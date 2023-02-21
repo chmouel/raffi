@@ -1,5 +1,6 @@
 [package]
-name = "nevergonnamakeyoucry"
+name = "raffi"
+description = "A simple wofi launcher based on YAML file"
 version = "0.1.0"
 edition = "2021"
 

@@ -31,15 +31,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fad582f4b9e86b6caa621cabeb0963332d92eea04729ab12892c2533951e6440"
 
 [[package]]
-name = "nevergonnamakeyoucry"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_yaml",
- "walkdir",
-]
-
-[[package]]
 name = "proc-macro2"
 version = "1.0.51"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -55,6 +46,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8856d8364d252a14d474036ea1358d63c9e6965c8e5c1885c18f73d70bff9c7b"
 dependencies = [
  "proc-macro2",
+]
+
+[[package]]
+name = "raffi"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_yaml",
+ "walkdir",
 ]
 
 [[package]]
