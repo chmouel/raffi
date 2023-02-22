@@ -111,13 +111,22 @@ fn read_config(filename: &str) -> Vec<RaffiConfig> {
     rafficonfigs
 }
 
-fn run_rofi_with_input(input: String) -> String {
+fn run_wofi_with_input(input: String) -> String {
     let home = std::env::var("HOME").unwrap();
     let xdg_cache_home = std::env::var("XDG_CACHE_HOME").unwrap_or(format!("{home}/.cache"));
     let mut child = Command::new("wofi")
-        .arg(format!(
-            "-d -G -I -k {xdg_cache_home}/raffi --alow-images --allow-markup -W500 -H500 -i"
-        ))
+        .args([
+            "-d",
+            "-G",
+            "-I",
+            "-k",
+            format!("{xdg_cache_home}/raffi/mru.cache").as_str(),
+            "--alow-images",
+            "--allow-markup",
+            "-W500",
+            "-H500",
+            "-i",
+        ])
         .stdout(Stdio::piped())
         .stdin(Stdio::piped())
         .stderr(Stdio::null())
@@ -156,7 +165,7 @@ fn main() {
     let xdg_config_home = std::env::var("XDG_CONFIG_HOME").unwrap_or(format!("{home}/.config"));
     let rafficonfigs = read_config(&(xdg_config_home + "/raffi/raffi.yaml"));
     let inputs = make_wofi_input(&rafficonfigs);
-    let ret = run_rofi_with_input(inputs);
+    let ret = run_wofi_with_input(inputs);
     let chosen = ret.split(':').last().unwrap().trim();
     for mc in rafficonfigs {
         if mc.description.unwrap_or(mc.binary.clone()) == chosen {
