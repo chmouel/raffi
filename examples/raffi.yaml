@@ -1,0 +1,317 @@
+# jumpapp is a custom tool i use when launching programs to run-or-raise or go to the previous windows
+# find it here https://gitlab.com/chmouel/chmouzies/-/blob/main/graphical/sway-jumpapp
+wally:
+  args: ["-X", "wally"]
+  binary: jumpapp
+  description: "Wally"
+  icon: wally
+  ifexist: wally
+
+thunar:
+  args: ["~/Downloads/"]
+  binary: thunar
+  description: "Thunar"
+
+rbw-pass:
+  args: ["--selector wofi --clipboarder wl-copy --action copy-password --typer xdotool"]
+  binary: rofi-rbw
+  description: "Password Manager"
+  icon: password-manager
+  ifenvset: WAYLAND_DISPLAY
+
+rbw-pass-user:
+  args: ["--selector wofi --clipboarder wl-copy --action copy-username"]
+  binary: rofi-rbw
+  description: "Password Manager user"
+  icon: passwords-app
+  ifenvset: WAYLAND_DISPLAY
+
+cliphistory:
+  args: ["pick", "-t", "wofi"]
+  binary: "clipman"
+  description: "Clipboard history"
+  icon: accessories-clipboard
+  ifenvset: SWAYSOCK
+
+evolution-mail:
+  args: ["-t", "Evolution", "-X", "evolution"]
+  binary: jumpapp
+  description: "Evolution Mail"
+  icon: evolution-mail
+  ifexist: evolution
+
+signal:
+  args: ["-X", "signal", "signal-desktop"]
+  binary: jumpapp
+  description: "Signal"
+  icon: signal-desktop
+  ifexist: signal-desktop
+
+firefox:
+  args: ["-X", "firefox"]
+  binary: jumpapp
+  description: "Firefox"
+  icon: firefox
+
+chrome:
+  args: ["-X", "-c", "Chromium", "chromium"]
+  binary: jumpapp
+  description: "Chromium"
+  icon: chromium
+
+ipython:
+  binary: kitty-ctrl
+  args: ["jump", "-t IPython", "ipython3"]
+  description: "Ipython"
+  icon: ipython
+
+ssh-kodi:
+  binary: kitty-ctrl
+  args: ["jump", "-t", "Kodi", "ssh", "kodi"]
+  description: "Kodi"
+  icon: kodi
+
+ssh-pi:
+  binary: kitty-ctrl
+  args: ["jump", "-t", "PI", "ssh", "pi"]
+  description: "PI"
+  icon: raspberry
+
+ssh-bootstrap:
+  binary: kitty-ctrl
+  args: ["jump", "-t", "Bootstrap", "ssh", "bootstrap"]
+  description: "Bootstrap SSH"
+  icon: bootstrap
+
+google-meet:
+  binary: jumpapp
+  args: ["-t", "^(Google Meet$|Meet$|Meet -)", "-i", "google-chrome", "/opt/google/chrome/google-chrome", "--profile-directory=Default", "--app-id=kjgfgldnnfoeklkmfkjfagphfepbbdan"]
+  description: "Google Meet"
+  icon: "google-meet"
+  disabled: true
+
+golang:
+  binary: jumpapp
+  args: ["-c", "jetbrains-goland", "goland"]
+  description: "Goland"
+  icon: /opt/goland/bin/goland.svg
+
+add-org-note:
+  binary: add-org-task
+  description: "Add org note"
+  icon: writenote
+
+calculate:
+  args: ["-modi", "calc:qalc +u8", "-show", "calc", "-theme", "mounch", "-theme-str", '* { width: 640; height: 400;}']
+  binary: rofi
+  description: "Calculate"
+  icon: calc
+
+center-window:
+  binary: wmctrl-resize-and-center
+  description: "Center window"
+  icon: wmsnap
+
+jump-to-org-file:
+  args: [jumpto]
+  binary: add-org-task
+  description: "Jump to org file"
+  icon: notes-app
+
+keyboard-setting:
+  args: [keyboard]
+  binary: gnome-control-center
+  description: "Keyboard setting"
+  icon: preferences-desktop-keyboard-shortcuts
+  ifenveq: [DESKTOP_SESSION, GNOME]
+
+red-hat-mail:
+  args: ["chromium", "Red Hat Mail", "https://mail.google.com/a/redhat.com"]
+  binary: xdo-focus-a-tab
+  description: "Red Hat GMail"
+  icon: gmail
+  ifenveq: [XDG_SESSION_TYPE, x11]
+
+snap-window-around:
+  args: [rotate]
+  binary: wmctrl-resize-and-center
+  description: "Snap window around"
+  icon: wmaround
+  ifenveq: [XDG_SESSION_TYPE, x11]
+
+ssh:
+  args: ["-show", "ssh", "-theme", "mounch"]
+  binary: rofi
+  description: "SSH"
+  icon: ssh
+  ifenveq: [XDG_SESSION_TYPE, x11]
+
+suspend:
+  args: [suspend]
+  binary: systemctl
+  description: "Suspend/Sleep or Hibernate"
+  icon: system-suspend-hibernate
+
+reboot:
+  args: [--reboot]
+  binary: gnome-session-quit
+  description: "Reboot"
+  icon: gnome-session-reboot
+  ifenveq: [DESKTOP_SESSION, GNOME]
+
+reboot-systemctl:
+  args: [reboot]
+  binary: systemctl
+  description: "Reboot / Restart"
+  icon: gnome-session-reboot
+  ifenvset: SWAYSOCK
+
+gnome-shutdown:
+  args: [--power-off]
+  binary: gnome-session-quit
+  description: "Shutdown / Poweroff"
+  icon: gnome-shutdown
+  ifenveq: [DESKTOP_SESSION, GNOME]
+
+shutdown:
+  binary: poweroff
+  description: "Shutdown / Poweroff"
+  icon: gnome-shutdown
+  ifenvset: SWAYSOCK
+
+timezones:
+  args: [batz]
+  binary: gtk-launch
+  description: "Batz timezone converter"
+  icon: batman
+
+passgen:
+  args: ["jump", "-t", "GeneratePassword", "genpasswd"]
+  binary: kitty-ctrl
+  description: "Password Generator"
+  icon: password
+
+emoji-picker:
+  args: [copy]
+  binary: splatmoji
+  description: "Emoji Picker"
+  icon: emoji
+  ifexist: splatmoji
+
+bpytop:
+  binary: kitty-ctrl
+  args: ["jump", "bpytop"]
+  description: "BpyTOP"
+  icon: bashtop
+  ifexist: bpytop
+
+show-tv:
+  binary: playr
+  icon: tv
+  description: "Play TV"
+  ifexist: playr
+
+show-tv-groups:
+  binary: playr
+  args: ["-G"]
+  icon: tv
+  description: "Play TV choose groups"
+  ifexist: playr
+
+gnome-activity:
+  binary: gnome-show-activity
+  description: "Gnome Activity"
+  icon: gnome-run
+  ifenveq: [DESKTOP_SESSION, GNOME]
+
+spotify:
+  args: ["-X", "-c", "Spotify", "spotify"]
+  binary: jumpapp
+  description: "Spotify"
+  icon: spotify
+
+vscode:
+  args: ["-X", "-c", "Visual Studio Code", "code"]
+  binary: jumpapp
+  description: "VSCode"
+  icon: visual-studio-code
+
+pavucontrol:
+  binary: pavucontrol
+  description: "PAVucontrol Pulseaudio"
+  icon: gnome-audio
+
+start-kind:
+  binary: kitty-ctrl
+  args: ["jump", "-t", "Kind", "startkind"]
+  description: "Start Kind"
+  icon: kind-started
+  ifexist: kind
+
+stop-kind:
+  binary: kitty-ctrl
+  args: ["jump", "-t", "Kind", "stopkind"]
+  description: "Stop Kind"
+  icon: kind-stopped
+  ifexist: kind
+
+windows:
+  binary: systemctl
+  args: ["reboot", "--boot-loader-entry=auto-windows"]
+  description: Reboot to windows
+  icon: windows
+  ifenvset: SWAYSOCK
+
+fixbt:
+  binary: fixbt
+  description: Fix Bluetooth
+  icon: bluetooth
+
+screenshot-clipboard:
+  description: Screenshot to clipboard
+  args: [selection-clipboard]
+  binary: sway-screenshot
+  icon: screenshoticon
+  ifenvset: SWAYSOCK
+
+screenshot-file:
+  description: Screenshot to file
+  args: [selection-file]
+  binary: sway-screenshot
+  icon: screenshoticon
+  ifenvset: SWAYSOCK
+
+screenshot-window-clipboard:
+  description: Screenshot window to clipboard
+  args: [selection-window-clipboard]
+  binary: sway-screenshot
+  icon: screenshoticon
+  ifenvset: SWAYSOCK
+
+screenshot-window-file:
+  description: Screenshot window to file
+  args: [selection-window-file]
+  binary: sway-screenshot
+  icon: screenshoticon
+  ifenvset: SWAYSOCK
+
+screenshot-movie-selection:
+  description: Screencast movie selection
+  args: [movie-selection]
+  binary: sway-screenshot
+  icon: movierecord
+  ifenvset: SWAYSOCK
+
+screenshot-movie-screen:
+  description: Screecast movie screen
+  args: [movie-screen]
+  binary: sway-screenshot
+  icon: movierecord
+  ifenvset: SWAYSOCK
+
+screenshot-stop-recording:
+  description: Screencast stop recording
+  args: [stop-recording]
+  binary: sway-screenshot
+  icon: stoprecording
+  ifenvset: SWAYSOCK
