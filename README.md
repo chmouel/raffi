@@ -6,6 +6,30 @@ raffi is a launcher for wofi, it uses a yaml config file to define the commands 
 
 ## Installation
 
+## Usage
+
+You can launch it directly and it will run the binary and args as defined in the [configuration](#configuration).
+
+With the option `-p/--print-only` it will only print the command to be executed.
+
+You can specify a custom config file with the `-c/--configfile` option.
+
+### Sway
+
+Here is an example on how to use this with Sway:
+
+```c
+// set a variable that can be easily used later in the config file
+// those variables are optionals
+set $menu raffi -p
+
+// Mod4 is the Super key for me but use whatever you want.
+set $super Mod4
+
+// will bind the super+space key to launch the launcher
+bindsym $super+Space exec $menu|xargs swaymsg exec --
+```
+
 ## Configuration
 
 The configuration file is located at `$HOME/.config/raffi/raffi.yaml` and it has the following structure:

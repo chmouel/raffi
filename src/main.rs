@@ -5,6 +5,7 @@ use std::{
     process::{Command, Stdio},
 };
 
+use gumdrop::Options;
 use serde::Deserialize;
 use serde_yaml::Value;
 
@@ -25,6 +26,18 @@ struct RaffiConfig {
 struct Config {
     #[serde(flatten)]
     toplevel: HashMap<String, Value>,
+}
+
+#[derive(Debug, Options)]
+struct Args {
+    #[options(help = "print help message")]
+    help: bool,
+    #[options(help = "print version")]
+    version: bool,
+    #[options(help = "config file location ")]
+    configfile: Option<String>,
+    #[options(help = "print command to stdout, do not run it")]
+    print_only: bool,
 }
 
 fn get_icon_map() -> HashMap<String, String> {
@@ -121,11 +134,12 @@ fn run_wofi_with_input(input: String) -> String {
             "-I",
             "-k",
             format!("{xdg_cache_home}/raffi/mru.cache").as_str(),
-            "--alow-images",
             "--allow-markup",
             "-W500",
             "-H500",
             "-i",
+            "-p",
+            "Raffi",
         ])
         .stdout(Stdio::piped())
         .stdin(Stdio::piped())
@@ -136,7 +150,6 @@ fn run_wofi_with_input(input: String) -> String {
     if let Some(stdin) = child.stdin.as_mut() {
         stdin.write_all(input.as_bytes()).unwrap();
     }
-
     let output = child.wait_with_output().expect("failed to read output");
     String::from_utf8(output.stdout).unwrap()
 }
@@ -151,7 +164,6 @@ fn make_wofi_input(rafficonfigs: &Vec<RaffiConfig>) -> String {
             .get(&icon)
             .unwrap_or(&"default".to_string())
             .to_string();
-        // check if icon exists
         if std::path::Path::new(&icon).exists() {
             icon_path = icon;
         }
@@ -161,14 +173,24 @@ fn make_wofi_input(rafficonfigs: &Vec<RaffiConfig>) -> String {
 }
 
 fn main() {
+    let args = Args::parse_args_default_or_exit();
+
     let home = std::env::var("HOME").unwrap();
     let xdg_config_home = std::env::var("XDG_CONFIG_HOME").unwrap_or(format!("{home}/.config"));
-    let rafficonfigs = read_config(&(xdg_config_home + "/raffi/raffi.yaml"));
+    let configfile = args
+        .configfile
+        .unwrap_or(xdg_config_home + "/raffi/raffi.yaml");
+    let rafficonfigs = read_config(configfile.as_str());
     let inputs = make_wofi_input(&rafficonfigs);
     let ret = run_wofi_with_input(inputs);
     let chosen = ret.split(':').last().unwrap().trim();
     for mc in rafficonfigs {
         if mc.description.unwrap_or(mc.binary.clone()) == chosen {
+            if args.print_only {
+                // print the command to stdout with args
+                println!("{} {}", mc.binary, mc.args.unwrap_or(vec![]).join(" "));
+                return;
+            }
             let mut child = Command::new(mc.binary)
                 .args(mc.args.unwrap_or(vec![]))
                 .spawn()
