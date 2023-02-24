@@ -105,17 +105,19 @@ fn read_config(filename: &str) -> Vec<RaffiConfig> {
             }
 
             if let Some(ifexist) = mc.ifexist.clone() {
-                // search ifexist in PATH
-                let paths = std::env::var("PATH").unwrap();
-                let mut found = false;
-                for path in paths.split(':') {
-                    if std::path::Path::new(&(path.to_string() + "/" + &ifexist)).exists() {
-                        found = true;
-                        break;
+                // first check if that binary exist
+                if !std::path::Path::new(&ifexist).exists() {
+                    let paths = std::env::var("PATH").unwrap();
+                    let mut found = false;
+                    for path in paths.split(':') {
+                        if std::path::Path::new(&(path.to_string() + "/" + &ifexist)).exists() {
+                            found = true;
+                            break;
+                        }
                     }
-                }
-                if !found {
-                    continue;
+                    if !found {
+                        continue;
+                    }
                 }
             }
             rafficonfigs.push(mc);

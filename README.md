@@ -56,6 +56,7 @@ name. You can as well specify the full path in there.
 there is some mininal support for conditions, to let you run a command only if
 a condition is met. They are all optional and cannot be used in combination.
 
+**ifexist**: show entry if a file exist in PATH or the full path can be specified
 **ifenvset**: show entry if the environment variable is set
 **ifenvnotset**: show entry if the environment variable is not set
 **ifenveq**: show entry if the environment variable is equal to the value, for example:
@@ -65,7 +66,6 @@ ifenvset: [FOO, bar]
 ```
 
 will only show the entry if an environment variable FOO is set and its value is bar.
-**ifexist**: show entry if the file exists
 
 ## Example
 
