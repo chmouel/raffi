@@ -93,7 +93,7 @@ fn read_config(filename: &str) -> Vec<RaffiConfig> {
                 }
             }
             if let Some(ifenvset) = mc.ifenvset.clone() {
-                if std::env::var(&ifenvset).is_ok() {
+                if std::env::var(&ifenvset).is_err() {
                     continue;
                 }
             }
