@@ -70,7 +70,7 @@ dependencies = [
 
 [[package]]
 name = "raffi"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "gumdrop",
  "serde",
