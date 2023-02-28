@@ -5,13 +5,13 @@
 class Raffi < Formula
   desc "raffi - wofi launcher based on yaml configuration"
   homepage "https://github.com/chmouel/raffi"
-  version "0.0.3"
+  version "0.0.4"
   depends_on :linux
 
   on_linux do
     if Hardware::CPU.intel?
-      url "https://github.com/chmouel/raffi/releases/download/v0.0.3/raffi_0.0.3_linux_amd64.tar.gz"
-      sha256 "45211ccdaa72436d158f84ead0a0b4bd27128e2ff7f3fe73a3fe8852b3be3e1e"
+      url "https://github.com/chmouel/raffi/releases/download/v0.0.4/raffi_0.0.4_linux_amd64.tar.gz"
+      sha256 "0276a7fc2bd9961ad81992910bcf561caf5d639073a4c7d4ed6708a7104bdd29"
 
       def install
         bin.install "raffi" => "raffi"
