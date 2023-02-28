@@ -49,4 +49,4 @@ git commit -S -m "Release v${VERSION} 🥳" ${vfile} Cargo.lock || true
 git tag -s v${VERSION} -m "Releasing version v${VERSION}"
 git push --tags origin v${VERSION}
 git push origin main --no-verify
-env CARGO_REGISTRY_TOKEN=$(pass show cargo/token) cargo release 
+env CARGO_REGISTRY_TOKEN=$(pass show cargo/token) cargo publish
