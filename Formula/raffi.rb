@@ -5,11 +5,11 @@
 class Raffi < Formula
   desc "raffi - wofi launcher based on yaml configuration"
   homepage "https://github.com/chmouel/raffi"
-  version "0.0.1"
+  version "0.0.2"
 
   on_macos do
-    url "https://github.com/chmouel/raffi/releases/download/v0.0.1/raffi_0.0.1_macOS_all.tar.gz"
-    sha256 "bfa2f903dfde81e8b3efb96366e86a4c712d2e2b99303568d70f34ad8cf312e4"
+    url "https://github.com/chmouel/raffi/releases/download/v0.0.2/raffi_0.0.2_macOS_all.tar.gz"
+    sha256 "da74fc438172527172f9706cded96117636edd053aeda0d1b39126f6524bd679"
 
     def install
       bin.install "raffi" => "raffi"
@@ -28,8 +28,8 @@ class Raffi < Formula
 
   on_linux do
     if Hardware::CPU.intel?
-      url "https://github.com/chmouel/raffi/releases/download/v0.0.1/raffi_0.0.1_linux_amd64.tar.gz"
-      sha256 "02621d0fd14e06ed5c87bbeff8a3e85e01ca413e4be04f28085e4821a4267f98"
+      url "https://github.com/chmouel/raffi/releases/download/v0.0.2/raffi_0.0.2_linux_amd64.tar.gz"
+      sha256 "80eb7ba0da379c41351fcbee7e5bad87ad26ba75b6e675a3a34a84067ac446cc"
 
       def install
         bin.install "raffi" => "raffi"
