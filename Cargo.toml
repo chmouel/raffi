@@ -1,8 +1,13 @@
 [package]
+authors = ["Chmouel Boudjnah <chmouel@chmouel.com>"]
 name = "raffi"
 description = "A simple wofi launcher based on YAML file"
 version = "0.1.0"
 edition = "2021"
+readme = "README.md"
+license = "Apache-2.0"
+categories = ["command-line-utilities"]
+keywords = ["task", "command", "launch"]
 
 [dependencies]
 gumdrop = { version = "0.8.1" }

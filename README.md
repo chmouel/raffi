@@ -6,6 +6,31 @@ raffi is a launcher for wofi, it uses a yaml config file to define the commands 
 
 ## Installation
 
+### [Binaries](https://github.com/chmouel/raffi/releases)
+
+Go to the [release](https://github.com/chmouel/raffi/releases) page and grab
+the archive or package targeting your platform.
+
+### [Homebrew](https://homebrew.sh)
+
+```shell
+brew tap chmouel/raffi https://github.com/chmouel/raffi
+brew install raffi
+```
+
+### [Crates.io](https://crates.io/crates/raffi)
+
+```shell
+cargo install raffi
+```
+
+### [Arch](https://aur.archlinux.org/packages/raffi-bin)
+
+With your favourite aurhelper for example [yay](https://github.com/Jguer/yay) :
+
+```shell
+yay -S raffi-bin
+```
 ## Usage
 
 You can launch it directly and it will run the binary and args as defined in the [configuration](#configuration).
