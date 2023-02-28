@@ -2,21 +2,15 @@ project_name: raffi
 builds:
   - main: dummy.go
     goos:
-      - darwin
       - linux
     goarch:
       - amd64
     binary: raffi
     hooks:
-      post: /bin/bash -c "install -m755 target/darwin_amd64/raffi/raffi dist/raffi_darwin_amd64_v1/raffi;install -m755 target/linux_amd64/raffi/raffi dist/raffi_linux_amd64_v1/raffi"
+      post: /bin/bash -c "install -m755 target/linux_amd64/raffi/raffi dist/raffi_linux_amd64_v1/raffi"
 archives:
-  - replacements:
-      darwin: macOS
-    name_template: "{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - name_template: "{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
-      - src: misc/completions/*
-        dst: completions
-        strip_parent: true
       - LICENSE
       - README.md
 checksum:
@@ -33,15 +27,6 @@ brews:
     install: |
       bin.install "raffi" => "raffi"
       prefix.install_metafiles
-
-      output = Utils.popen_read("SHELL=bash #{bin}/raffi --shell-completion bash")
-      (bash_completion/"raffi").write output
-
-      output = Utils.popen_read("SHELL=zsh #{bin}/raffi --shell-completion zsh")
-      (zsh_completion/"_raffi").write output
-
-      output = Utils.popen_read("SHELL=fish #{bin}/raffi --shell-completion fish")
-      (fish_completion/"raffi.fish").write output
 
 nfpms:
   - file_name_template: "raffi-{{.Version}}_{{.Os}}-{{.Arch}}"

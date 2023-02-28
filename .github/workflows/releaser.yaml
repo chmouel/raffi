@@ -21,7 +21,6 @@ jobs:
       matrix:
         job:
           - {os: ubuntu-latest, target: x86_64-unknown-linux-gnu}
-          - {os: macos-latest, target: x86_64-apple-darwin}
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -55,12 +54,6 @@ jobs:
         with:
           name: raffi-x86_64-unknown-linux-gnu
           path: target/linux_amd64/raffi
-      - uses: actions/download-artifact@v3
-        with:
-          name: raffi-x86_64-apple-darwin
-          path: target/darwin_amd64/raffi
-
-      # - uses: mxschmitt/action-tmate@v3
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v4
