@@ -1,0 +1,100 @@
+project_name: raffi
+builds:
+  - main: dummy.go
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+    binary: raffi
+    hooks:
+      post: /bin/bash -c "install -m755 target/darwin_amd64/raffi/raffi dist/raffi_darwin_amd64_v1/raffi;install -m755 target/linux_amd64/raffi/raffi dist/raffi_linux_amd64_v1/raffi"
+archives:
+  - replacements:
+      darwin: macOS
+    name_template: "{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - src: misc/completions/*
+        dst: completions
+        strip_parent: true
+      - LICENSE
+      - README.md
+checksum:
+  name_template: "checksums.txt"
+
+brews:
+  - name: raffi
+    tap:
+      owner: chmouel
+      name: raffi
+    folder: Formula
+    homepage: "https://github.com/chmouel/raffi"
+    description: "raffi - wofi launcher based on yaml configuration"
+    install: |
+      bin.install "raffi" => "raffi"
+      prefix.install_metafiles
+
+      output = Utils.popen_read("SHELL=bash #{bin}/raffi --shell-completion bash")
+      (bash_completion/"raffi").write output
+
+      output = Utils.popen_read("SHELL=zsh #{bin}/raffi --shell-completion zsh")
+      (zsh_completion/"_raffi").write output
+
+      output = Utils.popen_read("SHELL=fish #{bin}/raffi --shell-completion fish")
+      (fish_completion/"raffi.fish").write output
+
+nfpms:
+  - file_name_template: "raffi-{{.Version}}_{{.Os}}-{{.Arch}}"
+    homepage: https://github.com/chmouel/raffi
+    description: raffi - wofi launcher based on yaml configuration 
+    maintainer: Chmouel Boudjnah <chmouel@chmouel.com>
+    license: Apache 2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+    replacements:
+      amd64: 64bit
+      386: 32bit
+      arm: ARM
+      arm64: ARM64
+      darwin: macOS
+      linux: Linux
+      windows: Windows
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^Brew formula update"
+      - Merge pull request
+      - Merge branch
+      - go mod tidy
+      - Update README.md
+      - "[release] "
+
+universal_binaries:
+  - replace: true
+    name_template: "raffi"
+
+release:
+  prerelease: "false"
+
+aurs:
+  - name: raffi-bin
+    homepage: "https://github.com/chmouel/raffi"
+    description: "raffi - wofi launcher based on yaml configuration"
+    maintainers:
+      - "Chmouel Boudjnah <chmouel@chmouel.com>"
+    license: Apache 2.0
+    private_key: "{{ .Env.AUR_PRIVATE_KEY }}"
+    git_url: ssh://aur@aur.archlinux.org/raffi-bin.git
+    package: |
+      # bin
+      install -Dm755 "./raffi" "${pkgdir}/usr/bin/raffi"
+
+      # license
+      install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/raffi/LICENSE"
