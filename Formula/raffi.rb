@@ -5,44 +5,17 @@
 class Raffi < Formula
   desc "raffi - wofi launcher based on yaml configuration"
   homepage "https://github.com/chmouel/raffi"
-  version "0.0.2"
-
-  on_macos do
-    url "https://github.com/chmouel/raffi/releases/download/v0.0.2/raffi_0.0.2_macOS_all.tar.gz"
-    sha256 "da74fc438172527172f9706cded96117636edd053aeda0d1b39126f6524bd679"
-
-    def install
-      bin.install "raffi" => "raffi"
-      prefix.install_metafiles
-
-      output = Utils.popen_read("SHELL=bash #{bin}/raffi --shell-completion bash")
-      (bash_completion/"raffi").write output
-
-      output = Utils.popen_read("SHELL=zsh #{bin}/raffi --shell-completion zsh")
-      (zsh_completion/"_raffi").write output
-
-      output = Utils.popen_read("SHELL=fish #{bin}/raffi --shell-completion fish")
-      (fish_completion/"raffi.fish").write output
-    end
-  end
+  version "0.0.3"
+  depends_on :linux
 
   on_linux do
     if Hardware::CPU.intel?
-      url "https://github.com/chmouel/raffi/releases/download/v0.0.2/raffi_0.0.2_linux_amd64.tar.gz"
-      sha256 "80eb7ba0da379c41351fcbee7e5bad87ad26ba75b6e675a3a34a84067ac446cc"
+      url "https://github.com/chmouel/raffi/releases/download/v0.0.3/raffi_0.0.3_linux_amd64.tar.gz"
+      sha256 "45211ccdaa72436d158f84ead0a0b4bd27128e2ff7f3fe73a3fe8852b3be3e1e"
 
       def install
         bin.install "raffi" => "raffi"
         prefix.install_metafiles
-
-        output = Utils.popen_read("SHELL=bash #{bin}/raffi --shell-completion bash")
-        (bash_completion/"raffi").write output
-
-        output = Utils.popen_read("SHELL=zsh #{bin}/raffi --shell-completion zsh")
-        (zsh_completion/"_raffi").write output
-
-        output = Utils.popen_read("SHELL=fish #{bin}/raffi --shell-completion fish")
-        (fish_completion/"raffi.fish").write output
       end
     end
   end
