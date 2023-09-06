@@ -13,4 +13,4 @@ keywords = ["task", "command", "launch"]
 gumdrop = { version = "0.8.1" }
 serde = { version = "1.0.188", features = ["derive"] }
 serde_yaml = "0.9.22"
-walkdir = "2.3.3"
+walkdir = "2.4.0"
