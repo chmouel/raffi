@@ -70,7 +70,7 @@ firefox:
     description: Firefox browser with marionette enabled
 ```
 
-**binary**: The binary to be executed
+**binary**: The binary to be executed (if not exist in *PATH* it will be skipped)
 **description**: The description to be displayed in the launcher
 **args**: The arguments to be passed to the binary as array i.e: `[foo, bar]` (optional)
 **icon**: The icon to be displayed in the launcher if not specified it will try to use binary name (optional)

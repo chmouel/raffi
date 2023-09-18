@@ -87,6 +87,12 @@ fn read_config(filename: &str) -> Vec<RaffiConfig> {
                     continue;
                 }
             }
+
+            let binary = mc.binary.to_string();
+            if !find_binary(binary) {
+                continue;
+            }
+
             if let Some(ifenveq) = mc.ifenveq.clone() {
                 if ifenveq.len() != 2 {
                     continue;
@@ -108,25 +114,25 @@ fn read_config(filename: &str) -> Vec<RaffiConfig> {
             }
 
             if let Some(ifexist) = mc.ifexist.clone() {
-                // first check if that binary exist
-                if !std::path::Path::new(&ifexist).exists() {
-                    let paths = std::env::var("PATH").unwrap();
-                    let mut found = false;
-                    for path in paths.split(':') {
-                        if std::path::Path::new(&(path.to_string() + "/" + &ifexist)).exists() {
-                            found = true;
-                            break;
-                        }
-                    }
-                    if !found {
-                        continue;
-                    }
+                if !find_binary(ifexist.clone()) {
+                    continue;
                 }
             }
             rafficonfigs.push(mc);
         }
     }
     rafficonfigs
+}
+
+fn find_binary(binary: String) -> bool {
+    let paths = std::env::var("PATH").unwrap();
+    let found = false;
+    for path in paths.split(':') {
+        if std::path::Path::new(&(path.to_string() + "/" + &binary)).exists() {
+            return true;
+        }
+    }
+    found
 }
 
 fn run_wofi_with_input(input: String) -> String {
