@@ -9,7 +9,16 @@ builds:
     hooks:
       post: /bin/bash -c "install -m755 target/linux_amd64/raffi/raffi dist/raffi_linux_amd64_v1/raffi"
 archives:
-  - name_template: "{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - name_template: >-
+      {{ .Binary }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else if eq .Arch "darwin" }}MacOS
+      {{- else if eq .Arch "linux" }}Linux
+      {{- else if eq .Arch "windows" }}Windows
+      {{- else }}{{ .Arch }}{{ end }}
     files:
       - LICENSE
       - README.md
@@ -18,7 +27,7 @@ checksum:
 
 brews:
   - name: raffi
-    tap:
+    repository:
       owner: chmouel
       name: raffi
     folder: Formula
@@ -29,7 +38,15 @@ brews:
       prefix.install_metafiles
 
 nfpms:
-  - file_name_template: "raffi-{{.Version}}_{{.Os}}-{{.Arch}}"
+  - file_name_template: >-
+      raffi-
+      {{- .Version}}_{{.Os}}-
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else if eq .Arch "darwin" }}MacOS
+      {{- else if eq .Arch "linux" }}Linux
+      {{- else if eq .Arch "windows" }}Windows
+      {{- else }}{{ .Arch }}{{ end }}
     homepage: https://github.com/chmouel/raffi
     description: raffi - wofi launcher based on yaml configuration 
     maintainer: Chmouel Boudjnah <chmouel@chmouel.com>
@@ -38,14 +55,6 @@ nfpms:
       - deb
       - rpm
     bindir: /usr/bin
-    replacements:
-      amd64: 64bit
-      386: 32bit
-      arm: ARM
-      arm64: ARM64
-      darwin: macOS
-      linux: Linux
-      windows: Windows
 
 changelog:
   sort: asc
