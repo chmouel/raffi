@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fs::File,
-    io::Write,
+    io::{Read, Write},
     process::{Command, Stdio},
 };
 
@@ -38,6 +38,9 @@ struct Args {
     configfile: Option<String>,
     #[options(help = "print command to stdout, do not run it")]
     print_only: bool,
+
+    #[options(help = "refresh cache")]
+    refresh_cache: bool,
 }
 
 fn get_icon_map() -> HashMap<String, String> {
@@ -156,9 +159,36 @@ fn run_wofi_with_input(input: String) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
+fn save_to_cache_file(map: &HashMap<String, String>) {
+    let home = std::env::var("HOME").unwrap();
+    let xdg_cache_home = std::env::var("XDG_CACHE_HOME").unwrap_or(format!("{home}/.cache"));
+    let mut cache_file =
+        File::create(format!("{xdg_cache_home}/raffi/icon.cache").as_str()).unwrap();
+    cache_file
+        .write_all(serde_json::to_string(&map).unwrap().as_bytes())
+        .unwrap();
+}
+
+fn read_icon_map() -> HashMap<String, String> {
+    let home = std::env::var("HOME").unwrap();
+    let xdg_cache_home = std::env::var("XDG_CACHE_HOME").unwrap_or(format!("{home}/.cache"));
+    // check if file is older than 24h
+    // check if file exist or get_icon_map and save manually
+    if !std::path::Path::new(format!("{xdg_cache_home}/raffi/icon.cache").as_str()).exists() {
+        let icon_map = get_icon_map();
+        save_to_cache_file(&icon_map);
+        return icon_map;
+    }
+    let mut cache_file = File::open(format!("{xdg_cache_home}/raffi/icon.cache").as_str()).unwrap();
+    let mut contents = String::new();
+    cache_file.read_to_string(&mut contents).unwrap();
+    serde_json::from_str(&contents).unwrap()
+}
+
 fn make_wofi_input(rafficonfigs: &Vec<RaffiConfig>) -> String {
     let mut ret = String::new();
-    let icon_map = get_icon_map();
+    let icon_map = read_icon_map();
+
     for mc in rafficonfigs {
         let s = mc.description.clone().unwrap_or(mc.binary.clone());
         let icon = mc.icon.clone().unwrap_or(mc.binary.clone());
@@ -182,6 +212,10 @@ fn main() {
     let configfile = args
         .configfile
         .unwrap_or(xdg_config_home + "/raffi/raffi.yaml");
+    if args.refresh_cache {
+        let icon_map = get_icon_map();
+        save_to_cache_file(&icon_map);
+    }
     let rafficonfigs = read_config(configfile.as_str());
     let inputs = make_wofi_input(&rafficonfigs);
     let ret = run_wofi_with_input(inputs);
