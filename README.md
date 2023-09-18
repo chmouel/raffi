@@ -39,6 +39,9 @@ With the option `-p/--print-only` it will only print the command to be executed.
 
 You can specify a custom config file with the `-c/--configfile` option.
 
+Icon path are automatically searched on your system and cached, if you need to refresh the cache 
+you can use the option `-r/--refresh-cache`.
+
 ### Sway
 
 Here is an example on how to use this with Sway:
