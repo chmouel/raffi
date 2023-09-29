@@ -1,5 +1,9 @@
 # raffi - fuzzel launcher on yaml config file
 
+![image](https://github.com/chmouel/raffi/assets/98980/04d6af0f-2a80-47d5-a2ec-95443a629305)
+
+(this uses my fuzzel config, see below)
+
 ## Description
 
 raffi is a launcher for fuzzel, it uses a yaml config file to define the commands to be executed.
