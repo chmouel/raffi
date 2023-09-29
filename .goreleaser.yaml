@@ -32,7 +32,7 @@ brews:
       name: raffi
     folder: Formula
     homepage: "https://github.com/chmouel/raffi"
-    description: "raffi - wofi launcher based on yaml configuration"
+    description: "raffi - fuzzel launcher based on yaml configuration"
     install: |
       bin.install "raffi" => "raffi"
       prefix.install_metafiles
@@ -48,7 +48,7 @@ nfpms:
       {{- else if eq .Arch "windows" }}Windows
       {{- else }}{{ .Arch }}{{ end }}
     homepage: https://github.com/chmouel/raffi
-    description: raffi - wofi launcher based on yaml configuration 
+    description: raffi - fuzzel launcher based on yaml configuration 
     maintainer: Chmouel Boudjnah <chmouel@chmouel.com>
     license: Apache 2.0
     formats:
@@ -80,12 +80,14 @@ release:
 aurs:
   - name: raffi-bin
     homepage: "https://github.com/chmouel/raffi"
-    description: "raffi - wofi launcher based on yaml configuration"
+    description: "raffi - fuzzel launcher based on yaml configuration"
     maintainers:
       - "Chmouel Boudjnah <chmouel@chmouel.com>"
     license: Apache 2.0
     private_key: "{{ .Env.AUR_PRIVATE_KEY }}"
     git_url: ssh://aur@aur.archlinux.org/raffi-bin.git
+    depends:
+    - fuzzel
     package: |
       # bin
       install -Dm755 "./raffi" "${pkgdir}/usr/bin/raffi"

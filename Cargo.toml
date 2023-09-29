@@ -1,7 +1,7 @@
 [package]
 authors = ["Chmouel Boudjnah <chmouel@chmouel.com>"]
 name = "raffi"
-description = "A simple wofi launcher based on YAML file"
+description = "A simple fuzzel launcher based on YAML file"
 version = "0.1.0"
 edition = "2021"
 readme = "README.md"

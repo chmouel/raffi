@@ -135,28 +135,14 @@ fn find_binary(binary: String) -> bool {
     found
 }
 
-fn run_wofi_with_input(input: String) -> String {
-    let home = std::env::var("HOME").unwrap();
-    let xdg_cache_home = std::env::var("XDG_CACHE_HOME").unwrap_or(format!("{home}/.cache"));
-    let mut child = Command::new("wofi")
-        .args([
-            "-d",
-            "-G",
-            "-I",
-            "-k",
-            format!("{xdg_cache_home}/raffi/mru.cache").as_str(),
-            "--allow-markup",
-            "-W500",
-            "-H500",
-            "-i",
-            "-p",
-            "Raffi",
-        ])
+fn run_fuzzel_with_input(input: String) -> String {
+    let mut child = Command::new("fuzzel")
+        .args(["-d", "--no-fuzzy"])
         .stdout(Stdio::piped())
         .stdin(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("cannot launch wofi command");
+        .expect("cannot launch raffi command");
 
     if let Some(stdin) = child.stdin.as_mut() {
         stdin.write_all(input.as_bytes()).unwrap();
@@ -191,7 +177,7 @@ fn read_icon_map() -> HashMap<String, String> {
     serde_json::from_str(&contents).unwrap()
 }
 
-fn make_wofi_input(rafficonfigs: &Vec<RaffiConfig>) -> String {
+fn make_fuzzel_input(rafficonfigs: &Vec<RaffiConfig>) -> String {
     let mut ret = String::new();
     let icon_map = read_icon_map();
 
@@ -205,7 +191,7 @@ fn make_wofi_input(rafficonfigs: &Vec<RaffiConfig>) -> String {
         if std::path::Path::new(&icon).exists() {
             icon_path = icon;
         }
-        ret.push_str(&format!("img:{icon_path}:text:{s}\n",));
+        ret.push_str(&format!("{s}\0icon\x1f{icon_path}\n",));
     }
     ret
 }
@@ -223,8 +209,8 @@ fn main() {
         save_to_cache_file(&icon_map);
     }
     let rafficonfigs = read_config(configfile.as_str());
-    let inputs = make_wofi_input(&rafficonfigs);
-    let ret = run_wofi_with_input(inputs);
+    let inputs = make_fuzzel_input(&rafficonfigs);
+    let ret = run_fuzzel_with_input(inputs);
     let chosen = ret.split(':').last().unwrap().trim();
     for mc in rafficonfigs {
         if mc.description.unwrap_or(mc.binary.clone()) == chosen {
