@@ -8,6 +8,9 @@ readme = "README.md"
 license = "Apache-2.0"
 categories = ["command-line-utilities"]
 keywords = ["task", "command", "launch"]
+homepage = "https://github.com/chmouel/raffi"
+documentation = "https://github.com/chmouel/raffi"
+repository = "https://github.com/chmouel/raffi"
 
 [dependencies]
 gumdrop = { version = "0.8.1" }
