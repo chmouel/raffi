@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     fs::File,
     io::{Read, Write},
+    os::unix::fs::PermissionsExt,
     process::{Command, Stdio},
 };
 
@@ -11,7 +12,7 @@ use serde_yaml::Value;
 
 #[derive(Deserialize)]
 struct RaffiConfig {
-    binary: String,
+    binary: Option<String>,
     args: Option<Vec<String>>,
     icon: Option<String>,
     description: Option<String>,
@@ -20,6 +21,7 @@ struct RaffiConfig {
     ifenvnotset: Option<String>,
     ifexist: Option<String>,
     disabled: Option<bool>,
+    script: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -81,15 +83,20 @@ fn read_config(filename: &str) -> Vec<RaffiConfig> {
     let mut rafficonfigs: Vec<RaffiConfig> = Vec::new();
     for (_, value) in config.toplevel {
         if value.is_mapping() {
-            let mc: RaffiConfig = serde_yaml::from_value(value).unwrap();
+            let mut mc: RaffiConfig = serde_yaml::from_value(value).unwrap();
             if let Some(disabled) = mc.disabled {
                 if disabled {
                     continue;
                 }
             }
 
-            let binary = mc.binary.to_string();
-            if !find_binary(binary) {
+            if let Some(binary) = mc.binary.clone() {
+                if !find_binary(binary) {
+                    continue;
+                }
+            } else if let Some(description) = mc.description.clone() {
+                mc.binary = Some(description)
+            } else {
                 continue;
             }
 
@@ -182,8 +189,14 @@ fn make_fuzzel_input(rafficonfigs: &Vec<RaffiConfig>) -> String {
     let icon_map = read_icon_map();
 
     for mc in rafficonfigs {
-        let s = mc.description.clone().unwrap_or(mc.binary.clone());
-        let icon = mc.icon.clone().unwrap_or(mc.binary.clone());
+        let s = mc
+            .description
+            .clone()
+            .unwrap_or(mc.binary.clone().unwrap_or("unknown".to_string()));
+        let icon = mc
+            .icon
+            .clone()
+            .unwrap_or(mc.binary.clone().unwrap_or("unknown".to_string()));
         let mut icon_path = icon_map
             .get(&icon)
             .unwrap_or(&"default".to_string())
@@ -213,13 +226,59 @@ fn main() {
     let ret = run_fuzzel_with_input(inputs);
     let chosen = ret.split(':').last().unwrap().trim();
     for mc in rafficonfigs {
-        if mc.description.unwrap_or(mc.binary.clone()) == chosen {
+        if mc.description.unwrap_or(mc.binary.clone().unwrap()) == chosen {
             if args.print_only {
                 // print the command to stdout with args
-                println!("{} {}", mc.binary, mc.args.unwrap_or(vec![]).join(" "));
+                println!(
+                    "{} {}",
+                    mc.binary.unwrap(),
+                    mc.args.unwrap_or(vec![]).join(" ")
+                );
                 return;
             }
-            let mut child = Command::new(mc.binary)
+            if let Some(mut script) = mc.script {
+                // check first line for an interpreter and then write script as temporary file, set as executable and run
+                let mut lines = script.lines();
+                let first_line = lines.next().unwrap();
+                if !first_line.starts_with("#!") {
+                    script = "#!/usr/bin/env sh\n".to_string() + &script;
+                }
+                let mut script_file = tempfile::NamedTempFile::new().unwrap();
+                script_file
+                    .write_all(script.as_bytes())
+                    .expect("cannot write to tempfile");
+                // set temp file as executable
+                let _set_permissions = script_file
+                    .as_file()
+                    .set_permissions(std::fs::Permissions::from_mode(0o755));
+                let path = script_file
+                    .into_temp_path()
+                    .keep()
+                    .expect("cannot keep tempfile")
+                    .as_path()
+                    .to_str()
+                    .unwrap()
+                    .to_string();
+
+                // execute the temp file
+                let mut child = Command::new(path)
+                    .args(mc.args.unwrap_or(vec![]))
+                    .spawn()
+                    .expect("cannot launch script");
+                child.wait().expect("cannot wait for child");
+                return;
+            }
+
+            // let mut script_file = tempfile::NamedTempFile::new().unwrap();
+            // script_file
+            //     .write_all(script.as_bytes())
+            //     .expect("cannot write to tempfile");
+            // let mut child = Command::new("sh")
+            //     .args(["-c", script.as_str()])
+            //     .spawn()
+            //     .expect("cannot launch script");
+            // child.wait().expect("cannot wait for child");
+            let mut child = Command::new(mc.binary.unwrap())
                 .args(mc.args.unwrap_or(vec![]))
                 .spawn()
                 .expect("cannot launch binary");

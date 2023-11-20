@@ -105,14 +105,36 @@ firefox:
   description: Firefox browser with marionette enabled
 ```
 
-**binary**: The binary to be executed (if not exist in _PATH_ it will be skipped)
-**description**: The description to be displayed in the launcher
-**args**: The arguments to be passed to the binary as array i.e: `[foo, bar]` (optional)
-**icon**: The icon to be displayed in the launcher if not specified it will try to use binary name (optional)
+* **binary**: The binary to be executed (if not exist in _PATH_ it will be skipped)
+* **description**: The description to be displayed in the launcher
+* **args**: The arguments to be passed to the binary as array i.e: `[foo, bar]` (optional)
+* **icon**: The icon to be displayed in the launcher if not specified it will try to use binary name (optional)
+  icons are searched in /usr/share/icons, /usr/share/pixmaps,
+  $HOME/.local/share/icons or in $XDG_DATA_HOME if set and matched to the icon
+  name. You can as well specify the full path in there.
+* **script**: If you want to run a script instead of a binary, you can embed a
+  script directly in the configuration like this:
 
-icons are searched in /usr/share/icons, /usr/share/pixmaps,
-$HOME/.local/share/icons or in $XDG_DATA_HOME if set and matched to the icon
-name. You can as well specify the full path in there.
+  ```yaml
+  script: |
+    #!/usr/bin/env python3
+    import os
+    os.system("app_to_run")
+  ```
+
+  or another example using bash, comining multiple commands:
+
+  ```yaml
+   script: |
+    #!/usr/bin/env bash
+    kitty --class kitty-multi --session multi.session &
+    swaymsg -t get_tree | jq -r 'recurse(.nodes[]?) | select(.app_id=="kitty-multi") | .id' | xargs -I{} swaymsg "[con_id={}] layout splith"
+  ```
+
+  The interpreter in the shbang are respected, if you don't specify a shbang
+  the script will be run with `/usr/bin/env bash`
+
+  **You need a description for script configuration to be displayed in the launcher**
 
 ### Conditions
 
@@ -140,7 +162,7 @@ See the file located in [examples/raffi.yaml](./examples/raffi.yaml) for a compr
 
 ## Authors
 
-- Chmouel Boudjnah <https://github.com/chmouel>
-  - Fediverse - <[@chmouel@fosstodon.org](https://fosstodon.org/@chmouel)>
-  - Twitter - <[@chmouel](https://twitter.com/chmouel)>
-  - Blog - <[https://blog.chmouel.com](https://blog.chmouel.com)>
+* Chmouel Boudjnah <https://github.com/chmouel>
+  * Fediverse - <[@chmouel@fosstodon.org](https://fosstodon.org/@chmouel)>
+  * Twitter - <[@chmouel](https://twitter.com/chmouel)>
+  * Blog - <[https://blog.chmouel.com](https://blog.chmouel.com)>
