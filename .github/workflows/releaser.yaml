@@ -37,7 +37,7 @@ jobs:
           command: build
           args: --release --target=${{ matrix.job.target }}
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: raffi-${{ matrix.job.target }}
           path: target/${{ matrix.job.target }}/release/raffi
