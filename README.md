@@ -112,29 +112,6 @@ firefox:
   icons are searched in /usr/share/icons, /usr/share/pixmaps,
   $HOME/.local/share/icons or in $XDG_DATA_HOME if set and matched to the icon
   name. You can as well specify the full path in there.
-* **script**: If you want to run a script instead of a binary, you can embed a
-  script directly in the configuration like this:
-
-  ```yaml
-  script: |
-    #!/usr/bin/env python3
-    import os
-    os.system("app_to_run")
-  ```
-
-  or another example using bash, comining multiple commands:
-
-  ```yaml
-   script: |
-    #!/usr/bin/env bash
-    kitty --class kitty-multi --session multi.session &
-    swaymsg -t get_tree | jq -r 'recurse(.nodes[]?) | select(.app_id=="kitty-multi") | .id' | xargs -I{} swaymsg "[con_id={}] layout splith"
-  ```
-
-  The interpreter in the shbang are respected, if you don't specify a shbang
-  the script will be run with `/usr/bin/env bash`
-
-  **You need a description for script configuration to be displayed in the launcher**
 
 ### Conditions
 
