@@ -16,6 +16,6 @@ repository = "https://github.com/chmouel/raffi"
 gumdrop = { version = "0.8.1" }
 serde = { version = "1.0.194", features = ["derive"] }
 serde_json = "1.0.110"
-serde_yaml = "0.9.29"
+serde_yaml = "0.9.30"
 tempfile = "3.9.0"
 walkdir = "2.4.0"
