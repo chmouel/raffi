@@ -5,10 +5,10 @@ use std::{
     process::{Command, Stdio},
 };
 
+use anyhow::{Context, Ok, Result};
 use gumdrop::Options;
 use serde::Deserialize;
 use serde_yaml::Value;
-use anyhow::{Result, Context, Ok};
 
 #[derive(Deserialize)]
 struct RaffiConfig {
@@ -77,17 +77,13 @@ fn get_icon_map() -> HashMap<String, String> {
 // read configuration from a yaml according to the if conditions
 fn read_config(filename: &str) -> Result<Vec<RaffiConfig>> {
     let file = File::open(filename).context(format!("cannot open config file {}", filename))?;
-    let config: Config = serde_yaml::from_reader(file).context(format!(
-        "cannot parse config file {}",
-        filename
-    ))?;
+    let config: Config =
+        serde_yaml::from_reader(file).context(format!("cannot parse config file {}", filename))?;
     let mut rafficonfigs: Vec<RaffiConfig> = Vec::new();
     for (_, value) in config.toplevel {
         if value.is_mapping() {
-            let mut mc: RaffiConfig = serde_yaml::from_value(value).context(format!(
-                "cannot parse config file {}",
-                filename
-            ))?;
+            let mut mc: RaffiConfig = serde_yaml::from_value(value)
+                .context(format!("cannot parse config file {}", filename))?;
             if let Some(disabled) = mc.disabled {
                 if disabled {
                     continue;
@@ -217,7 +213,8 @@ fn main() -> Result<()> {
     let args = Args::parse_args_default_or_exit();
 
     let home = std::env::var("HOME").unwrap();
-    let xdg_config_home = std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| format!("{}/.config", home));
+    let xdg_config_home =
+        std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| format!("{}/.config", home));
 
     let configfile = args
         .configfile
