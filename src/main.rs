@@ -234,7 +234,7 @@ fn main() -> Result<()> {
                 println!(
                     "{} {}",
                     mc.binary.unwrap(),
-                    mc.args.unwrap_or_else(|| vec![]).join(" ")
+                    mc.args.unwrap_or_else(std::vec::Vec::new).join(" ")
                 );
                 return Ok(());
             }
