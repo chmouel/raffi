@@ -161,8 +161,12 @@ fn run_fuzzel_with_input(input: String) -> String {
 fn save_to_cache_file(map: &HashMap<String, String>) {
     let home = std::env::var("HOME").unwrap();
     let xdg_cache_home = std::env::var("XDG_CACHE_HOME").unwrap_or(format!("{home}/.cache"));
-    let mut cache_file =
-        File::create(format!("{xdg_cache_home}/raffi/icon.cache").as_str()).unwrap();
+    let cache_dir = format!("{}/raffi", xdg_cache_home);
+
+    // Create the cache directory if it does not exist
+    std::fs::create_dir_all(&cache_dir).unwrap();
+
+    let mut cache_file = File::create(format!("{}/icon.cache", cache_dir)).unwrap();
     cache_file
         .write_all(serde_json::to_string(&map).unwrap().as_bytes())
         .unwrap();
