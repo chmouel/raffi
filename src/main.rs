@@ -144,7 +144,7 @@ fn find_binary(binary: String) -> bool {
 
 fn run_fuzzel_with_input(input: String) -> String {
     let mut child = Command::new("fuzzel")
-        .args(["-d", "--match-mode=fzf"])
+        .args(["-d", "--no-sort", "--counter"])
         .stdout(Stdio::piped())
         .stdin(Stdio::piped())
         .stderr(Stdio::null())
