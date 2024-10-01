@@ -38,6 +38,12 @@ With your favourite aurhelper for example [yay](https://github.com/Jguer/yay) :
 yay -S raffi-bin
 ```
 
+### [NixOS / Nix](https://nixos.org) (unstable)
+
+```shell
+nix-shell -p raffi
+```
+
 ## Usage
 
 You can launch it directly and it will run the binary and args as defined in the [configuration](#configuration).
