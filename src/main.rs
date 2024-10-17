@@ -11,6 +11,7 @@ use gumdrop::Options;
 use serde::Deserialize;
 use serde_yaml::Value;
 
+/// Represents the configuration for each Raffi entry.
 #[derive(Deserialize)]
 struct RaffiConfig {
     binary: Option<String>,
@@ -24,12 +25,14 @@ struct RaffiConfig {
     disabled: Option<bool>,
 }
 
+/// Represents the top-level configuration structure.
 #[derive(Deserialize)]
 struct Config {
     #[serde(flatten)]
     toplevel: HashMap<String, Value>,
 }
 
+/// Command-line arguments structure.
 #[derive(Debug, Options)]
 struct Args {
     #[options(help = "print help message")]
@@ -44,98 +47,47 @@ struct Args {
     refresh_cache: bool,
 }
 
+/// Get the icon mapping from system directories.
 fn get_icon_map() -> Result<HashMap<String, String>> {
     let mut icon_map = HashMap::new();
-    let iconhome = std::env::var("XDG_DATA_HOME").unwrap_or_else(|_| {
-        format!(
-            "{}/.local/share",
-            std::env::var("HOME").unwrap_or_else(|_| {
-                eprintln!("HOME not set");
-                String::new()
-            })
-        )
-    }) + "/icons";
-    let icondirs = vec!["/usr/share/icons", "/usr/share/pixmaps", &iconhome];
-    for dir in icondirs {
+    let iconhome = std::env::var("XDG_DATA_HOME")
+        .unwrap_or_else(|_| format!("{}/.local/share", std::env::var("HOME").unwrap_or_default()))
+        + "/icons";
+
+    let icon_dirs = vec!["/usr/share/icons", "/usr/share/pixmaps", &iconhome];
+
+    for dir in icon_dirs {
         for entry in walkdir::WalkDir::new(dir)
             .into_iter()
             .filter_map(Result::ok)
         {
-            let fname = entry
-                .file_name()
-                .to_str()
-                .context("Invalid file name")?
-                .split('.')
-                .next()
-                .context("Invalid file name")?
-                .to_string();
-            if entry
-                .path()
-                .to_str()
-                .context("Invalid path")?
-                .ends_with("png")
-                || entry
-                    .path()
-                    .to_str()
-                    .context("Invalid path")?
-                    .ends_with("svg")
-            {
-                icon_map.insert(
-                    fname,
-                    entry.path().to_str().context("Invalid path")?.to_string(),
-                );
+            let fname = entry.file_name().to_string_lossy().to_string();
+            if let Some(ext) = entry.path().extension().and_then(|s| s.to_str()) {
+                if ext == "png" || ext == "svg" {
+                    icon_map.insert(
+                        fname.split('.').next().unwrap().to_string(),
+                        entry.path().to_string_lossy().to_string(),
+                    );
+                }
             }
         }
     }
     Ok(icon_map)
 }
 
+/// Read the configuration file and return a list of RaffiConfig.
 fn read_config(filename: &str) -> Result<Vec<RaffiConfig>> {
     let file = File::open(filename).context(format!("cannot open config file {}", filename))?;
     let config: Config =
         serde_yaml::from_reader(file).context(format!("cannot parse config file {}", filename))?;
     let mut rafficonfigs = Vec::new();
-    for (_, value) in config.toplevel {
+
+    for value in config.toplevel.values() {
         if value.is_mapping() {
-            let mut mc: RaffiConfig = serde_yaml::from_value(value)
-                .context(format!("cannot parse config file {}", filename))?;
-            if mc.disabled.unwrap_or(false) {
+            let mut mc: RaffiConfig = serde_yaml::from_value(value.clone())
+                .context("cannot parse config entry".to_string())?;
+            if mc.disabled.unwrap_or(false) || !is_valid_config(&mut mc) {
                 continue;
-            }
-
-            if let Some(binary) = mc.binary.clone() {
-                if !find_binary(&binary) {
-                    continue;
-                }
-            } else if let Some(description) = mc.description.clone() {
-                mc.binary = Some(description);
-            } else {
-                continue;
-            }
-
-            if let Some(ifenveq) = mc.ifenveq.clone() {
-                if ifenveq.len() != 2
-                    || std::env::var(&ifenveq[0]).unwrap_or_default() != ifenveq[1]
-                {
-                    continue;
-                }
-            }
-            if let Some(ifenvset) = mc.ifenvset.clone() {
-                if std::env::var(&ifenvset).is_err() {
-                    continue;
-                }
-            }
-
-            if let Some(ifenvnotset) = mc.ifenvnotset.clone() {
-                if std::env::var(&ifenvnotset).is_ok() {
-                    continue;
-                }
-            }
-
-            if let Some(ifexist) = mc.ifexist.clone() {
-                if !find_binary(&ifexist) {
-                    continue;
-                }
             }
             rafficonfigs.push(mc);
         }
@@ -143,13 +95,40 @@ fn read_config(filename: &str) -> Result<Vec<RaffiConfig>> {
     Ok(rafficonfigs)
 }
 
-fn find_binary(binary: &str) -> bool {
-    std::env::var("PATH")
-        .unwrap()
-        .split(':')
-        .any(|path| Path::new(&(path.to_string() + "/" + binary)).exists())
+/// Validate the RaffiConfig based on various conditions.
+fn is_valid_config(mc: &mut RaffiConfig) -> bool {
+    if let Some(binary) = &mc.binary {
+        if !find_binary(binary) {
+            return false;
+        }
+    } else if let Some(description) = &mc.description {
+        mc.binary = Some(description.clone());
+    } else {
+        return false;
+    }
+
+    mc.ifenveq.as_ref().map_or(true, |eq| {
+        eq.len() == 2 && std::env::var(&eq[0]).unwrap_or_default() == eq[1]
+    }) && mc
+        .ifenvset
+        .as_ref()
+        .map_or(true, |var| std::env::var(var).is_ok())
+        && mc
+            .ifenvnotset
+            .as_ref()
+            .map_or(true, |var| std::env::var(var).is_err())
+        && mc.ifexist.as_ref().map_or(true, |exist| find_binary(exist))
 }
 
+/// Check if a binary exists in the PATH.
+fn find_binary(binary: &str) -> bool {
+    std::env::var("PATH")
+        .unwrap_or_default()
+        .split(':')
+        .any(|path| Path::new(&format!("{}/{}", path, binary)).exists())
+}
+
+/// Run the fuzzel command with the provided input and return its output.
 fn run_fuzzel_with_input(input: &str) -> Result<String> {
     let mut child = Command::new("fuzzel")
         .args(["-d", "--no-sort", "--counter"])
@@ -157,31 +136,33 @@ fn run_fuzzel_with_input(input: &str) -> Result<String> {
         .stdin(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .context("cannot launch raffi command")?;
+        .context("cannot launch fuzzel command")?;
 
     if let Some(stdin) = child.stdin.as_mut() {
         stdin
             .write_all(input.as_bytes())
             .context("Failed to write to stdin")?;
     }
+
     let output = child.wait_with_output().context("failed to read output")?;
     String::from_utf8(output.stdout).context("Invalid UTF-8 in output")
 }
 
+/// Save the icon map to a cache file.
 fn save_to_cache_file(map: &HashMap<String, String>) -> Result<()> {
-    let home = std::env::var("HOME").context("HOME not set")?;
-    let xdg_cache_home =
-        std::env::var("XDG_CACHE_HOME").unwrap_or_else(|_| format!("{home}/.cache"));
-    let cache_dir = format!("{}/raffi", xdg_cache_home);
+    let cache_dir = format!(
+        "{}/.cache/raffi",
+        std::env::var("XDG_CACHE_HOME")
+            .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()))
+    );
 
-    // Create the cache directory if it does not exist
     fs::create_dir_all(&cache_dir).context("Failed to create cache directory")?;
 
-    let mut cache_file =
-        File::create(format!("{}/icon.cache", cache_dir)).context("Failed to create cache file")?;
+    let cache_file_path = format!("{}/icon.cache", cache_dir);
+    let mut cache_file = File::create(&cache_file_path).context("Failed to create cache file")?;
     cache_file
         .write_all(
-            serde_json::to_string(&map)
+            serde_json::to_string(map)
                 .context("Failed to serialize icon map")?
                 .as_bytes(),
         )
@@ -189,11 +170,13 @@ fn save_to_cache_file(map: &HashMap<String, String>) -> Result<()> {
     Ok(())
 }
 
+/// Read the icon map from the cache file or generate it if it doesn't exist.
 fn read_icon_map() -> Result<HashMap<String, String>> {
-    let home = std::env::var("HOME").context("HOME not set")?;
-    let xdg_cache_home =
-        std::env::var("XDG_CACHE_HOME").unwrap_or_else(|_| format!("{home}/.cache"));
-    let cache_path = format!("{xdg_cache_home}/raffi/icon.cache");
+    let cache_path = format!(
+        "{}/.cache/raffi/icon.cache",
+        std::env::var("XDG_CACHE_HOME")
+            .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()))
+    );
 
     if !Path::new(&cache_path).exists() {
         let icon_map = get_icon_map()?;
@@ -209,12 +192,13 @@ fn read_icon_map() -> Result<HashMap<String, String>> {
     serde_json::from_str(&contents).context("Failed to deserialize cache file")
 }
 
+/// Create the input for fuzzel based on the Raffi configurations.
 fn make_fuzzel_input(rafficonfigs: &[RaffiConfig]) -> Result<String> {
-    let mut ret = String::new();
     let icon_map = read_icon_map()?;
+    let mut ret = String::new();
 
     for mc in rafficonfigs {
-        let s = mc
+        let description = mc
             .description
             .clone()
             .unwrap_or_else(|| mc.binary.clone().unwrap_or_else(|| "unknown".to_string()));
@@ -226,25 +210,29 @@ fn make_fuzzel_input(rafficonfigs: &[RaffiConfig]) -> Result<String> {
             .get(&icon)
             .unwrap_or(&"default".to_string())
             .to_string();
-        ret.push_str(&format!("{s}\0icon\x1f{icon_path}\n"));
+        ret.push_str(&format!("{}\0icon\x1f{}\n", description, icon_path));
     }
     Ok(ret)
 }
 
+/// Main function to execute the program logic.
 fn main() -> Result<()> {
     let args = Args::parse_args_default_or_exit();
+    let configfile = args.configfile.unwrap_or_else(|| {
+        format!(
+            "{}/raffi/raffi.yaml",
+            std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| format!(
+                "{}/.config",
+                std::env::var("HOME").unwrap_or_default()
+            ))
+        )
+    });
 
-    let home = std::env::var("HOME").context("HOME not set")?;
-    let xdg_config_home =
-        std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| format!("{}/.config", home));
-
-    let configfile = args
-        .configfile
-        .unwrap_or_else(|| format!("{}/raffi/raffi.yaml", xdg_config_home));
     if args.refresh_cache {
         let icon_map = get_icon_map()?;
         save_to_cache_file(&icon_map)?;
     }
+
     let rafficonfigs = read_config(&configfile)?;
     let inputs = make_fuzzel_input(&rafficonfigs)?;
     let ret = run_fuzzel_with_input(&inputs)?;
@@ -253,13 +241,13 @@ fn main() -> Result<()> {
         .last()
         .context("Failed to split input")?
         .trim();
+
     for mc in rafficonfigs {
-        if mc
+        let description = mc
             .description
             .as_deref()
-            .unwrap_or_else(|| mc.binary.as_deref().unwrap())
-            == chosen
-        {
+            .unwrap_or_else(|| mc.binary.as_deref().unwrap_or("unknown"));
+        if description == chosen {
             if args.print_only {
                 println!(
                     "{} {}",
