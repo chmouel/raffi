@@ -11,6 +11,7 @@ updates:
       interval: "daily"
     labels:
       - "dependencies"
+      - "dependabot"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
