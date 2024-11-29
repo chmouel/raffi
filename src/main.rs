@@ -45,6 +45,8 @@ struct Args {
     print_only: bool,
     #[options(help = "refresh cache")]
     refresh_cache: bool,
+    #[options(help = "do not show icons", short = "I")]
+    no_icons: bool,
 }
 
 /// Get the icon mapping from system directories.
@@ -193,8 +195,12 @@ fn read_icon_map() -> Result<HashMap<String, String>> {
 }
 
 /// Create the input for fuzzel based on the Raffi configurations.
-fn make_fuzzel_input(rafficonfigs: &[RaffiConfig]) -> Result<String> {
-    let icon_map = read_icon_map()?;
+fn make_fuzzel_input(rafficonfigs: &[RaffiConfig], no_icons: bool) -> Result<String> {
+    let icon_map = if no_icons {
+        HashMap::new()
+    } else {
+        read_icon_map()?
+    };
     let mut ret = String::new();
 
     for mc in rafficonfigs {
@@ -202,15 +208,19 @@ fn make_fuzzel_input(rafficonfigs: &[RaffiConfig]) -> Result<String> {
             .description
             .clone()
             .unwrap_or_else(|| mc.binary.clone().unwrap_or_else(|| "unknown".to_string()));
-        let icon = mc
-            .icon
-            .clone()
-            .unwrap_or_else(|| mc.binary.clone().unwrap_or_else(|| "unknown".to_string()));
-        let icon_path = icon_map
-            .get(&icon)
-            .unwrap_or(&"default".to_string())
-            .to_string();
-        ret.push_str(&format!("{}\0icon\x1f{}\n", description, icon_path));
+        if no_icons {
+            ret.push_str(&format!("{}\n", description));
+        } else {
+            let icon = mc
+                .icon
+                .clone()
+                .unwrap_or_else(|| mc.binary.clone().unwrap_or_else(|| "unknown".to_string()));
+            let icon_path = icon_map
+                .get(&icon)
+                .unwrap_or(&"default".to_string())
+                .to_string();
+            ret.push_str(&format!("{}\0icon\x1f{}\n", description, icon_path));
+        }
     }
     Ok(ret)
 }
@@ -234,7 +244,7 @@ fn main() -> Result<()> {
     }
 
     let rafficonfigs = read_config(&configfile)?;
-    let inputs = make_fuzzel_input(&rafficonfigs)?;
+    let inputs = make_fuzzel_input(&rafficonfigs, args.no_icons)?;
     let ret = run_fuzzel_with_input(&inputs)?;
     let chosen = ret
         .split(':')

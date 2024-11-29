@@ -6,7 +6,8 @@
 
 ## Description
 
-Raffi is a launcher for the [Fuzzel](https://codeberg.org/dnkl/fuzzel) utility that uses a YAML configuration file
+Raffi is a launcher for the [Fuzzel](https://codeberg.org/dnkl/fuzzel) utility
+that uses a YAML configuration file
 to define the commands to be executed.
 
 ## Installation
@@ -52,7 +53,9 @@ Use the `-p/--print-only` option to only print the command to be executed.
 
 Specify a custom configuration file with the `-c/--configfile` option.
 
-Icon paths are automatically searched on your system and cached. To refresh the cache, use the `-r/--refresh-cache` option.
+Icon paths are automatically searched on your system and cached. To refresh the
+cache, use the `-r/--refresh-cache` option. If you want to have fuzzel running
+faster you can use the option `-I/--disable-icons` to disable them.
 
 ### Sway
 
