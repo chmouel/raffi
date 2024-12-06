@@ -132,8 +132,16 @@ fn find_binary(binary: &str) -> bool {
 
 /// Run the fuzzel command with the provided input and return its output.
 fn run_fuzzel_with_input(input: &str) -> Result<String> {
+    let cache_file = format!(
+        "{}/.cache/raffi/mru.cache",
+        std::env::var("XDG_CACHE_HOME")
+            .unwrap_or_else(|_| std::env::var("HOME").unwrap_or_default().to_string())
+    );
+    if let Some(parent) = Path::new(&cache_file).parent() {
+        fs::create_dir_all(parent).context("Failed to create cache directory for fuzzel")?;
+    }
     let mut child = Command::new("fuzzel")
-        .args(["-d", "--no-sort", "--counter"])
+        .args(["-d", "--counter", "--cache", &cache_file])
         .stdout(Stdio::piped())
         .stdin(Stdio::piped())
         .stderr(Stdio::null())
