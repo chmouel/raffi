@@ -1,0 +1,14 @@
+default_install_hook_types: ["pre-push"]
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+  - repo: https://codeberg.org/avery42/pre-commit-rust.git
+    rev: v1.0.0
+    hooks:
+      - id: cargo-clippy
+      - id: cargo-fmt
+      - id: cargo-test

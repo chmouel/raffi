@@ -217,6 +217,26 @@ See the file located in [examples/raffi.yaml](./examples/raffi.yaml) for a more 
 
 Use the `--print-only` option to print the command that will be executed. This can help identify issues with the configuration or command execution.
 
+## Development
+
+All contributions are welcome! If you have any suggestions, bug reports, or feature requests, please open an issue or a pull request.
+
+### Pre-commit Hooks
+
+To ensure code quality, you can set up pre-commit hooks to run `cargo clippy` automatically before pushing commits. First, install pre-commit:
+
+```sh
+pip install pre-commit
+```
+
+Then, install the pre-commit hooks:
+
+```sh
+pre-commit install
+```
+
+This will automatically run `cargo clippy` before each commit to catch any potential issues.
+
 ## License
 
 This project is licensed under the MIT License.
