@@ -150,7 +150,7 @@ firefox:
   `$XDG_DATA_HOME` if set and matched to the icon name. The icons paths are
   cached for optimization, use the `-r` option to refresh it. You can also
   specify a full path to the icon.
-- **script**: See below for more information.
+- **script**: [See below](#script-feature) for more information.
 - **disabled**: If set to `true`, the entry will be disabled.
 
 ### Script Feature
