@@ -48,7 +48,7 @@ nfpms:
       {{- else if eq .Arch "windows" }}Windows
       {{- else }}{{ .Arch }}{{ end }}
     homepage: https://github.com/chmouel/raffi
-    description: raffi - fuzzel launcher based on yaml configuration 
+    description: raffi - fuzzel launcher based on yaml configuration
     maintainer: Chmouel Boudjnah <chmouel@chmouel.com>
     license: Apache 2.0
     formats:
