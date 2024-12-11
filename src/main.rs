@@ -23,6 +23,7 @@ struct RaffiConfig {
     ifenvnotset: Option<String>,
     ifexist: Option<String>,
     disabled: Option<bool>,
+    script: Option<String>,
 }
 
 /// Represents the top-level configuration structure.
@@ -47,6 +48,12 @@ struct Args {
     refresh_cache: bool,
     #[options(help = "do not show icons", short = "I")]
     no_icons: bool,
+    #[options(
+        help = "default shell when using scripts",
+        default = "bash",
+        short = "P"
+    )]
+    default_script_shell: String,
 }
 
 /// Get the icon mapping from system directories.
@@ -78,7 +85,7 @@ fn get_icon_map() -> Result<HashMap<String, String>> {
 }
 
 /// Read the configuration file and return a list of RaffiConfig.
-fn read_config(filename: &str) -> Result<Vec<RaffiConfig>> {
+fn read_config(filename: &str, args: &Args) -> Result<Vec<RaffiConfig>> {
     let file = File::open(filename).context(format!("cannot open config file {}", filename))?;
     let config: Config =
         serde_yaml::from_reader(file).context(format!("cannot parse config file {}", filename))?;
@@ -88,7 +95,7 @@ fn read_config(filename: &str) -> Result<Vec<RaffiConfig>> {
         if value.is_mapping() {
             let mut mc: RaffiConfig = serde_yaml::from_value(value.clone())
                 .context("cannot parse config entry".to_string())?;
-            if mc.disabled.unwrap_or(false) || !is_valid_config(&mut mc) {
+            if mc.disabled.unwrap_or(false) || !is_valid_config(&mut mc, args) {
                 continue;
             }
             rafficonfigs.push(mc);
@@ -98,8 +105,13 @@ fn read_config(filename: &str) -> Result<Vec<RaffiConfig>> {
 }
 
 /// Validate the RaffiConfig based on various conditions.
-fn is_valid_config(mc: &mut RaffiConfig) -> bool {
-    if let Some(binary) = &mc.binary {
+fn is_valid_config(mc: &mut RaffiConfig, args: &Args) -> bool {
+    if let Some(_script) = &mc.script {
+        if !find_binary(mc.binary.as_deref().unwrap_or(&args.default_script_shell)) {
+            return false;
+        }
+        mc.binary = Some(args.default_script_shell.clone());
+    } else if let Some(binary) = &mc.binary {
         if !find_binary(binary) {
             return false;
         }
@@ -233,10 +245,45 @@ fn make_fuzzel_input(rafficonfigs: &[RaffiConfig], no_icons: bool) -> Result<Str
     Ok(ret)
 }
 
+/// Execute the chosen command or script.
+fn execute_chosen_command(mc: &RaffiConfig, args: &Args, interpreter: &str) -> Result<()> {
+    if args.print_only {
+        if let Some(script) = &mc.script {
+            println!("#!/usr/bin/env {}\n{}", interpreter, script);
+        } else {
+            println!(
+                "{} {}",
+                mc.binary.as_deref().context("Binary not found")?,
+                mc.args.as_deref().unwrap_or(&[]).join(" ")
+            );
+        }
+        return Ok(());
+    }
+    if let Some(script) = &mc.script {
+        let mut temp_script =
+            tempfile::NamedTempFile::new().context("Failed to create temp script file")?;
+        writeln!(temp_script, "#!/usr/bin/env {}\n{}", interpreter, script)
+            .context("Failed to write to temp script file")?;
+        let mut child = Command::new("/usr/bin/env")
+            .arg(interpreter)
+            .arg(temp_script.path())
+            .spawn()
+            .context("cannot launch script")?;
+        child.wait().context("cannot wait for child")?;
+    } else {
+        let mut child = Command::new(mc.binary.as_deref().context("Binary not found")?)
+            .args(mc.args.as_deref().unwrap_or(&[]))
+            .spawn()
+            .context("cannot launch binary")?;
+        child.wait().context("cannot wait for child")?;
+    }
+    Ok(())
+}
+
 /// Main function to execute the program logic.
 fn main() -> Result<()> {
     let args = Args::parse_args_default_or_exit();
-    let configfile = args.configfile.unwrap_or_else(|| {
+    let configfile = args.configfile.clone().unwrap_or_else(|| {
         format!(
             "{}/raffi/raffi.yaml",
             std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| format!(
@@ -247,11 +294,10 @@ fn main() -> Result<()> {
     });
 
     if args.refresh_cache {
-        let icon_map = get_icon_map()?;
-        save_to_cache_file(&icon_map)?;
+        refresh_icon_cache()?;
     }
 
-    let rafficonfigs = read_config(&configfile)?;
+    let rafficonfigs = read_config(&configfile, &args)?;
     let inputs = make_fuzzel_input(&rafficonfigs, args.no_icons)?;
     let ret = run_fuzzel_with_input(&inputs)?;
     let chosen = ret
@@ -266,20 +312,19 @@ fn main() -> Result<()> {
             .as_deref()
             .unwrap_or_else(|| mc.binary.as_deref().unwrap_or("unknown"));
         if description == chosen {
-            if args.print_only {
-                println!(
-                    "{} {}",
-                    mc.binary.as_deref().context("Binary not found")?,
-                    mc.args.as_deref().unwrap_or(&[]).join(" ")
-                );
-                return Ok(());
-            }
-            let mut child = Command::new(mc.binary.as_deref().context("Binary not found")?)
-                .args(mc.args.as_deref().unwrap_or(&[]))
-                .spawn()
-                .context("cannot launch binary")?;
-            child.wait().context("cannot wait for child")?;
+            let interpreter = mc
+                .binary
+                .clone()
+                .unwrap_or_else(|| args.default_script_shell.clone());
+            execute_chosen_command(&mc, &args, &interpreter)?;
         }
     }
+    Ok(())
+}
+
+/// Refresh the icon cache.
+fn refresh_icon_cache() -> Result<()> {
+    let icon_map = get_icon_map()?;
+    save_to_cache_file(&icon_map)?;
     Ok(())
 }
