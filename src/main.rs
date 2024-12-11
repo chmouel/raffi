@@ -111,6 +111,13 @@ fn is_valid_config(mc: &mut RaffiConfig, args: &Args) -> bool {
             return false;
         }
         mc.binary = Some(args.default_script_shell.clone());
+        if let Some(binary_args) = &mc.args {
+            mc.binary = Some(format!(
+                "{} {}",
+                mc.binary.as_deref().unwrap_or_default(),
+                binary_args.join(" ")
+            ));
+        }
     } else if let Some(binary) = &mc.binary {
         if !find_binary(binary) {
             return false;
@@ -247,6 +254,10 @@ fn make_fuzzel_input(rafficonfigs: &[RaffiConfig], no_icons: bool) -> Result<Str
 
 /// Execute the chosen command or script.
 fn execute_chosen_command(mc: &RaffiConfig, args: &Args, interpreter: &str) -> Result<()> {
+    let interpreter_parts: Vec<&str> = interpreter.split_whitespace().collect();
+    let interpreter_cmd = interpreter_parts.get(0).context("No interpreter found")?;
+    let interpreter_args = &interpreter_parts[1..];
+
     if args.print_only {
         if let Some(script) = &mc.script {
             println!("#!/usr/bin/env {}\n{}", interpreter, script);
@@ -264,17 +275,19 @@ fn execute_chosen_command(mc: &RaffiConfig, args: &Args, interpreter: &str) -> R
             tempfile::NamedTempFile::new().context("Failed to create temp script file")?;
         writeln!(temp_script, "#!/usr/bin/env {}\n{}", interpreter, script)
             .context("Failed to write to temp script file")?;
-        let mut child = Command::new("/usr/bin/env")
-            .arg(interpreter)
-            .arg(temp_script.path())
-            .spawn()
-            .context("cannot launch script")?;
+        let mut command = Command::new("/usr/bin/env");
+        command
+            .arg(interpreter_cmd)
+            .args(interpreter_args)
+            .arg(temp_script.path());
+        let mut child = command.spawn().context("cannot launch script")?;
         child.wait().context("cannot wait for child")?;
     } else {
-        let mut child = Command::new(mc.binary.as_deref().context("Binary not found")?)
-            .args(mc.args.as_deref().unwrap_or(&[]))
-            .spawn()
-            .context("cannot launch binary")?;
+        let mut command = Command::new(mc.binary.as_deref().context("Binary not found")?);
+        if let Some(binary_args) = &mc.args {
+            command.args(binary_args);
+        }
+        let mut child = command.spawn().context("cannot launch binary")?;
         child.wait().context("cannot wait for child")?;
     }
     Ok(())

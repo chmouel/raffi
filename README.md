@@ -2,7 +2,8 @@
 
 ![image](https://github.com/chmouel/raffi/assets/98980/04d6af0f-2a80-47d5-a2ec-95443a629305)
 
-*(This uses my Fuzzel configuration, see below for more details)*
+> [!NOTE]
+> This uses my Fuzzel configuration, see below for more details
 
 ## Description
 
@@ -177,7 +178,20 @@ hello_script:
     import os
     print("hello world and show me your env")
     print(os.environ)
-  description: "Hello Script"
+  description: "Hello Python script"
+  icon: "script"
+```
+
+If you want to add some specific arguments to the interpreter, you can do it like this:
+
+```yaml
+hello_script:
+  binary: sh
+  args: ["-xv"]
+  script: |
+    echo "hello world and show me your env"
+    env
+  description: "Hello debug"
   icon: "script"
 ```
 
