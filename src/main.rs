@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     fs::{self, File},
     io::{Read, Write},
+    os::unix::fs::PermissionsExt,
     path::Path,
     process::{Command, Stdio},
 };
@@ -109,14 +110,6 @@ fn is_valid_config(mc: &mut RaffiConfig, args: &Args) -> bool {
     if let Some(_script) = &mc.script {
         if !find_binary(mc.binary.as_deref().unwrap_or(&args.default_script_shell)) {
             return false;
-        }
-        mc.binary = Some(args.default_script_shell.clone());
-        if let Some(binary_args) = &mc.args {
-            mc.binary = Some(format!(
-                "{} {}",
-                mc.binary.as_deref().unwrap_or_default(),
-                binary_args.join(" ")
-            ));
         }
     } else if let Some(binary) = &mc.binary {
         if !find_binary(binary) {
@@ -254,13 +247,14 @@ fn make_fuzzel_input(rafficonfigs: &[RaffiConfig], no_icons: bool) -> Result<Str
 
 /// Execute the chosen command or script.
 fn execute_chosen_command(mc: &RaffiConfig, args: &Args, interpreter: &str) -> Result<()> {
-    let interpreter_parts: Vec<&str> = interpreter.split_whitespace().collect();
-    let interpreter_cmd = interpreter_parts.get(0).context("No interpreter found")?;
-    let interpreter_args = &interpreter_parts[1..];
+    // make interepreter with mc.binary and mc.args on the same line
+    let interpreter_with_args = mc.args.as_ref().map_or(interpreter.to_string(), |args| {
+        format!("{} {}", interpreter, args.join(" "))
+    });
 
     if args.print_only {
         if let Some(script) = &mc.script {
-            println!("#!/usr/bin/env {}\n{}", interpreter, script);
+            println!("#!/usr/bin/env -S {}\n{}", interpreter_with_args, script);
         } else {
             println!(
                 "{} {}",
@@ -273,15 +267,41 @@ fn execute_chosen_command(mc: &RaffiConfig, args: &Args, interpreter: &str) -> R
     if let Some(script) = &mc.script {
         let mut temp_script =
             tempfile::NamedTempFile::new().context("Failed to create temp script file")?;
-        writeln!(temp_script, "#!/usr/bin/env {}\n{}", interpreter, script)
-            .context("Failed to write to temp script file")?;
-        let mut command = Command::new("/usr/bin/env");
-        command
-            .arg(interpreter_cmd)
-            .args(interpreter_args)
-            .arg(temp_script.path());
+        writeln!(
+            temp_script,
+            "#!/usr/bin/env -S {}\n{}",
+            interpreter_with_args, script
+        )
+        .context("Failed to write to temp script file")?;
+
+        // set the script file to be executable
+        let mut permissions = temp_script
+            .as_file()
+            .metadata()
+            .context("Failed to get metadata of temp script file")?
+            .permissions();
+        permissions.set_mode(0o755);
+        temp_script
+            .as_file()
+            .set_permissions(permissions)
+            .context("Failed to set permissions of temp script file")?;
+        temp_script
+            .flush()
+            .context("Failed to flush temp script file")?;
+        let temp_script_path = temp_script
+            .path()
+            .to_str()
+            .context("Failed to get temp script path")?
+            .to_string();
+        temp_script
+            .persist(&temp_script_path)
+            .context("Failed to persist temp script file")?;
+
+        let mut command = Command::new(&temp_script_path);
         let mut child = command.spawn().context("cannot launch script")?;
         child.wait().context("cannot wait for child")?;
+        // remove the temp script file
+        fs::remove_file(&temp_script_path.clone()).context("Failed to remove temp script file")?;
     } else {
         let mut command = Command::new(mc.binary.as_deref().context("Binary not found")?);
         if let Some(binary_args) = &mc.args {
