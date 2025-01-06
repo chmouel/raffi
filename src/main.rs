@@ -301,7 +301,7 @@ fn execute_chosen_command(mc: &RaffiConfig, args: &Args, interpreter: &str) -> R
         let mut child = command.spawn().context("cannot launch script")?;
         child.wait().context("cannot wait for child")?;
         // remove the temp script file
-        fs::remove_file(&temp_script_path.clone()).context("Failed to remove temp script file")?;
+        fs::remove_file(temp_script_path.clone()).context("Failed to remove temp script file")?;
     } else {
         let mut command = Command::new(mc.binary.as_deref().context("Binary not found")?);
         if let Some(binary_args) = &mc.args {
