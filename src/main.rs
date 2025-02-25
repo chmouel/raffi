@@ -121,17 +121,18 @@ fn is_valid_config(mc: &mut RaffiConfig, args: &Args) -> bool {
         return false;
     }
 
-    mc.ifenveq.as_ref().map_or(true, |eq| {
-        eq.len() == 2 && std::env::var(&eq[0]).unwrap_or_default() == eq[1]
-    }) && mc
-        .ifenvset
+    mc.ifenveq
         .as_ref()
-        .map_or(true, |var| std::env::var(var).is_ok())
+        .is_none_or(|eq| eq.len() == 2 && std::env::var(&eq[0]).unwrap_or_default() == eq[1])
+        && mc
+            .ifenvset
+            .as_ref()
+            .is_none_or(|var| std::env::var(var).is_ok())
         && mc
             .ifenvnotset
             .as_ref()
-            .map_or(true, |var| std::env::var(var).is_err())
-        && mc.ifexist.as_ref().map_or(true, |exist| find_binary(exist))
+            .is_none_or(|var| std::env::var(var).is_err())
+        && mc.ifexist.as_ref().is_none_or(|exist| find_binary(exist))
 }
 
 /// Check if a binary exists in the PATH.
