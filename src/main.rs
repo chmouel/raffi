@@ -87,9 +87,9 @@ fn get_icon_map() -> Result<HashMap<String, String>> {
 
 /// Read the configuration file and return a list of RaffiConfig.
 fn read_config(filename: &str, args: &Args) -> Result<Vec<RaffiConfig>> {
-    let file = File::open(filename).context(format!("cannot open config file {}", filename))?;
+    let file = File::open(filename).context(format!("cannot open config file {filename}"))?;
     let config: Config =
-        serde_yaml::from_reader(file).context(format!("cannot parse config file {}", filename))?;
+        serde_yaml::from_reader(file).context(format!("cannot parse config file {filename}"))?;
     let mut rafficonfigs = Vec::new();
 
     for value in config.toplevel.values() {
@@ -140,7 +140,7 @@ fn find_binary(binary: &str) -> bool {
     std::env::var("PATH")
         .unwrap_or_default()
         .split(':')
-        .any(|path| Path::new(&format!("{}/{}", path, binary)).exists())
+        .any(|path| Path::new(&format!("{path}/{binary}")).exists())
 }
 
 /// Run the fuzzel command with the provided input and return its output.
@@ -181,7 +181,7 @@ fn save_to_cache_file(map: &HashMap<String, String>) -> Result<()> {
 
     fs::create_dir_all(&cache_dir).context("Failed to create cache directory")?;
 
-    let cache_file_path = format!("{}/icon.cache", cache_dir);
+    let cache_file_path = format!("{cache_dir}/icon.cache");
     let mut cache_file = File::create(&cache_file_path).context("Failed to create cache file")?;
     cache_file
         .write_all(
@@ -230,7 +230,7 @@ fn make_fuzzel_input(rafficonfigs: &[RaffiConfig], no_icons: bool) -> Result<Str
             .clone()
             .unwrap_or_else(|| mc.binary.clone().unwrap_or_else(|| "unknown".to_string()));
         if no_icons {
-            ret.push_str(&format!("{}\n", description));
+            ret.push_str(&format!("{description}\n"));
         } else {
             let icon = mc
                 .icon
@@ -240,7 +240,7 @@ fn make_fuzzel_input(rafficonfigs: &[RaffiConfig], no_icons: bool) -> Result<Str
                 .get(&icon)
                 .unwrap_or(&"default".to_string())
                 .to_string();
-            ret.push_str(&format!("{}\0icon\x1f{}\n", description, icon_path));
+            ret.push_str(&format!("{description}\0icon\x1f{icon_path}\n"));
         }
     }
     Ok(ret)
@@ -255,7 +255,7 @@ fn execute_chosen_command(mc: &RaffiConfig, args: &Args, interpreter: &str) -> R
 
     if args.print_only {
         if let Some(script) = &mc.script {
-            println!("#!/usr/bin/env -S {}\n{}", interpreter_with_args, script);
+            println!("#!/usr/bin/env -S {interpreter_with_args}\n{script}");
         } else {
             println!(
                 "{} {}",
@@ -270,8 +270,7 @@ fn execute_chosen_command(mc: &RaffiConfig, args: &Args, interpreter: &str) -> R
             tempfile::NamedTempFile::new().context("Failed to create temp script file")?;
         writeln!(
             temp_script,
-            "#!/usr/bin/env -S {}\n{}",
-            interpreter_with_args, script
+            "#!/usr/bin/env -S {interpreter_with_args}\n{script}"
         )
         .context("Failed to write to temp script file")?;
 
@@ -336,7 +335,7 @@ fn main() -> Result<()> {
     let ret = run_fuzzel_with_input(&inputs)?;
     let chosen = ret
         .split(':')
-        .last()
+        .next_back()
         .context("Failed to split input")?
         .trim();
 
