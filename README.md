@@ -157,7 +157,10 @@ firefox:
 
 ### Script Feature
 
-You can define a script to be executed instead of a binary. The script will be executed using the default script shell `bash` unless you specify another one in `--default-script-shell`.
+You can define a script to be executed instead of a binary. The script will be
+executed using the default script shell `bash` unless you specify another one in
+`--default-script-shell`. The `binary` field is used to specify the interpreter
+for the script.
 
 Here is an example configuration with a script:
 
