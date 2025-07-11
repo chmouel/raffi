@@ -51,6 +51,7 @@ yay -S raffi-bin
 ```shell
 nix-shell -p raffi
 ```
+### [Source](https://github.com/chmouel/raffi)
 
 To install Raffi from source, clone the repository and build it using Cargo:
 
