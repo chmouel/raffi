@@ -2,7 +2,6 @@ use std::{
     collections::HashMap,
     fs::{self, File},
     io::{Read, Write},
-    os::unix::fs::PermissionsExt,
     path::Path,
     process::{Command, Stdio},
 };
@@ -266,98 +265,65 @@ fn execute_chosen_command(mc: &RaffiConfig, args: &Args, interpreter: &str) -> R
         return Ok(());
     }
     if let Some(script) = &mc.script {
-        let mut temp_script =
-            tempfile::NamedTempFile::new().context("Failed to create temp script file")?;
-        writeln!(
-            temp_script,
-            "#!/usr/bin/env -S {interpreter_with_args}\n{script}"
-        )
-        .context("Failed to write to temp script file")?;
-
-        // set the script file to be executable
-        let mut permissions = temp_script
-            .as_file()
-            .metadata()
-            .context("Failed to get metadata of temp script file")?
-            .permissions();
-        permissions.set_mode(0o755);
-        temp_script
-            .as_file()
-            .set_permissions(permissions)
-            .context("Failed to set permissions of temp script file")?;
-        temp_script
-            .flush()
-            .context("Failed to flush temp script file")?;
-        let temp_script_path = temp_script
-            .path()
-            .to_str()
-            .context("Failed to get temp script path")?
-            .to_string();
-        temp_script
-            .persist(&temp_script_path)
-            .context("Failed to persist temp script file")?;
-
-        let mut command = Command::new(&temp_script_path);
-        let mut child = command.spawn().context("cannot launch script")?;
-        child.wait().context("cannot wait for child")?;
-        // remove the temp script file
-        fs::remove_file(temp_script_path.clone()).context("Failed to remove temp script file")?;
+        let mut command = Command::new(interpreter);
+        command.arg("-c").arg(script);
+        if let Some(args) = &mc.args {
+            command.arg(interpreter);
+            command.args(args);
+        }
+        command.spawn().context("cannot launch script")?;
     } else {
-        let mut command = Command::new(mc.binary.as_deref().context("Binary not found")?);
-        if let Some(binary_args) = &mc.args {
-            command.args(binary_args);
-        }
-        let mut child = command.spawn().context("cannot launch binary")?;
-        child.wait().context("cannot wait for child")?;
+        Command::new(mc.binary.as_deref().context("Binary not found")?)
+            .args(mc.args.as_deref().unwrap_or(&[]))
+            .spawn()
+            .context("cannot launch command")?;
     }
     Ok(())
 }
 
-/// Main function to execute the program logic.
 fn main() -> Result<()> {
-    let args = Args::parse_args_default_or_exit();
-    let configfile = args.configfile.clone().unwrap_or_else(|| {
-        format!(
-            "{}/raffi/raffi.yaml",
-            std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| format!(
-                "{}/.config",
-                std::env::var("HOME").unwrap_or_default()
-            ))
-        )
-    });
+    let args: Args = Args::parse_args_default_or_exit();
 
-    if args.refresh_cache {
-        refresh_icon_cache()?;
+    if args.version {
+        println!("raffi version 0.1.0");
+        return Ok(());
     }
 
-    let rafficonfigs = read_config(&configfile, &args)?;
-    let inputs = make_fuzzel_input(&rafficonfigs, args.no_icons)?;
-    let ret = run_fuzzel_with_input(&inputs)?;
-    let chosen = ret
-        .split(':')
-        .next_back()
-        .context("Failed to split input")?
-        .trim();
+    let default_config_path =
+        format!("{}/.config/raffi/raffi.yaml", std::env::var("HOME").unwrap_or_default());
+    let configfile = args
+        .configfile
+        .as_deref()
+        .unwrap_or(&default_config_path);
 
-    for mc in rafficonfigs {
-        let description = mc
-            .description
-            .as_deref()
-            .unwrap_or_else(|| mc.binary.as_deref().unwrap_or("unknown"));
-        if description == chosen {
-            let interpreter = mc
-                .binary
-                .clone()
-                .unwrap_or_else(|| args.default_script_shell.clone());
-            execute_chosen_command(&mc, &args, &interpreter)?;
-        }
+    let rafficonfigs = read_config(configfile, &args).context("Failed to read config")?;
+
+    if rafficonfigs.is_empty() {
+        eprintln!("No valid configurations found in {}", configfile);
+        std::process::exit(1);
     }
-    Ok(())
-}
 
-/// Refresh the icon cache.
-fn refresh_icon_cache() -> Result<()> {
-    let icon_map = get_icon_map()?;
-    save_to_cache_file(&icon_map)?;
+    let input =
+        make_fuzzel_input(&rafficonfigs, args.no_icons).context("Failed to make fuzzel input")?;
+
+    let chosen = run_fuzzel_with_input(&input).context("Failed to run fuzzel")?;
+
+    let chosen_name = chosen.trim();
+    let mc = rafficonfigs
+        .iter()
+        .find(|mc| {
+            mc.description.as_deref() == Some(chosen_name)
+                || mc.binary.as_deref() == Some(chosen_name)
+        })
+        .context("No matching configuration found")?;
+
+    let interpreter = if mc.script.is_some() {
+        mc.binary.as_deref().unwrap_or(&args.default_script_shell)
+    } else {
+        // Not used for binary commands
+        ""
+    };
+    execute_chosen_command(mc, &args, interpreter).context("Failed to execute command")?;
+
     Ok(())
 }
