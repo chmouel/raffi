@@ -355,7 +355,7 @@ pub fn run(args: Args) -> Result<()> {
     let rafficonfigs = read_config(configfile, &args).context("Failed to read config")?;
 
     if rafficonfigs.is_empty() {
-        eprintln!("No valid configurations found in {}", configfile);
+        eprintln!("No valid configurations found in {configfile}");
         std::process::exit(1);
     }
 
