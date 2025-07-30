@@ -1,10 +1,10 @@
 use std::{
     collections::HashMap,
+    fmt::Write as _,
     fs::{self, File},
     io::{Read, Write},
     path::Path,
     process::{Command, Stdio},
-    fmt::Write as _,
 };
 
 use anyhow::{Context, Result};
@@ -110,7 +110,7 @@ fn get_icon_map() -> Result<HashMap<String, String>> {
             std::env::var("HOME").unwrap_or_default()
         )
     });
-    let _ = write!(&mut data_dirs, ":{data_home}");
+    write!(&mut data_dirs, ":{data_home}")?;
 
     for datadir in std::env::split_paths(&data_dirs) {
         for subdir in &["icons", "pixmaps"] {
@@ -124,7 +124,7 @@ fn get_icon_map() -> Result<HashMap<String, String>> {
                 if let Some(ext) = entry.path().extension().and_then(|s| s.to_str()) {
                     if ext == "png" || ext == "svg" {
                         icon_map.insert(
-                            fname.split('.').next().unwrap().to_string(),
+                            fname.rsplit_once('.').unwrap().0.to_string(),
                             entry.path().to_string_lossy().to_string(),
                         );
                     }
