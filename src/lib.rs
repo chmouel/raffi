@@ -4,6 +4,7 @@ use std::{
     io::{Read, Write},
     path::Path,
     process::{Command, Stdio},
+    fmt::Write as _,
 };
 
 use anyhow::{Context, Result};
@@ -101,24 +102,32 @@ impl IconMapProvider for DefaultIconMapProvider {
 /// Get the icon mapping from system directories.
 fn get_icon_map() -> Result<HashMap<String, String>> {
     let mut icon_map = HashMap::new();
-    let iconhome = std::env::var("XDG_DATA_HOME")
-        .unwrap_or_else(|_| format!("{}/.local/share", std::env::var("HOME").unwrap_or_default()))
-        + "/icons";
+    let mut data_dirs =
+        std::env::var("XDG_DATA_DIRS").unwrap_or("/usr/local/share/:/usr/share/".to_string());
+    let data_home = std::env::var("XDG_DATA_HOME").unwrap_or_else(|_| {
+        format!(
+            "{}/.local/share/",
+            std::env::var("HOME").unwrap_or_default()
+        )
+    });
+    let _ = write!(&mut data_dirs, ":{data_home}");
 
-    let icon_dirs = vec!["/usr/share/icons", "/usr/share/pixmaps", &iconhome];
-
-    for dir in icon_dirs {
-        for entry in walkdir::WalkDir::new(dir)
-            .into_iter()
-            .filter_map(Result::ok)
-        {
-            let fname = entry.file_name().to_string_lossy().to_string();
-            if let Some(ext) = entry.path().extension().and_then(|s| s.to_str()) {
-                if ext == "png" || ext == "svg" {
-                    icon_map.insert(
-                        fname.split('.').next().unwrap().to_string(),
-                        entry.path().to_string_lossy().to_string(),
-                    );
+    for datadir in std::env::split_paths(&data_dirs) {
+        for subdir in &["icons", "pixmaps"] {
+            let mut dir = datadir.clone();
+            dir.push(subdir);
+            for entry in walkdir::WalkDir::new(dir)
+                .into_iter()
+                .filter_map(Result::ok)
+            {
+                let fname = entry.file_name().to_string_lossy().to_string();
+                if let Some(ext) = entry.path().extension().and_then(|s| s.to_str()) {
+                    if ext == "png" || ext == "svg" {
+                        icon_map.insert(
+                            fname.split('.').next().unwrap().to_string(),
+                            entry.path().to_string_lossy().to_string(),
+                        );
+                    }
                 }
             }
         }
