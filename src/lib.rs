@@ -200,9 +200,9 @@ fn find_binary(binary: &str) -> bool {
 /// Run the fuzzel command with the provided input and return its output.
 fn run_fuzzel_with_input(input: &str) -> Result<String> {
     let cache_file = format!(
-        "{}/.cache/raffi/mru.cache",
+        "{}/raffi/mru.cache",
         std::env::var("XDG_CACHE_HOME")
-            .unwrap_or_else(|_| std::env::var("HOME").unwrap_or_default().to_string())
+            .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()))
     );
     if let Some(parent) = Path::new(&cache_file).parent() {
         fs::create_dir_all(parent).context("Failed to create cache directory for fuzzel")?;
@@ -228,7 +228,7 @@ fn run_fuzzel_with_input(input: &str) -> Result<String> {
 /// Save the icon map to a cache file.
 fn save_to_cache_file(map: &HashMap<String, String>) -> Result<()> {
     let cache_dir = format!(
-        "{}/.cache/raffi",
+        "{}/raffi",
         std::env::var("XDG_CACHE_HOME")
             .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()))
     );
