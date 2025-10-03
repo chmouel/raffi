@@ -331,8 +331,13 @@ fn run_wayland_ui(configs: &[RaffiConfig], no_icons: bool) -> Result<String> {
             size: iced::Size::new(800.0, 600.0),
             position: window::Position::Centered,
             decorations: true,
-            transparent: false,
+            transparent: true,
+            visible: true,
             level: window::Level::AlwaysOnTop,
+            platform_specific: iced::window::settings::PlatformSpecific {
+                application_id: "com.chmouel.raffi".to_string(),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .run_with(move || LauncherApp::new(configs_owned, no_icons, selected_item_clone));
