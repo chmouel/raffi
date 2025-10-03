@@ -358,7 +358,7 @@ pub fn run(args: Args) -> Result<()> {
             mc.description.as_deref() == Some(chosen_name)
                 || mc.binary.as_deref() == Some(chosen_name)
         })
-        .context("No matching configuration found")?;
+        .context("No item selected, bailing out.")?;
 
     let interpreter = if mc.script.is_some() {
         mc.binary.as_deref().unwrap_or(&args.default_script_shell)

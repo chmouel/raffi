@@ -12,6 +12,8 @@ use iced::{window, Element, Length, Task};
 use super::UI;
 use crate::{read_icon_map, RaffiConfig};
 
+const APPLICATION_ID: &str = "com.chmouel.raffi";
+
 /// Wayland UI implementation using iced
 pub struct WaylandUI;
 
@@ -335,7 +337,7 @@ fn run_wayland_ui(configs: &[RaffiConfig], no_icons: bool) -> Result<String> {
             visible: true,
             level: window::Level::AlwaysOnTop,
             platform_specific: iced::window::settings::PlatformSpecific {
-                application_id: "com.chmouel.raffi".to_string(),
+                application_id: APPLICATION_ID.to_string(),
                 ..Default::default()
             },
             ..Default::default()
@@ -353,5 +355,5 @@ fn run_wayland_ui(configs: &[RaffiConfig], no_icons: bool) -> Result<String> {
         }
     }
 
-    anyhow::bail!("No item selected")
+    Ok(String::new())
 }
