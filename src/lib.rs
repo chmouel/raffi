@@ -4,13 +4,15 @@ use std::{
     fs::{self, File},
     io::{Read, Write},
     path::Path,
-    process::{Command, Stdio},
+    process::Command,
 };
 
 use anyhow::{Context, Result};
 use gumdrop::Options;
 use serde::Deserialize;
 use serde_yaml::Value;
+
+pub mod ui;
 
 /// Represents the configuration for each Raffi entry.
 #[derive(Deserialize, Debug, PartialEq, Clone, Default)]
@@ -34,6 +36,30 @@ struct Config {
     toplevel: HashMap<String, Value>,
 }
 
+/// UI type selection
+#[derive(Debug, Clone, PartialEq)]
+pub enum UIType {
+    Fuzzel,
+    Native,
+    Wayland,
+}
+
+impl std::str::FromStr for UIType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "fuzzel" => Ok(UIType::Fuzzel),
+            "native" | "skim" => Ok(UIType::Native),
+            "wayland" | "iced" => Ok(UIType::Wayland),
+            _ => Err(format!(
+                "Invalid UI type: {}. Valid options are: fuzzel, native, wayland",
+                s
+            )),
+        }
+    }
+}
+
 /// Command-line arguments structure.
 #[derive(Debug, Options, Clone)]
 pub struct Args {
@@ -55,6 +81,11 @@ pub struct Args {
         short = "P"
     )]
     pub default_script_shell: String,
+    #[options(
+        help = "UI type to use: fuzzel, native, wayland (default: fuzzel)",
+        short = "u"
+    )]
+    pub ui_type: Option<String>,
 }
 
 /// A trait for checking environment variables.
@@ -206,34 +237,6 @@ fn find_binary(binary: &str) -> bool {
         .any(|path| Path::new(&format!("{path}/{binary}")).exists())
 }
 
-/// Run the fuzzel command with the provided input and return its output.
-fn run_fuzzel_with_input(input: &str) -> Result<String> {
-    let cache_file = format!(
-        "{}/raffi/mru.cache",
-        std::env::var("XDG_CACHE_HOME")
-            .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()))
-    );
-    if let Some(parent) = Path::new(&cache_file).parent() {
-        fs::create_dir_all(parent).context("Failed to create cache directory for fuzzel")?;
-    }
-    let mut child = Command::new("fuzzel")
-        .args(["-d", "--counter", "--cache", &cache_file])
-        .stdout(Stdio::piped())
-        .stdin(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .context("cannot launch fuzzel command")?;
-
-    if let Some(stdin) = child.stdin.as_mut() {
-        stdin
-            .write_all(input.as_bytes())
-            .context("Failed to write to stdin")?;
-    }
-
-    let output = child.wait_with_output().context("failed to read output")?;
-    String::from_utf8(output.stdout).context("Invalid UTF-8 in output")
-}
-
 /// Save the icon map to a cache file.
 fn save_to_cache_file(map: &HashMap<String, String>) -> Result<()> {
     let cache_dir = format!(
@@ -257,7 +260,7 @@ fn save_to_cache_file(map: &HashMap<String, String>) -> Result<()> {
 }
 
 /// Read the icon map from the cache file or generate it if it doesn't exist.
-fn read_icon_map() -> Result<HashMap<String, String>> {
+pub fn read_icon_map() -> Result<HashMap<String, String>> {
     let cache_path = format!(
         "{}/.cache/raffi/icon.cache",
         std::env::var("XDG_CACHE_HOME")
@@ -276,41 +279,6 @@ fn read_icon_map() -> Result<HashMap<String, String>> {
         .read_to_string(&mut contents)
         .context("Failed to read cache file")?;
     serde_json::from_str(&contents).context("Failed to deserialize cache file")
-}
-
-/// Create the input for fuzzel based on the Raffi configurations.
-pub fn make_fuzzel_input(
-    rafficonfigs: &[RaffiConfig],
-    no_icons: bool,
-    icon_map_provider: &impl IconMapProvider,
-) -> Result<String> {
-    let icon_map = if no_icons {
-        HashMap::new()
-    } else {
-        icon_map_provider.get_icon_map()?
-    };
-    let mut ret = String::new();
-
-    for mc in rafficonfigs {
-        let description = mc
-            .description
-            .clone()
-            .unwrap_or_else(|| mc.binary.clone().unwrap_or_else(|| "unknown".to_string()));
-        if no_icons {
-            ret.push_str(&format!("{description}\n"));
-        } else {
-            let icon = mc
-                .icon
-                .clone()
-                .unwrap_or_else(|| mc.binary.clone().unwrap_or_else(|| "unknown".to_string()));
-            let icon_path = icon_map
-                .get(&icon)
-                .unwrap_or(&"default".to_string())
-                .to_string();
-            ret.push_str(&format!("{description}\0icon\x1f{icon_path}\n"));
-        }
-    }
-    Ok(ret)
 }
 
 /// Execute the chosen command or script.
@@ -368,10 +336,20 @@ pub fn run(args: Args) -> Result<()> {
         std::process::exit(1);
     }
 
-    let input = make_fuzzel_input(&rafficonfigs, args.no_icons, &DefaultIconMapProvider)
-        .context("Failed to make fuzzel input")?;
+    // Determine UI type
+    let ui_type = if let Some(ref ui_type_str) = args.ui_type {
+        ui_type_str
+            .parse::<UIType>()
+            .map_err(|e| anyhow::anyhow!(e))?
+    } else {
+        UIType::Fuzzel
+    };
 
-    let chosen = run_fuzzel_with_input(&input).context("Failed to run fuzzel")?;
+    // Get the appropriate UI implementation
+    let ui = ui::get_ui(ui_type);
+    let chosen = ui
+        .show(&rafficonfigs, args.no_icons)
+        .context("Failed to show UI")?;
 
     let chosen_name = chosen.trim();
     let mc = rafficonfigs
@@ -417,6 +395,7 @@ mod tests {
             refresh_cache: false,
             no_icons: true,
             default_script_shell: "bash".to_string(),
+            ui_type: None,
         };
         let configs = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(configs.len(), 2);
@@ -437,45 +416,6 @@ mod tests {
         for expected_config in &expected_configs {
             assert!(configs.contains(expected_config));
         }
-    }
-
-    struct MockIconMapProvider {
-        icon_map: HashMap<String, String>,
-    }
-
-    impl IconMapProvider for MockIconMapProvider {
-        fn get_icon_map(&self) -> Result<HashMap<String, String>> {
-            Ok(self.icon_map.clone())
-        }
-    }
-
-    #[test]
-    fn test_make_fuzzel_input() {
-        let configs = vec![
-            RaffiConfig {
-                binary: Some("firefox".to_string()),
-                description: Some("Firefox browser".to_string()),
-                icon: Some("firefox".to_string()),
-                ..Default::default()
-            },
-            RaffiConfig {
-                script: Some("echo hello".to_string()),
-                description: Some("Hello script".to_string()),
-                icon: Some("script".to_string()),
-                ..Default::default()
-            },
-        ];
-        let icon_map_provider = MockIconMapProvider {
-            icon_map: {
-                let mut map = HashMap::new();
-                map.insert("firefox".to_string(), "/path/to/firefox.png".to_string());
-                map.insert("script".to_string(), "/path/to/script.png".to_string());
-                map
-            },
-        };
-        let input = make_fuzzel_input(&configs, false, &icon_map_provider).unwrap();
-        assert!(input.contains("Firefox browser\0icon\x1f/path/to/firefox.png"));
-        assert!(input.contains("Hello script\0icon\x1f/path/to/script.png"));
     }
 
     struct MockEnvProvider {
@@ -523,6 +463,7 @@ mod tests {
             refresh_cache: false,
             no_icons: true,
             default_script_shell: "bash".to_string(),
+            ui_type: None,
         };
         let env_provider = MockEnvProvider {
             vars: {
