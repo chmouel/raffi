@@ -209,26 +209,26 @@ impl LauncherApp {
             // Style the button based on selection
             let styled_button = if idx == self.selected_index {
                 item_button.style(|_theme, _status| button::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgb(
-                        0.2, 0.3, 0.4,
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(
+                        0.2, 0.3, 0.4, 0.9,
                     ))),
                     border: iced::Border {
                         radius: 8.0.into(),
                         width: 2.0,
-                        color: iced::Color::from_rgb(0.3, 0.6, 0.9),
+                        color: iced::Color::from_rgba(0.3, 0.6, 0.9, 0.9),
                     },
                     text_color: iced::Color::WHITE,
                     ..Default::default()
                 })
             } else {
                 item_button.style(|_theme, _status| button::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgb(
-                        0.15, 0.15, 0.15,
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(
+                        0.15, 0.15, 0.15, 0.8,
                     ))),
                     border: iced::Border {
                         radius: 8.0.into(),
                         width: 1.0,
-                        color: iced::Color::from_rgb(0.25, 0.25, 0.25),
+                        color: iced::Color::from_rgba(0.25, 0.25, 0.25, 0.8),
                     },
                     text_color: iced::Color::WHITE,
                     ..Default::default()
@@ -260,8 +260,8 @@ impl LauncherApp {
             .height(Length::Fill)
             .clip(true)
             .style(|_theme| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgb(
-                    0.1, 0.1, 0.1,
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    0.1, 0.1, 0.1, 0.95, // 95% opacity - adjust to your preference
                 ))),
                 ..Default::default()
             })
