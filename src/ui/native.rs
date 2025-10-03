@@ -97,4 +97,3 @@ fn run_native_ui(rafficonfigs: &[RaffiConfig], no_icons: bool) -> Result<String>
         anyhow::bail!("No item selected")
     }
 }
-
