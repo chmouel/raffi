@@ -51,6 +51,7 @@ yay -S raffi-bin
 ```shell
 nix-shell -p raffi
 ```
+
 ### [Source](https://github.com/chmouel/raffi)
 
 To install Raffi from source, clone the repository and build it using Cargo:
@@ -88,6 +89,7 @@ Options:
 - `--refresh-cache`: Refresh the icon cache.
 - `--no-icons`: Do not show icons.
 - `--default-script-shell <SHELL>`: Default shell when using scripts (default: `bash`).
+- `--ui-type <TYPE>` or `-u <TYPE>`: Select UI type: `fuzzel`, `native`, or `wayland` (default: `fuzzel`).
 
 ### Sway
 
@@ -104,6 +106,112 @@ set $super Mod4
 // Bind the Super+Space key to launch the launcher
 bindsym $super+Space exec $menu | xargs swaymsg exec --
 ```
+
+## UI Options
+
+Raffi supports multiple UI implementations to suit different needs and environments:
+
+### 1. **Fuzzel** (Default)
+
+Uses the external [fuzzel](https://codeberg.org/dnkl/fuzzel) launcher for a native Wayland experience with GPU acceleration.
+
+### 2. **Native/Skim**
+
+A built-in terminal-based fuzzy finder using [skim](https://github.com/lotabout/skim). No external dependencies required.
+
+- **No external dependencies**: Works without requiring fuzzel, wofi, or rofi
+- **Fuzzy search**: Intelligent fuzzy matching for quick command selection
+- **Keyboard-driven**: Full keyboard navigation with vim-like keybindings
+- **Fast and responsive**: Terminal-based UI with minimal overhead
+- **Cross-platform**: Works on any system that supports terminal interfaces
+
+### 3. **Wayland**
+
+Native Wayland launcher using [iced](https://iced.rs/) GUI framework. Provides a modern graphical window with keyboard navigation.
+
+### Selecting a UI
+
+Use the `--ui-type` or `-u` flag to choose your UI:
+
+```sh
+# Use fuzzel (default)
+raffi
+
+# Use native terminal UI
+raffi --ui-type native
+# or short form
+raffi -u native
+
+# Use Wayland GUI
+raffi --ui-type wayland
+```
+
+### Sway Configuration with Native UI
+
+For Sway users who want to use the native UI in a terminal:
+
+```config
+# Set a variable for the launcher
+set $menu raffi -u native
+
+# Mod4 is the Super key
+set $super Mod4
+
+# Open raffi in a floating terminal window
+bindsym $super+Space exec kitty --class=launcher -e raffi -u native
+
+# Make the launcher window float and center it
+for_window [app_id="launcher"] floating enable, resize set 800 600, move position center
+```
+
+For standalone Wayland GUI:
+
+```config
+bindsym $super+Space exec raffi -u wayland
+```
+
+### Keyboard Shortcuts in Wayland UI
+
+The Wayland GUI supports:
+
+- `↑`/`↓`: Navigate through items
+- `Enter`: Select the current item
+- `Esc`: Cancel and exit
+- Type to search: Real-time filtering of items
+
+### Keyboard Shortcuts in Native UI
+
+The native terminal UI uses standard skim keybindings:
+
+- `↑`/`↓` or `Ctrl-p`/`Ctrl-n`: Navigate through items
+- `Enter`: Select the current item
+- `Esc` or `Ctrl-c`: Cancel and exit
+- Type to search: Fuzzy search across all entries
+- `Ctrl-u`: Clear the search input
+
+## Architecture
+
+Raffi's UI system is designed with a modular architecture:
+
+```
+raffi/
+├── src/
+│   ├── lib.rs           # Core logic and configuration
+│   ├── main.rs          # Entry point
+│   └── ui/
+│       ├── mod.rs       # UI trait and factory
+│       ├── fuzzel.rs    # Fuzzel implementation
+│       ├── native.rs    # Skim/terminal implementation
+│       └── wayland.rs   # Iced/Wayland GUI implementation
+```
+
+All UI implementations follow a common `UI` trait, making it easy to add new launchers or switch between them.
+
+### UI Implementation Details
+
+- **Fuzzel**: Spawns external `fuzzel` process, pipes data via stdin
+- **Native**: Terminal UI using skim's embedded fuzzy finder
+- **Wayland**: Native iced GUI with Arc<Mutex<>> for state capture between app lifecycle and caller
 
 ## Configuration
 
