@@ -21,4 +21,4 @@ serde_yaml = "0.9.34"
 tempfile = "3.23.0"
 walkdir = "2.5.0"
 skim = "0.15.5"
-iced = { version = "0.13", features = ["tiny-skia", "image"] }
+iced = { version = "0.13", features = ["tiny-skia", "image", "svg"] }

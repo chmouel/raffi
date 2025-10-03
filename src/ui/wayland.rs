@@ -6,7 +6,9 @@ use anyhow::Result;
 use iced::widget::container::Id as ContainerId;
 use iced::widget::scrollable::Id as ScrollableId;
 use iced::widget::text_input::Id as TextInputId;
-use iced::widget::{button, column, container, image, scrollable, text, text_input, Column, Row};
+use iced::widget::{
+    button, column, container, image, scrollable, svg, text, text_input, Column, Row,
+};
 use iced::{window, Element, Length, Task};
 
 use super::UI;
@@ -185,10 +187,23 @@ impl LauncherApp {
 
             // Add icon if available
             if let Some(icon_path_str) = icon_path {
-                let icon_path = PathBuf::from(icon_path_str);
+                let icon_path = PathBuf::from(&icon_path_str);
                 if icon_path.exists() {
-                    // Use actual icon
-                    item_row = item_row.push(image(icon_path).width(64).height(64));
+                    // Check if it's an SVG file (iced has issues with SVGs)
+                    let is_svg = icon_path
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .map(|ext| ext.to_lowercase() == "svg")
+                        .unwrap_or(false);
+
+                    if is_svg {
+                        // Use SVG widget for SVG files
+                        let svg_handle = iced::widget::svg::Handle::from_path(&icon_path);
+                        item_row = item_row.push(svg(svg_handle).width(64).height(64));
+                    } else {
+                        // Use image widget for PNG, etc.
+                        item_row = item_row.push(image(icon_path).width(64).height(64));
+                    }
                 }
             }
 
