@@ -89,7 +89,7 @@ Options:
 - `--refresh-cache`: Refresh the icon cache.
 - `--no-icons`: Do not show icons.
 - `--default-script-shell <SHELL>`: Default shell when using scripts (default: `bash`).
-- `--ui-type <TYPE>` or `-u <TYPE>`: Select UI type: `fuzzel`, `native`, or `wayland` (default: `fuzzel`).
+- `--ui-type <TYPE>` or `-u <TYPE>`: Select UI type: `fuzzel`, `tui`, or `wayland` (default: `fuzzel`).
 
 ### Sway
 

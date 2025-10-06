@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -36,6 +37,7 @@ struct LauncherApp {
     selected_index: usize,
     selected_item: SharedSelection,
     icon_map: HashMap<String, String>,
+    mru_map: HashMap<String, u32>,
     search_input_id: TextInputId,
     scrollable_id: ScrollableId,
     items_container_id: ContainerId,
@@ -54,7 +56,7 @@ enum Message {
 
 impl LauncherApp {
     fn new(
-        configs: Vec<RaffiConfig>,
+        mut configs: Vec<RaffiConfig>,
         no_icons: bool,
         selected_item: SharedSelection,
     ) -> (Self, Task<Message>) {
@@ -63,6 +65,15 @@ impl LauncherApp {
         } else {
             read_icon_map().unwrap_or_default()
         };
+
+        let mru_map = load_mru_map();
+        configs.sort_by_key(|config| {
+            let description = config
+                .description
+                .as_deref()
+                .unwrap_or_else(|| config.binary.as_deref().unwrap_or(""));
+            -(mru_map.get(description).copied().unwrap_or(0) as i32)
+        });
 
         let filtered_configs: Vec<usize> = (0..configs.len()).collect();
         let search_input_id = TextInputId::unique();
@@ -77,6 +88,7 @@ impl LauncherApp {
                 selected_index: 0,
                 selected_item,
                 icon_map,
+                mru_map,
                 search_input_id: search_input_id.clone(),
                 scrollable_id,
                 items_container_id,
@@ -102,27 +114,47 @@ impl LauncherApp {
                 if self.selected_index > 0 {
                     self.selected_index -= 1;
                 }
-                Task::none()
+                if self.filtered_configs.len() > 1 {
+                    let offset =
+                        self.selected_index as f32 / (self.filtered_configs.len() - 1) as f32;
+                    scrollable::snap_to(
+                        self.scrollable_id.clone(),
+                        scrollable::RelativeOffset { x: 0.0, y: offset },
+                    )
+                } else {
+                    Task::none()
+                }
             }
             Message::MoveDown => {
                 // Move selection down
                 if self.selected_index < self.filtered_configs.len().saturating_sub(1) {
                     self.selected_index += 1;
                 }
-                Task::none()
+                if self.filtered_configs.len() > 1 {
+                    let offset =
+                        self.selected_index as f32 / (self.filtered_configs.len() - 1) as f32;
+                    scrollable::snap_to(
+                        self.scrollable_id.clone(),
+                        scrollable::RelativeOffset { x: 0.0, y: offset },
+                    )
+                } else {
+                    Task::none()
+                }
             }
             Message::Submit => {
                 if !self.filtered_configs.is_empty() {
                     let config_idx = self.filtered_configs[self.selected_index];
                     let config = &self.configs[config_idx];
+                    let description = config
+                        .description
+                        .clone()
+                        .unwrap_or_else(|| config.binary.clone().unwrap_or_default());
                     if let Ok(mut selected) = self.selected_item.lock() {
-                        *selected = Some(
-                            config
-                                .description
-                                .clone()
-                                .unwrap_or_else(|| config.binary.clone().unwrap_or_default()),
-                        );
+                        *selected = Some(description.clone());
                     }
+                    let count = self.mru_map.entry(description).or_insert(0);
+                    *count += 1;
+                    save_mru_map(&self.mru_map);
                 }
                 window::get_latest().and_then(window::close)
             }
@@ -137,14 +169,16 @@ impl LauncherApp {
                 if !self.filtered_configs.is_empty() && idx < self.filtered_configs.len() {
                     let config_idx = self.filtered_configs[idx];
                     let config = &self.configs[config_idx];
+                    let description = config
+                        .description
+                        .clone()
+                        .unwrap_or_else(|| config.binary.clone().unwrap_or_default());
                     if let Ok(mut selected) = self.selected_item.lock() {
-                        *selected = Some(
-                            config
-                                .description
-                                .clone()
-                                .unwrap_or_else(|| config.binary.clone().unwrap_or_default()),
-                        );
+                        *selected = Some(description.clone());
                     }
+                    let count = self.mru_map.entry(description).or_insert(0);
+                    *count += 1;
+                    save_mru_map(&self.mru_map);
                 }
                 window::get_latest().and_then(window::close)
             }
@@ -156,11 +190,23 @@ impl LauncherApp {
             .id(self.search_input_id.clone())
             .on_input(Message::SearchChanged)
             .on_submit(Message::Submit)
-            .padding(20)
-            .size(24)
+            .padding(15)
+            .size(22)
+            .style(|_theme, _status| text_input::Style {
+                background: iced::Background::Color(iced::Color::from_rgb(0.2, 0.2, 0.25)),
+                border: iced::Border {
+                    radius: 5.0.into(),
+                    width: 1.0,
+                    color: iced::Color::from_rgb(0.4, 0.4, 0.5),
+                },
+                placeholder: iced::Color::from_rgb(0.6, 0.6, 0.7),
+                value: iced::Color::WHITE,
+                selection: iced::Color::from_rgb(0.4, 0.4, 0.5),
+                icon: iced::Color::from_rgb(0.8, 0.8, 0.8),
+            })
             .width(Length::Fill);
 
-        let mut items_column = Column::new().spacing(2);
+        let mut items_column = Column::new().spacing(5);
 
         for (idx, &config_idx) in self.filtered_configs.iter().enumerate() {
             let config = &self.configs[config_idx];
@@ -170,7 +216,7 @@ impl LauncherApp {
                 .unwrap_or_else(|| config.binary.clone().unwrap_or_default());
 
             // Get icon path if available
-            let icon_path = if !self.icon_map.is_empty() {
+            let mut icon_path = if !self.icon_map.is_empty() {
                 let icon_name = config
                     .icon
                     .as_ref()
@@ -182,14 +228,17 @@ impl LauncherApp {
                 None
             };
 
+            if icon_path.is_none() {
+                icon_path = Some("assets/default_icon.svg".to_string());
+            }
+
             // Build the row with optional icon
-            let mut item_row = Row::new().spacing(20).align_y(iced::Alignment::Center);
+            let mut item_row = Row::new().spacing(15).align_y(iced::Alignment::Center);
 
             // Add icon if available
             if let Some(icon_path_str) = icon_path {
                 let icon_path = PathBuf::from(&icon_path_str);
                 if icon_path.exists() {
-                    // Check if it's an SVG file (iced has issues with SVGs)
                     let is_svg = icon_path
                         .extension()
                         .and_then(|ext| ext.to_str())
@@ -197,55 +246,44 @@ impl LauncherApp {
                         .unwrap_or(false);
 
                     if is_svg {
-                        // Use SVG widget for SVG files
                         let svg_handle = iced::widget::svg::Handle::from_path(&icon_path);
-                        item_row = item_row.push(svg(svg_handle).width(64).height(64));
+                        item_row = item_row.push(svg(svg_handle).width(48).height(48));
                     } else {
-                        // Use image widget for PNG, etc.
-                        item_row = item_row.push(image(icon_path).width(64).height(64));
+                        item_row = item_row.push(image(icon_path).width(48).height(48));
                     }
                 }
             }
 
-            // Add text with better sizing
-            let text_widget = if idx == self.selected_index {
-                text(description).size(22)
-            } else {
-                text(description).size(20)
-            };
+            let text_widget = text(description).size(20);
             item_row = item_row.push(text_widget);
 
-            // Wrap in a button to make it clickable
             let item_button = button(item_row)
                 .on_press(Message::ItemClicked(idx))
-                .padding(18)
+                .padding(15)
                 .width(Length::Fill);
 
-            // Style the button based on selection
             let styled_button = if idx == self.selected_index {
                 item_button.style(|_theme, _status| button::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgba(
-                        0.2, 0.3, 0.4, 0.9,
+                    background: Some(iced::Background::Color(iced::Color::from_rgb(
+                        0.4, 0.4, 0.5,
                     ))),
                     border: iced::Border {
-                        radius: 8.0.into(),
-                        width: 2.0,
-                        color: iced::Color::from_rgba(0.3, 0.6, 0.9, 0.9),
+                        radius: 5.0.into(),
+                        ..Default::default()
                     },
                     text_color: iced::Color::WHITE,
                     ..Default::default()
                 })
             } else {
                 item_button.style(|_theme, _status| button::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgba(
-                        0.15, 0.15, 0.15, 0.8,
+                    background: Some(iced::Background::Color(iced::Color::from_rgb(
+                        0.2, 0.2, 0.25,
                     ))),
                     border: iced::Border {
-                        radius: 8.0.into(),
-                        width: 1.0,
-                        color: iced::Color::from_rgba(0.25, 0.25, 0.25, 0.8),
+                        radius: 5.0.into(),
+                        ..Default::default()
                     },
-                    text_color: iced::Color::WHITE,
+                    text_color: iced::Color::from_rgb(0.8, 0.8, 0.8),
                     ..Default::default()
                 })
             };
@@ -253,7 +291,6 @@ impl LauncherApp {
             items_column = items_column.push(styled_button);
         }
 
-        // Wrap items in keyed container to force recreation on filter change
         let items_container = container(items_column)
             .id(self.items_container_id.clone())
             .width(Length::Fill)
@@ -265,18 +302,18 @@ impl LauncherApp {
             .width(Length::Fill);
 
         let content = column![search_input, items_scroll]
-            .spacing(20)
+            .spacing(10)
             .width(Length::Fill)
             .height(Length::Fill);
 
         container(content)
-            .padding(25)
+            .padding(10)
             .width(Length::Fill)
             .height(Length::Fill)
             .clip(true)
             .style(|_theme| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(
-                    0.1, 0.1, 0.1, 0.95, // 95% opacity - adjust to your preference
+                background: Some(iced::Background::Color(iced::Color::from_rgb(
+                    0.1, 0.1, 0.15,
                 ))),
                 ..Default::default()
             })
@@ -333,6 +370,47 @@ impl LauncherApp {
     }
 }
 
+fn get_mru_file_path() -> Result<PathBuf> {
+    let cache_dir = std::env::var("XDG_CACHE_HOME")
+        .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()));
+    let mut path = PathBuf::from(cache_dir);
+    path.push("raffi");
+    fs::create_dir_all(&path)?;
+    path.push("mru.cache");
+    Ok(path)
+}
+
+fn load_mru_map() -> HashMap<String, u32> {
+    if let Ok(path) = get_mru_file_path() {
+        if let Ok(content) = fs::read_to_string(path) {
+            let mut map = HashMap::new();
+            for line in content.lines() {
+                let mut parts = line.splitn(2, '|');
+                if let (Some(desc), Some(count_str)) = (parts.next(), parts.next()) {
+                    if let Ok(count) = count_str.parse::<u32>() {
+                        map.insert(desc.to_string(), count);
+                    }
+                }
+            }
+            return map;
+        }
+    }
+    HashMap::new()
+}
+
+fn save_mru_map(map: &HashMap<String, u32>) {
+    if let Ok(path) = get_mru_file_path() {
+        let mut entries: Vec<_> = map.iter().collect();
+        entries.sort_by(|a, b| b.1.cmp(a.1));
+        let content = entries
+            .iter()
+            .map(|(desc, count)| format!("{}|{}", desc, count))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let _ = fs::write(path, content);
+    }
+}
+
 /// Run the Wayland UI with the provided configurations and return the selected item.
 fn run_wayland_ui(configs: &[RaffiConfig], no_icons: bool) -> Result<String> {
     let selected_item: SharedSelection = Arc::new(Mutex::new(None));
@@ -347,7 +425,7 @@ fn run_wayland_ui(configs: &[RaffiConfig], no_icons: bool) -> Result<String> {
         .window(window::Settings {
             size: iced::Size::new(800.0, 600.0),
             position: window::Position::Centered,
-            decorations: true,
+            decorations: false,
             transparent: true,
             visible: true,
             level: window::Level::AlwaysOnTop,

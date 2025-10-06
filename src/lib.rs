@@ -40,7 +40,7 @@ struct Config {
 #[derive(Debug, Clone, PartialEq)]
 pub enum UIType {
     Fuzzel,
-    Native,
+    Tui,
     Wayland,
 }
 
@@ -50,10 +50,10 @@ impl std::str::FromStr for UIType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "fuzzel" => Ok(UIType::Fuzzel),
-            "native" | "skim" => Ok(UIType::Native),
+            "tui" | "skim" => Ok(UIType::Tui),
             "wayland" | "iced" => Ok(UIType::Wayland),
             _ => Err(format!(
-                "Invalid UI type: {}. Valid options are: fuzzel, native, wayland",
+                "Invalid UI type: {}. Valid options are: fuzzel, tui, wayland",
                 s
             )),
         }
@@ -82,7 +82,7 @@ pub struct Args {
     )]
     pub default_script_shell: String,
     #[options(
-        help = "UI type to use: fuzzel, native, wayland (default: fuzzel)",
+        help = "UI type to use: fuzzel, tui, wayland (default: fuzzel)",
         short = "u"
     )]
     pub ui_type: Option<String>,
@@ -341,8 +341,10 @@ pub fn run(args: Args) -> Result<()> {
         ui_type_str
             .parse::<UIType>()
             .map_err(|e| anyhow::anyhow!(e))?
-    } else {
+    } else if find_binary("fuzzel") {
         UIType::Fuzzel
+    } else {
+        UIType::Wayland
     };
 
     // Get the appropriate UI implementation

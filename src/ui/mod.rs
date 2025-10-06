@@ -1,21 +1,23 @@
-use crate::{RaffiConfig, UIType};
 use anyhow::Result;
 
-pub mod fuzzel;
-pub mod native;
-pub mod wayland;
+use crate::{RaffiConfig, UIType};
 
-/// Trait for UI implementations
+mod fuzzel;
+mod tui;
+mod wayland;
+
+use self::fuzzel::FuzzelUI;
+use self::tui::TuiUI;
+use self::wayland::WaylandUI;
+
 pub trait UI {
-    /// Show the UI with the given configurations and return the selected item description
     fn show(&self, configs: &[RaffiConfig], no_icons: bool) -> Result<String>;
 }
 
-/// Get the appropriate UI implementation based on the UI type
 pub fn get_ui(ui_type: UIType) -> Box<dyn UI> {
     match ui_type {
-        UIType::Fuzzel => Box::new(fuzzel::FuzzelUI),
-        UIType::Native => Box::new(native::NativeUI),
-        UIType::Wayland => Box::new(wayland::WaylandUI),
+        UIType::Fuzzel => Box::new(FuzzelUI),
+        UIType::Tui => Box::new(TuiUI),
+        UIType::Wayland => Box::new(WaylandUI),
     }
 }
