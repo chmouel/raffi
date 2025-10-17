@@ -58,16 +58,9 @@ fn make_fuzzel_input(rafficonfigs: &[RaffiConfig], no_icons: bool) -> Result<Str
 
 /// Run the fuzzel command with the provided input and return its output.
 fn run_fuzzel_with_input(input: &str) -> Result<String> {
-    let cache_file = format!(
-        "{}/raffi/mru.cache",
-        std::env::var("XDG_CACHE_HOME")
-            .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()))
-    );
-    if let Some(parent) = Path::new(&cache_file).parent() {
-        fs::create_dir_all(parent).context("Failed to create cache directory for fuzzel")?;
-    }
+    let cache_file = super::get_mru_cache_path().context("Failed to get MRU cache path")?;
     let mut child = Command::new("fuzzel")
-        .args(["-d", "--counter", "--cache", &cache_file])
+        .args(["-d", "--counter", "--cache", cache_file.to_str().unwrap()])
         .stdout(Stdio::piped())
         .stdin(Stdio::piped())
         .stderr(Stdio::null())

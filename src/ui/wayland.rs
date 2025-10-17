@@ -371,18 +371,9 @@ impl LauncherApp {
     }
 }
 
-fn get_mru_file_path() -> Result<PathBuf> {
-    let cache_dir = std::env::var("XDG_CACHE_HOME")
-        .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()));
-    let mut path = PathBuf::from(cache_dir);
-    path.push("raffi");
-    fs::create_dir_all(&path)?;
-    path.push("mru.cache");
-    Ok(path)
-}
 
 fn load_mru_map() -> HashMap<String, u32> {
-    if let Ok(path) = get_mru_file_path() {
+    if let Ok(path) = super::get_mru_cache_path() {
         if let Ok(content) = fs::read_to_string(path) {
             let mut map = HashMap::new();
             for line in content.lines() {
@@ -400,7 +391,7 @@ fn load_mru_map() -> HashMap<String, u32> {
 }
 
 fn save_mru_map(map: &HashMap<String, u32>) {
-    if let Ok(path) = get_mru_file_path() {
+    if let Ok(path) = super::get_mru_cache_path() {
         let mut entries: Vec<_> = map.iter().collect();
         entries.sort_by(|a, b| b.1.cmp(a.1));
         let content = entries
