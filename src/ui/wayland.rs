@@ -72,7 +72,7 @@ impl LauncherApp {
                 .description
                 .as_deref()
                 .unwrap_or_else(|| config.binary.as_deref().unwrap_or(""));
-            -(mru_map.get(description).copied().unwrap_or(0) as i32)
+            std::cmp::Reverse(mru_map.get(description).copied().unwrap_or(0))
         });
 
         let filtered_configs: Vec<usize> = (0..configs.len()).collect();
