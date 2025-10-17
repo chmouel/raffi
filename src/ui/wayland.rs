@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
@@ -370,7 +370,6 @@ impl LauncherApp {
         }
     }
 }
-
 
 fn load_mru_map() -> HashMap<String, u32> {
     if let Ok(path) = super::get_mru_cache_path() {
