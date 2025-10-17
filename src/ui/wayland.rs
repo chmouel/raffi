@@ -408,7 +408,9 @@ fn save_mru_map(map: &HashMap<String, u32>) {
             .map(|(desc, count)| format!("{}|{}", desc, count))
             .collect::<Vec<_>>()
             .join("\n");
-        let _ = fs::write(path, content);
+        if let Err(e) = fs::write(&path, content) {
+            eprintln!("Warning: Failed to save MRU cache to {:?}: {}", path, e);
+        }
     }
 }
 
