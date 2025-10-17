@@ -142,8 +142,7 @@ impl LauncherApp {
                 }
             }
             Message::Submit => {
-                if !self.filtered_configs.is_empty() {
-                    let config_idx = self.filtered_configs[self.selected_index];
+                if let Some(&config_idx) = self.filtered_configs.get(self.selected_index) {
                     let config = &self.configs[config_idx];
                     let description = config
                         .description
@@ -166,8 +165,7 @@ impl LauncherApp {
                 // Set the clicked item as selected and submit
                 self.selected_index = idx;
                 // Execute submit logic
-                if !self.filtered_configs.is_empty() && idx < self.filtered_configs.len() {
-                    let config_idx = self.filtered_configs[idx];
+                if let Some(&config_idx) = self.filtered_configs.get(idx) {
                     let config = &self.configs[config_idx];
                     let description = config
                         .description
