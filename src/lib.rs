@@ -354,13 +354,16 @@ pub fn run(args: Args) -> Result<()> {
         .context("Failed to show UI")?;
 
     let chosen_name = chosen.trim();
+    if chosen_name.is_empty() {
+        std::process::exit(0);
+    }
     let mc = rafficonfigs
         .iter()
         .find(|mc| {
             mc.description.as_deref() == Some(chosen_name)
                 || mc.binary.as_deref() == Some(chosen_name)
         })
-        .context("No item selected, bailing out.")?;
+        .context("No matching configuration found")?;
 
     let interpreter = if mc.script.is_some() {
         mc.binary.as_deref().unwrap_or(&args.default_script_shell)
