@@ -344,7 +344,7 @@ pub fn run(args: Args) -> Result<()> {
     } else if find_binary("fuzzel") {
         UIType::Fuzzel
     } else {
-        UIType::Wayland
+        UIType::Tui
     };
 
     // Get the appropriate UI implementation
