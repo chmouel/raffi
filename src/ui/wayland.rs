@@ -227,7 +227,10 @@ impl LauncherApp {
             };
 
             if icon_path.is_none() {
-                icon_path = Some("assets/default_icon.svg".to_string());
+                let default_path = "assets/default_icon.svg";
+                if Path::new(default_path).exists() {
+                    icon_path = Some(default_path.to_string());
+                }
             }
 
             // Build the row with optional icon
