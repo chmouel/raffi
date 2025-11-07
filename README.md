@@ -107,6 +107,15 @@ set $super Mod4
 bindsym $super+Space exec $menu | xargs swaymsg exec --
 ```
 
+### Hyprland
+
+Here is an example of how to use Raffi with hyprland:
+
+```conf
+$super = SUPER
+bind = $super, R, exec, (val=$(raffi -pI); echo $val | grep -q . && hyprctl dispatch exec "$val")
+```
+
 ## UI Options
 
 Raffi supports multiple UI implementations to suit different needs and environments:
