@@ -198,35 +198,11 @@ The native terminal UI uses standard skim keybindings:
 - Type to search: Fuzzy search across all entries
 - `Ctrl-u`: Clear the search input
 
-## Architecture
-
-Raffi's UI system is designed with a modular architecture:
-
-```
-raffi/
-├── src/
-│   ├── lib.rs           # Core logic and configuration
-│   ├── main.rs          # Entry point
-│   └── ui/
-│       ├── mod.rs       # UI trait and factory
-│       ├── fuzzel.rs    # Fuzzel implementation
-│       ├── native.rs    # Skim/terminal implementation
-│       └── wayland.rs   # Iced/Wayland GUI implementation
-```
-
-All UI implementations follow a common `UI` trait, making it easy to add new launchers or switch between them.
-
-### UI Implementation Details
-
-- **Fuzzel**: Spawns external `fuzzel` process, pipes data via stdin
-- **Native**: Terminal UI using skim's embedded fuzzy finder
-- **Wayland**: Native iced GUI with Arc<Mutex<>> for state capture between app lifecycle and caller
-
 ## Configuration
 
 ### Fuzzel
 
-First, configure your Fuzzel appearance and behavior by editing the file `~/.config/fuzzel/fuzzel.ini`. See the manpages [here](https://man.archlinux.org/man/fuzzel.ini.5.en). Below is my configuration, which matches the screenshot above:
+First, configure your Fuzzel appearance and behavior by editing the file `~/.config/fuzzel/fuzzel.ini`. See the manpages [here](https://man.archlinux.org/man/fuzzel.ini.5.en). Below is my configuration, which matches the screenshot at the top:
 
 ```ini
 dpi-aware=yes
@@ -320,10 +296,10 @@ hello_script:
 
 There is limited support for conditions, allowing you to run a command only if a specific condition is met. These conditions are optional and cannot be combined.
 
-- **ifexist**: Display the entry if a binary exists in the PATH or if the full path is specified.
-- **ifenvset**: Display the entry if the environment variable is set.
-- **ifenvnotset**: Display the entry if the environment variable is not set.
-- **ifenveq**: Display the entry if the environment variable equals a specified value.
+- *ifexist*: Display the entry if a binary exists in the PATH or if the full path is specified.
+- *ifenvset*: Display the entry if the environment variable is set.
+- *ifenvnotset*: Display the entry if the environment variable is not set.
+- *ifenveq*: Display the entry if the environment variable equals a specified value.
 
 #### Example
 
