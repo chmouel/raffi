@@ -188,23 +188,23 @@ impl LauncherApp {
             .id(self.search_input_id.clone())
             .on_input(Message::SearchChanged)
             .on_submit(Message::Submit)
-            .padding(15)
-            .size(22)
+            .padding(18)
+            .size(24)
             .style(|_theme, _status| text_input::Style {
-                background: iced::Background::Color(iced::Color::from_rgb(0.2, 0.2, 0.25)),
+                background: iced::Background::Color(iced::Color::from_rgb(0.15, 0.15, 0.2)),
                 border: iced::Border {
                     radius: 5.0.into(),
                     width: 1.0,
-                    color: iced::Color::from_rgb(0.4, 0.4, 0.5),
+                    color: iced::Color::from_rgb(0.3, 0.6, 1.0),
                 },
-                placeholder: iced::Color::from_rgb(0.6, 0.6, 0.7),
+                placeholder: iced::Color::from_rgb(0.5, 0.5, 0.6),
                 value: iced::Color::WHITE,
-                selection: iced::Color::from_rgb(0.4, 0.4, 0.5),
+                selection: iced::Color::from_rgb(0.3, 0.6, 1.0),
                 icon: iced::Color::from_rgb(0.8, 0.8, 0.8),
             })
             .width(Length::Fill);
 
-        let mut items_column = Column::new().spacing(5);
+        let mut items_column = Column::new().spacing(8);
 
         for (idx, &config_idx) in self.filtered_configs.iter().enumerate() {
             let config = &self.configs[config_idx];
@@ -234,7 +234,7 @@ impl LauncherApp {
             }
 
             // Build the row with optional icon
-            let mut item_row = Row::new().spacing(15).align_y(iced::Alignment::Center);
+            let mut item_row = Row::new().spacing(18).align_y(iced::Alignment::Center);
 
             // Add icon if available
             if let Some(icon_path_str) = icon_path {
@@ -255,18 +255,18 @@ impl LauncherApp {
                 }
             }
 
-            let text_widget = text(description).size(20);
+            let text_widget = text(description).size(22);
             item_row = item_row.push(text_widget);
 
             let item_button = button(item_row)
                 .on_press(Message::ItemClicked(idx))
-                .padding(15)
+                .padding(20)
                 .width(Length::Fill);
 
             let styled_button = if idx == self.selected_index {
                 item_button.style(|_theme, _status| button::Style {
                     background: Some(iced::Background::Color(iced::Color::from_rgb(
-                        0.4, 0.4, 0.5,
+                        0.2, 0.5, 0.9,
                     ))),
                     border: iced::Border {
                         radius: 5.0.into(),
@@ -278,13 +278,13 @@ impl LauncherApp {
             } else {
                 item_button.style(|_theme, _status| button::Style {
                     background: Some(iced::Background::Color(iced::Color::from_rgb(
-                        0.2, 0.2, 0.25,
+                        0.15, 0.15, 0.2,
                     ))),
                     border: iced::Border {
                         radius: 5.0.into(),
                         ..Default::default()
                     },
-                    text_color: iced::Color::from_rgb(0.8, 0.8, 0.8),
+                    text_color: iced::Color::WHITE,
                     ..Default::default()
                 })
             };
@@ -303,12 +303,12 @@ impl LauncherApp {
             .width(Length::Fill);
 
         let content = column![search_input, items_scroll]
-            .spacing(10)
+            .spacing(16)
             .width(Length::Fill)
             .height(Length::Fill);
 
         container(content)
-            .padding(10)
+            .padding(15)
             .width(Length::Fill)
             .height(Length::Fill)
             .clip(true)
