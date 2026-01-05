@@ -469,28 +469,85 @@ impl LauncherApp {
         if query.is_empty() {
             self.filtered_configs = (0..self.configs.len()).collect();
         } else {
-            let matcher = SkimMatcherV2::default();
-            let mut matches: Vec<(usize, i64)> = self
-                .configs
-                .iter()
-                .enumerate()
-                .filter_map(|(idx, config)| {
-                    let description = config
-                        .description
-                        .as_deref()
-                        .or(config.binary.as_deref())
-                        .unwrap_or_default();
-                    matcher
-                        .fuzzy_match(description, query)
-                        .map(|score| (idx, score))
-                })
-                .collect();
-
-            // Sort by score descending
-            matches.sort_by(|a, b| b.1.cmp(&a.1));
-
-            self.filtered_configs = matches.into_iter().map(|(idx, _)| idx).collect();
+            self.filtered_configs = fuzzy_match_configs(&self.configs, query);
         }
+    }
+}
+
+fn fuzzy_match_configs(configs: &[RaffiConfig], query: &str) -> Vec<usize> {
+    let matcher = SkimMatcherV2::default();
+    let mut matches: Vec<(usize, i64)> = configs
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, config)| {
+            let description = config
+                .description
+                .as_deref()
+                .or(config.binary.as_deref())
+                .unwrap_or_default();
+            matcher
+                .fuzzy_match(description, query)
+                .map(|score| (idx, score))
+        })
+        .collect();
+
+    // Sort by score descending
+    matches.sort_by(|a, b| b.1.cmp(&a.1));
+
+    matches.into_iter().map(|(idx, _)| idx).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_fuzzy_match_configs() {
+        let configs = vec![
+            RaffiConfig {
+                description: Some("Firefox".to_string()),
+                ..Default::default()
+            },
+            RaffiConfig {
+                description: Some("Google Chrome".to_string()),
+                ..Default::default()
+            },
+            RaffiConfig {
+                description: Some("Alacritty".to_string()),
+                ..Default::default()
+            },
+            RaffiConfig {
+                binary: Some("code".to_string()),
+                description: None,
+                ..Default::default()
+            },
+        ];
+
+        // Exact match
+        let results = fuzzy_match_configs(&configs, "Firefox");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], 0);
+
+        // Fuzzy match "fox" -> Firefox
+        let results = fuzzy_match_configs(&configs, "fox");
+        assert!(results.contains(&0));
+
+        // Fuzzy match "chr" -> Google Chrome
+        let results = fuzzy_match_configs(&configs, "chr");
+        assert!(results.contains(&1));
+
+        // Fuzzy match binary "od" -> code
+        let results = fuzzy_match_configs(&configs, "od");
+        assert!(results.contains(&3));
+
+        // Ranking check: "o" matches Firefox, Google Chrome, code
+        // "code" (idx 3) should likely be high for "o" if it starts with it or is short,
+        // but let's just check we get results
+        let results = fuzzy_match_configs(&configs, "o");
+        assert!(results.len() >= 3);
+        assert!(results.contains(&0)); // FirefOx
+        assert!(results.contains(&1)); // GOOgle Chrome
+        assert!(results.contains(&3)); // cOde
     }
 }
 
