@@ -128,6 +128,8 @@ Uses the external [fuzzel](https://codeberg.org/dnkl/fuzzel) launcher for a nati
 
 A built-in terminal-based fuzzy finder using [skim](https://github.com/lotabout/skim). No external dependencies required.
 
+<img width="1848" height="1177" alt="image" src="https://github.com/user-attachments/assets/8e0a6c0f-eb65-4e44-a188-b8bd5863fd4c" />
+
 - **No external dependencies**: Works without requiring fuzzel, wofi, or rofi
 - **Fuzzy search**: Intelligent fuzzy matching for quick command selection
 - **Keyboard-driven**: Full keyboard navigation with vim-like keybindings
@@ -137,6 +139,8 @@ A built-in terminal-based fuzzy finder using [skim](https://github.com/lotabout/
 ### 3. **Wayland**
 
 Native Wayland launcher using [iced](https://iced.rs/) GUI framework. Provides a modern graphical window with keyboard navigation.
+
+<img width="2575" height="1978" alt="raffi-native" src="https://github.com/user-attachments/assets/843fdce9-bcb3-4fc0-8f05-0e4ce5131f6c" />
 
 ### Selecting a UI
 
