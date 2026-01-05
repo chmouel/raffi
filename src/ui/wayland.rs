@@ -4,18 +4,18 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use iced::widget::container::Id as ContainerId;
-use iced::widget::scrollable::Id as ScrollableId;
-use iced::widget::text_input::Id as TextInputId;
+use iced::widget::operation::{focus, snap_to};
 use iced::widget::{
-    button, column, container, image, scrollable, svg, text, text_input, Column, Row,
+    button, column, container, image, scrollable, svg, text, text_input, Column, Id, Row,
 };
-use iced::{window, Element, Length, Task};
+use iced::{Element, Length, Task};
+
+type ContainerId = Id;
+type ScrollableId = Id;
+type TextInputId = Id;
 
 use super::UI;
 use crate::{read_icon_map, RaffiConfig};
-
-const APPLICATION_ID: &str = "com.chmouel.raffi";
 
 /// Wayland UI implementation using iced
 pub struct WaylandUI;
@@ -94,7 +94,7 @@ impl LauncherApp {
                 items_container_id,
                 view_generation: 0,
             },
-            text_input::focus(search_input_id),
+            focus(search_input_id),
         )
     }
 
@@ -117,7 +117,7 @@ impl LauncherApp {
                 if self.filtered_configs.len() > 1 {
                     let offset =
                         self.selected_index as f32 / (self.filtered_configs.len() - 1) as f32;
-                    scrollable::snap_to(
+                    snap_to(
                         self.scrollable_id.clone(),
                         scrollable::RelativeOffset { x: 0.0, y: offset },
                     )
@@ -133,7 +133,7 @@ impl LauncherApp {
                 if self.filtered_configs.len() > 1 {
                     let offset =
                         self.selected_index as f32 / (self.filtered_configs.len() - 1) as f32;
-                    scrollable::snap_to(
+                    snap_to(
                         self.scrollable_id.clone(),
                         scrollable::RelativeOffset { x: 0.0, y: offset },
                     )
@@ -155,11 +155,11 @@ impl LauncherApp {
                     *count += 1;
                     save_mru_map(&self.mru_map);
                 }
-                window::get_latest().and_then(window::close)
+                iced::exit()
             }
             Message::Cancel => {
                 // Don't set selection, just close
-                window::get_latest().and_then(window::close)
+                iced::exit()
             }
             Message::ItemClicked(idx) => {
                 // Set the clicked item as selected and submit
@@ -178,7 +178,7 @@ impl LauncherApp {
                     *count += 1;
                     save_mru_map(&self.mru_map);
                 }
-                window::get_latest().and_then(window::close)
+                iced::exit()
             }
         }
     }
@@ -412,23 +412,31 @@ fn run_wayland_ui(configs: &[RaffiConfig], no_icons: bool) -> Result<String> {
     // Clone configs to own them for the 'static lifetime requirement
     let configs_owned = configs.to_vec();
 
-    let result = iced::application("Raffi Launcher", LauncherApp::update, LauncherApp::view)
-        .subscription(LauncherApp::subscription)
-        .theme(|_state: &LauncherApp| iced::Theme::Dark)
-        .window(window::Settings {
-            size: iced::Size::new(800.0, 600.0),
-            position: window::Position::Centered,
-            decorations: false,
-            transparent: true,
-            visible: true,
-            level: window::Level::AlwaysOnTop,
-            platform_specific: iced::window::settings::PlatformSpecific {
-                application_id: APPLICATION_ID.to_string(),
-                ..Default::default()
-            },
-            ..Default::default()
-        })
-        .run_with(move || LauncherApp::new(configs_owned, no_icons, selected_item_clone));
+    fn new_app(
+        configs_owned: Vec<RaffiConfig>,
+        no_icons: bool,
+        selected_item_clone: SharedSelection,
+    ) -> (LauncherApp, Task<Message>) {
+        LauncherApp::new(configs_owned, no_icons, selected_item_clone)
+    }
+
+    let configs_for_new = configs_owned.clone();
+    let selected_item_for_new = selected_item_clone.clone();
+
+    let result = iced::application(
+        move || {
+            new_app(
+                configs_for_new.clone(),
+                no_icons,
+                selected_item_for_new.clone(),
+            )
+        },
+        LauncherApp::update,
+        LauncherApp::view,
+    )
+    .subscription(LauncherApp::subscription)
+    .theme(|_state: &LauncherApp| iced::Theme::Dark)
+    .run();
 
     if let Err(e) = result {
         return Err(anyhow::anyhow!("Failed to run UI: {:?}", e));
