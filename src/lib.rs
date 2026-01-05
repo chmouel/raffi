@@ -130,9 +130,32 @@ impl IconMapProvider for DefaultIconMapProvider {
     }
 }
 
+/// Extract icon size from path (e.g., "/usr/share/icons/Papirus/48x48/apps/icon.svg" -> 48).
+/// Returns 0 if size cannot be determined.
+fn extract_icon_size(path: &std::path::Path) -> u32 {
+    for component in path.components() {
+        if let std::path::Component::Normal(s) = component {
+            if let Some(s_str) = s.to_str() {
+                // Match patterns like "48x48", "64x64", "scalable"
+                if s_str == "scalable" {
+                    return 512; // Treat scalable as large
+                }
+                if let Some((w, _)) = s_str.split_once('x') {
+                    if let Ok(size) = w.parse::<u32>() {
+                        return size;
+                    }
+                }
+            }
+        }
+    }
+    0
+}
+
 /// Get the icon mapping from system directories.
+/// Prefers larger icons (48x48+) since raffi renders at 48x48.
 fn get_icon_map() -> Result<HashMap<String, String>> {
-    let mut icon_map = HashMap::new();
+    let mut icon_map: HashMap<String, String> = HashMap::new();
+    let mut icon_sizes: HashMap<String, u32> = HashMap::new();
     let mut data_dirs =
         std::env::var("XDG_DATA_DIRS").unwrap_or("/usr/local/share/:/usr/share/".to_string());
     let data_home = std::env::var("XDG_DATA_HOME").unwrap_or_else(|_| {
@@ -154,10 +177,16 @@ fn get_icon_map() -> Result<HashMap<String, String>> {
                 let fname = entry.file_name().to_string_lossy().to_string();
                 if let Some(ext) = entry.path().extension().and_then(|s| s.to_str()) {
                     if ext == "png" || ext == "svg" {
-                        icon_map.insert(
-                            fname.rsplit_once('.').unwrap().0.to_string(),
-                            entry.path().to_string_lossy().to_string(),
-                        );
+                        let icon_name = fname.rsplit_once('.').unwrap().0.to_string();
+                        let icon_path = entry.path().to_string_lossy().to_string();
+                        let new_size = extract_icon_size(entry.path());
+                        let current_size = icon_sizes.get(&icon_name).copied().unwrap_or(0);
+
+                        // Prefer icons >= 48px, or larger than current
+                        if new_size >= current_size || (new_size >= 48 && current_size < 48) {
+                            icon_map.insert(icon_name.clone(), icon_path);
+                            icon_sizes.insert(icon_name, new_size);
+                        }
                     }
                 }
             }
@@ -259,10 +288,23 @@ fn save_to_cache_file(map: &HashMap<String, String>) -> Result<()> {
     Ok(())
 }
 
+/// Clear the icon cache file to force regeneration.
+pub fn clear_icon_cache() -> Result<()> {
+    let cache_path = format!(
+        "{}/raffi/icon.cache",
+        std::env::var("XDG_CACHE_HOME")
+            .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()))
+    );
+    if Path::new(&cache_path).exists() {
+        fs::remove_file(&cache_path).context("Failed to remove icon cache file")?;
+    }
+    Ok(())
+}
+
 /// Read the icon map from the cache file or generate it if it doesn't exist.
 pub fn read_icon_map() -> Result<HashMap<String, String>> {
     let cache_path = format!(
-        "{}/.cache/raffi/icon.cache",
+        "{}/raffi/icon.cache",
         std::env::var("XDG_CACHE_HOME")
             .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()))
     );
@@ -321,6 +363,10 @@ pub fn run(args: Args) -> Result<()> {
     if args.version {
         println!("raffi version 0.1.0");
         return Ok(());
+    }
+
+    if args.refresh_cache {
+        clear_icon_cache()?;
     }
 
     let default_config_path = format!(
