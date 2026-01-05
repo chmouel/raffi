@@ -8,6 +8,7 @@ use iced::widget::operation::{focus, snap_to};
 use iced::widget::{
     button, column, container, image, scrollable, svg, text, text_input, Column, Id, Row,
 };
+use iced::window;
 use iced::{Element, Length, Task};
 
 type ContainerId = Id;
@@ -423,6 +424,23 @@ fn run_wayland_ui(configs: &[RaffiConfig], no_icons: bool) -> Result<String> {
     let configs_for_new = configs_owned.clone();
     let selected_item_for_new = selected_item_clone.clone();
 
+    let window_settings = window::Settings {
+        size: iced::Size::new(800.0, 600.0),
+        position: window::Position::Centered,
+        decorations: false,
+        transparent: true,
+        visible: true,
+        level: window::Level::AlwaysOnTop,
+        #[cfg(target_os = "linux")]
+        platform_specific: window::settings::PlatformSpecific {
+            application_id: "com.chmouel.raffi".to_string(),
+            ..Default::default()
+        },
+        #[cfg(not(target_os = "linux"))]
+        platform_specific: Default::default(),
+        ..Default::default()
+    };
+
     let result = iced::application(
         move || {
             new_app(
@@ -436,6 +454,7 @@ fn run_wayland_ui(configs: &[RaffiConfig], no_icons: bool) -> Result<String> {
     )
     .subscription(LauncherApp::subscription)
     .theme(|_state: &LauncherApp| iced::Theme::Dark)
+    .window(window_settings)
     .run();
 
     if let Err(e) = result {

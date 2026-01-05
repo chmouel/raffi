@@ -177,6 +177,9 @@ For standalone Wayland GUI:
 
 ```config
 bindsym $super+Space exec raffi -u wayland
+
+# Make the Wayland GUI window float and center it
+for_window [app_id="com.chmouel.raffi"] floating enable, resize set 800 600, move position center
 ```
 
 ### Keyboard Shortcuts in Wayland UI
