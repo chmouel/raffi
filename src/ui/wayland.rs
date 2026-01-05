@@ -18,6 +18,51 @@ type TextInputId = Id;
 use super::UI;
 use crate::{read_icon_map, RaffiConfig};
 
+// --- Theme Colors (Dracula-ish with transparency) ---
+const COLOR_BG_BASE: iced::Color = iced::Color {
+    r: 0.15,
+    g: 0.16,
+    b: 0.21,
+    a: 0.95,
+}; // Dark Blue-Grey
+const COLOR_BG_INPUT: iced::Color = iced::Color {
+    r: 0.26,
+    g: 0.27,
+    b: 0.35,
+    a: 1.0,
+}; // Lighter Blue-Grey
+const COLOR_ACCENT: iced::Color = iced::Color {
+    r: 0.74,
+    g: 0.57,
+    b: 0.97,
+    a: 1.0,
+}; // Purple
+const COLOR_ACCENT_HOVER: iced::Color = iced::Color {
+    r: 0.54,
+    g: 0.91,
+    b: 0.99,
+    a: 1.0,
+}; // Cyan
+const COLOR_TEXT_MAIN: iced::Color = iced::Color::WHITE;
+const COLOR_TEXT_MUTED: iced::Color = iced::Color {
+    r: 0.38,
+    g: 0.44,
+    b: 0.64,
+    a: 1.0,
+}; // Blueish Grey
+const COLOR_SELECTION_BG: iced::Color = iced::Color {
+    r: 0.27,
+    g: 0.29,
+    b: 0.36,
+    a: 0.8,
+}; // Selection HL
+const COLOR_BORDER: iced::Color = iced::Color {
+    r: 0.38,
+    g: 0.44,
+    b: 0.64,
+    a: 0.5,
+};
+
 /// Wayland UI implementation using iced
 pub struct WaylandUI;
 
@@ -114,7 +159,13 @@ impl LauncherApp {
             Message::MoveUp => {
                 if self.selected_index > 0 {
                     self.selected_index -= 1;
+                } else {
+                    // Wrap around to bottom
+                    if !self.filtered_configs.is_empty() {
+                        self.selected_index = self.filtered_configs.len() - 1;
+                    }
                 }
+
                 if self.filtered_configs.len() > 1 {
                     let offset =
                         self.selected_index as f32 / (self.filtered_configs.len() - 1) as f32;
@@ -130,7 +181,11 @@ impl LauncherApp {
                 // Move selection down
                 if self.selected_index < self.filtered_configs.len().saturating_sub(1) {
                     self.selected_index += 1;
+                } else {
+                    // Wrap around to top
+                    self.selected_index = 0;
                 }
+
                 if self.filtered_configs.len() > 1 {
                     let offset =
                         self.selected_index as f32 / (self.filtered_configs.len() - 1) as f32;
@@ -185,112 +240,160 @@ impl LauncherApp {
     }
 
     fn view(&self) -> Element<'_, Message> {
+        // --- Search Input Styling ---
         let search_input = text_input("Type to search...", &self.search_query)
             .id(self.search_input_id.clone())
             .on_input(Message::SearchChanged)
             .on_submit(Message::Submit)
-            .padding(18)
+            .padding(16)
             .size(24)
-            .style(|_theme, _status| text_input::Style {
-                background: iced::Background::Color(iced::Color::from_rgb(0.15, 0.15, 0.2)),
-                border: iced::Border {
-                    radius: 5.0.into(),
-                    width: 1.0,
-                    color: iced::Color::from_rgb(0.3, 0.6, 1.0),
-                },
-                placeholder: iced::Color::from_rgb(0.5, 0.5, 0.6),
-                value: iced::Color::WHITE,
-                selection: iced::Color::from_rgb(0.3, 0.6, 1.0),
-                icon: iced::Color::from_rgb(0.8, 0.8, 0.8),
+            .style(|_theme, status| {
+                let border_color = if matches!(status, text_input::Status::Focused { .. }) {
+                    COLOR_ACCENT
+                } else {
+                    COLOR_BORDER
+                };
+
+                text_input::Style {
+                    background: iced::Background::Color(COLOR_BG_INPUT),
+                    border: iced::Border {
+                        radius: 12.0.into(),
+                        width: 1.0,
+                        color: border_color,
+                    },
+                    placeholder: COLOR_TEXT_MUTED,
+                    value: COLOR_TEXT_MAIN,
+                    selection: COLOR_ACCENT,
+                    icon: COLOR_TEXT_MUTED,
+                }
             })
             .width(Length::Fill);
 
-        let mut items_column = Column::new().spacing(8);
+        // --- List Items ---
+        let mut items_column = Column::new().spacing(6);
 
-        for (idx, &config_idx) in self.filtered_configs.iter().enumerate() {
-            let config = &self.configs[config_idx];
-            let description = config
-                .description
-                .clone()
-                .unwrap_or_else(|| config.binary.clone().unwrap_or_default());
+        if self.filtered_configs.is_empty() {
+            let no_results = container(
+                text("No matching results found.")
+                    .size(18)
+                    .color(COLOR_TEXT_MUTED),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(iced::Alignment::Center)
+            .align_y(iced::Alignment::Center);
 
-            // Get icon path if available
-            let mut icon_path = if !self.icon_map.is_empty() {
-                let icon_name = config
-                    .icon
-                    .as_ref()
-                    .or(config.binary.as_ref())
-                    .cloned()
-                    .unwrap_or_default();
-                self.icon_map.get(&icon_name).cloned()
-            } else {
-                None
-            };
+            // If no results, we just show the message in the scroll area
+            items_column = items_column.push(no_results);
+        } else {
+            for (idx, &config_idx) in self.filtered_configs.iter().enumerate() {
+                let config = &self.configs[config_idx];
+                let description = config
+                    .description
+                    .clone()
+                    .unwrap_or_else(|| config.binary.clone().unwrap_or_default());
 
-            if icon_path.is_none() {
-                let default_path = "assets/default_icon.svg";
-                if Path::new(default_path).exists() {
-                    icon_path = Some(default_path.to_string());
-                }
-            }
+                // Get icon path if available
+                let mut icon_path = if !self.icon_map.is_empty() {
+                    let icon_name = config
+                        .icon
+                        .as_ref()
+                        .or(config.binary.as_ref())
+                        .cloned()
+                        .unwrap_or_default();
+                    self.icon_map.get(&icon_name).cloned()
+                } else {
+                    None
+                };
 
-            // Build the row with optional icon
-            let mut item_row = Row::new().spacing(18).align_y(iced::Alignment::Center);
-
-            // Add icon if available
-            if let Some(icon_path_str) = icon_path {
-                let icon_path = PathBuf::from(&icon_path_str);
-                if icon_path.exists() {
-                    let is_svg = icon_path
-                        .extension()
-                        .and_then(|ext| ext.to_str())
-                        .map(|ext| ext.to_lowercase() == "svg")
-                        .unwrap_or(false);
-
-                    if is_svg {
-                        let svg_handle = iced::widget::svg::Handle::from_path(&icon_path);
-                        item_row = item_row.push(svg(svg_handle).width(48).height(48));
-                    } else {
-                        item_row = item_row.push(image(icon_path).width(48).height(48));
+                if icon_path.is_none() {
+                    let default_path = "assets/default_icon.svg";
+                    if Path::new(default_path).exists() {
+                        icon_path = Some(default_path.to_string());
                     }
                 }
+
+                // Build the row with optional icon
+                let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
+
+                // Add icon if available
+                if let Some(icon_path_str) = icon_path {
+                    let icon_path = PathBuf::from(&icon_path_str);
+                    if icon_path.exists() {
+                        let is_svg = icon_path
+                            .extension()
+                            .and_then(|ext| ext.to_str())
+                            .map(|ext| ext.to_lowercase() == "svg")
+                            .unwrap_or(false);
+
+                        // Icon Container for consistent sizing and alignment
+                        let icon_content: Element<Message> = if is_svg {
+                            svg(iced::widget::svg::Handle::from_path(&icon_path))
+                                .width(Length::Fixed(40.0))
+                                .height(Length::Fixed(40.0))
+                                .content_fit(iced::ContentFit::Contain)
+                                .into()
+                        } else {
+                            image(icon_path)
+                                .width(Length::Fixed(40.0))
+                                .height(Length::Fixed(40.0))
+                                .content_fit(iced::ContentFit::Contain)
+                                .into()
+                        };
+
+                        item_row = item_row.push(icon_content);
+                    }
+                }
+
+                // Text Content
+                let text_widget = text(description).size(20).width(Length::Fill);
+                item_row = item_row.push(text_widget);
+
+                let is_selected = idx == self.selected_index;
+
+                let item_button = button(item_row)
+                    .on_press(Message::ItemClicked(idx))
+                    .padding(12)
+                    .width(Length::Fill)
+                    .style(move |_theme, status| {
+                        let base_style = button::Style {
+                            text_color: COLOR_TEXT_MAIN,
+                            border: iced::Border {
+                                radius: 8.0.into(),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        };
+
+                        if is_selected {
+                            button::Style {
+                                background: Some(iced::Background::Color(COLOR_SELECTION_BG)),
+                                border: iced::Border {
+                                    color: COLOR_ACCENT,
+                                    width: 1.0,
+                                    radius: 8.0.into(),
+                                },
+                                ..base_style
+                            }
+                        } else {
+                            match status {
+                                button::Status::Hovered => button::Style {
+                                    background: Some(iced::Background::Color(iced::Color {
+                                        a: 0.1,
+                                        ..COLOR_ACCENT_HOVER
+                                    })),
+                                    ..base_style
+                                },
+                                _ => button::Style {
+                                    background: None, // Transparent by default
+                                    ..base_style
+                                },
+                            }
+                        }
+                    });
+
+                items_column = items_column.push(item_button);
             }
-
-            let text_widget = text(description).size(22);
-            item_row = item_row.push(text_widget);
-
-            let item_button = button(item_row)
-                .on_press(Message::ItemClicked(idx))
-                .padding(20)
-                .width(Length::Fill);
-
-            let styled_button = if idx == self.selected_index {
-                item_button.style(|_theme, _status| button::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgb(
-                        0.2, 0.5, 0.9,
-                    ))),
-                    border: iced::Border {
-                        radius: 5.0.into(),
-                        ..Default::default()
-                    },
-                    text_color: iced::Color::WHITE,
-                    ..Default::default()
-                })
-            } else {
-                item_button.style(|_theme, _status| button::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgb(
-                        0.15, 0.15, 0.2,
-                    ))),
-                    border: iced::Border {
-                        radius: 5.0.into(),
-                        ..Default::default()
-                    },
-                    text_color: iced::Color::WHITE,
-                    ..Default::default()
-                })
-            };
-
-            items_column = items_column.push(styled_button);
         }
 
         let items_container = container(items_column)
@@ -303,20 +406,32 @@ impl LauncherApp {
             .height(Length::Fill)
             .width(Length::Fill);
 
-        let content = column![search_input, items_scroll]
-            .spacing(16)
-            .width(Length::Fill)
-            .height(Length::Fill);
+        // Main Layout
+        let content = column![
+            search_input,
+            container(items_scroll).padding(iced::Padding {
+                top: 8.0,
+                right: 4.0,
+                bottom: 0.0,
+                left: 0.0
+            })
+        ]
+        .spacing(12)
+        .width(Length::Fill)
+        .height(Length::Fill);
 
         container(content)
-            .padding(15)
+            .padding(20)
             .width(Length::Fill)
             .height(Length::Fill)
-            .clip(true)
             .style(|_theme| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgb(
-                    0.1, 0.1, 0.15,
-                ))),
+                background: Some(iced::Background::Color(COLOR_BG_BASE)),
+                border: iced::Border {
+                    color: COLOR_BORDER,
+                    width: 1.0,
+                    radius: 16.0.into(),
+                },
+                text_color: Some(COLOR_TEXT_MAIN),
                 ..Default::default()
             })
             .into()
