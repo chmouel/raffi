@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
+use fuzzy_matcher::skim::SkimMatcherV2;
+use fuzzy_matcher::FuzzyMatcher;
 use iced::widget::operation::{focus, snap_to};
 use iced::widget::{
     button, column, container, image, scrollable, svg, text, text_input, Column, Id, Row,
@@ -467,22 +469,27 @@ impl LauncherApp {
         if query.is_empty() {
             self.filtered_configs = (0..self.configs.len()).collect();
         } else {
-            let query_lower = query.to_lowercase();
-            self.filtered_configs = self
+            let matcher = SkimMatcherV2::default();
+            let mut matches: Vec<(usize, i64)> = self
                 .configs
                 .iter()
                 .enumerate()
-                .filter(|(_, config)| {
+                .filter_map(|(idx, config)| {
                     let description = config
                         .description
-                        .as_ref()
-                        .or(config.binary.as_ref())
-                        .map(|s| s.to_lowercase())
+                        .as_deref()
+                        .or(config.binary.as_deref())
                         .unwrap_or_default();
-                    description.contains(&query_lower)
+                    matcher
+                        .fuzzy_match(description, query)
+                        .map(|score| (idx, score))
                 })
-                .map(|(idx, _)| idx)
                 .collect();
+
+            // Sort by score descending
+            matches.sort_by(|a, b| b.1.cmp(&a.1));
+
+            self.filtered_configs = matches.into_iter().map(|(idx, _)| idx).collect();
         }
     }
 }

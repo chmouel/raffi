@@ -138,9 +138,13 @@ A built-in terminal-based fuzzy finder using [skim](https://github.com/lotabout/
 
 ### 3. **Wayland**
 
-Native Wayland launcher using [iced](https://iced.rs/) GUI framework. Provides a modern graphical window with keyboard navigation.
+Native Wayland launcher using the [iced](https://iced.rs/) GUI framework. It features a modern, "glassy" dark theme (Dracula-inspired) with a sleek card-based layout, transparency, and polished animations.
 
-<img width="2575" height="1978" alt="raffi-native" src="https://github.com/user-attachments/assets/843fdce9-bcb3-4fc0-8f05-0e4ce5131f6c" />
+- **Modern Design**: High-contrast dark theme with transparency and rounded corners.
+- **Fuzzy Search**: integrated smart fuzzy matching for quick and accurate results.
+- **Visuals**: Icon support and clear selection indicators.
+
+<img width="2575" height="1978" alt="raffi-wayland" src="https://github.com/user-attachments/assets/843fdce9-bcb3-4fc0-8f05-0e4ce5131f6c" />
 
 ### Selecting a UI
 
@@ -193,7 +197,7 @@ The Wayland GUI supports:
 - `↑`/`↓`: Navigate through items
 - `Enter`: Select the current item
 - `Esc`: Cancel and exit
-- Type to search: Real-time filtering of items
+- Type to search: Real-time fuzzy filtering of items
 
 ### Keyboard Shortcuts in Native UI
 
