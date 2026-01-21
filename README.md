@@ -1,21 +1,10 @@
-# Raffi - Fuzzel Launcher Using YAML Configuration
+# Raffi
 
 ![image](https://github.com/chmouel/raffi/assets/98980/04d6af0f-2a80-47d5-a2ec-95443a629305)
 
-> [!NOTE]
-> This uses my Fuzzel configuration, see below for more details
+## Overview
 
-## Description
-
-Raffi is a launcher for the [Fuzzel](https://codeberg.org/dnkl/fuzzel) utility
-that uses a YAML configuration file
-to define the commands to be executed.
-
-## Features
-
-- Launch applications with custom configurations.
-- Support for icons.
-- Script execution with a configurable interpreter.
+Raffi is a launcher that wraps the [Fuzzel](https://codeberg.org/dnkl/fuzzel) utility, allowing you to define commands and scripts in a YAML configuration file. It supports icons, custom arguments, conditional display, and script execution with configurable interpreters.
 
 ## Installation
 
@@ -64,34 +53,22 @@ cargo build --release
 
 ## Usage
 
-You can launch Raffi directly, and it will run the binary and arguments as defined in the [configuration](#configuration).
+Run `raffi` to launch the configured items through Fuzzel. The application will execute the selected entry according to your configuration.
 
-Use the `-p/--print-only` option to only print the command to be executed.
+Common options:
 
-Specify a custom configuration file with the `-c/--configfile` option.
+- `-p/--print-only`: Print the command instead of executing it
+- `-c/--configfile <FILE>`: Specify a custom configuration file
+- `-r/--refresh-cache`: Refresh the cached icon paths
+- `-I/--disable-icons`: Run without icons (marginally faster)
+- `-u/--ui-type <TYPE>`: Select UI type (`fuzzel` or `wayland`, default: `fuzzel`)
+- `--default-script-shell <SHELL>`: Shell for scripts (default: `bash`)
+- `--version`: Show version
+- `--help`: Show all options
 
-Icon paths are automatically searched on your system and cached. To refresh the
-cache, use the `-r/--refresh-cache` option. If you want to have fuzzel running
-faster you can use the option `-I/--disable-icons` to disable them.
+### Integration with Window Managers
 
-### Command-line Options
-
-```sh
-raffi [OPTIONS]
-```
-
-Options:
-
-- `--help`: Print help message.
-- `--version`: Print version.
-- `--configfile <FILE>`: Specify the config file location.
-- `--print-only`: Print the command to stdout, do not run it.
-- `--refresh-cache`: Refresh the icon cache.
-- `--no-icons`: Do not show icons.
-- `--default-script-shell <SHELL>`: Default shell when using scripts (default: `bash`).
-- `--ui-type <TYPE>` or `-u <TYPE>`: Select UI type: `fuzzel` or `wayland` (default: `fuzzel`).
-
-### Sway
+#### Sway
 
 Here is an example of how to use Raffi with Sway:
 
@@ -107,73 +84,36 @@ set $super Mod4
 bindsym $super+Space exec $menu | xargs swaymsg exec --
 ```
 
-### Hyprland
-
-Here is an example of how to use Raffi with hyprland:
+#### Hyprland
 
 ```conf
 $super = SUPER
 bind = $super, R, exec, (val=$(raffi -pI); echo $val | grep -q . && hyprctl dispatch exec "$val")
 ```
 
-## UI Options
+### User Interface Options
 
-Raffi supports multiple UI implementations to suit different needs and environments:
+Raffi supports two UI options via the `--ui-type` flag:
 
-### 1. **Fuzzel** (Default)
+**Fuzzel** (default): External launcher using [Fuzzel](https://codeberg.org/dnkl/fuzzel). Good integration with Wayland.
 
-Uses the external [fuzzel](https://codeberg.org/dnkl/fuzzel) launcher for a native Wayland experience with GPU acceleration.
+**Wayland**: Built-in GUI using the [iced](https://iced.rs/) framework. Displays a dark-themed window with fuzzy search. Navigation via arrow keys, `Enter` to select, `Esc` to cancel. Useful if you prefer a native window over an external launcher.
 
-### 2. **Wayland**
-
-Native Wayland launcher using the [iced](https://iced.rs/) GUI framework. It features a modern, "glassy" dark theme (Dracula-inspired) with a sleek card-based layout, transparency, and polished animations.
-
-- **Modern Design**: High-contrast dark theme with transparency and rounded corners.
-- **Fuzzy Search**: integrated smart fuzzy matching for quick and accurate results.
-- **Visuals**: Icon support and clear selection indicators.
-
-<img width="2575" height="1978" alt="raffi-wayland" src="https://github.com/user-attachments/assets/843fdce9-bcb3-4fc0-8f05-0e4ce5131f6c" />
-
-### Selecting a UI
-
-Use the `--ui-type` or `-u` flag to choose your UI:
-
-```sh
-# Use fuzzel (default)
-raffi
-
-# Use Wayland GUI
-raffi --ui-type wayland
-```
-
-### Sway Configuration with Wayland GUI
-
-For Sway users who want to use the Wayland GUI:
+Example with Wayland UI in Sway:
 
 ```config
 set $super Mod4
-
-# Open raffi with Wayland UI
 bindsym $super+Space exec raffi -u wayland
-
-# Make the Wayland GUI window float and center it
 for_window [app_id="com.chmouel.raffi"] floating enable, resize set 800 600, move position center
 ```
 
-### Keyboard Shortcuts in Wayland UI
-
-The Wayland GUI supports:
-
-- `↑`/`↓`: Navigate through items
-- `Enter`: Select the current item
-- `Esc`: Cancel and exit
-- Type to search: Real-time fuzzy filtering of items
+<img width="2575" height="1978" alt="raffi-wayland" src="https://github.com/user-attachments/assets/843fdce9-bcb3-4fc0-8f05-0e4ce5131f6c" />
 
 ## Configuration
 
-### Fuzzel
+### Fuzzel Configuration
 
-First, configure your Fuzzel appearance and behavior by editing the file `~/.config/fuzzel/fuzzel.ini`. See the manpages [here](https://man.archlinux.org/man/fuzzel.ini.5.en). Below is my configuration, which matches the screenshot at the top:
+Configure Fuzzel's appearance via `~/.config/fuzzel/fuzzel.ini`. See the [manpage](https://man.archlinux.org/man/fuzzel.ini.5.en) for options. Example:
 
 ```ini
 dpi-aware=yes
@@ -195,9 +135,9 @@ selection-text=f8f8f2ff
 border=bd93f9ff
 ```
 
-### Raffi
+### Raffi Configuration
 
-The Raffi configuration file is located at `$HOME/.config/raffi/raffi.yaml` and has the following structure:
+Configuration goes in `$HOME/.config/raffi/raffi.yaml`. Basic example:
 
 ```yaml
 firefox:
@@ -207,26 +147,18 @@ firefox:
   description: Firefox browser with marionette enabled
 ```
 
-- **binary**: The binary to be executed (if it does not exist in the PATH, it will be skipped).
-- **description**: The description to be displayed in the launcher.
-- **args**: The arguments to be passed to the binary as an array, e.g., `[foo, bar]` (optional).
-- **icon**: The icon to be displayed in the launcher. If not specified, it will
-  try to use the binary name (optional). Icons are searched in
-  `/usr/share/icons`, `/usr/share/pixmaps`, `$HOME/.local/share/icons`, or
-  `$XDG_DATA_HOME` if set and matched to the icon name. The icons paths are
-  cached for optimization, use the `-r` option to refresh it. You can also
-  specify a full path to the icon.
-- **script**: [See below](#script-feature) for more information.
-- **disabled**: If set to `true`, the entry will be disabled.
+Fields:
 
-### Script Feature
+- `binary`: The executable to run. Skipped if not in PATH.
+- `description`: Label shown in the launcher.
+- `args`: Command-line arguments as an array (optional).
+- `icon`: Icon name or full path (optional). Searched in standard directories. Icon paths are cached; refresh with `-r`.
+- `script`: Inline script to execute (see below).
+- `disabled`: Set to `true` to hide the entry.
 
-You can define a script to be executed instead of a binary. The script will be
-executed using the default script shell `bash` unless you specify another one in
-`--default-script-shell`. The `binary` field is used to specify the interpreter
-for the script.
+### Scripts
 
-Here is an example configuration with a script:
+Define inline scripts instead of binaries. Scripts run via `bash` by default, or specify a different interpreter with `--default-script-shell`. Use the `binary` field to set the interpreter explicitly. Example:
 
 ```yaml
 hello_script:
@@ -237,7 +169,7 @@ hello_script:
   icon: "script"
 ```
 
-If you want a script running, for example, with `python3`, you can specify it like this:
+With a different interpreter:
 
 ```yaml
 hello_script:
@@ -250,7 +182,7 @@ hello_script:
   icon: "script"
 ```
 
-If you want to add some specific arguments to the interpreter, you can do it like this:
+With interpreter arguments:
 
 ```yaml
 hello_script:
@@ -263,21 +195,16 @@ hello_script:
   icon: "script"
 ```
 
-### Conditions
+### Conditional Display
 
-There is limited support for conditions, allowing you to run a command only if a specific condition is met. These conditions are optional and cannot be combined.
+Entries can be shown or hidden based on conditions. Conditions are optional and cannot be combined.
 
-- *ifexist*: Display the entry if a binary exists in the PATH or if the full path is specified.
-- *ifenvset*: Display the entry if the environment variable is set.
-- *ifenvnotset*: Display the entry if the environment variable is not set.
-- *ifenveq*: Display the entry if the environment variable equals a specified value.
+- `ifexist`: Show if binary exists in PATH or at full path.
+- `ifenvset`: Show if environment variable is set.
+- `ifenvnotset`: Show if environment variable is not set.
+- `ifenveq`: Show if environment variable equals a specified value.
 
-#### Example
-
-Here is an example of how to use conditions. This will only display the entry
-if the `DESKTOP_SESSION` environment variable is set to `GNOME` and the
-`WAYLAND_DISPLAY` environment variable is set and the `firefox` binary exists
-in the PATH:
+Example:
 
 ```yaml
 ifenveq: [DESKTOP_SESSION, GNOME]
@@ -287,37 +214,16 @@ ifexist: firefox
 
 See the file located in [examples/raffi.yaml](./examples/raffi.yaml) for a more comprehensive example.
 
-## Troubleshooting
-
-### Common Issues
-
-- **Binary not found**: Ensure that the binary specified in the configuration file exists in the PATH.
-- **Invalid configuration**: Verify that the YAML configuration file is correctly formatted and all required fields are provided.
-- **Icons not displayed**: Ensure that the icon paths are correct and refresh the icon cache using the `--refresh-cache` option if necessary.
-
-### Debugging
-
-Use the `--print-only` option to print the command that will be executed. This can help identify issues with the configuration or command execution.
-
 ## Development
 
-All contributions are welcome! If you have any suggestions, bug reports, or feature requests, please open an issue or a pull request.
+Contributions welcome. For issues, feature requests, or pull requests, see the [GitHub repository](https://github.com/chmouel/raffi).
 
-### Pre-commit Hooks
-
-To ensure code quality, you can set up pre-commit hooks to run `cargo clippy` automatically before pushing commits. First, install pre-commit:
+To set up pre-commit hooks that run `cargo clippy` before pushing:
 
 ```sh
 pip install pre-commit
-```
-
-Then, install the pre-commit hooks:
-
-```sh
 pre-commit install
 ```
-
-This will automatically run `cargo clippy` before each commit to catch any potential issues.
 
 ## License
 
