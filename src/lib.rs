@@ -53,7 +53,10 @@ impl std::str::FromStr for UIType {
             #[cfg(feature = "wayland")]
             "wayland" | "iced" => Ok(UIType::Wayland),
             #[cfg(not(feature = "wayland"))]
-            "wayland" | "iced" => Err("Wayland UI is not available. Build with the 'wayland' feature to enable it.".to_string()),
+            "wayland" | "iced" => Err(
+                "Wayland UI is not available. Build with the 'wayland' feature to enable it."
+                    .to_string(),
+            ),
             _ => {
                 #[cfg(feature = "wayland")]
                 {
@@ -64,10 +67,7 @@ impl std::str::FromStr for UIType {
                 }
                 #[cfg(not(feature = "wayland"))]
                 {
-                    Err(format!(
-                        "Invalid UI type: {}. Valid options are: fuzzel",
-                        s
-                    ))
+                    Err(format!("Invalid UI type: {}. Valid options are: fuzzel", s))
                 }
             }
         }
