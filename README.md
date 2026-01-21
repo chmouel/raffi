@@ -51,6 +51,16 @@ cd raffi
 cargo build --release
 ```
 
+#### Building Without Wayland UI
+
+If you only need the Fuzzel UI and want to reduce binary size significantly, build with the Wayland feature disabled:
+
+```sh
+cargo build --release --no-default-features
+```
+
+This reduces the binary size from **15 MB** (with Wayland) to **1.1 MB** (93% smaller), as the Wayland UI depends on the heavy `iced` GUI framework. Use this option if you only plan to use Fuzzel or need a minimal installation.
+
 ## Usage
 
 Run `raffi` to launch the configured items through Fuzzel. The application will execute the selected entry according to your configuration.

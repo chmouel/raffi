@@ -5,9 +5,11 @@ use anyhow::Result;
 use crate::{RaffiConfig, UIType};
 
 mod fuzzel;
+#[cfg(feature = "wayland")]
 mod wayland;
 
 use self::fuzzel::FuzzelUI;
+#[cfg(feature = "wayland")]
 use self::wayland::WaylandUI;
 
 pub trait UI {
@@ -17,6 +19,7 @@ pub trait UI {
 pub fn get_ui(ui_type: UIType) -> Box<dyn UI> {
     match ui_type {
         UIType::Fuzzel => Box::new(FuzzelUI),
+        #[cfg(feature = "wayland")]
         UIType::Wayland => Box::new(WaylandUI),
     }
 }

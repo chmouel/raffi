@@ -40,6 +40,7 @@ struct Config {
 #[derive(Debug, Clone, PartialEq)]
 pub enum UIType {
     Fuzzel,
+    #[cfg(feature = "wayland")]
     Wayland,
 }
 
@@ -49,11 +50,26 @@ impl std::str::FromStr for UIType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "fuzzel" => Ok(UIType::Fuzzel),
+            #[cfg(feature = "wayland")]
             "wayland" | "iced" => Ok(UIType::Wayland),
-            _ => Err(format!(
-                "Invalid UI type: {}. Valid options are: fuzzel, wayland",
-                s
-            )),
+            #[cfg(not(feature = "wayland"))]
+            "wayland" | "iced" => Err("Wayland UI is not available. Build with the 'wayland' feature to enable it.".to_string()),
+            _ => {
+                #[cfg(feature = "wayland")]
+                {
+                    Err(format!(
+                        "Invalid UI type: {}. Valid options are: fuzzel, wayland",
+                        s
+                    ))
+                }
+                #[cfg(not(feature = "wayland"))]
+                {
+                    Err(format!(
+                        "Invalid UI type: {}. Valid options are: fuzzel",
+                        s
+                    ))
+                }
+            }
         }
     }
 }
@@ -388,7 +404,16 @@ pub fn run(args: Args) -> Result<()> {
     } else if find_binary("fuzzel") {
         UIType::Fuzzel
     } else {
-        UIType::Wayland
+        #[cfg(feature = "wayland")]
+        {
+            UIType::Wayland
+        }
+        #[cfg(not(feature = "wayland"))]
+        {
+            return Err(anyhow::anyhow!(
+                "No UI backend available. Install 'fuzzel' or build with the 'wayland' feature."
+            ));
+        }
     };
 
     // Get the appropriate UI implementation
