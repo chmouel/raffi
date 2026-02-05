@@ -135,10 +135,9 @@ struct FrankfurterResponse {
 
 // Supported currencies from Frankfurter API
 const SUPPORTED_CURRENCIES: &[&str] = &[
-    "EUR", "USD", "GBP", "JPY", "CAD", "AUD", "CHF", "CNY", "HKD", "NZD",
-    "SEK", "KRW", "SGD", "NOK", "MXN", "INR", "RUB", "ZAR", "TRY", "BRL",
-    "TWD", "DKK", "PLN", "THB", "IDR", "HUF", "CZK", "ILS", "CLP", "PHP",
-    "AED", "COP", "SAR", "MYR", "RON", "BGN", "ISK", "HRK",
+    "EUR", "USD", "GBP", "JPY", "CAD", "AUD", "CHF", "CNY", "HKD", "NZD", "SEK", "KRW", "SGD",
+    "NOK", "MXN", "INR", "RUB", "ZAR", "TRY", "BRL", "TWD", "DKK", "PLN", "THB", "IDR", "HUF",
+    "CZK", "ILS", "CLP", "PHP", "AED", "COP", "SAR", "MYR", "RON", "BGN", "ISK", "HRK",
 ];
 
 lazy_static! {
@@ -659,36 +658,37 @@ impl LauncherApp {
                 .align_y(iced::Alignment::Center)
                 .push(text(help_text).size(20).color(COLOR_TEXT_MUTED));
 
-            let help_button = button(help_row)
-                .padding(12)
-                .width(Length::Fill)
-                .style(move |_theme, _status| {
-                    let base_style = button::Style {
-                        text_color: COLOR_TEXT_MUTED,
-                        border: iced::Border {
-                            radius: 8.0.into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    };
-
-                    if is_selected {
-                        button::Style {
-                            background: Some(iced::Background::Color(COLOR_SELECTION_BG)),
+            let help_button =
+                button(help_row)
+                    .padding(12)
+                    .width(Length::Fill)
+                    .style(move |_theme, _status| {
+                        let base_style = button::Style {
+                            text_color: COLOR_TEXT_MUTED,
                             border: iced::Border {
-                                color: COLOR_ACCENT,
-                                width: 1.0,
                                 radius: 8.0.into(),
+                                ..Default::default()
                             },
-                            ..base_style
+                            ..Default::default()
+                        };
+
+                        if is_selected {
+                            button::Style {
+                                background: Some(iced::Background::Color(COLOR_SELECTION_BG)),
+                                border: iced::Border {
+                                    color: COLOR_ACCENT,
+                                    width: 1.0,
+                                    radius: 8.0.into(),
+                                },
+                                ..base_style
+                            }
+                        } else {
+                            button::Style {
+                                background: None,
+                                ..base_style
+                            }
                         }
-                    } else {
-                        button::Style {
-                            background: None,
-                            ..base_style
-                        }
-                    }
-                });
+                    });
 
             items_column = items_column.push(help_button);
             special_item_idx += 1;
@@ -712,10 +712,8 @@ impl LauncherApp {
 
             let is_selected = self.selected_index == special_item_idx;
 
-            let loading_button = button(loading_row)
-                .padding(12)
-                .width(Length::Fill)
-                .style(move |_theme, _status| {
+            let loading_button = button(loading_row).padding(12).width(Length::Fill).style(
+                move |_theme, _status| {
                     let base_style = button::Style {
                         text_color: COLOR_TEXT_MUTED,
                         border: iced::Border {
@@ -741,7 +739,8 @@ impl LauncherApp {
                             ..base_style
                         }
                     }
-                });
+                },
+            );
 
             items_column = items_column.push(loading_button);
             special_item_idx += 1;

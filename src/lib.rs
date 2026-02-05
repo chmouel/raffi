@@ -95,10 +95,7 @@ pub struct Args {
         short = "P"
     )]
     pub default_script_shell: String,
-    #[options(
-        help = "UI type to use: fuzzel, native (default: fuzzel)",
-        short = "u"
-    )]
+    #[options(help = "UI type to use: fuzzel, native (default: fuzzel)", short = "u")]
     pub ui_type: Option<String>,
 }
 

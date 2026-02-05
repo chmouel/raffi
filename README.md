@@ -53,13 +53,13 @@ cargo build --release
 
 #### Building Without Wayland UI
 
-If you only need the Fuzzel UI and want to reduce binary size significantly, build with the Wayland feature disabled:
+If you only need the Fuzzel UI and want to reduce binary size significantly, build with the Native feature disabled:
 
 ```sh
 cargo build --release --no-default-features
 ```
 
-This reduces the binary size from **15 MB** (with Wayland) to **1.1 MB** (93% smaller), as the Wayland UI depends on the heavy `iced` GUI framework. Use this option if you only plan to use Fuzzel or need a minimal installation.
+This reduces the binary size from **15 MB** (with Native UI) to **1.1 MB** (93% smaller), as the Native UI depends on the heavy `iced` GUI framework. Use this option if you only plan to use Fuzzel or need a minimal installation.
 
 ## Usage
 
@@ -105,7 +105,7 @@ bind = $super, R, exec, (val=$(raffi -pI); echo $val | grep -q . && hyprctl disp
 
 Raffi supports two UI options via the `--ui-type` flag:
 
-**Fuzzel** (default): External launcher using [Fuzzel](https://codeberg.org/dnkl/fuzzel). Good integration with Wayland.
+**Fuzzel** (default): External launcher using [Fuzzel](https://codeberg.org/dnkl/fuzzel). Good integration on Wayland.
 
 **Native**: Built-in GUI using the [iced](https://iced.rs/) framework. Displays a dark-themed window with fuzzy search. Navigation via arrow keys, `Enter` to select, `Esc` to cancel. Useful if you prefer a native window over an external launcher.
 
@@ -118,6 +118,18 @@ The Native UI includes a built-in calculator that automatically detects and eval
 - Press `Enter` to copy the result to clipboard (requires `wl-copy`)
 - Supports basic operators: `+`, `-`, `*`, `/`, `^`, `%`
 - Supports functions: `sqrt()`, `sin()`, `cos()`, `tan()`, `log()`, `ln()`, `exp()`, `abs()`, `floor()`, `ceil()`
+
+#### Currency Converter (Native UI only)
+
+Type `$` followed by an amount to convert currencies:
+
+- `$10 to eur` - convert 10 USD to EUR
+- `$50 gbp to usd` - convert 50 GBP to USD
+- `$100eur to jpy` - convert 100 EUR to JPY
+
+Type just `$` to see usage hints. Press `Enter` to copy the result to clipboard. Rates fetched from [Frankfurter API](https://frankfurter.dev/) and cached for 1 hour.
+
+#### Configuration Example
 
 Example with Native UI in Sway:
 
