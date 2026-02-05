@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -13,6 +14,9 @@ use iced::widget::{
 };
 use iced::window;
 use iced::{Element, Length, Task};
+use lazy_static::lazy_static;
+use regex::Regex;
+use serde::Deserialize;
 
 type ContainerId = Id;
 type ScrollableId = Id;
@@ -85,6 +89,180 @@ struct CalculatorResult {
     result: f64,
 }
 
+/// Currency conversion request parsed from user input
+#[derive(Debug, Clone, PartialEq)]
+struct CurrencyConversionRequest {
+    amount: f64,
+    from_currency: String,
+    to_currency: String,
+}
+
+/// Result of a currency conversion
+#[derive(Debug, Clone)]
+struct CurrencyResult {
+    request: CurrencyConversionRequest,
+    converted_amount: f64,
+    rate: f64,
+}
+
+/// Cached exchange rate with timestamp for TTL
+#[derive(Debug, Clone)]
+struct CachedRate {
+    rate: f64,
+    timestamp: Instant,
+}
+
+impl CachedRate {
+    const TTL: Duration = Duration::from_secs(3600); // 1 hour
+
+    fn new(rate: f64) -> Self {
+        Self {
+            rate,
+            timestamp: Instant::now(),
+        }
+    }
+
+    fn is_valid(&self) -> bool {
+        self.timestamp.elapsed() < Self::TTL
+    }
+}
+
+/// Frankfurter API response
+#[derive(Debug, Deserialize)]
+struct FrankfurterResponse {
+    rates: HashMap<String, f64>,
+}
+
+// Supported currencies from Frankfurter API
+const SUPPORTED_CURRENCIES: &[&str] = &[
+    "EUR", "USD", "GBP", "JPY", "CAD", "AUD", "CHF", "CNY", "HKD", "NZD",
+    "SEK", "KRW", "SGD", "NOK", "MXN", "INR", "RUB", "ZAR", "TRY", "BRL",
+    "TWD", "DKK", "PLN", "THB", "IDR", "HUF", "CZK", "ILS", "CLP", "PHP",
+    "AED", "COP", "SAR", "MYR", "RON", "BGN", "ISK", "HRK",
+];
+
+lazy_static! {
+    // Pattern: "$10 to EUR", "$10 EUR to GBP", "$10EUR to GBP"
+    // Captures: amount, optional source currency, target currency
+    static ref PATTERN_DOLLAR_PREFIX: Regex = Regex::new(
+        r"(?i)^\$\s*(\d+(?:\.\d+)?)\s*([A-Z]{3})?\s*(?:to|in)\s+([A-Z]{3})$"
+    ).unwrap();
+
+    // Pattern with word currencies: "$10 euros to dollars"
+    static ref PATTERN_DOLLAR_WORDS: Regex = Regex::new(
+        r"(?i)^\$\s*(\d+(?:\.\d+)?)\s*(dollars?|euros?|pounds?|yen|yuan)?\s*(?:to|in)\s+(dollars?|euros?|pounds?|yen|yuan)$"
+    ).unwrap();
+}
+
+fn is_currency_help_query(query: &str) -> bool {
+    let trimmed = query.trim();
+    trimmed == "$" || trimmed == "$ "
+}
+
+fn word_to_currency(word: &str) -> Option<&'static str> {
+    match word.to_lowercase().as_str() {
+        "dollar" | "dollars" => Some("USD"),
+        "euro" | "euros" => Some("EUR"),
+        "pound" | "pounds" => Some("GBP"),
+        "yen" => Some("JPY"),
+        "yuan" => Some("CNY"),
+        _ => None,
+    }
+}
+
+fn is_valid_currency(code: &str) -> bool {
+    SUPPORTED_CURRENCIES.contains(&code.to_uppercase().as_str())
+}
+
+fn try_parse_currency_conversion(query: &str) -> Option<CurrencyConversionRequest> {
+    let trimmed = query.trim();
+
+    // Must start with $
+    if !trimmed.starts_with('$') {
+        return None;
+    }
+
+    // Try pattern: "$10 to EUR" or "$10 EUR to GBP" or "$10EUR to GBP"
+    if let Some(caps) = PATTERN_DOLLAR_PREFIX.captures(trimmed) {
+        let amount: f64 = caps.get(1)?.as_str().parse().ok()?;
+        let from = caps
+            .get(2)
+            .map(|m| m.as_str().to_uppercase())
+            .unwrap_or_else(|| "USD".to_string());
+        let to = caps.get(3)?.as_str().to_uppercase();
+
+        if is_valid_currency(&from) && is_valid_currency(&to) && from != to {
+            return Some(CurrencyConversionRequest {
+                amount,
+                from_currency: from,
+                to_currency: to,
+            });
+        }
+    }
+
+    // Try word pattern: "$10 euros to dollars"
+    if let Some(caps) = PATTERN_DOLLAR_WORDS.captures(trimmed) {
+        let amount: f64 = caps.get(1)?.as_str().parse().ok()?;
+        let from = caps
+            .get(2)
+            .and_then(|m| word_to_currency(m.as_str()))
+            .unwrap_or("USD");
+        let to = word_to_currency(caps.get(3)?.as_str())?;
+
+        if from != to {
+            return Some(CurrencyConversionRequest {
+                amount,
+                from_currency: from.to_string(),
+                to_currency: to.to_string(),
+            });
+        }
+    }
+
+    None
+}
+
+fn fetch_exchange_rate(request: CurrencyConversionRequest) -> Task<Message> {
+    let request_for_result = request.clone();
+    Task::perform(
+        async move { fetch_rate_blocking(&request) },
+        move |result| Message::CurrencyConversionResult(request_for_result, result),
+    )
+}
+
+fn fetch_rate_blocking(request: &CurrencyConversionRequest) -> Result<CurrencyResult, String> {
+    let url = format!(
+        "https://api.frankfurter.dev/v1/latest?base={}&symbols={}",
+        request.from_currency, request.to_currency
+    );
+
+    let config = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(10)))
+        .build();
+    let agent: ureq::Agent = config.into();
+
+    let response: FrankfurterResponse = agent
+        .get(&url)
+        .call()
+        .map_err(|e| format!("Network error: {}", e))?
+        .body_mut()
+        .read_json()
+        .map_err(|e| format!("Parse error: {}", e))?;
+
+    let rate = response
+        .rates
+        .get(&request.to_currency)
+        .copied()
+        .ok_or_else(|| "Rate not found".to_string())?;
+
+    let converted_amount = request.amount * rate;
+
+    Ok(CurrencyResult {
+        request: request.clone(),
+        converted_amount,
+        rate,
+    })
+}
+
 /// The main application state
 struct LauncherApp {
     configs: Vec<RaffiConfig>,
@@ -99,6 +277,12 @@ struct LauncherApp {
     items_container_id: ContainerId,
     view_generation: u64,
     calculator_result: Option<CalculatorResult>,
+    currency_result: Option<CurrencyResult>,
+    currency_loading: bool,
+    currency_error: Option<String>,
+    currency_cache: HashMap<String, CachedRate>,
+    pending_currency_request: Option<CurrencyConversionRequest>,
+    currency_help: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -110,6 +294,11 @@ enum Message {
     Cancel,
     ItemClicked(usize),
     CalculatorSelected,
+    CurrencyConversionResult(
+        CurrencyConversionRequest,
+        std::result::Result<CurrencyResult, String>,
+    ),
+    CurrencyResultCopied,
 }
 
 impl LauncherApp {
@@ -152,6 +341,12 @@ impl LauncherApp {
                 items_container_id,
                 view_generation: 0,
                 calculator_result: None,
+                currency_result: None,
+                currency_loading: false,
+                currency_error: None,
+                currency_cache: HashMap::new(),
+                pending_currency_request: None,
+                currency_help: false,
             },
             focus(search_input_id),
         )
@@ -168,6 +363,55 @@ impl LauncherApp {
                 self.scrollable_id = ScrollableId::unique();
                 self.items_container_id = ContainerId::unique();
                 self.view_generation = self.view_generation.wrapping_add(1);
+
+                // Check for currency help (just "$")
+                self.currency_help = is_currency_help_query(&query);
+
+                if self.currency_help {
+                    self.currency_result = None;
+                    self.currency_loading = false;
+                    self.currency_error = None;
+                    self.pending_currency_request = None;
+                    return Task::none();
+                }
+
+                // Check for currency conversion request
+                if let Some(currency_request) = try_parse_currency_conversion(&query) {
+                    let cache_key = format!(
+                        "{}_{}",
+                        currency_request.from_currency, currency_request.to_currency
+                    );
+
+                    // Check cache first
+                    if let Some(cached) = self.currency_cache.get(&cache_key) {
+                        if cached.is_valid() {
+                            let converted_amount = currency_request.amount * cached.rate;
+                            self.currency_result = Some(CurrencyResult {
+                                request: currency_request,
+                                converted_amount,
+                                rate: cached.rate,
+                            });
+                            self.currency_loading = false;
+                            self.currency_error = None;
+                            self.pending_currency_request = None;
+                            return Task::none();
+                        }
+                    }
+
+                    // Need to fetch from API
+                    self.currency_loading = true;
+                    self.currency_result = None;
+                    self.currency_error = None;
+                    self.pending_currency_request = Some(currency_request.clone());
+                    return fetch_exchange_rate(currency_request);
+                } else {
+                    // Clear currency state if no conversion request
+                    self.currency_result = None;
+                    self.currency_loading = false;
+                    self.currency_error = None;
+                    self.pending_currency_request = None;
+                }
+
                 Task::none()
             }
             Message::MoveUp => {
@@ -210,17 +454,32 @@ impl LauncherApp {
                 }
             }
             Message::Submit => {
-                // Check if calculator is selected (index 0 when calculator is shown)
-                if self.calculator_result.is_some() && self.selected_index == 0 {
-                    return self.update(Message::CalculatorSelected);
+                // Track position offsets for special items
+                let mut current_idx = 0;
+
+                // Check if currency loading/result is selected (index 0 when currency is shown)
+                if self.currency_loading {
+                    if self.selected_index == current_idx {
+                        return Task::none();
+                    }
+                    current_idx += 1;
+                } else if self.currency_result.is_some() {
+                    if self.selected_index == current_idx {
+                        return self.update(Message::CurrencyResultCopied);
+                    }
+                    current_idx += 1;
                 }
 
-                // Adjust index for config lookup when calculator is shown
-                let config_index = if self.calculator_result.is_some() {
-                    self.selected_index.saturating_sub(1)
-                } else {
-                    self.selected_index
-                };
+                // Check if calculator is selected
+                if self.calculator_result.is_some() {
+                    if self.selected_index == current_idx {
+                        return self.update(Message::CalculatorSelected);
+                    }
+                    current_idx += 1;
+                }
+
+                // Adjust index for config lookup
+                let config_index = self.selected_index.saturating_sub(current_idx);
 
                 if let Some(&config_idx) = self.filtered_configs.get(config_index) {
                     let config = &self.configs[config_idx];
@@ -245,17 +504,32 @@ impl LauncherApp {
                 // Set the clicked item as selected and submit
                 self.selected_index = idx;
 
-                // Check if calculator is clicked (index 0 when calculator is shown)
-                if self.calculator_result.is_some() && idx == 0 {
-                    return self.update(Message::CalculatorSelected);
+                // Track position offsets for special items
+                let mut current_idx = 0;
+
+                // Check if currency loading/result is clicked
+                if self.currency_loading {
+                    if idx == current_idx {
+                        return Task::none();
+                    }
+                    current_idx += 1;
+                } else if self.currency_result.is_some() {
+                    if idx == current_idx {
+                        return self.update(Message::CurrencyResultCopied);
+                    }
+                    current_idx += 1;
                 }
 
-                // Adjust index for config lookup when calculator is shown
-                let config_index = if self.calculator_result.is_some() {
-                    idx.saturating_sub(1)
-                } else {
-                    idx
-                };
+                // Check if calculator is clicked
+                if self.calculator_result.is_some() {
+                    if idx == current_idx {
+                        return self.update(Message::CalculatorSelected);
+                    }
+                    current_idx += 1;
+                }
+
+                // Adjust index for config lookup
+                let config_index = idx.saturating_sub(current_idx);
 
                 if let Some(&config_idx) = self.filtered_configs.get(config_index) {
                     let config = &self.configs[config_idx];
@@ -280,6 +554,48 @@ impl LauncherApp {
                     } else {
                         format!("{}", calc.result)
                     };
+                    // Copy result to clipboard using wl-copy
+                    let _ = Command::new("wl-copy")
+                        .arg(&result_str)
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .spawn();
+                }
+                iced::exit()
+            }
+            Message::CurrencyConversionResult(request, result) => {
+                if self.pending_currency_request.as_ref() != Some(&request) {
+                    return Task::none();
+                }
+
+                self.currency_loading = false;
+                match result {
+                    Ok(currency_result) => {
+                        // Cache the rate
+                        let cache_key = format!(
+                            "{}_{}",
+                            currency_result.request.from_currency,
+                            currency_result.request.to_currency
+                        );
+                        self.currency_cache
+                            .insert(cache_key, CachedRate::new(currency_result.rate));
+
+                        self.currency_result = Some(currency_result);
+                        self.currency_error = None;
+                    }
+                    Err(err) => {
+                        self.currency_result = None;
+                        self.currency_error = Some(err);
+                    }
+                }
+                self.pending_currency_request = None;
+                Task::none()
+            }
+            Message::CurrencyResultCopied => {
+                if let Some(ref currency) = self.currency_result {
+                    // Format the result for clipboard
+                    let result_str = format!("{:.2}", currency.converted_amount);
                     // Copy result to clipboard using wl-copy
                     let _ = Command::new("wl-copy")
                         .arg(&result_str)
@@ -326,10 +642,172 @@ impl LauncherApp {
         // --- List Items ---
         let mut items_column = Column::new().spacing(6);
 
-        // Track if calculator result is shown to offset config indices
+        // Track special items for index offset calculation
+        let has_currency = self.currency_result.is_some() || self.currency_loading;
         let has_calculator = self.calculator_result.is_some();
 
-        // Add calculator result as first item if present
+        // Current display index for special items
+        let mut special_item_idx = 0;
+
+        // Add currency help as first item if user typed just "$"
+        if self.currency_help {
+            let help_text = "Currency: $10 to EUR, $50 GBP to USD";
+            let is_selected = self.selected_index == special_item_idx;
+
+            let help_row = Row::new()
+                .spacing(16)
+                .align_y(iced::Alignment::Center)
+                .push(text(help_text).size(20).color(COLOR_TEXT_MUTED));
+
+            let help_button = button(help_row)
+                .padding(12)
+                .width(Length::Fill)
+                .style(move |_theme, _status| {
+                    let base_style = button::Style {
+                        text_color: COLOR_TEXT_MUTED,
+                        border: iced::Border {
+                            radius: 8.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    };
+
+                    if is_selected {
+                        button::Style {
+                            background: Some(iced::Background::Color(COLOR_SELECTION_BG)),
+                            border: iced::Border {
+                                color: COLOR_ACCENT,
+                                width: 1.0,
+                                radius: 8.0.into(),
+                            },
+                            ..base_style
+                        }
+                    } else {
+                        button::Style {
+                            background: None,
+                            ..base_style
+                        }
+                    }
+                });
+
+            items_column = items_column.push(help_button);
+            special_item_idx += 1;
+        }
+
+        // Add currency result/loading as first item if present
+        if self.currency_loading {
+            let loading_text = if let Some(ref req) = self.pending_currency_request {
+                format!(
+                    "Converting {} {} to {}...",
+                    req.amount, req.from_currency, req.to_currency
+                )
+            } else {
+                "Converting...".to_string()
+            };
+
+            let loading_row = Row::new()
+                .spacing(16)
+                .align_y(iced::Alignment::Center)
+                .push(text(loading_text).size(20).color(COLOR_TEXT_MUTED));
+
+            let is_selected = self.selected_index == special_item_idx;
+
+            let loading_button = button(loading_row)
+                .padding(12)
+                .width(Length::Fill)
+                .style(move |_theme, _status| {
+                    let base_style = button::Style {
+                        text_color: COLOR_TEXT_MUTED,
+                        border: iced::Border {
+                            radius: 8.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    };
+
+                    if is_selected {
+                        button::Style {
+                            background: Some(iced::Background::Color(COLOR_SELECTION_BG)),
+                            border: iced::Border {
+                                color: COLOR_ACCENT,
+                                width: 1.0,
+                                radius: 8.0.into(),
+                            },
+                            ..base_style
+                        }
+                    } else {
+                        button::Style {
+                            background: None,
+                            ..base_style
+                        }
+                    }
+                });
+
+            items_column = items_column.push(loading_button);
+            special_item_idx += 1;
+        } else if let Some(ref currency) = self.currency_result {
+            let currency_text = format!(
+                "{:.2} {} = {:.2} {} (rate: {:.4})",
+                currency.request.amount,
+                currency.request.from_currency,
+                currency.converted_amount,
+                currency.request.to_currency,
+                currency.rate
+            );
+
+            let currency_row = Row::new()
+                .spacing(16)
+                .align_y(iced::Alignment::Center)
+                .push(text(currency_text).size(20).color(COLOR_ACCENT));
+
+            let is_selected = self.selected_index == special_item_idx;
+
+            let currency_button = button(currency_row)
+                .on_press(Message::CurrencyResultCopied)
+                .padding(12)
+                .width(Length::Fill)
+                .style(move |_theme, status| {
+                    let base_style = button::Style {
+                        text_color: COLOR_ACCENT,
+                        border: iced::Border {
+                            radius: 8.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    };
+
+                    if is_selected {
+                        button::Style {
+                            background: Some(iced::Background::Color(COLOR_SELECTION_BG)),
+                            border: iced::Border {
+                                color: COLOR_ACCENT,
+                                width: 1.0,
+                                radius: 8.0.into(),
+                            },
+                            ..base_style
+                        }
+                    } else {
+                        match status {
+                            button::Status::Hovered => button::Style {
+                                background: Some(iced::Background::Color(iced::Color {
+                                    a: 0.1,
+                                    ..COLOR_ACCENT_HOVER
+                                })),
+                                ..base_style
+                            },
+                            _ => button::Style {
+                                background: None,
+                                ..base_style
+                            },
+                        }
+                    }
+                });
+
+            items_column = items_column.push(currency_button);
+            special_item_idx += 1;
+        }
+
+        // Add calculator result if present
         if let Some(ref calc) = self.calculator_result {
             let result_str = if calc.result.fract() == 0.0 {
                 format!("{}", calc.result as i64)
@@ -343,7 +821,7 @@ impl LauncherApp {
                 .align_y(iced::Alignment::Center)
                 .push(text(calc_text).size(20).color(COLOR_ACCENT));
 
-            let is_selected = self.selected_index == 0;
+            let is_selected = self.selected_index == special_item_idx;
 
             let calc_button = button(calc_row)
                 .on_press(Message::CalculatorSelected)
@@ -387,9 +865,10 @@ impl LauncherApp {
                 });
 
             items_column = items_column.push(calc_button);
+            special_item_idx += 1;
         }
 
-        if self.filtered_configs.is_empty() && !has_calculator {
+        if self.filtered_configs.is_empty() && !has_calculator && !has_currency {
             let no_results = container(
                 text("No matching results found.")
                     .size(18)
@@ -404,8 +883,8 @@ impl LauncherApp {
             items_column = items_column.push(no_results);
         } else {
             for (idx, &config_idx) in self.filtered_configs.iter().enumerate() {
-                // Adjust display index when calculator is shown
-                let display_idx = if has_calculator { idx + 1 } else { idx };
+                // Adjust display index for special items (currency, calculator)
+                let display_idx = idx + special_item_idx;
                 let config = &self.configs[config_idx];
                 let description = config
                     .description
@@ -591,12 +1070,17 @@ impl LauncherApp {
     }
 
     fn total_items(&self) -> usize {
-        let calc_offset = if self.calculator_result.is_some() {
-            1
-        } else {
-            0
-        };
-        self.filtered_configs.len() + calc_offset
+        let mut offset = 0;
+        if self.currency_help {
+            offset += 1;
+        }
+        if self.currency_result.is_some() || self.currency_loading {
+            offset += 1;
+        }
+        if self.calculator_result.is_some() {
+            offset += 1;
+        }
+        self.filtered_configs.len() + offset
     }
 }
 
@@ -839,6 +1323,127 @@ mod tests {
 
         // Text starting with letters should not match
         assert!(try_evaluate_math("x+5").is_none());
+    }
+
+    #[test]
+    fn test_try_parse_currency_conversion_dollar_prefix() {
+        // Basic pattern: "$10 to EUR" (defaults to USD)
+        let result = try_parse_currency_conversion("$10 to EUR");
+        assert!(result.is_some());
+        let req = result.unwrap();
+        assert_eq!(req.amount, 10.0);
+        assert_eq!(req.from_currency, "USD");
+        assert_eq!(req.to_currency, "EUR");
+
+        // With explicit source currency: "$10 GBP to USD"
+        let result = try_parse_currency_conversion("$50 GBP to USD");
+        assert!(result.is_some());
+        let req = result.unwrap();
+        assert_eq!(req.amount, 50.0);
+        assert_eq!(req.from_currency, "GBP");
+        assert_eq!(req.to_currency, "USD");
+
+        // Currency code attached: "$100EUR to JPY"
+        let result = try_parse_currency_conversion("$100EUR to JPY");
+        assert!(result.is_some());
+        let req = result.unwrap();
+        assert_eq!(req.amount, 100.0);
+        assert_eq!(req.from_currency, "EUR");
+        assert_eq!(req.to_currency, "JPY");
+
+        // With "in" instead of "to"
+        let result = try_parse_currency_conversion("$25 in GBP");
+        assert!(result.is_some());
+        let req = result.unwrap();
+        assert_eq!(req.amount, 25.0);
+        assert_eq!(req.from_currency, "USD");
+        assert_eq!(req.to_currency, "GBP");
+
+        // Space after $
+        let result = try_parse_currency_conversion("$ 10 to EUR");
+        assert!(result.is_some());
+        let req = result.unwrap();
+        assert_eq!(req.amount, 10.0);
+        assert_eq!(req.from_currency, "USD");
+        assert_eq!(req.to_currency, "EUR");
+
+        // Case insensitive
+        let result = try_parse_currency_conversion("$10 eur to gbp");
+        assert!(result.is_some());
+        let req = result.unwrap();
+        assert_eq!(req.from_currency, "EUR");
+        assert_eq!(req.to_currency, "GBP");
+
+        // Decimal amount
+        let result = try_parse_currency_conversion("$25.50 to JPY");
+        assert!(result.is_some());
+        let req = result.unwrap();
+        assert_eq!(req.amount, 25.50);
+    }
+
+    #[test]
+    fn test_try_parse_currency_conversion_dollar_words() {
+        // Pattern: "$10 to euros"
+        let result = try_parse_currency_conversion("$10 to euros");
+        assert!(result.is_some());
+        let req = result.unwrap();
+        assert_eq!(req.amount, 10.0);
+        assert_eq!(req.from_currency, "USD");
+        assert_eq!(req.to_currency, "EUR");
+
+        // Pattern: "$50 euros to dollars"
+        let result = try_parse_currency_conversion("$50 euros to dollars");
+        assert!(result.is_some());
+        let req = result.unwrap();
+        assert_eq!(req.amount, 50.0);
+        assert_eq!(req.from_currency, "EUR");
+        assert_eq!(req.to_currency, "USD");
+
+        // Singular form
+        let result = try_parse_currency_conversion("$1 to pound");
+        assert!(result.is_some());
+        let req = result.unwrap();
+        assert_eq!(req.from_currency, "USD");
+        assert_eq!(req.to_currency, "GBP");
+    }
+
+    #[test]
+    fn test_try_parse_currency_conversion_invalid() {
+        // No $ prefix - should not match
+        assert!(try_parse_currency_conversion("10 USD to EUR").is_none());
+        assert!(try_parse_currency_conversion("USD 10 to EUR").is_none());
+        assert!(try_parse_currency_conversion("100 dollars to euros").is_none());
+
+        // Same currency
+        assert!(try_parse_currency_conversion("$10 USD to USD").is_none());
+
+        // Invalid currency code
+        assert!(try_parse_currency_conversion("$10 XYZ to EUR").is_none());
+
+        // Not a currency pattern
+        assert!(try_parse_currency_conversion("hello world").is_none());
+        assert!(try_parse_currency_conversion("10 + 5").is_none());
+        assert!(try_parse_currency_conversion("").is_none());
+
+        // Missing parts
+        assert!(try_parse_currency_conversion("$10 USD").is_none());
+        assert!(try_parse_currency_conversion("$to EUR").is_none());
+
+        // Just $ or $ with space (help query, not conversion)
+        assert!(try_parse_currency_conversion("$").is_none());
+        assert!(try_parse_currency_conversion("$ ").is_none());
+    }
+
+    #[test]
+    fn test_is_currency_help_query() {
+        assert!(is_currency_help_query("$"));
+        assert!(is_currency_help_query("$ "));
+        assert!(is_currency_help_query(" $ "));
+
+        assert!(!is_currency_help_query("$10"));
+        assert!(!is_currency_help_query("$10 to EUR"));
+        assert!(!is_currency_help_query(""));
+        assert!(!is_currency_help_query("hello"));
     }
 }
 

@@ -14,7 +14,7 @@ repository = "https://github.com/chmouel/raffi"
 
 [features]
 default = ["wayland"]
-wayland = ["iced"]
+wayland = ["iced", "ureq", "regex", "lazy_static"]
 
 [dependencies]
 anyhow = "1.0.100"
@@ -31,3 +31,6 @@ iced = { version = "0.14", features = [
   "svg",
 ], optional = true }
 meval = "0.2"
+ureq = { version = "3", features = ["json"], optional = true }
+regex = { version = "1.10", optional = true }
+lazy_static = { version = "1.4", optional = true }
