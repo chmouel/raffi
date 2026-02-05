@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
@@ -77,6 +78,13 @@ impl UI for WaylandUI {
 /// Shared state for capturing the selected item
 type SharedSelection = Arc<Mutex<Option<String>>>;
 
+/// Calculator result for math expression evaluation
+#[derive(Debug, Clone)]
+struct CalculatorResult {
+    expression: String,
+    result: f64,
+}
+
 /// The main application state
 struct LauncherApp {
     configs: Vec<RaffiConfig>,
@@ -90,6 +98,7 @@ struct LauncherApp {
     scrollable_id: ScrollableId,
     items_container_id: ContainerId,
     view_generation: u64,
+    calculator_result: Option<CalculatorResult>,
 }
 
 #[derive(Debug, Clone)]
@@ -100,6 +109,7 @@ enum Message {
     Submit,
     Cancel,
     ItemClicked(usize),
+    CalculatorSelected,
 }
 
 impl LauncherApp {
@@ -141,6 +151,7 @@ impl LauncherApp {
                 scrollable_id,
                 items_container_id,
                 view_generation: 0,
+                calculator_result: None,
             },
             focus(search_input_id),
         )
@@ -151,6 +162,7 @@ impl LauncherApp {
             Message::SearchChanged(query) => {
                 self.search_query = query.clone();
                 self.filter_items(&query);
+                self.calculator_result = try_evaluate_math(&query);
                 self.selected_index = 0;
                 // Regenerate IDs to force complete view refresh
                 self.scrollable_id = ScrollableId::unique();
@@ -159,18 +171,16 @@ impl LauncherApp {
                 Task::none()
             }
             Message::MoveUp => {
+                let total = self.total_items();
                 if self.selected_index > 0 {
                     self.selected_index -= 1;
-                } else {
+                } else if total > 0 {
                     // Wrap around to bottom
-                    if !self.filtered_configs.is_empty() {
-                        self.selected_index = self.filtered_configs.len() - 1;
-                    }
+                    self.selected_index = total - 1;
                 }
 
-                if self.filtered_configs.len() > 1 {
-                    let offset =
-                        self.selected_index as f32 / (self.filtered_configs.len() - 1) as f32;
+                if total > 1 {
+                    let offset = self.selected_index as f32 / (total - 1) as f32;
                     snap_to(
                         self.scrollable_id.clone(),
                         scrollable::RelativeOffset { x: 0.0, y: offset },
@@ -180,17 +190,17 @@ impl LauncherApp {
                 }
             }
             Message::MoveDown => {
+                let total = self.total_items();
                 // Move selection down
-                if self.selected_index < self.filtered_configs.len().saturating_sub(1) {
+                if self.selected_index < total.saturating_sub(1) {
                     self.selected_index += 1;
                 } else {
                     // Wrap around to top
                     self.selected_index = 0;
                 }
 
-                if self.filtered_configs.len() > 1 {
-                    let offset =
-                        self.selected_index as f32 / (self.filtered_configs.len() - 1) as f32;
+                if total > 1 {
+                    let offset = self.selected_index as f32 / (total - 1) as f32;
                     snap_to(
                         self.scrollable_id.clone(),
                         scrollable::RelativeOffset { x: 0.0, y: offset },
@@ -200,7 +210,19 @@ impl LauncherApp {
                 }
             }
             Message::Submit => {
-                if let Some(&config_idx) = self.filtered_configs.get(self.selected_index) {
+                // Check if calculator is selected (index 0 when calculator is shown)
+                if self.calculator_result.is_some() && self.selected_index == 0 {
+                    return self.update(Message::CalculatorSelected);
+                }
+
+                // Adjust index for config lookup when calculator is shown
+                let config_index = if self.calculator_result.is_some() {
+                    self.selected_index.saturating_sub(1)
+                } else {
+                    self.selected_index
+                };
+
+                if let Some(&config_idx) = self.filtered_configs.get(config_index) {
                     let config = &self.configs[config_idx];
                     let description = config
                         .description
@@ -222,8 +244,20 @@ impl LauncherApp {
             Message::ItemClicked(idx) => {
                 // Set the clicked item as selected and submit
                 self.selected_index = idx;
-                // Execute submit logic
-                if let Some(&config_idx) = self.filtered_configs.get(idx) {
+
+                // Check if calculator is clicked (index 0 when calculator is shown)
+                if self.calculator_result.is_some() && idx == 0 {
+                    return self.update(Message::CalculatorSelected);
+                }
+
+                // Adjust index for config lookup when calculator is shown
+                let config_index = if self.calculator_result.is_some() {
+                    idx.saturating_sub(1)
+                } else {
+                    idx
+                };
+
+                if let Some(&config_idx) = self.filtered_configs.get(config_index) {
                     let config = &self.configs[config_idx];
                     let description = config
                         .description
@@ -235,6 +269,24 @@ impl LauncherApp {
                     let count = self.mru_map.entry(description).or_insert(0);
                     *count += 1;
                     save_mru_map(&self.mru_map);
+                }
+                iced::exit()
+            }
+            Message::CalculatorSelected => {
+                if let Some(ref calc) = self.calculator_result {
+                    // Format the result nicely (remove trailing zeros for whole numbers)
+                    let result_str = if calc.result.fract() == 0.0 {
+                        format!("{}", calc.result as i64)
+                    } else {
+                        format!("{}", calc.result)
+                    };
+                    // Copy result to clipboard using wl-copy
+                    let _ = Command::new("wl-copy")
+                        .arg(&result_str)
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .spawn();
                 }
                 iced::exit()
             }
@@ -274,7 +326,70 @@ impl LauncherApp {
         // --- List Items ---
         let mut items_column = Column::new().spacing(6);
 
-        if self.filtered_configs.is_empty() {
+        // Track if calculator result is shown to offset config indices
+        let has_calculator = self.calculator_result.is_some();
+
+        // Add calculator result as first item if present
+        if let Some(ref calc) = self.calculator_result {
+            let result_str = if calc.result.fract() == 0.0 {
+                format!("{}", calc.result as i64)
+            } else {
+                format!("{}", calc.result)
+            };
+
+            let calc_text = format!("= {} = {}", calc.expression, result_str);
+            let calc_row = Row::new()
+                .spacing(16)
+                .align_y(iced::Alignment::Center)
+                .push(text(calc_text).size(20).color(COLOR_ACCENT));
+
+            let is_selected = self.selected_index == 0;
+
+            let calc_button = button(calc_row)
+                .on_press(Message::CalculatorSelected)
+                .padding(12)
+                .width(Length::Fill)
+                .style(move |_theme, status| {
+                    let base_style = button::Style {
+                        text_color: COLOR_ACCENT,
+                        border: iced::Border {
+                            radius: 8.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    };
+
+                    if is_selected {
+                        button::Style {
+                            background: Some(iced::Background::Color(COLOR_SELECTION_BG)),
+                            border: iced::Border {
+                                color: COLOR_ACCENT,
+                                width: 1.0,
+                                radius: 8.0.into(),
+                            },
+                            ..base_style
+                        }
+                    } else {
+                        match status {
+                            button::Status::Hovered => button::Style {
+                                background: Some(iced::Background::Color(iced::Color {
+                                    a: 0.1,
+                                    ..COLOR_ACCENT_HOVER
+                                })),
+                                ..base_style
+                            },
+                            _ => button::Style {
+                                background: None,
+                                ..base_style
+                            },
+                        }
+                    }
+                });
+
+            items_column = items_column.push(calc_button);
+        }
+
+        if self.filtered_configs.is_empty() && !has_calculator {
             let no_results = container(
                 text("No matching results found.")
                     .size(18)
@@ -289,6 +404,8 @@ impl LauncherApp {
             items_column = items_column.push(no_results);
         } else {
             for (idx, &config_idx) in self.filtered_configs.iter().enumerate() {
+                // Adjust display index when calculator is shown
+                let display_idx = if has_calculator { idx + 1 } else { idx };
                 let config = &self.configs[config_idx];
                 let description = config
                     .description
@@ -351,10 +468,10 @@ impl LauncherApp {
                 let text_widget = text(description).size(20).width(Length::Fill);
                 item_row = item_row.push(text_widget);
 
-                let is_selected = idx == self.selected_index;
+                let is_selected = display_idx == self.selected_index;
 
                 let item_button = button(item_row)
-                    .on_press(Message::ItemClicked(idx))
+                    .on_press(Message::ItemClicked(display_idx))
                     .padding(12)
                     .width(Length::Fill)
                     .style(move |_theme, status| {
@@ -472,6 +589,76 @@ impl LauncherApp {
             self.filtered_configs = fuzzy_match_configs(&self.configs, query);
         }
     }
+
+    fn total_items(&self) -> usize {
+        let calc_offset = if self.calculator_result.is_some() {
+            1
+        } else {
+            0
+        };
+        self.filtered_configs.len() + calc_offset
+    }
+}
+
+fn try_evaluate_math(query: &str) -> Option<CalculatorResult> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Check if expression looks like math: must contain an operator
+    let has_operator = trimmed.contains('+')
+        || trimmed.contains('-')
+        || trimmed.contains('*')
+        || trimmed.contains('/')
+        || trimmed.contains('^')
+        || trimmed.contains('%');
+
+    // Check for function calls like sqrt(), sin(), etc.
+    let has_function = trimmed.contains("sqrt")
+        || trimmed.contains("sin")
+        || trimmed.contains("cos")
+        || trimmed.contains("tan")
+        || trimmed.contains("log")
+        || trimmed.contains("ln")
+        || trimmed.contains("exp")
+        || trimmed.contains("abs")
+        || trimmed.contains("floor")
+        || trimmed.contains("ceil");
+
+    if !has_operator && !has_function {
+        return None;
+    }
+
+    // Check valid start: digit, '(', '-', or '.'
+    let first_char = trimmed.chars().next()?;
+    let valid_start =
+        first_char.is_ascii_digit() || first_char == '(' || first_char == '-' || first_char == '.';
+
+    // Also allow function names at the start
+    let starts_with_function = trimmed.starts_with("sqrt")
+        || trimmed.starts_with("sin")
+        || trimmed.starts_with("cos")
+        || trimmed.starts_with("tan")
+        || trimmed.starts_with("log")
+        || trimmed.starts_with("ln")
+        || trimmed.starts_with("exp")
+        || trimmed.starts_with("abs")
+        || trimmed.starts_with("floor")
+        || trimmed.starts_with("ceil");
+
+    if !valid_start && !starts_with_function {
+        return None;
+    }
+
+    // Try to evaluate
+    match meval::eval_str(trimmed) {
+        Ok(result) if result.is_finite() => Some(CalculatorResult {
+            expression: trimmed.to_string(),
+            result,
+        }),
+        _ => None,
+    }
 }
 
 fn fuzzy_match_configs(configs: &[RaffiConfig], query: &str) -> Vec<usize> {
@@ -548,6 +735,110 @@ mod tests {
         assert!(results.contains(&0)); // FirefOx
         assert!(results.contains(&1)); // GOOgle Chrome
         assert!(results.contains(&3)); // cOde
+    }
+
+    #[test]
+    fn test_try_evaluate_math_basic_operations() {
+        // Addition
+        let result = try_evaluate_math("2+2");
+        assert!(result.is_some());
+        assert_eq!(result.as_ref().unwrap().result, 4.0);
+
+        // Subtraction
+        let result = try_evaluate_math("10-3");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().result, 7.0);
+
+        // Multiplication
+        let result = try_evaluate_math("5*6");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().result, 30.0);
+
+        // Division
+        let result = try_evaluate_math("20/4");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().result, 5.0);
+
+        // Power
+        let result = try_evaluate_math("2^3");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().result, 8.0);
+
+        // Modulo
+        let result = try_evaluate_math("17%5");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().result, 2.0);
+    }
+
+    #[test]
+    fn test_try_evaluate_math_complex_expressions() {
+        // Parentheses
+        let result = try_evaluate_math("(10+5)*2");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().result, 30.0);
+
+        // Nested parentheses
+        let result = try_evaluate_math("((2+3)*4)-5");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().result, 15.0);
+
+        // Negative numbers
+        let result = try_evaluate_math("-5+10");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().result, 5.0);
+
+        // Decimals
+        let result = try_evaluate_math("3.5*2");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().result, 7.0);
+    }
+
+    #[test]
+    fn test_try_evaluate_math_functions() {
+        // sqrt
+        let result = try_evaluate_math("sqrt(16)");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().result, 4.0);
+
+        // abs
+        let result = try_evaluate_math("abs(-5)");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().result, 5.0);
+
+        // sin(0) should be 0
+        let result = try_evaluate_math("sin(0)");
+        assert!(result.is_some());
+        assert!((result.unwrap().result - 0.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_try_evaluate_math_not_math() {
+        // Regular text should not trigger calculator
+        assert!(try_evaluate_math("firefox").is_none());
+        assert!(try_evaluate_math("google chrome").is_none());
+        assert!(try_evaluate_math("hello world").is_none());
+
+        // Text with numbers but no operators
+        assert!(try_evaluate_math("firefox123").is_none());
+
+        // Empty string
+        assert!(try_evaluate_math("").is_none());
+
+        // Just whitespace
+        assert!(try_evaluate_math("   ").is_none());
+    }
+
+    #[test]
+    fn test_try_evaluate_math_invalid_expressions() {
+        // Division by zero produces infinity, should be rejected
+        let result = try_evaluate_math("1/0");
+        assert!(result.is_none());
+
+        // Invalid syntax - operator at start (no valid start character)
+        assert!(try_evaluate_math("*5").is_none());
+
+        // Text starting with letters should not match
+        assert!(try_evaluate_math("x+5").is_none());
     }
 }
 
