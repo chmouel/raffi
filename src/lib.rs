@@ -41,7 +41,7 @@ struct Config {
 pub enum UIType {
     Fuzzel,
     #[cfg(feature = "wayland")]
-    Wayland,
+    Native,
 }
 
 impl std::str::FromStr for UIType {
@@ -51,17 +51,17 @@ impl std::str::FromStr for UIType {
         match s.to_lowercase().as_str() {
             "fuzzel" => Ok(UIType::Fuzzel),
             #[cfg(feature = "wayland")]
-            "wayland" | "iced" => Ok(UIType::Wayland),
+            "native" | "wayland" | "iced" => Ok(UIType::Native),
             #[cfg(not(feature = "wayland"))]
-            "wayland" | "iced" => Err(
-                "Wayland UI is not available. Build with the 'wayland' feature to enable it."
+            "native" | "wayland" | "iced" => Err(
+                "Native UI is not available. Build with the 'wayland' feature to enable it."
                     .to_string(),
             ),
             _ => {
                 #[cfg(feature = "wayland")]
                 {
                     Err(format!(
-                        "Invalid UI type: {}. Valid options are: fuzzel, wayland",
+                        "Invalid UI type: {}. Valid options are: fuzzel, native",
                         s
                     ))
                 }
@@ -96,7 +96,7 @@ pub struct Args {
     )]
     pub default_script_shell: String,
     #[options(
-        help = "UI type to use: fuzzel, wayland (default: fuzzel)",
+        help = "UI type to use: fuzzel, native (default: fuzzel)",
         short = "u"
     )]
     pub ui_type: Option<String>,
@@ -406,7 +406,7 @@ pub fn run(args: Args) -> Result<()> {
     } else {
         #[cfg(feature = "wayland")]
         {
-            UIType::Wayland
+            UIType::Native
         }
         #[cfg(not(feature = "wayland"))]
         {

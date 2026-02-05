@@ -71,7 +71,7 @@ Common options:
 - `-c/--configfile <FILE>`: Specify a custom configuration file
 - `-r/--refresh-cache`: Refresh the cached icon paths
 - `-I/--disable-icons`: Run without icons (marginally faster)
-- `-u/--ui-type <TYPE>`: Select UI type (`fuzzel` or `wayland`, default: `fuzzel`)
+- `-u/--ui-type <TYPE>`: Select UI type (`fuzzel` or `native`, default: `fuzzel`)
 - `--default-script-shell <SHELL>`: Shell for scripts (default: `bash`)
 - `--version`: Show version
 - `--help`: Show all options
@@ -107,17 +107,27 @@ Raffi supports two UI options via the `--ui-type` flag:
 
 **Fuzzel** (default): External launcher using [Fuzzel](https://codeberg.org/dnkl/fuzzel). Good integration with Wayland.
 
-**Wayland**: Built-in GUI using the [iced](https://iced.rs/) framework. Displays a dark-themed window with fuzzy search. Navigation via arrow keys, `Enter` to select, `Esc` to cancel. Useful if you prefer a native window over an external launcher.
+**Native**: Built-in GUI using the [iced](https://iced.rs/) framework. Displays a dark-themed window with fuzzy search. Navigation via arrow keys, `Enter` to select, `Esc` to cancel. Useful if you prefer a native window over an external launcher.
 
-Example with Wayland UI in Sway:
+#### Calculator Feature (Native UI only)
+
+The Native UI includes a built-in calculator that automatically detects and evaluates math expressions as you type:
+
+- Type any math expression like `2+2`, `sqrt(16)`, or `(10+5)*2`
+- The result appears as the first item with accent color: `= 2 + 2 = 4`
+- Press `Enter` to copy the result to clipboard (requires `wl-copy`)
+- Supports basic operators: `+`, `-`, `*`, `/`, `^`, `%`
+- Supports functions: `sqrt()`, `sin()`, `cos()`, `tan()`, `log()`, `ln()`, `exp()`, `abs()`, `floor()`, `ceil()`
+
+Example with Native UI in Sway:
 
 ```config
 set $super Mod4
-bindsym $super+Space exec raffi -u wayland
+bindsym $super+Space exec raffi -u native
 for_window [app_id="com.chmouel.raffi"] floating enable, resize set 800 600, move position center
 ```
 
-<img width="2575" height="1978" alt="raffi-wayland" src="https://github.com/user-attachments/assets/843fdce9-bcb3-4fc0-8f05-0e4ce5131f6c" />
+<img width="2575" height="1978" alt="raffi-native" src="https://github.com/user-attachments/assets/843fdce9-bcb3-4fc0-8f05-0e4ce5131f6c" />
 
 ## Configuration
 

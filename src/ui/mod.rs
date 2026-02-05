@@ -20,7 +20,7 @@ pub fn get_ui(ui_type: UIType) -> Box<dyn UI> {
     match ui_type {
         UIType::Fuzzel => Box::new(FuzzelUI),
         #[cfg(feature = "wayland")]
-        UIType::Wayland => Box::new(WaylandUI),
+        UIType::Native => Box::new(WaylandUI),
     }
 }
 
