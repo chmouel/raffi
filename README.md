@@ -4,7 +4,7 @@
 
 ## Overview
 
-Raffi is a launcher that wraps the [Fuzzel](https://codeberg.org/dnkl/fuzzel) utility, allowing you to define commands and scripts in a YAML configuration file. It supports icons, custom arguments, conditional display, and script execution with configurable interpreters.
+Raffi is a launcher that wraps the [Fuzzel](https://codeberg.org/dnkl/fuzzel) utility (or via its own UI), letting you to define commands and scripts in a YAML configuration file. It supports icons, custom arguments, conditional display, and script execution with configurable interpreters.
 
 ## Installation
 
@@ -14,18 +14,6 @@ Visit the [release](https://github.com/chmouel/raffi/releases) page and download
 
 Ensure you have [Fuzzel](https://codeberg.org/dnkl/fuzzel) installed.
 
-### [Homebrew](https://homebrew.sh)
-
-```shell
-brew tap chmouel/raffi https://github.com/chmouel/raffi
-brew install raffi
-```
-
-### [Crates.io](https://crates.io/crates/raffi)
-
-```shell
-cargo install raffi
-```
 
 ### [Arch](https://aur.archlinux.org/packages/raffi-bin)
 
@@ -39,6 +27,19 @@ yay -S raffi-bin
 
 ```shell
 nix-shell -p raffi
+```
+
+### [LinuxBrew/Homebrew](https://homebrew.sh)
+
+```shell
+brew tap chmouel/raffi https://github.com/chmouel/raffi
+brew install raffi
+```
+
+### [Crates.io](https://crates.io/crates/raffi)
+
+```shell
+cargo install raffi
 ```
 
 ### [Source](https://github.com/chmouel/raffi)
