@@ -1,50 +1,37 @@
 # Raffi
 
-![image](https://github.com/chmouel/raffi/assets/98980/04d6af0f-2a80-47d5-a2ec-95443a629305)
-
-## Overview
-
-Raffi is a launcher that wraps the [Fuzzel](https://codeberg.org/dnkl/fuzzel) utility (or via its own UI), letting you to define commands and scripts in a YAML configuration file. It supports icons, custom arguments, conditional display, and script execution with configurable interpreters.
+Raffi is an application launcher designed to sit on top of Fuzzel, or, if preferred, operate using its own built‑in interface. It allows commands and scripts to be defined in a YAML configuration file, with support for icons, arguments, conditional visibility, and script execution through configurable interpreters.
 
 ## Installation
 
-### [Binaries](https://github.com/chmouel/raffi/releases)
+Prebuilt binaries are available from the GitHub releases page. Download the archive or package suitable for your platform. If you intend to use the default interface, Fuzzel must also be installed.
 
-Visit the [release](https://github.com/chmouel/raffi/releases) page and download the archive or package for your platform.
+On Arch Linux, Raffi can be installed from the AUR using a helper such as:
 
-Ensure you have [Fuzzel](https://codeberg.org/dnkl/fuzzel) installed.
-
-
-### [Arch](https://aur.archlinux.org/packages/raffi-bin)
-
-Using your preferred AUR helper, for example, [yay](https://github.com/Jguer/yay):
-
-```shell
+```sh
 yay -S raffi-bin
 ```
 
-### [NixOS / Nix](https://nixos.org) (unstable)
+On NixOS or using Nix (unstable channel):
 
-```shell
+```sh
 nix-shell -p raffi
 ```
 
-### [LinuxBrew/Homebrew](https://homebrew.sh)
+With LinuxBrew or Homebrew:
 
-```shell
+```sh
 brew tap chmouel/raffi https://github.com/chmouel/raffi
 brew install raffi
 ```
 
-### [Crates.io](https://crates.io/crates/raffi)
+From crates.io:
 
-```shell
+```sh
 cargo install raffi
 ```
 
-### [Source](https://github.com/chmouel/raffi)
-
-To install Raffi from source, clone the repository and build it using Cargo:
+To build from source:
 
 ```sh
 git clone https://github.com/chmouel/raffi.git
@@ -52,101 +39,73 @@ cd raffi
 cargo build --release
 ```
 
-#### Building Without Wayland UI
-
-If you only need the Fuzzel UI and want to reduce binary size significantly, build with the Native feature disabled:
+If you only require Fuzzel integration and want a significantly smaller binary, build without the native UI:
 
 ```sh
 cargo build --release --no-default-features
 ```
 
-This reduces the binary size from **15 MB** (with Native UI) to **1.1 MB** (93% smaller), as the Native UI depends on the heavy `iced` GUI framework. Use this option if you only plan to use Fuzzel or need a minimal installation.
+This reduces the binary from roughly 15 MB to around 1.1 MB by removing the iced GUI dependency.
 
 ## Usage
 
-Run `raffi` to launch the configured items through Fuzzel. The application will execute the selected entry according to your configuration.
+Running `raffi` launches configured entries through the selected interface. The chosen item is executed according to the configuration.
 
-Common options:
+Common options include:
 
-- `-p/--print-only`: Print the command instead of executing it
-- `-c/--configfile <FILE>`: Specify a custom configuration file
-- `-r/--refresh-cache`: Refresh the cached icon paths
-- `-I/--disable-icons`: Run without icons (marginally faster)
-- `-u/--ui-type <TYPE>`: Select UI type (`fuzzel` or `native`, default: `fuzzel`)
-- `--default-script-shell <SHELL>`: Shell for scripts (default: `bash`)
-- `--version`: Show version
-- `--help`: Show all options
+`-p` or `--print-only` prints the command rather than executing it.
+`-c` or `--configfile <FILE>` selects a custom configuration file.
+`-r` or `--refresh-cache` refreshes cached icon paths.
+`-I` or `--disable-icons` disables icons for slightly faster startup.
+`-u` or `--ui-type <TYPE>` selects `fuzzel` or `native` (default is `fuzzel`).
+`--default-script-shell <SHELL>` sets the default interpreter for scripts.
 
-### Integration with Window Managers
+## Window Manager Integration
 
-#### Sway
-
-Here is an example of how to use Raffi with Sway:
+### Sway
 
 ```config
-// Set a variable that can be easily used later in the config file
-// These variables are optional
 set $menu raffi -p
-
-// Mod4 is the Super key for me, but use whatever you want.
 set $super Mod4
-
-// Bind the Super+Space key to launch the launcher
 bindsym $super+Space exec $menu | xargs swaymsg exec --
 ```
 
-#### Hyprland
+### Hyprland
 
 ```conf
 $super = SUPER
 bind = $super, R, exec, (val=$(raffi -pI); echo $val | grep -q . && hyprctl dispatch exec "$val")
 ```
 
-### User Interface Options
+## User Interfaces
 
-Raffi supports two UI options via the `--ui-type` flag:
+Raffi supports two interface modes.
 
-**Fuzzel** (default): External launcher using [Fuzzel](https://codeberg.org/dnkl/fuzzel). Good integration on Wayland.
+Fuzzel mode uses the external Fuzzel launcher and integrates naturally with Wayland environments.
 
-**Native**: Built-in GUI using the [iced](https://iced.rs/) framework. Displays a dark-themed window with fuzzy search. Navigation via arrow keys, `Enter` to select, `Esc` to cancel. Useful if you prefer a native window over an external launcher.
+Native mode uses an internal iced‑based graphical interface with fuzzy search, keyboard navigation, and a dark theme. It is suitable if you prefer a self‑contained graphical window.
 
-#### Calculator Feature (Native UI only)
+### Native Interface Extras
 
-The Native UI includes a built-in calculator that automatically detects and evaluates math expressions as you type:
+The native interface includes a built‑in calculator which evaluates expressions as you type. Standard mathematical operators are supported, along with functions such as `sqrt`, `sin`, `cos`, `tan`, `log`, `ln`, `exp`, `abs`, `floor`, and `ceil`. Results can be copied to the clipboard using Enter, provided `wl-copy` is available.
 
-- Type any math expression like `2+2`, `sqrt(16)`, or `(10+5)*2`
-- The result appears as the first item with accent color: `= 2 + 2 = 4`
-- Press `Enter` to copy the result to clipboard (requires `wl-copy`)
-- Supports basic operators: `+`, `-`, `*`, `/`, `^`, `%`
-- Supports functions: `sqrt()`, `sin()`, `cos()`, `tan()`, `log()`, `ln()`, `exp()`, `abs()`, `floor()`, `ceil()`
+The native interface also includes a currency converter. Enter an amount prefixed with `$` followed by a target currency. Exchange rates are fetched from the Frankfurter API and cached for one hour.
 
-#### Currency Converter (Native UI only)
+Example inputs:
 
-Type `$` followed by an amount to convert currencies:
-
-- `$10 to eur` - convert 10 USD to EUR
-- `$50 gbp to usd` - convert 50 GBP to USD
-- `$100eur to jpy` - convert 100 EUR to JPY
-
-Type just `$` to see usage hints. Press `Enter` to copy the result to clipboard. Rates fetched from [Frankfurter API](https://frankfurter.dev/) and cached for 1 hour.
-
-#### Configuration Example
-
-Example with Native UI in Sway:
-
-```config
-set $super Mod4
-bindsym $super+Space exec raffi -u native
-for_window [app_id="com.chmouel.raffi"] floating enable, resize set 800 600, move position center
 ```
-
-<img width="2575" height="1978" alt="raffi-native" src="https://github.com/user-attachments/assets/843fdce9-bcb3-4fc0-8f05-0e4ce5131f6c" />
+$10 to eur
+$50 gbp to usd
+$100eur to jpy
+```
 
 ## Configuration
 
 ### Fuzzel Configuration
 
-Configure Fuzzel's appearance via `~/.config/fuzzel/fuzzel.ini`. See the [manpage](https://man.archlinux.org/man/fuzzel.ini.5.en) for options. Example:
+Fuzzel appearance can be configured through `~/.config/fuzzel/fuzzel.ini`. Refer to the [Fuzzel manual](https://man.archlinux.org/man/fuzzel.ini.5.en) for full details.
+
+Example:
 
 ```ini
 dpi-aware=yes
@@ -170,7 +129,13 @@ border=bd93f9ff
 
 ### Raffi Configuration
 
-Configuration goes in `$HOME/.config/raffi/raffi.yaml`. Basic example:
+Configuration is stored in:
+
+```
+$HOME/.config/raffi/raffi.yaml
+```
+
+Basic example:
 
 ```yaml
 firefox:
@@ -180,18 +145,18 @@ firefox:
   description: Firefox browser with marionette enabled
 ```
 
-Fields:
-
-- `binary`: The executable to run. Skipped if not in PATH.
-- `description`: Label shown in the launcher.
-- `args`: Command-line arguments as an array (optional).
-- `icon`: Icon name or full path (optional). Searched in standard directories. Icon paths are cached; refresh with `-r`.
-- `script`: Inline script to execute (see below).
-- `disabled`: Set to `true` to hide the entry.
+The `binary` field defines the executable. If the binary is not present in PATH, the entry is ignored.
+The `description` field defines the label shown in the launcher.
+The `args` field defines optional command‑line arguments.
+The `icon` field defines an icon name or absolute path. Icons are cached and can be refreshed with `-r`.
+The `script` field defines inline script content.
+The `disabled` field hides the entry when set to true.
 
 ### Scripts
 
-Define inline scripts instead of binaries. Scripts run via `bash` by default, or specify a different interpreter with `--default-script-shell`. Use the `binary` field to set the interpreter explicitly. Example:
+Entries can run inline scripts instead of binaries. Scripts use `bash` by default, or another interpreter if configured via `--default-script-shell` or by explicitly setting `binary`.
+
+Example:
 
 ```yaml
 hello_script:
@@ -202,7 +167,7 @@ hello_script:
   icon: "script"
 ```
 
-With a different interpreter:
+Python example:
 
 ```yaml
 hello_script:
@@ -215,27 +180,11 @@ hello_script:
   icon: "script"
 ```
 
-With interpreter arguments:
-
-```yaml
-hello_script:
-  binary: sh
-  args: ["-xv"]
-  script: |
-    echo "hello world and show me your env"
-    env
-  description: "Hello debug"
-  icon: "script"
-```
-
 ### Conditional Display
 
-Entries can be shown or hidden based on conditions. Conditions are optional and cannot be combined.
+Entries can be shown or hidden based on simple conditions. Only one condition is supported per entry.
 
-- `ifexist`: Show if binary exists in PATH or at full path.
-- `ifenvset`: Show if environment variable is set.
-- `ifenvnotset`: Show if environment variable is not set.
-- `ifenveq`: Show if environment variable equals a specified value.
+Conditions include checking whether a binary exists, whether an environment variable is set, not set, or equal to a specific value.
 
 Example:
 
@@ -245,26 +194,26 @@ ifenvset: WAYLAND_DISPLAY
 ifexist: firefox
 ```
 
-See the file located in [examples/raffi.yaml](./examples/raffi.yaml) for a more comprehensive example.
-
 ## Development
 
-Contributions welcome. For issues, feature requests, or pull requests, see the [GitHub repository](https://github.com/chmouel/raffi).
+Contributions are welcome. Issues, feature requests, and pull requests can be submitted via GitHub.
 
-To set up pre-commit hooks that run `cargo clippy` before pushing:
+To enable pre‑commit hooks that run `cargo clippy` before pushing:
 
 ```sh
 pip install pre-commit
 pre-commit install
 ```
 
-## License
+## Licence
 
-This project is licensed under the MIT License.
+This project is released under the MIT Licence.
 
-## Authors
+## Author
 
-- Chmouel Boudjnah <https://github.com/chmouel>
-  - Fediverse - <[@chmouel@fosstodon.org](https://fosstodon.org/@chmouel)>
-  - Twitter - <[@chmouel](https://twitter.com/chmouel)>
-  - Blog - <[https://blog.chmouel.com](https://blog.chmouel.com)>
+Chmouel Boudjnah
+
+GitHub: [https://github.com/chmouel](https://github.com/chmouel)
+Fediverse: [https://fosstodon.org/@chmouel](https://fosstodon.org/@chmouel)
+Twitter: [https://twitter.com/chmouel](https://twitter.com/chmouel)
+Blog: [https://blog.chmouel.com](https://blog.chmouel.com)
