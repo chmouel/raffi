@@ -6,13 +6,13 @@ use std::{
 use anyhow::{Context, Result};
 
 use super::UI;
-use crate::{read_icon_map, RaffiConfig};
+use crate::{read_icon_map, AddonsConfig, RaffiConfig};
 
 /// Fuzzel-based UI implementation
 pub struct FuzzelUI;
 
 impl UI for FuzzelUI {
-    fn show(&self, configs: &[RaffiConfig], no_icons: bool) -> Result<String> {
+    fn show(&self, configs: &[RaffiConfig], _addons: &AddonsConfig, no_icons: bool) -> Result<String> {
         let input = make_fuzzel_input(configs, no_icons)?;
         run_fuzzel_with_input(&input)
     }

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-use crate::{RaffiConfig, UIType};
+use crate::{AddonsConfig, RaffiConfig, UIType};
 
 mod fuzzel;
 #[cfg(feature = "wayland")]
@@ -13,7 +13,7 @@ use self::fuzzel::FuzzelUI;
 use self::wayland::WaylandUI;
 
 pub trait UI {
-    fn show(&self, configs: &[RaffiConfig], no_icons: bool) -> Result<String>;
+    fn show(&self, configs: &[RaffiConfig], addons: &AddonsConfig, no_icons: bool) -> Result<String>;
 }
 
 pub fn get_ui(ui_type: UIType) -> Box<dyn UI> {

@@ -23,7 +23,7 @@ type ScrollableId = Id;
 type TextInputId = Id;
 
 use super::UI;
-use crate::{read_icon_map, RaffiConfig};
+use crate::{read_icon_map, AddonsConfig, RaffiConfig};
 
 // --- Theme Colors (Dracula-ish with transparency) ---
 const COLOR_BG_BASE: iced::Color = iced::Color {
@@ -74,8 +74,8 @@ const COLOR_BORDER: iced::Color = iced::Color {
 pub struct WaylandUI;
 
 impl UI for WaylandUI {
-    fn show(&self, configs: &[RaffiConfig], no_icons: bool) -> Result<String> {
-        run_wayland_ui(configs, no_icons)
+    fn show(&self, configs: &[RaffiConfig], addons: &AddonsConfig, no_icons: bool) -> Result<String> {
+        run_wayland_ui(configs, addons, no_icons)
     }
 }
 
@@ -275,6 +275,7 @@ struct LauncherApp {
     scrollable_id: ScrollableId,
     items_container_id: ContainerId,
     view_generation: u64,
+    addons: AddonsConfig,
     calculator_result: Option<CalculatorResult>,
     currency_result: Option<CurrencyResult>,
     currency_loading: bool,
@@ -303,6 +304,7 @@ enum Message {
 impl LauncherApp {
     fn new(
         mut configs: Vec<RaffiConfig>,
+        addons: AddonsConfig,
         no_icons: bool,
         selected_item: SharedSelection,
     ) -> (Self, Task<Message>) {
@@ -339,6 +341,7 @@ impl LauncherApp {
                 scrollable_id,
                 items_container_id,
                 view_generation: 0,
+                addons,
                 calculator_result: None,
                 currency_result: None,
                 currency_loading: false,
@@ -356,15 +359,19 @@ impl LauncherApp {
             Message::SearchChanged(query) => {
                 self.search_query = query.clone();
                 self.filter_items(&query);
-                self.calculator_result = try_evaluate_math(&query);
+                self.calculator_result = if self.addons.calculator.enabled {
+                    try_evaluate_math(&query)
+                } else {
+                    None
+                };
                 self.selected_index = 0;
                 // Regenerate IDs to force complete view refresh
                 self.scrollable_id = ScrollableId::unique();
                 self.items_container_id = ContainerId::unique();
                 self.view_generation = self.view_generation.wrapping_add(1);
 
-                // Check for currency help (just "$")
-                self.currency_help = is_currency_help_query(&query);
+                // Check for currency help (just "$") - only if currency addon is enabled
+                self.currency_help = self.addons.currency.enabled && is_currency_help_query(&query);
 
                 if self.currency_help {
                     self.currency_result = None;
@@ -374,37 +381,45 @@ impl LauncherApp {
                     return Task::none();
                 }
 
-                // Check for currency conversion request
-                if let Some(currency_request) = try_parse_currency_conversion(&query) {
-                    let cache_key = format!(
-                        "{}_{}",
-                        currency_request.from_currency, currency_request.to_currency
-                    );
+                // Check for currency conversion request - only if currency addon is enabled
+                if self.addons.currency.enabled {
+                    if let Some(currency_request) = try_parse_currency_conversion(&query) {
+                        let cache_key = format!(
+                            "{}_{}",
+                            currency_request.from_currency, currency_request.to_currency
+                        );
 
-                    // Check cache first
-                    if let Some(cached) = self.currency_cache.get(&cache_key) {
-                        if cached.is_valid() {
-                            let converted_amount = currency_request.amount * cached.rate;
-                            self.currency_result = Some(CurrencyResult {
-                                request: currency_request,
-                                converted_amount,
-                                rate: cached.rate,
-                            });
-                            self.currency_loading = false;
-                            self.currency_error = None;
-                            self.pending_currency_request = None;
-                            return Task::none();
+                        // Check cache first
+                        if let Some(cached) = self.currency_cache.get(&cache_key) {
+                            if cached.is_valid() {
+                                let converted_amount = currency_request.amount * cached.rate;
+                                self.currency_result = Some(CurrencyResult {
+                                    request: currency_request,
+                                    converted_amount,
+                                    rate: cached.rate,
+                                });
+                                self.currency_loading = false;
+                                self.currency_error = None;
+                                self.pending_currency_request = None;
+                                return Task::none();
+                            }
                         }
-                    }
 
-                    // Need to fetch from API
-                    self.currency_loading = true;
-                    self.currency_result = None;
-                    self.currency_error = None;
-                    self.pending_currency_request = Some(currency_request.clone());
-                    return fetch_exchange_rate(currency_request);
+                        // Need to fetch from API
+                        self.currency_loading = true;
+                        self.currency_result = None;
+                        self.currency_error = None;
+                        self.pending_currency_request = Some(currency_request.clone());
+                        return fetch_exchange_rate(currency_request);
+                    } else {
+                        // Clear currency state if no conversion request
+                        self.currency_result = None;
+                        self.currency_loading = false;
+                        self.currency_error = None;
+                        self.pending_currency_request = None;
+                    }
                 } else {
-                    // Clear currency state if no conversion request
+                    // Currency addon disabled - clear any currency state
                     self.currency_result = None;
                     self.currency_loading = false;
                     self.currency_error = None;
@@ -1480,22 +1495,16 @@ fn save_mru_map(map: &HashMap<String, u32>) {
 }
 
 /// Run the Wayland UI with the provided configurations and return the selected item.
-fn run_wayland_ui(configs: &[RaffiConfig], no_icons: bool) -> Result<String> {
+fn run_wayland_ui(configs: &[RaffiConfig], addons: &AddonsConfig, no_icons: bool) -> Result<String> {
     let selected_item: SharedSelection = Arc::new(Mutex::new(None));
     let selected_item_clone = selected_item.clone();
 
-    // Clone configs to own them for the 'static lifetime requirement
+    // Clone configs and addons to own them for the 'static lifetime requirement
     let configs_owned = configs.to_vec();
-
-    fn new_app(
-        configs_owned: Vec<RaffiConfig>,
-        no_icons: bool,
-        selected_item_clone: SharedSelection,
-    ) -> (LauncherApp, Task<Message>) {
-        LauncherApp::new(configs_owned, no_icons, selected_item_clone)
-    }
+    let addons_owned = addons.clone();
 
     let configs_for_new = configs_owned.clone();
+    let addons_for_new = addons_owned.clone();
     let selected_item_for_new = selected_item_clone.clone();
 
     let window_settings = window::Settings {
@@ -1517,8 +1526,9 @@ fn run_wayland_ui(configs: &[RaffiConfig], no_icons: bool) -> Result<String> {
 
     let result = iced::application(
         move || {
-            new_app(
+            LauncherApp::new(
                 configs_for_new.clone(),
+                addons_for_new.clone(),
                 no_icons,
                 selected_item_for_new.clone(),
             )

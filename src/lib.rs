@@ -29,11 +29,63 @@ pub struct RaffiConfig {
     pub script: Option<String>,
 }
 
+/// Configuration for the currency addon
+#[derive(Deserialize, Debug, Clone)]
+pub struct CurrencyAddonConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub currencies: Option<Vec<String>>,
+}
+
+impl Default for CurrencyAddonConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            currencies: None,
+        }
+    }
+}
+
+/// Configuration for the calculator addon
+#[derive(Deserialize, Debug, Clone)]
+pub struct CalculatorAddonConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for CalculatorAddonConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// Container for all addon configurations
+#[derive(Deserialize, Debug, Clone, Default)]
+pub struct AddonsConfig {
+    #[serde(default)]
+    pub currency: CurrencyAddonConfig,
+    #[serde(default)]
+    pub calculator: CalculatorAddonConfig,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Complete parsed configuration
+pub struct ParsedConfig {
+    pub addons: AddonsConfig,
+    pub entries: Vec<RaffiConfig>,
+}
+
 /// Represents the top-level configuration structure.
 #[derive(Deserialize)]
 struct Config {
+    #[serde(default)]
+    addons: AddonsConfig,
     #[serde(flatten)]
-    toplevel: HashMap<String, Value>,
+    entries: HashMap<String, Value>,
 }
 
 /// UI type selection
@@ -206,17 +258,17 @@ fn get_icon_map() -> Result<HashMap<String, String>> {
     Ok(icon_map)
 }
 
-/// Read the configuration file and return a list of RaffiConfig.
-pub fn read_config(filename: &str, args: &Args) -> Result<Vec<RaffiConfig>> {
+/// Read the configuration file and return a ParsedConfig.
+pub fn read_config(filename: &str, args: &Args) -> Result<ParsedConfig> {
     let file = File::open(filename).context(format!("cannot open config file {filename}"))?;
     read_config_from_reader(file, args)
 }
 
-pub fn read_config_from_reader<R: Read>(reader: R, args: &Args) -> Result<Vec<RaffiConfig>> {
+pub fn read_config_from_reader<R: Read>(reader: R, args: &Args) -> Result<ParsedConfig> {
     let config: Config = serde_yaml::from_reader(reader).context("cannot parse config")?;
     let mut rafficonfigs = Vec::new();
 
-    for value in config.toplevel.values() {
+    for value in config.entries.values() {
         if value.is_mapping() {
             let mut mc: RaffiConfig = serde_yaml::from_value(value.clone())
                 .context("cannot parse config entry".to_string())?;
@@ -228,7 +280,10 @@ pub fn read_config_from_reader<R: Read>(reader: R, args: &Args) -> Result<Vec<Ra
             rafficonfigs.push(mc);
         }
     }
-    Ok(rafficonfigs)
+    Ok(ParsedConfig {
+        addons: config.addons,
+        entries: rafficonfigs,
+    })
 }
 
 /// Validate the RaffiConfig based on various conditions.
@@ -386,9 +441,9 @@ pub fn run(args: Args) -> Result<()> {
     );
     let configfile = args.configfile.as_deref().unwrap_or(&default_config_path);
 
-    let rafficonfigs = read_config(configfile, &args).context("Failed to read config")?;
+    let parsed_config = read_config(configfile, &args).context("Failed to read config")?;
 
-    if rafficonfigs.is_empty() {
+    if parsed_config.entries.is_empty() {
         eprintln!("No valid configurations found in {configfile}");
         std::process::exit(1);
     }
@@ -416,14 +471,14 @@ pub fn run(args: Args) -> Result<()> {
     // Get the appropriate UI implementation
     let ui = ui::get_ui(ui_type);
     let chosen = ui
-        .show(&rafficonfigs, args.no_icons)
+        .show(&parsed_config.entries, &parsed_config.addons, args.no_icons)
         .context("Failed to show UI")?;
 
     let chosen_name = chosen.trim();
     if chosen_name.is_empty() {
         std::process::exit(0);
     }
-    let mc = rafficonfigs
+    let mc = parsed_config.entries
         .iter()
         .find(|mc| {
             mc.description.as_deref() == Some(chosen_name)
@@ -468,8 +523,12 @@ mod tests {
             default_script_shell: "bash".to_string(),
             ui_type: None,
         };
-        let configs = read_config_from_reader(reader, &args).unwrap();
-        assert_eq!(configs.len(), 2);
+        let parsed_config = read_config_from_reader(reader, &args).unwrap();
+        assert_eq!(parsed_config.entries.len(), 2);
+
+        // Addons should default to enabled
+        assert!(parsed_config.addons.currency.enabled);
+        assert!(parsed_config.addons.calculator.enabled);
 
         let expected_configs = vec![
             RaffiConfig {
@@ -485,8 +544,43 @@ mod tests {
         ];
 
         for expected_config in &expected_configs {
-            assert!(configs.contains(expected_config));
+            assert!(parsed_config.entries.contains(expected_config));
         }
+    }
+
+    #[test]
+    fn test_addons_config_parsing() {
+        let yaml_config = r#"
+        addons:
+          currency:
+            enabled: true
+            currencies: ["USD", "EUR", "GBP"]
+          calculator:
+            enabled: false
+        firefox:
+          binary: firefox
+          description: "Firefox browser"
+        "#;
+        let reader = Cursor::new(yaml_config);
+        let args = Args {
+            help: false,
+            version: false,
+            configfile: None,
+            print_only: false,
+            refresh_cache: false,
+            no_icons: true,
+            default_script_shell: "bash".to_string(),
+            ui_type: None,
+        };
+        let parsed_config = read_config_from_reader(reader, &args).unwrap();
+
+        assert!(parsed_config.addons.currency.enabled);
+        assert!(!parsed_config.addons.calculator.enabled);
+        assert_eq!(
+            parsed_config.addons.currency.currencies,
+            Some(vec!["USD".to_string(), "EUR".to_string(), "GBP".to_string()])
+        );
+        assert_eq!(parsed_config.entries.len(), 1);
     }
 
     struct MockEnvProvider {

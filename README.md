@@ -196,6 +196,24 @@ ifenvset: WAYLAND_DISPLAY
 ifexist: firefox
 ```
 
+### Addon Configuration
+
+The native interface includes optional addons for calculations and currency conversion. These are enabled by default and can be configured or disabled.
+
+```yaml
+addons:
+  currency:
+    enabled: true
+    currencies: ["USD", "EUR", "GBP"]
+  calculator:
+    enabled: true
+```
+
+The `enabled` field controls whether the addon is active.
+The `currencies` field for the currency addon defines which currencies are available for conversion.
+
+Both addons are enabled by default. Omitting the `addons` section preserves this behaviour.
+
 ## Development
 
 Contributions are welcome. Issues, feature requests, and pull requests can be submitted via GitHub.
