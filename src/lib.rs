@@ -36,6 +36,10 @@ pub struct CurrencyAddonConfig {
     pub enabled: bool,
     #[serde(default)]
     pub currencies: Option<Vec<String>>,
+    #[serde(default)]
+    pub default_currency: Option<String>,
+    #[serde(default)]
+    pub trigger: Option<String>,
 }
 
 impl Default for CurrencyAddonConfig {
@@ -43,6 +47,8 @@ impl Default for CurrencyAddonConfig {
         Self {
             enabled: true,
             currencies: None,
+            default_currency: None,
+            trigger: None,
         }
     }
 }
@@ -478,7 +484,8 @@ pub fn run(args: Args) -> Result<()> {
     if chosen_name.is_empty() {
         std::process::exit(0);
     }
-    let mc = parsed_config.entries
+    let mc = parsed_config
+        .entries
         .iter()
         .find(|mc| {
             mc.description.as_deref() == Some(chosen_name)
@@ -578,7 +585,11 @@ mod tests {
         assert!(!parsed_config.addons.calculator.enabled);
         assert_eq!(
             parsed_config.addons.currency.currencies,
-            Some(vec!["USD".to_string(), "EUR".to_string(), "GBP".to_string()])
+            Some(vec![
+                "USD".to_string(),
+                "EUR".to_string(),
+                "GBP".to_string()
+            ])
         );
         assert_eq!(parsed_config.entries.len(), 1);
     }
