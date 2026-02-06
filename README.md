@@ -1,6 +1,8 @@
-# Raffi
+# Raffi Application Launcher
 
 Raffi is an application launcher designed to sit on top of Fuzzel, or, if preferred, operate using its own built‑in interface. It allows commands and scripts to be defined in a YAML configuration file, with support for icons, arguments, conditional visibility, and script execution through configurable interpreters.
+
+![image](https://github.com/chmouel/raffi/assets/98980/04d6af0f-2a80-47d5-a2ec-95443a629305)
 
 ## Installation
 
@@ -213,7 +215,7 @@ This project is released under the MIT Licence.
 
 Chmouel Boudjnah
 
-GitHub: [https://github.com/chmouel](https://github.com/chmouel)
-Fediverse: [https://fosstodon.org/@chmouel](https://fosstodon.org/@chmouel)
-Twitter: [https://twitter.com/chmouel](https://twitter.com/chmouel)
-Blog: [https://blog.chmouel.com](https://blog.chmouel.com)
+- GitHub: [https://github.com/chmouel](https://github.com/chmouel)
+- Fediverse: [https://fosstodon.org/@chmouel](https://fosstodon.org/@chmouel)
+- Twitter: [https://twitter.com/chmouel](https://twitter.com/chmouel)
+- Blog: [https://blog.chmouel.com](https://blog.chmouel.com)
