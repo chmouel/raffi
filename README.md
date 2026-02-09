@@ -90,10 +90,12 @@ Native mode uses an internal iced‑based graphical interface with fuzzy search,
 ### Native Interface Extras
 
 #### Calculator
+
 <img align="right" width="522" height="150" alt="image" src="https://github.com/user-attachments/assets/eb7069c9-21f7-413d-b455-c2db186591d5" />
 The native interface includes a built‑in calculator which evaluates expressions as you type. Standard mathematical operators are supported, along with functions such as `sqrt`, `sin`, `cos`, `tan`, `log`, `ln`, `exp`, `abs`, `floor`, and `ceil`. Results can be copied to the clipboard using Enter, provided `wl-copy` is available.
 
 #### Currency Converter
+
 <img align="right" width="522" height="150" alt="image" src="https://github.com/user-attachments/assets/aaf35e3f-1cef-4604-b87a-ecfa626300c1" />
 
 The native interface also includes a currency converter.
@@ -121,48 +123,7 @@ passed as the final argument. The script must print JSON to stdout. On selection
 item's `arg` value (or `title` if `arg` is absent) is copied to the clipboard using
 `wl-copy`.
 
-Script filters are configured under `addons.script_filters`, here is an example the [batz](https://github.com/chmouel/batzconverter) 
-time converter (as shown on screenshot):
-
-```yaml
-addons:
-  script_filters:
-    - name: "Timezones"
-      keyword: "tz"
-      command: "batz"
-      args: ["-j"]
-      icon: "clock"
-```
-
-| Field     | Required | Description                                      |
-|-----------|----------|--------------------------------------------------|
-| `name`    | yes      | Display name shown during loading                |
-| `keyword` | yes      | Text that activates the script filter            |
-| `command` | yes      | Executable to run                                |
-| `args`    | no       | Arguments passed before the query                |
-| `icon`    | no       | Fallback icon name for results without their own |
-
-The script must output JSON matching this structure (a subset of Alfred's format):
-
-```json
-{
-  "items": [
-    {
-      "title": "New York",
-      "subtitle": "EST (UTC-5) — 14:30",
-      "arg": "America/New_York",
-      "icon": { "path": "/usr/share/icons/clock.png" }
-    }
-  ]
-}
-```
-
-| Field          | Required | Description                                     |
-|----------------|----------|-------------------------------------------------|
-| `title`        | yes      | Main text displayed for the item                |
-| `subtitle`     | no       | Secondary text shown below the title            |
-| `arg`          | no       | Value copied to clipboard (falls back to title) |
-| `icon.path`    | no       | Absolute path to a PNG or SVG icon              |
+See below for the `addons` configuration.
 
 ## Configuration
 
@@ -280,6 +241,60 @@ The `default_currency` field sets the source currency used when none is specifie
 The `currencies` field for the currency addon defines which currencies are available for conversion.
 
 Both addons are enabled by default. Omitting the `addons` section preserves this behaviour.
+
+Script filters are configured under `addons.script_filters`, here is an example the [batz](https://github.com/chmouel/batzconverter)
+time converter (as shown on screenshot):
+
+#### Script filters configuration
+
+Here is an example using the [batz](https://github.com/chmouel/batzconverter)
+time converter (as shown on screenshot).
+
+```yaml
+addons:
+  script_filters:
+    - name: "Timezones"
+      keyword: "tz"
+      command: "batz"
+      args: ["-j"]
+      icon: "clock"
+```
+
+This will parse the output of `batz -j` and display it in the launcher when the
+user types `tz` followed by a query. The script must output JSON in the format
+described below.
+
+Here is the meaning of each field in the script filter configuration:
+
+| Field     | Required | Description                                      |
+|-----------|----------|--------------------------------------------------|
+| `name`    | yes      | Display name shown during loading                |
+| `keyword` | yes      | Text that activates the script filter            |
+| `command` | yes      | Executable to run                                |
+| `args`    | no       | Arguments passed before the query                |
+| `icon`    | no       | Fallback icon name for results without their own |
+
+The script must output JSON matching this structure (a subset of Alfred's format):
+
+```json
+{
+  "items": [
+    {
+      "title": "New York",
+      "subtitle": "EST (UTC-5) — 14:30",
+      "arg": "America/New_York",
+      "icon": { "path": "/usr/share/icons/clock.png" }
+    }
+  ]
+}
+```
+
+| Field          | Required | Description                                     |
+|----------------|----------|-------------------------------------------------|
+| `title`        | yes      | Main text displayed for the item                |
+| `subtitle`     | no       | Secondary text shown below the title            |
+| `arg`          | no       | Value copied to clipboard (falls back to title) |
+| `icon.path`    | no       | Absolute path to a PNG or SVG icon              |
 
 ## Development
 
