@@ -121,7 +121,8 @@ passed as the final argument. The script must print JSON to stdout. On selection
 item's `arg` value (or `title` if `arg` is absent) is copied to the clipboard using
 `wl-copy`.
 
-Script filters are configured under `addons.script_filters`:
+Script filters are configured under `addons.script_filters`, here is an example the [batz](https://github.com/chmouel/batzconverter) 
+time converter (as shown on screenshot):
 
 ```yaml
 addons:
@@ -162,9 +163,6 @@ The script must output JSON matching this structure (a subset of Alfred's format
 | `subtitle`     | no       | Secondary text shown below the title            |
 | `arg`          | no       | Value copied to clipboard (falls back to title) |
 | `icon.path`    | no       | Absolute path to a PNG or SVG icon              |
-
-For a complete time zone conversion tool which can be used as a script filter,
-see [batz](https://github.com/chmouel/batzconverter).
 
 ## Configuration
 
