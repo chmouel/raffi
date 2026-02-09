@@ -66,6 +66,17 @@ impl Default for CalculatorAddonConfig {
     }
 }
 
+/// Configuration for a script filter addon
+#[derive(Deserialize, Debug, Clone)]
+pub struct ScriptFilterConfig {
+    pub name: String,
+    pub command: String,
+    pub keyword: String,
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
 /// Container for all addon configurations
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct AddonsConfig {
@@ -73,6 +84,8 @@ pub struct AddonsConfig {
     pub currency: CurrencyAddonConfig,
     #[serde(default)]
     pub calculator: CalculatorAddonConfig,
+    #[serde(default)]
+    pub script_filters: Vec<ScriptFilterConfig>,
 }
 
 fn default_true() -> bool {

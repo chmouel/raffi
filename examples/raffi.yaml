@@ -13,7 +13,10 @@ thunar:
   description: "Thunar"
 
 rbw-pass:
-  args: ["--selector wofi --clipboarder wl-copy --action copy-password --typer xdotool"]
+  args:
+    [
+      "--selector wofi --clipboarder wl-copy --action copy-password --typer xdotool",
+    ]
   binary: rofi-rbw
   description: "Password Manager"
   icon: password-manager
@@ -85,7 +88,16 @@ ssh-bootstrap:
 
 google-meet:
   binary: jumpapp
-  args: ["-t", "^(Google Meet$|Meet$|Meet -)", "-i", "google-chrome", "/opt/google/chrome/google-chrome", "--profile-directory=Default", "--app-id=kjgfgldnnfoeklkmfkjfagphfepbbdan"]
+  args:
+    [
+      "-t",
+      "^(Google Meet$|Meet$|Meet -)",
+      "-i",
+      "google-chrome",
+      "/opt/google/chrome/google-chrome",
+      "--profile-directory=Default",
+      "--app-id=kjgfgldnnfoeklkmfkjfagphfepbbdan",
+    ]
   description: "Google Meet"
   icon: "google-meet"
   disabled: true
@@ -102,7 +114,17 @@ add-org-note:
   icon: writenote
 
 calculate:
-  args: ["-modi", "calc:qalc +u8", "-show", "calc", "-theme", "mounch", "-theme-str", '* { width: 640; height: 400;}']
+  args:
+    [
+      "-modi",
+      "calc:qalc +u8",
+      "-show",
+      "calc",
+      "-theme",
+      "mounch",
+      "-theme-str",
+      "* { width: 640; height: 400;}",
+    ]
   binary: rofi
   description: "Calculate"
   icon: calc
@@ -315,3 +337,12 @@ screenshot-stop-recording:
   binary: sway-screenshot
   icon: stoprecording
   ifenvset: SWAYSOCK
+
+addons:
+  script_filters:
+    # grab batz from https://github.com/chmouel/batzconverter
+    - name: "Timezones"
+      keyword: "tz"
+      command: "batz"
+      args: ["-j"]
+      icon: "clock"

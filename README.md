@@ -89,9 +89,14 @@ Native mode uses an internal iced‑based graphical interface with fuzzy search,
 
 ### Native Interface Extras
 
+#### Calculator
+
 The native interface includes a built‑in calculator which evaluates expressions as you type. Standard mathematical operators are supported, along with functions such as `sqrt`, `sin`, `cos`, `tan`, `log`, `ln`, `exp`, `abs`, `floor`, and `ceil`. Results can be copied to the clipboard using Enter, provided `wl-copy` is available.
 
-The native interface also includes a currency converter. Enter an amount prefixed with the configured trigger (default `$`) followed by a target currency. Exchange rates are fetched from the Frankfurter API and cached for one hour.
+#### Currency Converter
+
+The native interface also includes a currency converter.
+Enter an amount prefixed with the configured trigger (default `$`) followed by a target currency. Exchange rates are fetched from the Frankfurter API and cached for one hour.
 
 Example inputs:
 
@@ -101,6 +106,62 @@ $50 gbp to usd
 $100eur to jpy
 €10 to usd    (with trigger set to €)
 ```
+
+#### Dynamic Script Filters
+
+The native interface supports script filters, which allow external commands to provide
+dynamic results in the launcher. This feature uses a subset of the
+[Alfred Script Filter JSON format](https://www.alfredapp.com/help/workflows/inputs/script-filter/json/).
+
+When the configured keyword is typed, the script is executed with the remaining input
+passed as the final argument. The script must print JSON to stdout. On selection, the
+item's `arg` value (or `title` if `arg` is absent) is copied to the clipboard using
+`wl-copy`.
+
+Script filters are configured under `addons.script_filters`:
+
+```yaml
+addons:
+  script_filters:
+    - name: "Timezones"
+      keyword: "tz"
+      command: "batz"
+      args: ["-j"]
+      icon: "clock"
+```
+
+| Field     | Required | Description                                      |
+|-----------|----------|--------------------------------------------------|
+| `name`    | yes      | Display name shown during loading                |
+| `keyword` | yes      | Text that activates the script filter            |
+| `command` | yes      | Executable to run                                |
+| `args`    | no       | Arguments passed before the query                |
+| `icon`    | no       | Fallback icon name for results without their own |
+
+The script must output JSON matching this structure (a subset of Alfred's format):
+
+```json
+{
+  "items": [
+    {
+      "title": "New York",
+      "subtitle": "EST (UTC-5) — 14:30",
+      "arg": "America/New_York",
+      "icon": { "path": "/usr/share/icons/clock.png" }
+    }
+  ]
+}
+```
+
+| Field          | Required | Description                                     |
+|----------------|----------|-------------------------------------------------|
+| `title`        | yes      | Main text displayed for the item                |
+| `subtitle`     | no       | Secondary text shown below the title            |
+| `arg`          | no       | Value copied to clipboard (falls back to title) |
+| `icon.path`    | no       | Absolute path to a PNG or SVG icon              |
+
+For a complete time zone conversion tool which can be used as a script filter,
+see [batz](https://github.com/chmouel/batzconverter).
 
 ## Configuration
 

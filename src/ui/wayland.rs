@@ -134,6 +134,34 @@ struct CurrencyConversion {
     rate: f64,
 }
 
+/// Alfred Script Filter JSON icon
+#[derive(Debug, Clone, Deserialize)]
+struct ScriptFilterIcon {
+    path: Option<String>,
+}
+
+/// Alfred Script Filter JSON item
+#[derive(Debug, Clone, Deserialize)]
+struct ScriptFilterItem {
+    title: String,
+    subtitle: Option<String>,
+    arg: Option<String>,
+    icon: Option<ScriptFilterIcon>,
+}
+
+/// Alfred Script Filter JSON response
+#[derive(Debug, Clone, Deserialize)]
+struct ScriptFilterResponse {
+    items: Vec<ScriptFilterItem>,
+}
+
+/// Container for script filter results with default icon
+#[derive(Debug, Clone)]
+struct ScriptFilterResult {
+    items: Vec<ScriptFilterItem>,
+    default_icon: Option<String>,
+}
+
 const DEFAULT_CURRENCIES: &[&str] = &["USD", "EUR", "GBP"];
 
 /// Cached exchange rate with timestamp for TTL
@@ -435,6 +463,53 @@ fn fetch_multi_rates_blocking(
     })
 }
 
+fn execute_script_filter(
+    command: String,
+    args: Vec<String>,
+    query: String,
+    generation: u64,
+    default_icon: Option<String>,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            let output = Command::new(&command)
+                .args(&args)
+                .arg(&query)
+                .stdin(Stdio::null())
+                .stderr(Stdio::null())
+                .output();
+
+            match output {
+                Ok(output) if output.status.success() => {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    match serde_json::from_str::<ScriptFilterResponse>(&stdout) {
+                        Ok(response) => Ok(ScriptFilterResult {
+                            items: response.items,
+                            default_icon,
+                        }),
+                        Err(e) => {
+                            eprintln!("Script filter: invalid JSON from {}: {}", command, e);
+                            Err(format!("Invalid JSON: {}", e))
+                        }
+                    }
+                }
+                Ok(output) => {
+                    eprintln!(
+                        "Script filter: {} exited with status {}",
+                        command, output.status
+                    );
+                    Err(format!("Script exited with status {}", output.status))
+                }
+                Err(e) => {
+                    eprintln!("Script filter: failed to execute {}: {}", command, e);
+                    Err(format!("Failed to execute: {}", e))
+                }
+            }
+        },
+        move |result| Message::ScriptFilterResult(generation, result),
+    )
+}
+
 /// The main application state
 struct LauncherApp {
     configs: Vec<RaffiConfig>,
@@ -460,6 +535,11 @@ struct LauncherApp {
     multi_currency_result: Option<MultiCurrencyResult>,
     multi_currency_loading: bool,
     pending_multi_currency_request: Option<MultiCurrencyRequest>,
+    // Script filter state
+    script_filter_results: Option<ScriptFilterResult>,
+    script_filter_loading: bool,
+    script_filter_loading_name: Option<String>,
+    script_filter_generation: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -481,6 +561,8 @@ enum Message {
         std::result::Result<MultiCurrencyResult, String>,
     ),
     MultiCurrencyResultCopied(usize), // index of conversion to copy
+    ScriptFilterResult(u64, std::result::Result<ScriptFilterResult, String>),
+    ScriptFilterItemSelected(usize),
 }
 
 impl LauncherApp {
@@ -534,6 +616,10 @@ impl LauncherApp {
                 multi_currency_result: None,
                 multi_currency_loading: false,
                 pending_multi_currency_request: None,
+                script_filter_results: None,
+                script_filter_loading: false,
+                script_filter_loading_name: None,
+                script_filter_generation: 0,
             },
             focus(search_input_id),
         )
@@ -555,6 +641,50 @@ impl LauncherApp {
                 self.items_container_id = ContainerId::unique();
                 self.view_generation = self.view_generation.wrapping_add(1);
 
+                let mut tasks: Vec<Task<Message>> = Vec::new();
+
+                // Check for script filter keyword match
+                let mut script_filter_matched = false;
+                let trimmed = query.trim();
+                for sf_config in &self.addons.script_filters {
+                    let keyword = &sf_config.keyword;
+                    // Match "keyword" exactly or "keyword " prefix
+                    if trimmed == keyword.as_str() || trimmed.starts_with(&format!("{} ", keyword))
+                    {
+                        script_filter_matched = true;
+                        let sf_query = if trimmed.len() > keyword.len() {
+                            trimmed[keyword.len()..].trim_start().to_string()
+                        } else {
+                            String::new()
+                        };
+
+                        // Clear regular config items when script filter is active
+                        self.filtered_configs.clear();
+
+                        self.script_filter_generation =
+                            self.script_filter_generation.wrapping_add(1);
+                        self.script_filter_loading = true;
+                        self.script_filter_loading_name = Some(sf_config.name.clone());
+                        self.script_filter_results = None;
+
+                        tasks.push(execute_script_filter(
+                            sf_config.command.clone(),
+                            sf_config.args.clone(),
+                            sf_query,
+                            self.script_filter_generation,
+                            sf_config.icon.clone(),
+                        ));
+                        break;
+                    }
+                }
+
+                if !script_filter_matched {
+                    // Clear script filter state
+                    self.script_filter_results = None;
+                    self.script_filter_loading = false;
+                    self.script_filter_loading_name = None;
+                }
+
                 // Determine trigger from config
                 let trigger = self.addons.currency.trigger.as_deref().unwrap_or("$");
 
@@ -570,7 +700,7 @@ impl LauncherApp {
                     self.multi_currency_result = None;
                     self.multi_currency_loading = false;
                     self.pending_multi_currency_request = None;
-                    return Task::none();
+                    return Task::batch(tasks);
                 }
 
                 // Check for currency conversion request - only if currency addon is enabled
@@ -609,7 +739,7 @@ impl LauncherApp {
                                 self.currency_loading = false;
                                 self.currency_error = None;
                                 self.pending_currency_request = None;
-                                return Task::none();
+                                return Task::batch(tasks);
                             }
                         }
 
@@ -618,7 +748,8 @@ impl LauncherApp {
                         self.currency_result = None;
                         self.currency_error = None;
                         self.pending_currency_request = Some(currency_request.clone());
-                        return fetch_exchange_rate(currency_request);
+                        tasks.push(fetch_exchange_rate(currency_request));
+                        return Task::batch(tasks);
                     }
 
                     // Try multi-currency conversion (simple syntax like "$10" or "$10 EUR")
@@ -667,14 +798,15 @@ impl LauncherApp {
                             });
                             self.multi_currency_loading = false;
                             self.pending_multi_currency_request = None;
-                            return Task::none();
+                            return Task::batch(tasks);
                         }
 
                         // Need to fetch from API
                         self.multi_currency_loading = true;
                         self.multi_currency_result = None;
                         self.pending_multi_currency_request = Some(multi_request.clone());
-                        return fetch_multi_exchange_rates(multi_request);
+                        tasks.push(fetch_multi_exchange_rates(multi_request));
+                        return Task::batch(tasks);
                     }
 
                     // Clear all currency state if no conversion request
@@ -696,7 +828,7 @@ impl LauncherApp {
                     self.pending_multi_currency_request = None;
                 }
 
-                Task::none()
+                Task::batch(tasks)
             }
             Message::MoveUp => {
                 let total = self.total_items();
@@ -740,6 +872,23 @@ impl LauncherApp {
             Message::Submit => {
                 // Track position offsets for special items
                 let mut current_idx = 0;
+
+                // Check if script filter loading/results are selected
+                if self.script_filter_loading {
+                    if self.selected_index == current_idx {
+                        return Task::none();
+                    }
+                    current_idx += 1;
+                } else if let Some(ref sf_result) = self.script_filter_results {
+                    let num_items = sf_result.items.len();
+                    if self.selected_index >= current_idx
+                        && self.selected_index < current_idx + num_items
+                    {
+                        let item_idx = self.selected_index - current_idx;
+                        return self.update(Message::ScriptFilterItemSelected(item_idx));
+                    }
+                    current_idx += num_items;
+                }
 
                 // Check if single currency loading/result is selected
                 if self.currency_loading {
@@ -807,6 +956,21 @@ impl LauncherApp {
 
                 // Track position offsets for special items
                 let mut current_idx = 0;
+
+                // Check if script filter loading/results are clicked
+                if self.script_filter_loading {
+                    if idx == current_idx {
+                        return Task::none();
+                    }
+                    current_idx += 1;
+                } else if let Some(ref sf_result) = self.script_filter_results {
+                    let num_items = sf_result.items.len();
+                    if idx >= current_idx && idx < current_idx + num_items {
+                        let item_idx = idx - current_idx;
+                        return self.update(Message::ScriptFilterItemSelected(item_idx));
+                    }
+                    current_idx += num_items;
+                }
 
                 // Check if single currency loading/result is clicked
                 if self.currency_loading {
@@ -965,6 +1129,36 @@ impl LauncherApp {
                 }
                 iced::exit()
             }
+            Message::ScriptFilterResult(generation, result) => {
+                if generation != self.script_filter_generation {
+                    return Task::none();
+                }
+                self.script_filter_loading = false;
+                self.script_filter_loading_name = None;
+                match result {
+                    Ok(sf_result) => {
+                        self.script_filter_results = Some(sf_result);
+                    }
+                    Err(_) => {
+                        self.script_filter_results = None;
+                    }
+                }
+                Task::none()
+            }
+            Message::ScriptFilterItemSelected(idx) => {
+                if let Some(ref sf_result) = self.script_filter_results {
+                    if let Some(item) = sf_result.items.get(idx) {
+                        let value = item.arg.as_deref().unwrap_or(&item.title);
+                        let _ = Command::new("wl-copy")
+                            .arg(value)
+                            .stdin(Stdio::null())
+                            .stdout(Stdio::null())
+                            .stderr(Stdio::null())
+                            .spawn();
+                    }
+                }
+                iced::exit()
+            }
         }
     }
 
@@ -1002,6 +1196,7 @@ impl LauncherApp {
         let mut items_column = Column::new().spacing(6);
 
         // Track special items for index offset calculation
+        let has_script_filter = self.script_filter_results.is_some() || self.script_filter_loading;
         let has_currency = self.currency_result.is_some()
             || self.currency_loading
             || self.multi_currency_result.is_some()
@@ -1010,6 +1205,165 @@ impl LauncherApp {
 
         // Current display index for special items
         let mut special_item_idx = 0;
+
+        // Add script filter loading/results
+        if self.script_filter_loading {
+            let loading_name = self
+                .script_filter_loading_name
+                .as_deref()
+                .unwrap_or("script filter");
+            let loading_text = format!("Loading {}...", loading_name);
+
+            let loading_row = Row::new()
+                .spacing(16)
+                .align_y(iced::Alignment::Center)
+                .push(text(loading_text).size(20).color(COLOR_TEXT_MUTED));
+
+            let is_selected = self.selected_index == special_item_idx;
+
+            let loading_button = button(loading_row).padding(12).width(Length::Fill).style(
+                move |_theme, _status| {
+                    let base_style = button::Style {
+                        text_color: COLOR_TEXT_MUTED,
+                        border: iced::Border {
+                            radius: 8.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    };
+
+                    if is_selected {
+                        button::Style {
+                            background: Some(iced::Background::Color(COLOR_SELECTION_BG)),
+                            border: iced::Border {
+                                color: COLOR_ACCENT,
+                                width: 1.0,
+                                radius: 8.0.into(),
+                            },
+                            ..base_style
+                        }
+                    } else {
+                        button::Style {
+                            background: None,
+                            ..base_style
+                        }
+                    }
+                },
+            );
+
+            items_column = items_column.push(loading_button);
+            special_item_idx += 1;
+        } else if let Some(ref sf_result) = self.script_filter_results {
+            for item in &sf_result.items {
+                let is_selected = self.selected_index == special_item_idx;
+
+                let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
+
+                // Try to resolve icon: item icon path, or fallback to default_icon via icon_map
+                let icon_path = item
+                    .icon
+                    .as_ref()
+                    .and_then(|i| i.path.clone())
+                    .and_then(|p| {
+                        let expanded = if p.starts_with("~/") {
+                            format!("{}/{}", std::env::var("HOME").unwrap_or_default(), &p[2..])
+                        } else {
+                            p
+                        };
+                        if Path::new(&expanded).exists() {
+                            Some(expanded)
+                        } else {
+                            None
+                        }
+                    })
+                    .or_else(|| {
+                        sf_result
+                            .default_icon
+                            .as_ref()
+                            .and_then(|name| self.icon_map.get(name).cloned())
+                    });
+
+                if let Some(icon_path_str) = icon_path {
+                    let icon_path = PathBuf::from(&icon_path_str);
+                    if icon_path.exists() {
+                        let is_svg = icon_path
+                            .extension()
+                            .and_then(|ext| ext.to_str())
+                            .map(|ext| ext.to_lowercase() == "svg")
+                            .unwrap_or(false);
+
+                        let icon_content: Element<Message> = if is_svg {
+                            svg(iced::widget::svg::Handle::from_path(&icon_path))
+                                .width(Length::Fixed(40.0))
+                                .height(Length::Fixed(40.0))
+                                .content_fit(iced::ContentFit::Contain)
+                                .into()
+                        } else {
+                            image(icon_path)
+                                .width(Length::Fixed(40.0))
+                                .height(Length::Fixed(40.0))
+                                .content_fit(iced::ContentFit::Contain)
+                                .into()
+                        };
+
+                        item_row = item_row.push(icon_content);
+                    }
+                }
+
+                // Title + optional subtitle
+                let mut text_col = Column::new();
+                text_col = text_col.push(text(item.title.clone()).size(20).color(COLOR_TEXT_MAIN));
+                if let Some(ref subtitle) = item.subtitle {
+                    text_col =
+                        text_col.push(text(subtitle.clone()).size(14).color(COLOR_TEXT_MUTED));
+                }
+                item_row = item_row.push(text_col.width(Length::Fill));
+
+                let item_button = button(item_row)
+                    .on_press(Message::ItemClicked(special_item_idx))
+                    .padding(12)
+                    .width(Length::Fill)
+                    .style(move |_theme, status| {
+                        let base_style = button::Style {
+                            text_color: COLOR_TEXT_MAIN,
+                            border: iced::Border {
+                                radius: 8.0.into(),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        };
+
+                        if is_selected {
+                            button::Style {
+                                background: Some(iced::Background::Color(COLOR_SELECTION_BG)),
+                                border: iced::Border {
+                                    color: COLOR_ACCENT,
+                                    width: 1.0,
+                                    radius: 8.0.into(),
+                                },
+                                ..base_style
+                            }
+                        } else {
+                            match status {
+                                button::Status::Hovered => button::Style {
+                                    background: Some(iced::Background::Color(iced::Color {
+                                        a: 0.1,
+                                        ..COLOR_ACCENT_HOVER
+                                    })),
+                                    ..base_style
+                                },
+                                _ => button::Style {
+                                    background: None,
+                                    ..base_style
+                                },
+                            }
+                        }
+                    });
+
+                items_column = items_column.push(item_button);
+                special_item_idx += 1;
+            }
+        }
 
         // Add currency help as first item if user typed just "$"
         if self.currency_help {
@@ -1346,7 +1700,11 @@ impl LauncherApp {
             special_item_idx += 1;
         }
 
-        if self.filtered_configs.is_empty() && !has_calculator && !has_currency {
+        if self.filtered_configs.is_empty()
+            && !has_calculator
+            && !has_currency
+            && !has_script_filter
+        {
             let no_results = container(
                 text("No matching results found.")
                     .size(18)
@@ -1549,6 +1907,11 @@ impl LauncherApp {
 
     fn total_items(&self) -> usize {
         let mut offset = 0;
+        if self.script_filter_loading {
+            offset += 1;
+        } else if let Some(ref sf_result) = self.script_filter_results {
+            offset += sf_result.items.len();
+        }
         if self.currency_help {
             offset += 1;
         }
