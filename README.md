@@ -90,10 +90,11 @@ Native mode uses an internal iced‑based graphical interface with fuzzy search,
 ### Native Interface Extras
 
 #### Calculator
-
+<img align="right" width="522" height="150" alt="image" src="https://github.com/user-attachments/assets/eb7069c9-21f7-413d-b455-c2db186591d5" />
 The native interface includes a built‑in calculator which evaluates expressions as you type. Standard mathematical operators are supported, along with functions such as `sqrt`, `sin`, `cos`, `tan`, `log`, `ln`, `exp`, `abs`, `floor`, and `ceil`. Results can be copied to the clipboard using Enter, provided `wl-copy` is available.
 
 #### Currency Converter
+<img align="right" width="522" height="150" alt="image" src="https://github.com/user-attachments/assets/aaf35e3f-1cef-4604-b87a-ecfa626300c1" />
 
 The native interface also includes a currency converter.
 Enter an amount prefixed with the configured trigger (default `$`) followed by a target currency. Exchange rates are fetched from the Frankfurter API and cached for one hour.
@@ -108,6 +109,8 @@ $100eur to jpy
 ```
 
 #### Dynamic Script Filters
+
+<img align="right" width="522" height="400" alt="image" src="https://github.com/user-attachments/assets/f65acf34-b499-477d-9952-48590723d5bb" />
 
 The native interface supports script filters, which allow external commands to provide
 dynamic results in the launcher. This feature uses a subset of the
