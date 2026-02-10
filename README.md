@@ -123,7 +123,7 @@ passed as the final argument. The script must print JSON to stdout. On selection
 item's `arg` value (or `title` if `arg` is absent) is copied to the clipboard using
 `wl-copy`.
 
-See below for the `addons` configuration.
+[See below for how to configure this](#script-filters-configuration)
 
 ## Configuration
 
