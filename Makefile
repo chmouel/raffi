@@ -6,7 +6,7 @@ test:
 	@$(CARGO) test -q
 
 clippy:
-	@$(CARGO) clippy -q --color=always
+	@$(CARGO) clippy -q --color=always -- -Dwarnings
 
 coverage:
 	@$(CARGO) tarpaulin --out=Html --output-dir /tmp/cov-output && \

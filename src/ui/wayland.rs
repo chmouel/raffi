@@ -1265,8 +1265,8 @@ impl LauncherApp {
                     .as_ref()
                     .and_then(|i| i.path.clone())
                     .and_then(|p| {
-                        let expanded = if p.starts_with("~/") {
-                            format!("{}/{}", std::env::var("HOME").unwrap_or_default(), &p[2..])
+                        let expanded = if let Some(stripped) = p.strip_prefix("~/") {
+                            format!("{}/{}", std::env::var("HOME").unwrap_or_default(), stripped)
                         } else {
                             p
                         };
