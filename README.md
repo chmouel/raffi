@@ -163,7 +163,7 @@ border=bd93f9ff
 ```
 
 ### Raffi Configuration
-<img align="right" width="522" height="700" alt="image" src="https://github.com/user-attachments/assets/eed41ab5-d852-4c57-8e89-52d8b4da43b6" />
+<img align="right" width="503" height="573" alt="suspend-to-sleep-then-hibernate" src="https://github.com/user-attachments/assets/9c6549dc-be51-422d-9b82-5dbbb89779b6" />
 
 Configuration is stored in:
 
