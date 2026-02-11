@@ -6,7 +6,7 @@ use std::{
 use anyhow::{Context, Result};
 
 use super::UI;
-use crate::{read_icon_map, AddonsConfig, RaffiConfig, ThemeMode};
+use crate::{read_icon_map, AddonsConfig, RaffiConfig, ThemeColorsConfig, ThemeMode};
 
 /// Fuzzel-based UI implementation
 pub struct FuzzelUI;
@@ -19,6 +19,7 @@ impl UI for FuzzelUI {
         no_icons: bool,
         _initial_query: Option<&str>,
         _theme: &ThemeMode,
+        _theme_colors: Option<&ThemeColorsConfig>,
     ) -> Result<String> {
         let input = make_fuzzel_input(configs, no_icons)?;
         run_fuzzel_with_input(&input)

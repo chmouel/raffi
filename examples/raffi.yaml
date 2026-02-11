@@ -3,6 +3,16 @@
 #   ui_type: native          # UI backend: fuzzel or native
 #   default_script_shell: bash  # Shell for script entries
 #   no_icons: false          # Hide icons
+#   theme: dark
+#   theme_colors:            # Override individual colours (hex: #RGB, #RRGGBB, or #RRGGBBAA)
+#     bg_base: "#1e1e2e"
+#     bg_input: "#313244"
+#     accent: "#cba6f7"
+#     accent_hover: "#89b4fa"
+#     text_main: "#cdd6f4"
+#     text_muted: "#6c7086"
+#     selection_bg: "#45475a"
+#     border: "#585b70"
 
 # jumpapp is a custom tool i use when launching programs to run-or-raise or go to the previous windows
 # find it here https://gitlab.com/chmouel/chmouzies/-/blob/main/graphical/sway-jumpapp

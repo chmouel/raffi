@@ -94,6 +94,19 @@ fn default_true() -> bool {
     true
 }
 
+/// Per-colour overrides for the native UI theme.
+#[derive(Deserialize, Debug, Clone, Default)]
+pub struct ThemeColorsConfig {
+    pub bg_base: Option<String>,
+    pub bg_input: Option<String>,
+    pub accent: Option<String>,
+    pub accent_hover: Option<String>,
+    pub text_main: Option<String>,
+    pub text_muted: Option<String>,
+    pub selection_bg: Option<String>,
+    pub border: Option<String>,
+}
+
 /// General configuration for persistent defaults
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct GeneralConfig {
@@ -105,6 +118,8 @@ pub struct GeneralConfig {
     pub no_icons: Option<bool>,
     #[serde(default)]
     pub theme: Option<String>,
+    #[serde(default)]
+    pub theme_colors: Option<ThemeColorsConfig>,
 }
 
 /// Complete parsed configuration
@@ -608,6 +623,7 @@ pub fn run(args: Args) -> Result<()> {
             no_icons,
             args.initial_query.as_deref(),
             &theme,
+            parsed_config.general.theme_colors.as_ref(),
         )
         .context("Failed to show UI")?;
 

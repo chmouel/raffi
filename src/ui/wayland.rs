@@ -24,7 +24,7 @@ type ScrollableId = Id;
 type TextInputId = Id;
 
 use super::UI;
-use crate::{read_icon_map, AddonsConfig, RaffiConfig, ThemeMode};
+use crate::{read_icon_map, AddonsConfig, RaffiConfig, ThemeColorsConfig, ThemeMode};
 
 // --- Theme Colors ---
 #[derive(Debug, Clone, Copy)]
@@ -140,6 +140,66 @@ impl ThemeColors {
             ThemeMode::Light => Self::light(),
         }
     }
+
+    fn from_mode_with_overrides(mode: &ThemeMode, overrides: Option<&ThemeColorsConfig>) -> Self {
+        let mut colors = Self::from_mode(mode);
+        if let Some(ov) = overrides {
+            if let Some(c) = ov.bg_base.as_deref().and_then(parse_hex_color) {
+                colors.bg_base = c;
+            }
+            if let Some(c) = ov.bg_input.as_deref().and_then(parse_hex_color) {
+                colors.bg_input = c;
+            }
+            if let Some(c) = ov.accent.as_deref().and_then(parse_hex_color) {
+                colors.accent = c;
+            }
+            if let Some(c) = ov.accent_hover.as_deref().and_then(parse_hex_color) {
+                colors.accent_hover = c;
+            }
+            if let Some(c) = ov.text_main.as_deref().and_then(parse_hex_color) {
+                colors.text_main = c;
+            }
+            if let Some(c) = ov.text_muted.as_deref().and_then(parse_hex_color) {
+                colors.text_muted = c;
+            }
+            if let Some(c) = ov.selection_bg.as_deref().and_then(parse_hex_color) {
+                colors.selection_bg = c;
+            }
+            if let Some(c) = ov.border.as_deref().and_then(parse_hex_color) {
+                colors.border = c;
+            }
+        }
+        colors
+    }
+}
+
+/// Parse a hex colour string into an iced Color.
+/// Supports `#RGB`, `#RRGGBB`, and `#RRGGBBAA` formats.
+/// Returns `None` for invalid input.
+fn parse_hex_color(hex: &str) -> Option<iced::Color> {
+    let hex = hex.strip_prefix('#')?;
+    match hex.len() {
+        3 => {
+            let r = u8::from_str_radix(&hex[0..1], 16).ok()?;
+            let g = u8::from_str_radix(&hex[1..2], 16).ok()?;
+            let b = u8::from_str_radix(&hex[2..3], 16).ok()?;
+            Some(iced::Color::from_rgba8(r * 17, g * 17, b * 17, 1.0))
+        }
+        6 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            Some(iced::Color::from_rgba8(r, g, b, 1.0))
+        }
+        8 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            let a = u8::from_str_radix(&hex[6..8], 16).ok()?;
+            Some(iced::Color::from_rgba8(r, g, b, a as f32 / 255.0))
+        }
+        _ => None,
+    }
 }
 
 /// Wayland UI implementation using iced
@@ -153,8 +213,16 @@ impl UI for WaylandUI {
         no_icons: bool,
         initial_query: Option<&str>,
         theme: &ThemeMode,
+        theme_colors: Option<&ThemeColorsConfig>,
     ) -> Result<String> {
-        run_wayland_ui(configs, addons, no_icons, initial_query, theme)
+        run_wayland_ui(
+            configs,
+            addons,
+            no_icons,
+            initial_query,
+            theme,
+            theme_colors,
+        )
     }
 }
 
@@ -2752,8 +2820,9 @@ fn run_wayland_ui(
     no_icons: bool,
     initial_query: Option<&str>,
     theme_mode: &ThemeMode,
+    theme_color_overrides: Option<&ThemeColorsConfig>,
 ) -> Result<String> {
-    let theme_colors = ThemeColors::from_mode(theme_mode);
+    let theme_colors = ThemeColors::from_mode_with_overrides(theme_mode, theme_color_overrides);
     let iced_theme = match theme_mode {
         ThemeMode::Dark => iced::Theme::Dark,
         ThemeMode::Light => iced::Theme::Light,

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-use crate::{AddonsConfig, RaffiConfig, ThemeMode, UIType};
+use crate::{AddonsConfig, RaffiConfig, ThemeColorsConfig, ThemeMode, UIType};
 
 mod fuzzel;
 #[cfg(feature = "wayland")]
@@ -20,6 +20,7 @@ pub trait UI {
         no_icons: bool,
         initial_query: Option<&str>,
         theme: &ThemeMode,
+        theme_colors: Option<&ThemeColorsConfig>,
     ) -> Result<String>;
 }
 

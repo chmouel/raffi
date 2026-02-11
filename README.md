@@ -163,6 +163,7 @@ border=bd93f9ff
 ```
 
 ### Raffi Configuration
+
 <img align="right" width="503" height="573" alt="suspend-to-sleep-then-hibernate" src="https://github.com/user-attachments/assets/9c6549dc-be51-422d-9b82-5dbbb89779b6" />
 
 Configuration is stored in:
@@ -198,12 +199,37 @@ general:
   theme: light
   no_icons: true
   default_script_shell: /bin/zsh
+  theme_colors:
+    accent: "#cba6f7"
 ```
 
 The `ui_type` field selects the interface (`fuzzel` or `native`).
 The `theme` field selects the colour theme for the native interface. `dark` (default) uses a Dracula‑inspired palette; `light` uses Rose Pine Dawn.
 The `no_icons` field disables icon loading when set to true.
 The `default_script_shell` field sets the default interpreter for inline scripts.
+
+Individual theme colours can be customised under `theme_colors`. Each field
+accepts a hex colour string (`#RGB`, `#RRGGBB`, or `#RRGGBBAA`). Only the
+colours you specify are overridden; the rest come from the base theme.
+
+Available colour keys: `bg_base`, `bg_input`, `accent`, `accent_hover`,
+`text_main`, `text_muted`, `selection_bg`, `border`.
+
+Example (Catppuccin Mocha on top of the dark base theme):
+
+```yaml
+general:
+  theme: dark
+  theme_colors:
+    bg_base: "#1e1e2e"
+    bg_input: "#313244"
+    accent: "#cba6f7"
+    accent_hover: "#89b4fa"
+    text_main: "#cdd6f4"
+    text_muted: "#6c7086"
+    selection_bg: "#45475a"
+    border: "#585b70"
+```
 
 ### Scripts
 
