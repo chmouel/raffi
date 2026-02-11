@@ -4,6 +4,8 @@ Raffi is an application launcher designed to sit on top of Fuzzel, or, if prefer
 
 ![image](https://github.com/chmouel/raffi/assets/98980/04d6af0f-2a80-47d5-a2ec-95443a629305)
 
+*See more screenshots [below](#screenshots)*
+
 ## Installation
 
 Prebuilt binaries are available from the GitHub releases page. Download the archive or package suitable for your platform. If you intend to use the default interface, Fuzzel must also be installed.
@@ -114,8 +116,6 @@ $100eur to jpy
 
 #### Dynamic Script Filters
 
-<img align="right" width="522" height="400" alt="image" src="https://github.com/user-attachments/assets/f65acf34-b499-477d-9952-48590723d5bb" />
-
 The native interface supports script filters, which allow external commands to provide
 dynamic results in the launcher. This feature uses a subset of the
 [Alfred Script Filter JSON format](https://www.alfredapp.com/help/workflows/inputs/script-filter/json/).
@@ -179,8 +179,6 @@ border=bd93f9ff
 ```
 
 ### Raffi Configuration
-
-<img align="right" width="503" height="573" alt="suspend-to-sleep-then-hibernate" src="https://github.com/user-attachments/assets/9c6549dc-be51-422d-9b82-5dbbb89779b6" />
 
 Configuration is stored in:
 
@@ -334,8 +332,6 @@ You don't need to add a prefix for the calculator; simply typing a valid express
 
 All three addons are enabled by default.
 
-<img align="right" width="441" height="559" alt="optimized-pull-requests-dashboard" src="https://github.com/user-attachments/assets/48da3b90-b8dd-4f4d-8465-3ae27fe267c3" />
-
 #### Script Filters Configuration
 
 Script filters are configured under `addons.script_filters`. Here is an example using the [batz](https://github.com/chmouel/batzconverter) time converter (shown in the screenshot above):
@@ -440,6 +436,20 @@ To enable pre‑commit hooks that run `cargo clippy` before pushing:
 pip install pre-commit
 pre-commit install
 ```
+
+## Screenshots
+
+### File Browser (`/`)
+<img width="321" height="224" alt="optimized-file-browse" src="https://github.com/user-attachments/assets/bbfbe937-c590-43c9-8853-9aaf786a3dc6" />
+
+### Script Filter with github PR browser 
+<img width="441" height="559" alt="optimized-pull-requests-dashboard" src="https://github.com/user-attachments/assets/48da3b90-b8dd-4f4d-8465-3ae27fe267c3" />
+
+### Script Filter with timezone converter 
+<img width="522" height="400" alt="image" src="https://github.com/user-attachments/assets/f65acf34-b499-477d-9952-48590723d5bb" />
+
+### Light Theme
+<img width="403" height="473" alt="suspend-to-sleep-then-hibernate" src="https://github.com/user-attachments/assets/9c6549dc-be51-422d-9b82-5dbbb89779b6" />
 
 ## Licence
 
