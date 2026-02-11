@@ -24,7 +24,9 @@ type ScrollableId = Id;
 type TextInputId = Id;
 
 use super::UI;
-use crate::{read_icon_map, AddonsConfig, RaffiConfig, ThemeColorsConfig, ThemeMode};
+use crate::{
+    execute_web_search_url, read_icon_map, AddonsConfig, RaffiConfig, ThemeColorsConfig, ThemeMode,
+};
 
 // --- Theme Colors ---
 #[derive(Debug, Clone, Copy)]
@@ -302,6 +304,15 @@ struct ScriptFilterResponse {
 struct ScriptFilterResult {
     items: Vec<ScriptFilterItem>,
     default_icon: Option<String>,
+}
+
+/// Active web search state when a web search keyword is matched
+#[derive(Debug, Clone)]
+struct WebSearchActiveState {
+    name: String,
+    query: String,
+    url_template: String,
+    icon: Option<String>,
 }
 
 const DEFAULT_CURRENCIES: &[&str] = &["USD", "EUR", "GBP"];
@@ -788,6 +799,8 @@ struct LauncherApp {
     script_filter_generation: u64,
     script_filter_action: Option<String>,
     script_filter_secondary_action: Option<String>,
+    // Web search state
+    web_search_active: Option<WebSearchActiveState>,
     current_modifiers: iced::keyboard::Modifiers,
     theme: ThemeColors,
 }
@@ -813,6 +826,7 @@ enum Message {
     MultiCurrencyResultCopied(usize), // index of conversion to copy
     ScriptFilterResult(u64, std::result::Result<ScriptFilterResult, String>),
     ScriptFilterItemSelected(usize),
+    WebSearchSelected,
     ModifiersChanged(iced::keyboard::Modifiers),
 }
 
@@ -876,6 +890,7 @@ impl LauncherApp {
                 script_filter_generation: 0,
                 script_filter_action: None,
                 script_filter_secondary_action: None,
+                web_search_active: None,
                 current_modifiers: iced::keyboard::Modifiers::empty(),
                 theme,
             },
@@ -949,6 +964,39 @@ impl LauncherApp {
                     self.script_filter_loading_name = None;
                     self.script_filter_action = None;
                     self.script_filter_secondary_action = None;
+
+                    // Check for web search keyword match
+                    let mut web_search_matched = false;
+                    for ws_config in &self.addons.web_searches {
+                        let keyword = &ws_config.keyword;
+                        if trimmed == keyword.as_str()
+                            || trimmed.starts_with(&format!("{} ", keyword))
+                        {
+                            web_search_matched = true;
+                            let ws_query = if trimmed.len() > keyword.len() {
+                                trimmed[keyword.len()..].trim_start().to_string()
+                            } else {
+                                String::new()
+                            };
+
+                            // Clear regular config items when web search is active
+                            self.filtered_configs.clear();
+
+                            self.web_search_active = Some(WebSearchActiveState {
+                                name: ws_config.name.clone(),
+                                query: ws_query,
+                                url_template: ws_config.url.clone(),
+                                icon: ws_config.icon.clone(),
+                            });
+                            break;
+                        }
+                    }
+
+                    if !web_search_matched {
+                        self.web_search_active = None;
+                    }
+                } else {
+                    self.web_search_active = None;
                 }
 
                 // Determine trigger from config
@@ -1156,6 +1204,14 @@ impl LauncherApp {
                     current_idx += num_items;
                 }
 
+                // Check if web search row is selected
+                if self.web_search_active.is_some() {
+                    if self.selected_index == current_idx {
+                        return self.update(Message::WebSearchSelected);
+                    }
+                    current_idx += 1;
+                }
+
                 // Check if single currency loading/result is selected
                 if self.currency_loading {
                     if self.selected_index == current_idx {
@@ -1236,6 +1292,14 @@ impl LauncherApp {
                         return self.update(Message::ScriptFilterItemSelected(item_idx));
                     }
                     current_idx += num_items;
+                }
+
+                // Check if web search row is clicked
+                if self.web_search_active.is_some() {
+                    if idx == current_idx {
+                        return self.update(Message::WebSearchSelected);
+                    }
+                    current_idx += 1;
                 }
 
                 // Check if single currency loading/result is clicked
@@ -1443,6 +1507,14 @@ impl LauncherApp {
                 }
                 iced::exit()
             }
+            Message::WebSearchSelected => {
+                if let Some(ref ws) = self.web_search_active {
+                    if !ws.query.is_empty() {
+                        let _ = execute_web_search_url(&ws.url_template, &ws.query);
+                    }
+                }
+                iced::exit()
+            }
             Message::ModifiersChanged(modifiers) => {
                 self.current_modifiers = modifiers;
                 Task::none()
@@ -1486,6 +1558,7 @@ impl LauncherApp {
 
         // Track special items for index offset calculation
         let has_script_filter = self.script_filter_results.is_some() || self.script_filter_loading;
+        let has_web_search = self.web_search_active.is_some();
         let has_currency = self.currency_result.is_some()
             || self.currency_loading
             || self.multi_currency_result.is_some()
@@ -1648,6 +1721,131 @@ impl LauncherApp {
                 items_column = items_column.push(item_button);
                 special_item_idx += 1;
             }
+        }
+
+        // Add web search row if active
+        if let Some(ref ws) = self.web_search_active {
+            let is_selected = self.selected_index == special_item_idx;
+
+            let mut ws_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
+
+            // Try to resolve icon from icon_map
+            if let Some(ref icon_name) = ws.icon {
+                if let Some(icon_path_str) = self.icon_map.get(icon_name) {
+                    let icon_path = PathBuf::from(icon_path_str);
+                    if icon_path.exists() {
+                        let is_svg = icon_path
+                            .extension()
+                            .and_then(|ext| ext.to_str())
+                            .map(|ext| ext.to_lowercase() == "svg")
+                            .unwrap_or(false);
+
+                        let icon_content: Element<Message> = if is_svg {
+                            svg(iced::widget::svg::Handle::from_path(&icon_path))
+                                .width(Length::Fixed(40.0))
+                                .height(Length::Fixed(40.0))
+                                .content_fit(iced::ContentFit::Contain)
+                                .into()
+                        } else {
+                            image(icon_path)
+                                .width(Length::Fixed(40.0))
+                                .height(Length::Fixed(40.0))
+                                .content_fit(iced::ContentFit::Contain)
+                                .into()
+                        };
+
+                        ws_row = ws_row.push(icon_content);
+                    }
+                }
+            }
+
+            if ws.query.is_empty() {
+                // Hint row (not clickable)
+                let hint = format!("Search {}: type your query...", ws.name);
+                ws_row = ws_row.push(text(hint).size(20).color(t.text_muted));
+
+                let ws_button =
+                    button(ws_row)
+                        .padding(12)
+                        .width(Length::Fill)
+                        .style(move |_theme, _status| {
+                            let base_style = button::Style {
+                                text_color: t.text_muted,
+                                border: iced::Border {
+                                    radius: 8.0.into(),
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            };
+
+                            if is_selected {
+                                button::Style {
+                                    background: Some(iced::Background::Color(t.selection_bg)),
+                                    border: iced::Border {
+                                        color: t.accent,
+                                        width: 1.0,
+                                        radius: 8.0.into(),
+                                    },
+                                    ..base_style
+                                }
+                            } else {
+                                button::Style {
+                                    background: None,
+                                    ..base_style
+                                }
+                            }
+                        });
+
+                items_column = items_column.push(ws_button);
+            } else {
+                // Clickable row with query
+                let label = format!("Search {} for '{}'", ws.name, ws.query);
+                ws_row = ws_row.push(text(label).size(20).color(t.accent));
+
+                let ws_button = button(ws_row)
+                    .on_press(Message::WebSearchSelected)
+                    .padding(12)
+                    .width(Length::Fill)
+                    .style(move |_theme, status| {
+                        let base_style = button::Style {
+                            text_color: t.accent,
+                            border: iced::Border {
+                                radius: 8.0.into(),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        };
+
+                        if is_selected {
+                            button::Style {
+                                background: Some(iced::Background::Color(t.selection_bg)),
+                                border: iced::Border {
+                                    color: t.accent,
+                                    width: 1.0,
+                                    radius: 8.0.into(),
+                                },
+                                ..base_style
+                            }
+                        } else {
+                            match status {
+                                button::Status::Hovered => button::Style {
+                                    background: Some(iced::Background::Color(iced::Color {
+                                        a: 0.1,
+                                        ..t.accent_hover
+                                    })),
+                                    ..base_style
+                                },
+                                _ => button::Style {
+                                    background: None,
+                                    ..base_style
+                                },
+                            }
+                        }
+                    });
+
+                items_column = items_column.push(ws_button);
+            }
+            special_item_idx += 1;
         }
 
         // Add currency help as first item if user typed just "$"
@@ -1989,6 +2187,7 @@ impl LauncherApp {
             && !has_calculator
             && !has_currency
             && !has_script_filter
+            && !has_web_search
         {
             let no_results = container(
                 text("No matching results found.")
@@ -2199,6 +2398,9 @@ impl LauncherApp {
             offset += 1;
         } else if let Some(ref sf_result) = self.script_filter_results {
             offset += sf_result.items.len();
+        }
+        if self.web_search_active.is_some() {
+            offset += 1;
         }
         if self.currency_help {
             offset += 1;

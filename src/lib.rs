@@ -79,6 +79,15 @@ pub struct ScriptFilterConfig {
     pub secondary_action: Option<String>,
 }
 
+/// Configuration for a web search addon
+#[derive(Deserialize, Debug, Clone)]
+pub struct WebSearchConfig {
+    pub name: String,
+    pub keyword: String,
+    pub url: String,
+    pub icon: Option<String>,
+}
+
 /// Container for all addon configurations
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct AddonsConfig {
@@ -88,6 +97,8 @@ pub struct AddonsConfig {
     pub calculator: CalculatorAddonConfig,
     #[serde(default)]
     pub script_filters: Vec<ScriptFilterConfig>,
+    #[serde(default)]
+    pub web_searches: Vec<WebSearchConfig>,
 }
 
 fn default_true() -> bool {
@@ -399,6 +410,10 @@ pub fn read_config_from_reader<R: Read>(reader: R, args: &Args) -> Result<Parsed
         sf.action = sf.action.as_ref().map(|s| expand_config_value(s));
         sf.secondary_action = sf.secondary_action.as_ref().map(|s| expand_config_value(s));
     }
+    for ws in &mut addons.web_searches {
+        ws.url = expand_config_value(&ws.url);
+        ws.icon = ws.icon.as_ref().map(|s| expand_config_value(s));
+    }
 
     Ok(ParsedConfig {
         general: config.general,
@@ -547,6 +562,35 @@ pub fn execute_chosen_command(mc: &RaffiConfig, args: &Args, interpreter: &str) 
             .spawn()
             .context("cannot launch command")?;
     }
+    Ok(())
+}
+
+/// Percent-encode a query string for use in URLs.
+/// Encodes all characters except unreserved ones (A-Z, a-z, 0-9, '-', '.', '_', '~').
+pub fn url_encode_query(query: &str) -> String {
+    let mut encoded = String::with_capacity(query.len() * 3);
+    for byte in query.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                encoded.push(byte as char);
+            }
+            _ => {
+                write!(encoded, "%{:02X}", byte).unwrap();
+            }
+        }
+    }
+    encoded
+}
+
+/// Build a web search URL by replacing `{query}` in the template with the percent-encoded query,
+/// then open it with `xdg-open`.
+pub fn execute_web_search_url(url_template: &str, query: &str) -> Result<()> {
+    let encoded = url_encode_query(query);
+    let url = url_template.replace("{query}", &encoded);
+    Command::new("xdg-open")
+        .arg(&url)
+        .spawn()
+        .context("cannot open web search URL")?;
     Ok(())
 }
 
@@ -1121,5 +1165,62 @@ mod tests {
         assert_eq!("Light".parse::<ThemeMode>().unwrap(), ThemeMode::Light);
         assert_eq!("LIGHT".parse::<ThemeMode>().unwrap(), ThemeMode::Light);
         assert!("invalid".parse::<ThemeMode>().is_err());
+    }
+
+    #[test]
+    fn test_url_encode_query() {
+        assert_eq!(url_encode_query("hello"), "hello");
+        assert_eq!(url_encode_query("hello world"), "hello%20world");
+        assert_eq!(url_encode_query("rust traits"), "rust%20traits");
+        assert_eq!(url_encode_query("a+b"), "a%2Bb");
+        assert_eq!(url_encode_query("foo&bar=baz"), "foo%26bar%3Dbaz");
+        assert_eq!(url_encode_query(""), "");
+        assert_eq!(url_encode_query("A-Z_0.9~"), "A-Z_0.9~");
+    }
+
+    #[test]
+    fn test_web_search_config_parsing() {
+        let yaml_config = r#"
+        addons:
+          web_searches:
+            - name: "Google"
+              keyword: "g"
+              url: "https://google.com/search?q={query}"
+              icon: "google"
+            - name: "DuckDuckGo"
+              keyword: "ddg"
+              url: "https://duckduckgo.com/?q={query}"
+        firefox:
+          binary: firefox
+          description: "Firefox browser"
+        "#;
+        let reader = Cursor::new(yaml_config);
+        let args = Args {
+            help: false,
+            version: false,
+            configfile: None,
+            print_only: false,
+            refresh_cache: false,
+            no_icons: true,
+            default_script_shell: None,
+            ui_type: None,
+            initial_query: None,
+            theme: None,
+        };
+        let parsed_config = read_config_from_reader(reader, &args).unwrap();
+
+        assert_eq!(parsed_config.addons.web_searches.len(), 2);
+
+        let google = &parsed_config.addons.web_searches[0];
+        assert_eq!(google.name, "Google");
+        assert_eq!(google.keyword, "g");
+        assert_eq!(google.url, "https://google.com/search?q={query}");
+        assert_eq!(google.icon, Some("google".to_string()));
+
+        let ddg = &parsed_config.addons.web_searches[1];
+        assert_eq!(ddg.name, "DuckDuckGo");
+        assert_eq!(ddg.keyword, "ddg");
+        assert_eq!(ddg.url, "https://duckduckgo.com/?q={query}");
+        assert!(ddg.icon.is_none());
     }
 }

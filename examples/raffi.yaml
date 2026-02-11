@@ -369,3 +369,16 @@ addons:
     #   args: ["-j"]
     #   action: "wl-copy {value}"
     #   secondary_action: "xdg-open {value}"
+
+  web_searches:
+    - name: "Google"
+      keyword: "g"
+      url: "https://google.com/search?q={query}"
+      icon: "google"
+    - name: "DuckDuckGo"
+      keyword: "ddg"
+      url: "https://duckduckgo.com/?q={query}"
+    - name: "GitHub"
+      keyword: "gh"
+      url: "https://github.com/search?q={query}&type=repositories"
+      icon: "github"

@@ -134,6 +134,16 @@ also be defined, which is triggered with Alt+Enter instead of Enter.
 
 [See below for how to configure this](#script-filters-configuration)
 
+#### Web Searches
+
+The native interface supports quick web searches via URL templates. Type a configured keyword followed by your query, and the launcher will open your default browser with the search results.
+
+Example: typing `g rust traits` opens Google search for "rust traits" in your browser.
+
+Common search engines are pre-configured in the example config (Google, DuckDuckGo, GitHub, Wikipedia, etc.), and you can add any search engine by providing a URL template with a `{query}` placeholder.
+
+[See below for how to configure this](#web-search-configuration)
+
 ## Configuration
 
 ### Fuzzel Configuration
@@ -275,12 +285,11 @@ ifexist: firefox
 
 ### Path Expansion
 
-Config values for `binary`, `icon`, `args`, `ifexist`, and script filter fields `command`, `icon`, `action`, and `secondary_action` support path expansion:
+Config values for most fields except the script field support path expansion:
 
 - `~/` is expanded to the user's home directory
-- `${VAR}` is replaced with the environment variable value (unset variables expand to empty string)
-
-The `script` field is not expanded as the shell handles it natively.
+- `${VAR}` is replaced with the environment variable value (unset variables
+expand to empty string)
 
 Example:
 
@@ -294,7 +303,7 @@ myapp:
 
 ### Addon Configuration
 
-The native interface includes optional addons for calculations and currency conversion. These are enabled by default and can be configured or disabled.
+The native interface includes optional addons for calculations, currency conversion, script filters, and web searches.
 
 ```yaml
 addons:
@@ -311,10 +320,13 @@ The `enabled` field controls whether the addon is active.
 The `trigger` field sets the character that activates currency conversion. Defaults to `$` if omitted. Can be set to `€`, `£`, or any other symbol.
 The `default_currency` field sets the source currency used when none is specified (e.g., `€10 to GBP` converts from EUR). Defaults to USD if omitted.
 The `currencies` field for the currency addon defines which currencies are available for conversion.
+You don't need to add a prefix for the calculator; simply typing a valid expression will show the result.
 
-Both addons are enabled by default. Omitting the `addons` section preserves this behaviour.
+Both addons are enabled by default.
 
 <img align="right" width="441" height="559" alt="optimized-pull-requests-dashboard" src="https://github.com/user-attachments/assets/48da3b90-b8dd-4f4d-8465-3ae27fe267c3" />
+
+#### Script Filters Configuration
 
 Script filters are configured under `addons.script_filters`. Here is an example using the [batz](https://github.com/chmouel/batzconverter) time converter (shown in the screenshot above):
 
@@ -381,6 +393,32 @@ The script must output JSON matching this structure (a subset of Alfred's format
 | `subtitle`     | no       | Secondary text shown below the title            |
 | `arg`          | no       | Value copied to clipboard (falls back to title) |
 | `icon.path`    | no       | Absolute path to a PNG or SVG icon              |
+
+### Web Search Configuration
+
+Web searches are configured under `addons.web_searches`. Each entry defines a keyword and URL template:
+
+```yaml
+addons:
+  web_searches:
+    - name: "Google"
+      keyword: "g"
+      url: "https://google.com/search?q={query}"
+      icon: "google"
+```
+
+When you type the keyword followed by a space and query (e.g., `g rust async`), the launcher displays a search row. Pressing Enter opens your browser with the URL template, replacing `{query}` with your search terms (properly percent-encoded).
+
+Field descriptions:
+
+| Field     | Required | Description                                                          |
+|-----------|----------|----------------------------------------------------------------------|
+| `name`    | yes      | Display name shown in the search row (e.g., "Search Google for...")  |
+| `keyword` | yes      | Text that activates the web search (e.g., "g", "ddg")                |
+| `url`     | yes      | URL template with `{query}` placeholder for the search terms         |
+| `icon`    | no       | Icon name from your icon cache to display next to the search row     |
+
+The URL template's `{query}` placeholder is replaced with your search terms, automatically percent-encoded for safe URL use. For example, `g hello world` becomes `https://google.com/search?q=hello%20world`.
 
 ## Development
 
