@@ -103,6 +103,8 @@ pub struct GeneralConfig {
     pub default_script_shell: Option<String>,
     #[serde(default)]
     pub no_icons: Option<bool>,
+    #[serde(default)]
+    pub theme: Option<String>,
 }
 
 /// Complete parsed configuration
@@ -129,6 +131,28 @@ pub enum UIType {
     Fuzzel,
     #[cfg(feature = "wayland")]
     Native,
+}
+
+/// Theme mode selection
+#[derive(Debug, Clone, PartialEq)]
+pub enum ThemeMode {
+    Dark,
+    Light,
+}
+
+impl std::str::FromStr for ThemeMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "dark" => Ok(ThemeMode::Dark),
+            "light" => Ok(ThemeMode::Light),
+            _ => Err(format!(
+                "Invalid theme: {}. Valid options are: dark, light",
+                s
+            )),
+        }
+    }
 }
 
 impl std::str::FromStr for UIType {
@@ -182,6 +206,8 @@ pub struct Args {
     pub ui_type: Option<String>,
     #[options(help = "initial search query (native mode only)", short = "i")]
     pub initial_query: Option<String>,
+    #[options(help = "theme: dark, light (default: dark)", short = "t")]
+    pub theme: Option<String>,
 }
 
 /// A trait for checking environment variables.
@@ -543,6 +569,16 @@ pub fn run(args: Args) -> Result<()> {
         .unwrap_or("bash")
         .to_string();
 
+    // Determine theme
+    let theme_str = args.theme.as_ref().or(general.theme.as_ref());
+    let theme = if let Some(ref theme_str) = theme_str {
+        theme_str
+            .parse::<ThemeMode>()
+            .map_err(|e| anyhow::anyhow!(e))?
+    } else {
+        ThemeMode::Dark
+    };
+
     // Determine UI type
     let ui_type = if let Some(ref ui_type_str) = ui_type_str {
         ui_type_str
@@ -571,6 +607,7 @@ pub fn run(args: Args) -> Result<()> {
             &parsed_config.addons,
             no_icons,
             args.initial_query.as_deref(),
+            &theme,
         )
         .context("Failed to show UI")?;
 
@@ -624,6 +661,7 @@ mod tests {
             default_script_shell: None,
             ui_type: None,
             initial_query: None,
+            theme: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.entries.len(), 2);
@@ -674,6 +712,7 @@ mod tests {
             default_script_shell: None,
             ui_type: None,
             initial_query: None,
+            theme: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -737,6 +776,7 @@ mod tests {
             default_script_shell: None,
             ui_type: None,
             initial_query: None,
+            theme: None,
         };
         let env_provider = MockEnvProvider {
             vars: {
@@ -788,6 +828,7 @@ mod tests {
             default_script_shell: None,
             ui_type: None,
             initial_query: None,
+            theme: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -958,6 +999,7 @@ mod tests {
             default_script_shell: None,
             ui_type: None,
             initial_query: None,
+            theme: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -988,6 +1030,7 @@ mod tests {
             default_script_shell: None,
             ui_type: None,
             initial_query: None,
+            theme: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1017,6 +1060,7 @@ mod tests {
             default_script_shell: None,
             ui_type: None,
             initial_query: None,
+            theme: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1024,5 +1068,42 @@ mod tests {
         assert!(parsed_config.general.default_script_shell.is_none());
         assert_eq!(parsed_config.general.no_icons, Some(true));
         assert_eq!(parsed_config.entries.len(), 1);
+    }
+
+    #[test]
+    fn test_general_config_theme_parsing() {
+        let yaml_config = r#"
+        general:
+          theme: light
+        firefox:
+          binary: firefox
+          description: "Firefox browser"
+        "#;
+        let reader = Cursor::new(yaml_config);
+        let args = Args {
+            help: false,
+            version: false,
+            configfile: None,
+            print_only: false,
+            refresh_cache: false,
+            no_icons: false,
+            default_script_shell: None,
+            ui_type: None,
+            initial_query: None,
+            theme: None,
+        };
+        let parsed_config = read_config_from_reader(reader, &args).unwrap();
+        assert_eq!(parsed_config.general.theme, Some("light".to_string()));
+    }
+
+    #[test]
+    fn test_theme_mode_from_str() {
+        assert_eq!("dark".parse::<ThemeMode>().unwrap(), ThemeMode::Dark);
+        assert_eq!("Dark".parse::<ThemeMode>().unwrap(), ThemeMode::Dark);
+        assert_eq!("DARK".parse::<ThemeMode>().unwrap(), ThemeMode::Dark);
+        assert_eq!("light".parse::<ThemeMode>().unwrap(), ThemeMode::Light);
+        assert_eq!("Light".parse::<ThemeMode>().unwrap(), ThemeMode::Light);
+        assert_eq!("LIGHT".parse::<ThemeMode>().unwrap(), ThemeMode::Light);
+        assert!("invalid".parse::<ThemeMode>().is_err());
     }
 }

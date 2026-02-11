@@ -24,52 +24,123 @@ type ScrollableId = Id;
 type TextInputId = Id;
 
 use super::UI;
-use crate::{read_icon_map, AddonsConfig, RaffiConfig};
+use crate::{read_icon_map, AddonsConfig, RaffiConfig, ThemeMode};
 
-// --- Theme Colors (Dracula-ish with transparency) ---
-const COLOR_BG_BASE: iced::Color = iced::Color {
-    r: 0.15,
-    g: 0.16,
-    b: 0.21,
-    a: 0.95,
-}; // Dark Blue-Grey
-const COLOR_BG_INPUT: iced::Color = iced::Color {
-    r: 0.26,
-    g: 0.27,
-    b: 0.35,
-    a: 1.0,
-}; // Lighter Blue-Grey
-const COLOR_ACCENT: iced::Color = iced::Color {
-    r: 0.74,
-    g: 0.57,
-    b: 0.97,
-    a: 1.0,
-}; // Purple
-const COLOR_ACCENT_HOVER: iced::Color = iced::Color {
-    r: 0.54,
-    g: 0.91,
-    b: 0.99,
-    a: 1.0,
-}; // Cyan
-const COLOR_TEXT_MAIN: iced::Color = iced::Color::WHITE;
-const COLOR_TEXT_MUTED: iced::Color = iced::Color {
-    r: 0.38,
-    g: 0.44,
-    b: 0.64,
-    a: 1.0,
-}; // Blueish Grey
-const COLOR_SELECTION_BG: iced::Color = iced::Color {
-    r: 0.27,
-    g: 0.29,
-    b: 0.36,
-    a: 0.8,
-}; // Selection HL
-const COLOR_BORDER: iced::Color = iced::Color {
-    r: 0.38,
-    g: 0.44,
-    b: 0.64,
-    a: 0.5,
-};
+// --- Theme Colors ---
+#[derive(Debug, Clone, Copy)]
+struct ThemeColors {
+    bg_base: iced::Color,
+    bg_input: iced::Color,
+    accent: iced::Color,
+    accent_hover: iced::Color,
+    text_main: iced::Color,
+    text_muted: iced::Color,
+    selection_bg: iced::Color,
+    border: iced::Color,
+}
+
+impl ThemeColors {
+    fn dark() -> Self {
+        Self {
+            bg_base: iced::Color {
+                r: 0.15,
+                g: 0.16,
+                b: 0.21,
+                a: 0.95,
+            },
+            bg_input: iced::Color {
+                r: 0.26,
+                g: 0.27,
+                b: 0.35,
+                a: 1.0,
+            },
+            accent: iced::Color {
+                r: 0.74,
+                g: 0.57,
+                b: 0.97,
+                a: 1.0,
+            },
+            accent_hover: iced::Color {
+                r: 0.54,
+                g: 0.91,
+                b: 0.99,
+                a: 1.0,
+            },
+            text_main: iced::Color::WHITE,
+            text_muted: iced::Color {
+                r: 0.38,
+                g: 0.44,
+                b: 0.64,
+                a: 1.0,
+            },
+            selection_bg: iced::Color {
+                r: 0.27,
+                g: 0.29,
+                b: 0.36,
+                a: 0.8,
+            },
+            border: iced::Color {
+                r: 0.38,
+                g: 0.44,
+                b: 0.64,
+                a: 0.5,
+            },
+        }
+    }
+
+    fn light() -> Self {
+        // Rose Pine Dawn palette
+        Self {
+            bg_base: iced::Color::from_rgb(
+                0xfa as f32 / 255.0,
+                0xf4 as f32 / 255.0,
+                0xed as f32 / 255.0,
+            ),
+            bg_input: iced::Color::from_rgb(
+                0xff as f32 / 255.0,
+                0xfa as f32 / 255.0,
+                0xf3 as f32 / 255.0,
+            ),
+            accent: iced::Color::from_rgb(
+                0x90 as f32 / 255.0,
+                0x7a as f32 / 255.0,
+                0xa9 as f32 / 255.0,
+            ),
+            accent_hover: iced::Color::from_rgb(
+                0x56 as f32 / 255.0,
+                0x94 as f32 / 255.0,
+                0x9f as f32 / 255.0,
+            ),
+            text_main: iced::Color::from_rgb(
+                0x57 as f32 / 255.0,
+                0x52 as f32 / 255.0,
+                0x79 as f32 / 255.0,
+            ),
+            text_muted: iced::Color::from_rgb(
+                0x98 as f32 / 255.0,
+                0x93 as f32 / 255.0,
+                0xa5 as f32 / 255.0,
+            ),
+            selection_bg: iced::Color::from_rgb(
+                0xdf as f32 / 255.0,
+                0xda as f32 / 255.0,
+                0xd9 as f32 / 255.0,
+            ),
+            border: iced::Color::from_rgb(
+                0x79 as f32 / 255.0,
+                0x75 as f32 / 255.0,
+                0x93 as f32 / 255.0,
+            ),
+        }
+    }
+
+    fn from_mode(mode: &ThemeMode) -> Self {
+        match mode {
+            ThemeMode::Dark => Self::dark(),
+            ThemeMode::Light => Self::light(),
+        }
+    }
+}
 
 /// Wayland UI implementation using iced
 pub struct WaylandUI;
@@ -81,8 +152,9 @@ impl UI for WaylandUI {
         addons: &AddonsConfig,
         no_icons: bool,
         initial_query: Option<&str>,
+        theme: &ThemeMode,
     ) -> Result<String> {
-        run_wayland_ui(configs, addons, no_icons, initial_query)
+        run_wayland_ui(configs, addons, no_icons, initial_query, theme)
     }
 }
 
@@ -649,6 +721,7 @@ struct LauncherApp {
     script_filter_action: Option<String>,
     script_filter_secondary_action: Option<String>,
     current_modifiers: iced::keyboard::Modifiers,
+    theme: ThemeColors,
 }
 
 #[derive(Debug, Clone)]
@@ -682,6 +755,7 @@ impl LauncherApp {
         no_icons: bool,
         selected_item: SharedSelection,
         initial_query: Option<String>,
+        theme: ThemeColors,
     ) -> (Self, Task<Message>) {
         let icon_map = if no_icons {
             HashMap::new()
@@ -735,6 +809,7 @@ impl LauncherApp {
                 script_filter_action: None,
                 script_filter_secondary_action: None,
                 current_modifiers: iced::keyboard::Modifiers::empty(),
+                theme,
             },
             if initial_query.is_empty() {
                 focus(search_input_id)
@@ -1308,6 +1383,7 @@ impl LauncherApp {
     }
 
     fn view(&self) -> Element<'_, Message> {
+        let t = self.theme;
         // --- Search Input Styling ---
         let search_input = text_input("Type to search...", &self.search_query)
             .id(self.search_input_id.clone())
@@ -1315,24 +1391,24 @@ impl LauncherApp {
             .on_submit(Message::Submit)
             .padding(16)
             .size(24)
-            .style(|_theme, status| {
+            .style(move |_theme, status| {
                 let border_color = if matches!(status, text_input::Status::Focused { .. }) {
-                    COLOR_ACCENT
+                    t.accent
                 } else {
-                    COLOR_BORDER
+                    t.border
                 };
 
                 text_input::Style {
-                    background: iced::Background::Color(COLOR_BG_INPUT),
+                    background: iced::Background::Color(t.bg_input),
                     border: iced::Border {
                         radius: 12.0.into(),
                         width: 1.0,
                         color: border_color,
                     },
-                    placeholder: COLOR_TEXT_MUTED,
-                    value: COLOR_TEXT_MAIN,
-                    selection: COLOR_ACCENT,
-                    icon: COLOR_TEXT_MUTED,
+                    placeholder: t.text_muted,
+                    value: t.text_main,
+                    selection: t.accent,
+                    icon: t.text_muted,
                 }
             })
             .width(Length::Fill);
@@ -1362,14 +1438,14 @@ impl LauncherApp {
             let loading_row = Row::new()
                 .spacing(16)
                 .align_y(iced::Alignment::Center)
-                .push(text(loading_text).size(20).color(COLOR_TEXT_MUTED));
+                .push(text(loading_text).size(20).color(t.text_muted));
 
             let is_selected = self.selected_index == special_item_idx;
 
             let loading_button = button(loading_row).padding(12).width(Length::Fill).style(
                 move |_theme, _status| {
                     let base_style = button::Style {
-                        text_color: COLOR_TEXT_MUTED,
+                        text_color: t.text_muted,
                         border: iced::Border {
                             radius: 8.0.into(),
                             ..Default::default()
@@ -1379,9 +1455,9 @@ impl LauncherApp {
 
                     if is_selected {
                         button::Style {
-                            background: Some(iced::Background::Color(COLOR_SELECTION_BG)),
+                            background: Some(iced::Background::Color(t.selection_bg)),
                             border: iced::Border {
-                                color: COLOR_ACCENT,
+                                color: t.accent,
                                 width: 1.0,
                                 radius: 8.0.into(),
                             },
@@ -1453,11 +1529,10 @@ impl LauncherApp {
 
                 // Title + optional subtitle
                 let mut text_col = Column::new();
-                text_col =
-                    text_col.push(rich_text(ansi_to_spans(&item.title, 20.0, COLOR_TEXT_MAIN)));
+                text_col = text_col.push(rich_text(ansi_to_spans(&item.title, 20.0, t.text_main)));
                 if let Some(ref subtitle) = item.subtitle {
                     text_col =
-                        text_col.push(rich_text(ansi_to_spans(subtitle, 14.0, COLOR_TEXT_MUTED)));
+                        text_col.push(rich_text(ansi_to_spans(subtitle, 14.0, t.text_muted)));
                 }
                 item_row = item_row.push(text_col.width(Length::Fill));
 
@@ -1467,7 +1542,7 @@ impl LauncherApp {
                     .width(Length::Fill)
                     .style(move |_theme, status| {
                         let base_style = button::Style {
-                            text_color: COLOR_TEXT_MAIN,
+                            text_color: t.text_main,
                             border: iced::Border {
                                 radius: 8.0.into(),
                                 ..Default::default()
@@ -1477,9 +1552,9 @@ impl LauncherApp {
 
                         if is_selected {
                             button::Style {
-                                background: Some(iced::Background::Color(COLOR_SELECTION_BG)),
+                                background: Some(iced::Background::Color(t.selection_bg)),
                                 border: iced::Border {
-                                    color: COLOR_ACCENT,
+                                    color: t.accent,
                                     width: 1.0,
                                     radius: 8.0.into(),
                                 },
@@ -1490,7 +1565,7 @@ impl LauncherApp {
                                 button::Status::Hovered => button::Style {
                                     background: Some(iced::Background::Color(iced::Color {
                                         a: 0.1,
-                                        ..COLOR_ACCENT_HOVER
+                                        ..t.accent_hover
                                     })),
                                     ..base_style
                                 },
@@ -1515,7 +1590,7 @@ impl LauncherApp {
             let help_row = Row::new()
                 .spacing(16)
                 .align_y(iced::Alignment::Center)
-                .push(text(help_text).size(20).color(COLOR_TEXT_MUTED));
+                .push(text(help_text).size(20).color(t.text_muted));
 
             let help_button =
                 button(help_row)
@@ -1523,7 +1598,7 @@ impl LauncherApp {
                     .width(Length::Fill)
                     .style(move |_theme, _status| {
                         let base_style = button::Style {
-                            text_color: COLOR_TEXT_MUTED,
+                            text_color: t.text_muted,
                             border: iced::Border {
                                 radius: 8.0.into(),
                                 ..Default::default()
@@ -1533,9 +1608,9 @@ impl LauncherApp {
 
                         if is_selected {
                             button::Style {
-                                background: Some(iced::Background::Color(COLOR_SELECTION_BG)),
+                                background: Some(iced::Background::Color(t.selection_bg)),
                                 border: iced::Border {
-                                    color: COLOR_ACCENT,
+                                    color: t.accent,
                                     width: 1.0,
                                     radius: 8.0.into(),
                                 },
@@ -1567,14 +1642,14 @@ impl LauncherApp {
             let loading_row = Row::new()
                 .spacing(16)
                 .align_y(iced::Alignment::Center)
-                .push(text(loading_text).size(20).color(COLOR_TEXT_MUTED));
+                .push(text(loading_text).size(20).color(t.text_muted));
 
             let is_selected = self.selected_index == special_item_idx;
 
             let loading_button = button(loading_row).padding(12).width(Length::Fill).style(
                 move |_theme, _status| {
                     let base_style = button::Style {
-                        text_color: COLOR_TEXT_MUTED,
+                        text_color: t.text_muted,
                         border: iced::Border {
                             radius: 8.0.into(),
                             ..Default::default()
@@ -1584,9 +1659,9 @@ impl LauncherApp {
 
                     if is_selected {
                         button::Style {
-                            background: Some(iced::Background::Color(COLOR_SELECTION_BG)),
+                            background: Some(iced::Background::Color(t.selection_bg)),
                             border: iced::Border {
-                                color: COLOR_ACCENT,
+                                color: t.accent,
                                 width: 1.0,
                                 radius: 8.0.into(),
                             },
@@ -1616,7 +1691,7 @@ impl LauncherApp {
             let currency_row = Row::new()
                 .spacing(16)
                 .align_y(iced::Alignment::Center)
-                .push(text(currency_text).size(20).color(COLOR_ACCENT));
+                .push(text(currency_text).size(20).color(t.accent));
 
             let is_selected = self.selected_index == special_item_idx;
 
@@ -1626,7 +1701,7 @@ impl LauncherApp {
                 .width(Length::Fill)
                 .style(move |_theme, status| {
                     let base_style = button::Style {
-                        text_color: COLOR_ACCENT,
+                        text_color: t.accent,
                         border: iced::Border {
                             radius: 8.0.into(),
                             ..Default::default()
@@ -1636,9 +1711,9 @@ impl LauncherApp {
 
                     if is_selected {
                         button::Style {
-                            background: Some(iced::Background::Color(COLOR_SELECTION_BG)),
+                            background: Some(iced::Background::Color(t.selection_bg)),
                             border: iced::Border {
-                                color: COLOR_ACCENT,
+                                color: t.accent,
                                 width: 1.0,
                                 radius: 8.0.into(),
                             },
@@ -1649,7 +1724,7 @@ impl LauncherApp {
                             button::Status::Hovered => button::Style {
                                 background: Some(iced::Background::Color(iced::Color {
                                     a: 0.1,
-                                    ..COLOR_ACCENT_HOVER
+                                    ..t.accent_hover
                                 })),
                                 ..base_style
                             },
@@ -1681,14 +1756,14 @@ impl LauncherApp {
             let loading_row = Row::new()
                 .spacing(16)
                 .align_y(iced::Alignment::Center)
-                .push(text(loading_text).size(20).color(COLOR_TEXT_MUTED));
+                .push(text(loading_text).size(20).color(t.text_muted));
 
             let is_selected = self.selected_index == special_item_idx;
 
             let loading_button = button(loading_row).padding(12).width(Length::Fill).style(
                 move |_theme, _status| {
                     let base_style = button::Style {
-                        text_color: COLOR_TEXT_MUTED,
+                        text_color: t.text_muted,
                         border: iced::Border {
                             radius: 8.0.into(),
                             ..Default::default()
@@ -1698,9 +1773,9 @@ impl LauncherApp {
 
                     if is_selected {
                         button::Style {
-                            background: Some(iced::Background::Color(COLOR_SELECTION_BG)),
+                            background: Some(iced::Background::Color(t.selection_bg)),
                             border: iced::Border {
-                                color: COLOR_ACCENT,
+                                color: t.accent,
                                 width: 1.0,
                                 radius: 8.0.into(),
                             },
@@ -1731,7 +1806,7 @@ impl LauncherApp {
                 let conversion_row = Row::new()
                     .spacing(16)
                     .align_y(iced::Alignment::Center)
-                    .push(text(conversion_text).size(20).color(COLOR_ACCENT));
+                    .push(text(conversion_text).size(20).color(t.accent));
 
                 let is_selected = self.selected_index == special_item_idx;
 
@@ -1741,7 +1816,7 @@ impl LauncherApp {
                     .width(Length::Fill)
                     .style(move |_theme, status| {
                         let base_style = button::Style {
-                            text_color: COLOR_ACCENT,
+                            text_color: t.accent,
                             border: iced::Border {
                                 radius: 8.0.into(),
                                 ..Default::default()
@@ -1751,9 +1826,9 @@ impl LauncherApp {
 
                         if is_selected {
                             button::Style {
-                                background: Some(iced::Background::Color(COLOR_SELECTION_BG)),
+                                background: Some(iced::Background::Color(t.selection_bg)),
                                 border: iced::Border {
-                                    color: COLOR_ACCENT,
+                                    color: t.accent,
                                     width: 1.0,
                                     radius: 8.0.into(),
                                 },
@@ -1764,7 +1839,7 @@ impl LauncherApp {
                                 button::Status::Hovered => button::Style {
                                     background: Some(iced::Background::Color(iced::Color {
                                         a: 0.1,
-                                        ..COLOR_ACCENT_HOVER
+                                        ..t.accent_hover
                                     })),
                                     ..base_style
                                 },
@@ -1793,7 +1868,7 @@ impl LauncherApp {
             let calc_row = Row::new()
                 .spacing(16)
                 .align_y(iced::Alignment::Center)
-                .push(text(calc_text).size(20).color(COLOR_ACCENT));
+                .push(text(calc_text).size(20).color(t.accent));
 
             let is_selected = self.selected_index == special_item_idx;
 
@@ -1803,7 +1878,7 @@ impl LauncherApp {
                 .width(Length::Fill)
                 .style(move |_theme, status| {
                     let base_style = button::Style {
-                        text_color: COLOR_ACCENT,
+                        text_color: t.accent,
                         border: iced::Border {
                             radius: 8.0.into(),
                             ..Default::default()
@@ -1813,9 +1888,9 @@ impl LauncherApp {
 
                     if is_selected {
                         button::Style {
-                            background: Some(iced::Background::Color(COLOR_SELECTION_BG)),
+                            background: Some(iced::Background::Color(t.selection_bg)),
                             border: iced::Border {
-                                color: COLOR_ACCENT,
+                                color: t.accent,
                                 width: 1.0,
                                 radius: 8.0.into(),
                             },
@@ -1826,7 +1901,7 @@ impl LauncherApp {
                             button::Status::Hovered => button::Style {
                                 background: Some(iced::Background::Color(iced::Color {
                                     a: 0.1,
-                                    ..COLOR_ACCENT_HOVER
+                                    ..t.accent_hover
                                 })),
                                 ..base_style
                             },
@@ -1850,7 +1925,7 @@ impl LauncherApp {
             let no_results = container(
                 text("No matching results found.")
                     .size(18)
-                    .color(COLOR_TEXT_MUTED),
+                    .color(t.text_muted),
             )
             .width(Length::Fill)
             .height(Length::Fill)
@@ -1933,7 +2008,7 @@ impl LauncherApp {
                     .width(Length::Fill)
                     .style(move |_theme, status| {
                         let base_style = button::Style {
-                            text_color: COLOR_TEXT_MAIN,
+                            text_color: t.text_main,
                             border: iced::Border {
                                 radius: 8.0.into(),
                                 ..Default::default()
@@ -1943,9 +2018,9 @@ impl LauncherApp {
 
                         if is_selected {
                             button::Style {
-                                background: Some(iced::Background::Color(COLOR_SELECTION_BG)),
+                                background: Some(iced::Background::Color(t.selection_bg)),
                                 border: iced::Border {
-                                    color: COLOR_ACCENT,
+                                    color: t.accent,
                                     width: 1.0,
                                     radius: 8.0.into(),
                                 },
@@ -1956,7 +2031,7 @@ impl LauncherApp {
                                 button::Status::Hovered => button::Style {
                                     background: Some(iced::Background::Color(iced::Color {
                                         a: 0.1,
-                                        ..COLOR_ACCENT_HOVER
+                                        ..t.accent_hover
                                     })),
                                     ..base_style
                                 },
@@ -2000,14 +2075,14 @@ impl LauncherApp {
             .padding(20)
             .width(Length::Fill)
             .height(Length::Fill)
-            .style(|_theme| container::Style {
-                background: Some(iced::Background::Color(COLOR_BG_BASE)),
+            .style(move |_theme| container::Style {
+                background: Some(iced::Background::Color(t.bg_base)),
                 border: iced::Border {
-                    color: COLOR_BORDER,
+                    color: t.border,
                     width: 1.0,
                     radius: 16.0.into(),
                 },
-                text_color: Some(COLOR_TEXT_MAIN),
+                text_color: Some(t.text_main),
                 ..Default::default()
             })
             .into()
@@ -2676,7 +2751,13 @@ fn run_wayland_ui(
     addons: &AddonsConfig,
     no_icons: bool,
     initial_query: Option<&str>,
+    theme_mode: &ThemeMode,
 ) -> Result<String> {
+    let theme_colors = ThemeColors::from_mode(theme_mode);
+    let iced_theme = match theme_mode {
+        ThemeMode::Dark => iced::Theme::Dark,
+        ThemeMode::Light => iced::Theme::Light,
+    };
     let selected_item: SharedSelection = Arc::new(Mutex::new(None));
     let selected_item_clone = selected_item.clone();
 
@@ -2714,13 +2795,14 @@ fn run_wayland_ui(
                 no_icons,
                 selected_item_for_new.clone(),
                 initial_query_owned.clone(),
+                theme_colors,
             )
         },
         LauncherApp::update,
         LauncherApp::view,
     )
     .subscription(LauncherApp::subscription)
-    .theme(|_state: &LauncherApp| iced::Theme::Dark)
+    .theme(move |_state: &LauncherApp| iced_theme.clone())
     .window(window_settings)
     .run();
 

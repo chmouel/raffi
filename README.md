@@ -61,6 +61,7 @@ Common options include:
 `-I` or `--disable-icons` disables icons for slightly faster startup.
 `-u` or `--ui-type <TYPE>` selects `fuzzel` or `native` (default is `fuzzel`).
 `-i` or `--initial-query <QUERY>` pre-fills the search field on launch (native mode only).
+`-t` or `--theme <THEME>` selects `dark` or `light` theme (default is `dark`, native mode only).
 `--default-script-shell <SHELL>` sets the default interpreter for scripts.
 
 ## Window Manager Integration
@@ -86,7 +87,7 @@ Raffi supports two interface modes.
 
 Fuzzel mode uses the external Fuzzel launcher and integrates naturally with Wayland environments.
 
-Native mode uses an internal iced‑based graphical interface with fuzzy search, keyboard navigation, and a dark theme. It is suitable if you prefer a self‑contained graphical window.
+Native mode uses an internal iced‑based graphical interface with fuzzy search, keyboard navigation, and theme support (dark by default, light available via `-t light` or config). It is suitable if you prefer a self‑contained graphical window.
 
 ### Native Interface Extras
 
@@ -185,6 +186,23 @@ The `args` field defines optional command‑line arguments.
 The `icon` field defines an icon name or absolute path. Icons are cached and can be refreshed with `-r`.
 The `script` field defines inline script content.
 The `disabled` field hides the entry when set to true.
+
+### General Settings
+
+Persistent defaults can be set under a `general` key. These are equivalent to command‑line flags and are overridden by them.
+
+```yaml
+general:
+  ui_type: native
+  theme: light
+  no_icons: true
+  default_script_shell: /bin/zsh
+```
+
+The `ui_type` field selects the interface (`fuzzel` or `native`).
+The `theme` field selects the colour theme for the native interface. `dark` (default) uses a Dracula‑inspired palette; `light` uses Rose Pine Dawn.
+The `no_icons` field disables icon loading when set to true.
+The `default_script_shell` field sets the default interpreter for inline scripts.
 
 ### Scripts
 
