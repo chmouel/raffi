@@ -80,8 +80,9 @@ impl UI for WaylandUI {
         configs: &[RaffiConfig],
         addons: &AddonsConfig,
         no_icons: bool,
+        initial_query: Option<&str>,
     ) -> Result<String> {
-        run_wayland_ui(configs, addons, no_icons)
+        run_wayland_ui(configs, addons, no_icons, initial_query)
     }
 }
 
@@ -680,6 +681,7 @@ impl LauncherApp {
         addons: AddonsConfig,
         no_icons: bool,
         selected_item: SharedSelection,
+        initial_query: Option<String>,
     ) -> (Self, Task<Message>) {
         let icon_map = if no_icons {
             HashMap::new()
@@ -696,6 +698,7 @@ impl LauncherApp {
             std::cmp::Reverse(mru_map.get(description).copied().unwrap_or(0))
         });
 
+        let initial_query = initial_query.unwrap_or_default();
         let filtered_configs: Vec<usize> = (0..configs.len()).collect();
         let search_input_id = TextInputId::unique();
         let scrollable_id = ScrollableId::unique();
@@ -705,7 +708,7 @@ impl LauncherApp {
             LauncherApp {
                 configs,
                 filtered_configs,
-                search_query: String::new(),
+                search_query: initial_query.clone(),
                 selected_index: 0,
                 selected_item,
                 icon_map,
@@ -733,7 +736,11 @@ impl LauncherApp {
                 script_filter_secondary_action: None,
                 current_modifiers: iced::keyboard::Modifiers::empty(),
             },
-            focus(search_input_id),
+            if initial_query.is_empty() {
+                focus(search_input_id)
+            } else {
+                focus(search_input_id).chain(Task::done(Message::SearchChanged(initial_query)))
+            },
         )
     }
 
@@ -2668,6 +2675,7 @@ fn run_wayland_ui(
     configs: &[RaffiConfig],
     addons: &AddonsConfig,
     no_icons: bool,
+    initial_query: Option<&str>,
 ) -> Result<String> {
     let selected_item: SharedSelection = Arc::new(Mutex::new(None));
     let selected_item_clone = selected_item.clone();
@@ -2679,6 +2687,7 @@ fn run_wayland_ui(
     let configs_for_new = configs_owned.clone();
     let addons_for_new = addons_owned.clone();
     let selected_item_for_new = selected_item_clone.clone();
+    let initial_query_owned = initial_query.map(|s| s.to_string());
 
     let window_settings = window::Settings {
         size: iced::Size::new(800.0, 600.0),
@@ -2704,6 +2713,7 @@ fn run_wayland_ui(
                 addons_for_new.clone(),
                 no_icons,
                 selected_item_for_new.clone(),
+                initial_query_owned.clone(),
             )
         },
         LauncherApp::update,

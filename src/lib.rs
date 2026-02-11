@@ -170,6 +170,8 @@ pub struct Args {
     pub default_script_shell: String,
     #[options(help = "UI type to use: fuzzel, native (default: fuzzel)", short = "u")]
     pub ui_type: Option<String>,
+    #[options(help = "initial search query (native mode only)", short = "i")]
+    pub initial_query: Option<String>,
 }
 
 /// A trait for checking environment variables.
@@ -538,7 +540,12 @@ pub fn run(args: Args) -> Result<()> {
     // Get the appropriate UI implementation
     let ui = ui::get_ui(ui_type);
     let chosen = ui
-        .show(&parsed_config.entries, &parsed_config.addons, args.no_icons)
+        .show(
+            &parsed_config.entries,
+            &parsed_config.addons,
+            args.no_icons,
+            args.initial_query.as_deref(),
+        )
         .context("Failed to show UI")?;
 
     let chosen_name = chosen.trim();
@@ -590,6 +597,7 @@ mod tests {
             no_icons: true,
             default_script_shell: "bash".to_string(),
             ui_type: None,
+            initial_query: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.entries.len(), 2);
@@ -639,6 +647,7 @@ mod tests {
             no_icons: true,
             default_script_shell: "bash".to_string(),
             ui_type: None,
+            initial_query: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -701,6 +710,7 @@ mod tests {
             no_icons: true,
             default_script_shell: "bash".to_string(),
             ui_type: None,
+            initial_query: None,
         };
         let env_provider = MockEnvProvider {
             vars: {
@@ -751,6 +761,7 @@ mod tests {
             no_icons: true,
             default_script_shell: "bash".to_string(),
             ui_type: None,
+            initial_query: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 

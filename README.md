@@ -60,6 +60,7 @@ Common options include:
 `-r` or `--refresh-cache` refreshes cached icon paths.
 `-I` or `--disable-icons` disables icons for slightly faster startup.
 `-u` or `--ui-type <TYPE>` selects `fuzzel` or `native` (default is `fuzzel`).
+`-i` or `--initial-query <QUERY>` pre-fills the search field on launch (native mode only).
 `--default-script-shell <SHELL>` sets the default interpreter for scripts.
 
 ## Window Manager Integration

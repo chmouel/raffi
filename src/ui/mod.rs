@@ -18,6 +18,7 @@ pub trait UI {
         configs: &[RaffiConfig],
         addons: &AddonsConfig,
         no_icons: bool,
+        initial_query: Option<&str>,
     ) -> Result<String>;
 }
 

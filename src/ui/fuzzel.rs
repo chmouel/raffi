@@ -17,6 +17,7 @@ impl UI for FuzzelUI {
         configs: &[RaffiConfig],
         _addons: &AddonsConfig,
         no_icons: bool,
+        _initial_query: Option<&str>,
     ) -> Result<String> {
         let input = make_fuzzel_input(configs, no_icons)?;
         run_fuzzel_with_input(&input)
