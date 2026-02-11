@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
-use iced::widget::operation::{focus, snap_to};
+use iced::widget::operation::{focus, move_cursor_to_end, snap_to};
 use iced::widget::{
     button, column, container, image, rich_text, scrollable, span, svg, text, text_input, Column,
     Id, Row,
@@ -1768,7 +1768,9 @@ impl LauncherApp {
                         entry.full_path.clone()
                     };
                     self.search_query = new_query.clone();
-                    return Task::done(Message::SearchChanged(new_query));
+                    let id = self.search_input_id.clone();
+                    return Task::done(Message::SearchChanged(new_query))
+                        .chain(move_cursor_to_end(id));
                 }
                 Task::none()
             }
