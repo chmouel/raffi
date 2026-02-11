@@ -125,9 +125,10 @@ item's `arg` value (or `title` if `arg` is absent) is copied to the clipboard us
 the selected value substituted via `{value}` placeholder. A `secondary_action` can
 also be defined, which is triggered with Alt+Enter instead of Enter.
 
-You can output ansi colored text in the `title` and `subtitle` fields by
-including ANSI escape codes in the JSON output and it will be rendered in the
-launcher.
+ The `title` and `subtitle` fields support ANSI color codes in JSON output,
+ which the launcher renders as colored text. For example, the [pr.py script
+ from alfred-pr-workflow](https://gitlab.com/chmouel/alfred-pr-workflow) uses
+ colors to display pull request states.
 
 [See below for how to configure this](#script-filters-configuration)
 
