@@ -268,6 +268,8 @@ The `currencies` field for the currency addon defines which currencies are avail
 
 Both addons are enabled by default. Omitting the `addons` section preserves this behaviour.
 
+<img align="right" width="441" height="559" alt="optimized-pull-requests-dashboard" src="https://github.com/user-attachments/assets/48da3b90-b8dd-4f4d-8465-3ae27fe267c3" />
+
 Script filters are configured under `addons.script_filters`. Here is an example using the [batz](https://github.com/chmouel/batzconverter) time converter (shown in the screenshot above):
 
 ```yaml
