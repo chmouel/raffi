@@ -1023,12 +1023,8 @@ impl LauncherApp {
                     // Expand ~ to home directory
                     let expanded = if trimmed == "~" {
                         format!("{}/", std::env::var("HOME").unwrap_or_default())
-                    } else if trimmed.starts_with("~/") {
-                        format!(
-                            "{}/{}",
-                            std::env::var("HOME").unwrap_or_default(),
-                            &trimmed[2..]
-                        )
+                    } else if let Some(rest) = trimmed.strip_prefix("~/") {
+                        format!("{}/{}", std::env::var("HOME").unwrap_or_default(), rest)
                     } else {
                         trimmed.to_string()
                     };
