@@ -541,6 +541,8 @@ struct LauncherApp {
     script_filter_loading_name: Option<String>,
     script_filter_generation: u64,
     script_filter_action: Option<String>,
+    script_filter_secondary_action: Option<String>,
+    current_modifiers: iced::keyboard::Modifiers,
 }
 
 #[derive(Debug, Clone)]
@@ -564,6 +566,7 @@ enum Message {
     MultiCurrencyResultCopied(usize), // index of conversion to copy
     ScriptFilterResult(u64, std::result::Result<ScriptFilterResult, String>),
     ScriptFilterItemSelected(usize),
+    ModifiersChanged(iced::keyboard::Modifiers),
 }
 
 impl LauncherApp {
@@ -622,6 +625,8 @@ impl LauncherApp {
                 script_filter_loading_name: None,
                 script_filter_generation: 0,
                 script_filter_action: None,
+                script_filter_secondary_action: None,
+                current_modifiers: iced::keyboard::Modifiers::empty(),
             },
             focus(search_input_id),
         )
@@ -668,6 +673,7 @@ impl LauncherApp {
                         self.script_filter_loading = true;
                         self.script_filter_loading_name = Some(sf_config.name.clone());
                         self.script_filter_action = sf_config.action.clone();
+                        self.script_filter_secondary_action = sf_config.secondary_action.clone();
                         self.script_filter_results = None;
 
                         tasks.push(execute_script_filter(
@@ -687,6 +693,7 @@ impl LauncherApp {
                     self.script_filter_loading = false;
                     self.script_filter_loading_name = None;
                     self.script_filter_action = None;
+                    self.script_filter_secondary_action = None;
                 }
 
                 // Determine trigger from config
@@ -1153,7 +1160,14 @@ impl LauncherApp {
                 if let Some(ref sf_result) = self.script_filter_results {
                     if let Some(item) = sf_result.items.get(idx) {
                         let value = item.arg.as_deref().unwrap_or(&item.title);
-                        if let Some(ref action_tpl) = self.script_filter_action {
+                        let action_tpl = if self.current_modifiers.alt() {
+                            self.script_filter_secondary_action
+                                .as_ref()
+                                .or(self.script_filter_action.as_ref())
+                        } else {
+                            self.script_filter_action.as_ref()
+                        };
+                        if let Some(action_tpl) = action_tpl {
                             let cmd = action_tpl.replace("{value}", value);
                             let _ = Command::new("sh")
                                 .arg("-c")
@@ -1173,6 +1187,10 @@ impl LauncherApp {
                     }
                 }
                 iced::exit()
+            }
+            Message::ModifiersChanged(modifiers) => {
+                self.current_modifiers = modifiers;
+                Task::none()
             }
         }
     }
@@ -1280,7 +1298,7 @@ impl LauncherApp {
                     .as_ref()
                     .and_then(|i| i.path.clone())
                     .and_then(|p| {
-                        let expanded = crate::expand_tilde(&p);
+                        let expanded = crate::expand_config_value(&p);
                         if Path::new(&expanded).exists() {
                             Some(expanded)
                         } else {
@@ -1904,6 +1922,9 @@ impl LauncherApp {
                 key: keyboard::Key::Named(Named::Escape),
                 ..
             }) => Some(Message::Cancel),
+            Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
+                Some(Message::ModifiersChanged(m))
+            }
             _ => None,
         })
     }

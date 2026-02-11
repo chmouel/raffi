@@ -76,6 +76,7 @@ pub struct ScriptFilterConfig {
     #[serde(default)]
     pub args: Vec<String>,
     pub action: Option<String>,
+    pub secondary_action: Option<String>,
 }
 
 /// Container for all addon configurations
@@ -287,6 +288,28 @@ pub(crate) fn expand_tilde(s: &str) -> String {
     }
 }
 
+/// Expand `${VAR}` references to their environment variable values.
+/// Unknown or unset variables expand to an empty string.
+fn expand_env_vars(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '$' && chars.peek() == Some(&'{') {
+            chars.next(); // consume '{'
+            let var_name: String = chars.by_ref().take_while(|&c| c != '}').collect();
+            result.push_str(&std::env::var(&var_name).unwrap_or_default());
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
+/// Expand both `~/` and `${VAR}` in a config value.
+pub(crate) fn expand_config_value(s: &str) -> String {
+    expand_env_vars(&expand_tilde(s))
+}
+
 /// Read the configuration file and return a ParsedConfig.
 pub fn read_config(filename: &str, args: &Args) -> Result<ParsedConfig> {
     let file = File::open(filename).context(format!("cannot open config file {filename}"))?;
@@ -301,12 +324,12 @@ pub fn read_config_from_reader<R: Read>(reader: R, args: &Args) -> Result<Parsed
         if value.is_mapping() {
             let mut mc: RaffiConfig = serde_yaml::from_value(value.clone())
                 .context("cannot parse config entry".to_string())?;
-            mc.binary = mc.binary.map(|s| expand_tilde(&s));
-            mc.icon = mc.icon.map(|s| expand_tilde(&s));
-            mc.ifexist = mc.ifexist.map(|s| expand_tilde(&s));
+            mc.binary = mc.binary.map(|s| expand_config_value(&s));
+            mc.icon = mc.icon.map(|s| expand_config_value(&s));
+            mc.ifexist = mc.ifexist.map(|s| expand_config_value(&s));
             mc.args = mc
                 .args
-                .map(|v| v.into_iter().map(|s| expand_tilde(&s)).collect());
+                .map(|v| v.into_iter().map(|s| expand_config_value(&s)).collect());
             if mc.disabled.unwrap_or(false)
                 || !is_valid_config(&mut mc, args, &DefaultEnvProvider, &DefaultBinaryChecker)
             {
@@ -318,9 +341,10 @@ pub fn read_config_from_reader<R: Read>(reader: R, args: &Args) -> Result<Parsed
 
     let mut addons = config.addons;
     for sf in &mut addons.script_filters {
-        sf.command = expand_tilde(&sf.command);
-        sf.icon = sf.icon.as_ref().map(|s| expand_tilde(s));
-        sf.action = sf.action.as_ref().map(|s| expand_tilde(s));
+        sf.command = expand_config_value(&sf.command);
+        sf.icon = sf.icon.as_ref().map(|s| expand_config_value(s));
+        sf.action = sf.action.as_ref().map(|s| expand_config_value(s));
+        sf.secondary_action = sf.secondary_action.as_ref().map(|s| expand_config_value(s));
     }
 
     Ok(ParsedConfig {
@@ -707,7 +731,8 @@ mod tests {
               keyword: "bm"
               command: "my-bookmark-script"
               args: ["-j"]
-              action: "xdg-open {value}"
+              action: "wl-copy {value}"
+              secondary_action: "xdg-open {value}"
             - name: "Timezones"
               keyword: "tz"
               command: "batz"
@@ -733,11 +758,13 @@ mod tests {
 
         let bm = &parsed_config.addons.script_filters[0];
         assert_eq!(bm.name, "Bookmarks");
-        assert_eq!(bm.action, Some("xdg-open {value}".to_string()));
+        assert_eq!(bm.action, Some("wl-copy {value}".to_string()));
+        assert_eq!(bm.secondary_action, Some("xdg-open {value}".to_string()));
 
         let tz = &parsed_config.addons.script_filters[1];
         assert_eq!(tz.name, "Timezones");
         assert_eq!(tz.action, None);
+        assert_eq!(tz.secondary_action, None);
     }
 
     #[test]
@@ -750,6 +777,84 @@ mod tests {
     fn test_expand_tilde_no_tilde() {
         assert_eq!(expand_tilde("/usr/bin/foo"), "/usr/bin/foo");
         assert_eq!(expand_tilde("relative/path"), "relative/path");
+    }
+
+    #[test]
+    fn test_expand_env_vars() {
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(expand_env_vars("${HOME}/foo"), format!("{home}/foo"));
+    }
+
+    #[test]
+    fn test_expand_env_vars_unknown() {
+        assert_eq!(expand_env_vars("${NONEXISTENT_VAR_12345}/foo"), "/foo");
+    }
+
+    #[test]
+    fn test_expand_env_vars_multiple() {
+        let home = std::env::var("HOME").unwrap();
+        let user = std::env::var("USER").unwrap_or_default();
+        assert_eq!(
+            expand_env_vars("${HOME}/stuff/${USER}/data"),
+            format!("{home}/stuff/{user}/data")
+        );
+    }
+
+    #[test]
+    fn test_expand_env_vars_no_vars() {
+        assert_eq!(expand_env_vars("/usr/bin/foo"), "/usr/bin/foo");
+        assert_eq!(expand_env_vars("plain text"), "plain text");
+    }
+
+    #[test]
+    fn test_expand_config_value_combined() {
+        let home = std::env::var("HOME").unwrap();
+        let user = std::env::var("USER").unwrap_or_default();
+        assert_eq!(
+            expand_config_value("~/foo/${USER}/bar"),
+            format!("{home}/foo/{user}/bar")
+        );
+    }
+
+    #[test]
+    fn test_config_expands_env_vars_in_fields() {
+        let home = std::env::var("HOME").unwrap();
+        let yaml_config = r#"
+        myapp:
+          binary: "${HOME}/bin/myapp"
+          description: "My App"
+          args: ["${HOME}/Downloads/file.txt", "--verbose"]
+          icon: "${HOME}/icons/myapp.png"
+          ifexist: "${HOME}/bin/myapp"
+        "#;
+        let reader = Cursor::new(yaml_config);
+        let config: super::Config = serde_yaml::from_reader(reader).expect("cannot parse config");
+        let mut rafficonfigs = Vec::new();
+        for value in config.entries.values() {
+            if value.is_mapping() {
+                let mut mc: RaffiConfig = serde_yaml::from_value(value.clone()).unwrap();
+                mc.binary = mc.binary.map(|s| expand_config_value(&s));
+                mc.icon = mc.icon.map(|s| expand_config_value(&s));
+                mc.ifexist = mc.ifexist.map(|s| expand_config_value(&s));
+                mc.args = mc
+                    .args
+                    .map(|v| v.into_iter().map(|s| expand_config_value(&s)).collect());
+                rafficonfigs.push(mc);
+            }
+        }
+
+        assert_eq!(rafficonfigs.len(), 1);
+        let mc = &rafficonfigs[0];
+        assert_eq!(mc.binary, Some(format!("{home}/bin/myapp")));
+        assert_eq!(mc.icon, Some(format!("{home}/icons/myapp.png")));
+        assert_eq!(mc.ifexist, Some(format!("{home}/bin/myapp")));
+        assert_eq!(
+            mc.args,
+            Some(vec![
+                format!("{home}/Downloads/file.txt"),
+                "--verbose".to_string()
+            ])
+        );
     }
 
     #[test]

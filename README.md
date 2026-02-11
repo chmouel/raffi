@@ -122,7 +122,8 @@ When the configured keyword is typed, the script is executed with the remaining 
 passed as the final argument. The script must print JSON to stdout. On selection, the
 item's `arg` value (or `title` if `arg` is absent) is copied to the clipboard using
 `wl-copy`. Alternatively, a custom `action` can be configured to run any command with
-the selected value substituted via `{value}` placeholder.
+the selected value substituted via `{value}` placeholder. A `secondary_action` can
+also be defined, which is triggered with Alt+Enter instead of Enter.
 
 [See below for how to configure this](#script-filters-configuration)
 
@@ -221,6 +222,25 @@ ifenvset: WAYLAND_DISPLAY
 ifexist: firefox
 ```
 
+### Path Expansion
+
+Config values for `binary`, `icon`, `args`, `ifexist`, and script filter fields `command`, `icon`, `action`, and `secondary_action` support path expansion:
+
+- `~/` is expanded to the user's home directory
+- `${VAR}` is replaced with the environment variable value (unset variables expand to empty string)
+
+The `script` field is not expanded as the shell handles it natively.
+
+Example:
+
+```yaml
+myapp:
+  binary: ${HOME}/bin/myapp
+  args: ["${XDG_DATA_HOME}/files", "~/Documents"]
+  icon: ~/icons/myapp.png
+  ifexist: ~/bin/myapp
+```
+
 ### Addon Configuration
 
 The native interface includes optional addons for calculations and currency conversion. These are enabled by default and can be configured or disabled.
@@ -243,13 +263,7 @@ The `currencies` field for the currency addon defines which currencies are avail
 
 Both addons are enabled by default. Omitting the `addons` section preserves this behaviour.
 
-Script filters are configured under `addons.script_filters`, here is an example the [batz](https://github.com/chmouel/batzconverter)
-time converter (as shown on screenshot):
-
-#### Script filters configuration
-
-Here is an example using the [batz](https://github.com/chmouel/batzconverter)
-time converter (as shown on screenshot).
+Script filters are configured under `addons.script_filters`. Here is an example using the [batz](https://github.com/chmouel/batzconverter) time converter (shown in the screenshot above):
 
 ```yaml
 addons:
@@ -265,6 +279,22 @@ This will parse the output of `batz -j` and display it in the launcher when the
 user types `tz` followed by a query. The script must output JSON in the format
 described below.
 
+An example with both a primary and secondary action:
+
+```yaml
+addons:
+  script_filters:
+    - name: "Bookmarks"
+      keyword: "bm"
+      command: "my-bookmark-script"
+      args: ["-j"]
+      action: "wl-copy {value}"
+      secondary_action: "xdg-open {value}"
+```
+
+Here, pressing Enter copies the selected bookmark URL to the clipboard, while
+Alt+Enter opens it in the default browser.
+
 Here is the meaning of each field in the script filter configuration:
 
 | Field     | Required | Description                                                          |
@@ -274,7 +304,8 @@ Here is the meaning of each field in the script filter configuration:
 | `command` | yes      | Executable to run                                                    |
 | `args`    | no       | Arguments passed before the query                                    |
 | `icon`    | no       | Fallback icon name for results without their own                     |
-| `action`  | no       | Command template run on selection; `{value}` is replaced with the selected value. Executed via `sh -c`. If omitted, the value is copied to the clipboard with `wl-copy`. |
+| `action`  | no       | Command template run on Enter; `{value}` is replaced with the selected value. Executed via `sh -c`. If omitted, the value is copied to the clipboard with `wl-copy`. |
+| `secondary_action` | no | Command template run on Alt+Enter; same `{value}` substitution and `sh -c` execution as `action`. If omitted, Alt+Enter behaves the same as Enter. |
 
 The script must output JSON matching this structure (a subset of Alfred's format):
 
