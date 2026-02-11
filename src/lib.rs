@@ -571,7 +571,7 @@ pub fn run(args: Args) -> Result<()> {
 
     // Determine theme
     let theme_str = args.theme.as_ref().or(general.theme.as_ref());
-    let theme = if let Some(ref theme_str) = theme_str {
+    let theme = if let Some(theme_str) = theme_str {
         theme_str
             .parse::<ThemeMode>()
             .map_err(|e| anyhow::anyhow!(e))?
@@ -580,7 +580,7 @@ pub fn run(args: Args) -> Result<()> {
     };
 
     // Determine UI type
-    let ui_type = if let Some(ref ui_type_str) = ui_type_str {
+    let ui_type = if let Some(ui_type_str) = ui_type_str {
         ui_type_str
             .parse::<UIType>()
             .map_err(|e| anyhow::anyhow!(e))?
