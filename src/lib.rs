@@ -278,6 +278,15 @@ fn get_icon_map() -> Result<HashMap<String, String>> {
     Ok(icon_map)
 }
 
+/// Expand `~/` prefix to the user's HOME directory.
+pub(crate) fn expand_tilde(s: &str) -> String {
+    if let Some(stripped) = s.strip_prefix("~/") {
+        format!("{}/{}", std::env::var("HOME").unwrap_or_default(), stripped)
+    } else {
+        s.to_string()
+    }
+}
+
 /// Read the configuration file and return a ParsedConfig.
 pub fn read_config(filename: &str, args: &Args) -> Result<ParsedConfig> {
     let file = File::open(filename).context(format!("cannot open config file {filename}"))?;
@@ -292,6 +301,12 @@ pub fn read_config_from_reader<R: Read>(reader: R, args: &Args) -> Result<Parsed
         if value.is_mapping() {
             let mut mc: RaffiConfig = serde_yaml::from_value(value.clone())
                 .context("cannot parse config entry".to_string())?;
+            mc.binary = mc.binary.map(|s| expand_tilde(&s));
+            mc.icon = mc.icon.map(|s| expand_tilde(&s));
+            mc.ifexist = mc.ifexist.map(|s| expand_tilde(&s));
+            mc.args = mc
+                .args
+                .map(|v| v.into_iter().map(|s| expand_tilde(&s)).collect());
             if mc.disabled.unwrap_or(false)
                 || !is_valid_config(&mut mc, args, &DefaultEnvProvider, &DefaultBinaryChecker)
             {
@@ -300,8 +315,16 @@ pub fn read_config_from_reader<R: Read>(reader: R, args: &Args) -> Result<Parsed
             rafficonfigs.push(mc);
         }
     }
+
+    let mut addons = config.addons;
+    for sf in &mut addons.script_filters {
+        sf.command = expand_tilde(&sf.command);
+        sf.icon = sf.icon.as_ref().map(|s| expand_tilde(s));
+        sf.action = sf.action.as_ref().map(|s| expand_tilde(s));
+    }
+
     Ok(ParsedConfig {
-        addons: config.addons,
+        addons,
         entries: rafficonfigs,
     })
 }
@@ -715,5 +738,59 @@ mod tests {
         let tz = &parsed_config.addons.script_filters[1];
         assert_eq!(tz.name, "Timezones");
         assert_eq!(tz.action, None);
+    }
+
+    #[test]
+    fn test_expand_tilde() {
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(expand_tilde("~/foo/bar"), format!("{home}/foo/bar"));
+    }
+
+    #[test]
+    fn test_expand_tilde_no_tilde() {
+        assert_eq!(expand_tilde("/usr/bin/foo"), "/usr/bin/foo");
+        assert_eq!(expand_tilde("relative/path"), "relative/path");
+    }
+
+    #[test]
+    fn test_config_expands_tilde_in_fields() {
+        let home = std::env::var("HOME").unwrap();
+        let yaml_config = r#"
+        myapp:
+          binary: "~/bin/myapp"
+          description: "My App"
+          args: ["~/Downloads/file.txt", "--verbose"]
+          icon: "~/icons/myapp.png"
+          ifexist: "~/bin/myapp"
+        "#;
+        let reader = Cursor::new(yaml_config);
+        // Parse and expand manually to avoid is_valid_config filtering out non-existent paths
+        let config: super::Config = serde_yaml::from_reader(reader).expect("cannot parse config");
+        let mut rafficonfigs = Vec::new();
+        for value in config.entries.values() {
+            if value.is_mapping() {
+                let mut mc: RaffiConfig = serde_yaml::from_value(value.clone()).unwrap();
+                mc.binary = mc.binary.map(|s| expand_tilde(&s));
+                mc.icon = mc.icon.map(|s| expand_tilde(&s));
+                mc.ifexist = mc.ifexist.map(|s| expand_tilde(&s));
+                mc.args = mc
+                    .args
+                    .map(|v| v.into_iter().map(|s| expand_tilde(&s)).collect());
+                rafficonfigs.push(mc);
+            }
+        }
+
+        assert_eq!(rafficonfigs.len(), 1);
+        let mc = &rafficonfigs[0];
+        assert_eq!(mc.binary, Some(format!("{home}/bin/myapp")));
+        assert_eq!(mc.icon, Some(format!("{home}/icons/myapp.png")));
+        assert_eq!(mc.ifexist, Some(format!("{home}/bin/myapp")));
+        assert_eq!(
+            mc.args,
+            Some(vec![
+                format!("{home}/Downloads/file.txt"),
+                "--verbose".to_string()
+            ])
+        );
     }
 }
