@@ -15,9 +15,9 @@ use iced::widget::{
 };
 use iced::window;
 use iced::{Element, Length, Task};
-use lazy_static::lazy_static;
 use regex::Regex;
 use serde::Deserialize;
+use std::sync::LazyLock;
 
 type ContainerId = Id;
 type ScrollableId = Id;
@@ -360,26 +360,23 @@ const SUPPORTED_CURRENCIES: &[&str] = &[
     "CZK", "ILS", "CLP", "PHP", "AED", "COP", "SAR", "MYR", "RON", "BGN", "ISK", "HRK",
 ];
 
-lazy_static! {
-    // Pattern: "10 to EUR", "10 EUR to GBP", "10EUR to GBP" (trigger prefix stripped before matching)
-    // Captures: amount, optional source currency, target currency
-    static ref PATTERN_CURRENCY_CONVERSION: Regex = Regex::new(
-        r"(?i)^\s*(\d+(?:\.\d+)?)\s*([A-Z]{3})?\s*(?:to|in)\s+([A-Z]{3})$"
-    ).unwrap();
+// Pattern: "10 to EUR", "10 EUR to GBP", "10EUR to GBP" (trigger prefix stripped before matching)
+// Captures: amount, optional source currency, target currency
+static PATTERN_CURRENCY_CONVERSION: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^\s*(\d+(?:\.\d+)?)\s*([A-Z]{3})?\s*(?:to|in)\s+([A-Z]{3})$").unwrap()
+});
 
-    // Pattern with word currencies: "10 euros to dollars" (trigger prefix stripped before matching)
-    static ref PATTERN_CURRENCY_WORDS: Regex = Regex::new(
-        r"(?i)^\s*(\d+(?:\.\d+)?)\s*(dollars?|euros?|pounds?|yen|yuan)?\s*(?:to|in)\s+(dollars?|euros?|pounds?|yen|yuan)$"
-    ).unwrap();
+// Pattern with word currencies: "10 euros to dollars" (trigger prefix stripped before matching)
+static PATTERN_CURRENCY_WORDS: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^\s*(\d+(?:\.\d+)?)\s*(dollars?|euros?|pounds?|yen|yuan)?\s*(?:to|in)\s+(dollars?|euros?|pounds?|yen|yuan)$").unwrap()
+});
 
-    // Pattern: "10" or "10 EUR" (simple syntax without "to/in", trigger prefix stripped before matching)
-    static ref PATTERN_SIMPLE_CURRENCY: Regex = Regex::new(
-        r"(?i)^\s*(\d+(?:\.\d+)?)\s*([A-Z]{3})?$"
-    ).unwrap();
+// Pattern: "10" or "10 EUR" (simple syntax without "to/in", trigger prefix stripped before matching)
+static PATTERN_SIMPLE_CURRENCY: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^\s*(\d+(?:\.\d+)?)\s*([A-Z]{3})?$").unwrap());
 
-    // ANSI SGR escape sequence pattern
-    static ref ANSI_SGR_RE: Regex = Regex::new(r"\x1b\[([0-9;]*)m").unwrap();
-}
+// ANSI SGR escape sequence pattern
+static ANSI_SGR_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\x1b\[([0-9;]*)m").unwrap());
 
 fn ansi_color(code: u8) -> Option<iced::Color> {
     match code {

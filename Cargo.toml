@@ -14,7 +14,7 @@ repository = "https://github.com/chmouel/raffi"
 
 [features]
 default = ["wayland"]
-wayland = ["iced", "ureq", "regex", "lazy_static"]
+wayland = ["iced", "ureq", "regex", "meval"]
 
 [dependencies]
 anyhow = "1.0.101"
@@ -22,7 +22,6 @@ gumdrop = { version = "0.8.1" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 serde_yaml = "0.9.34"
-tempfile = "3.24.0"
 walkdir = "2.5.0"
 fuzzy-matcher = "0.3.7"
 iced = { version = "0.14", features = [
@@ -30,7 +29,6 @@ iced = { version = "0.14", features = [
   "image",
   "svg",
 ], optional = true }
-meval = "0.2"
+meval = { version = "0.2", optional = true }
 ureq = { version = "3", features = ["json"], optional = true }
 regex = { version = "1.10", optional = true }
-lazy_static = { version = "1.4", optional = true }
