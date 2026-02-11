@@ -288,7 +288,7 @@ addons:
       keyword: "bm"
       command: "my-bookmark-script"
       args: ["-j"]
-      action: "wl-copy {value}"
+      action: "echo -n {value}|wl-copy"
       secondary_action: "xdg-open {value}"
 ```
 
