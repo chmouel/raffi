@@ -1,3 +1,9 @@
+# General settings (all fields optional, CLI flags override these)
+# general:
+#   ui_type: native          # UI backend: fuzzel or native
+#   default_script_shell: bash  # Shell for script entries
+#   no_icons: false          # Hide icons
+
 # jumpapp is a custom tool i use when launching programs to run-or-raise or go to the previous windows
 # find it here https://gitlab.com/chmouel/chmouzies/-/blob/main/graphical/sway-jumpapp
 wally:

@@ -94,8 +94,20 @@ fn default_true() -> bool {
     true
 }
 
+/// General configuration for persistent defaults
+#[derive(Deserialize, Debug, Clone, Default)]
+pub struct GeneralConfig {
+    #[serde(default)]
+    pub ui_type: Option<String>,
+    #[serde(default)]
+    pub default_script_shell: Option<String>,
+    #[serde(default)]
+    pub no_icons: Option<bool>,
+}
+
 /// Complete parsed configuration
 pub struct ParsedConfig {
+    pub general: GeneralConfig,
     pub addons: AddonsConfig,
     pub entries: Vec<RaffiConfig>,
 }
@@ -103,6 +115,8 @@ pub struct ParsedConfig {
 /// Represents the top-level configuration structure.
 #[derive(Deserialize)]
 struct Config {
+    #[serde(default)]
+    general: GeneralConfig,
     #[serde(default)]
     addons: AddonsConfig,
     #[serde(flatten)]
@@ -162,12 +176,8 @@ pub struct Args {
     pub refresh_cache: bool,
     #[options(help = "do not show icons", short = "I")]
     pub no_icons: bool,
-    #[options(
-        help = "default shell when using scripts",
-        default = "bash",
-        short = "P"
-    )]
-    pub default_script_shell: String,
+    #[options(help = "default shell when using scripts", short = "P")]
+    pub default_script_shell: Option<String>,
     #[options(help = "UI type to use: fuzzel, native (default: fuzzel)", short = "u")]
     pub ui_type: Option<String>,
     #[options(help = "initial search query (native mode only)", short = "i")]
@@ -350,6 +360,7 @@ pub fn read_config_from_reader<R: Read>(reader: R, args: &Args) -> Result<Parsed
     }
 
     Ok(ParsedConfig {
+        general: config.general,
         addons,
         entries: rafficonfigs,
     })
@@ -363,7 +374,11 @@ fn is_valid_config(
     binary_checker: &impl BinaryChecker,
 ) -> bool {
     if let Some(_script) = &mc.script {
-        if !binary_checker.exists(mc.binary.as_deref().unwrap_or(&args.default_script_shell)) {
+        if !binary_checker.exists(
+            mc.binary
+                .as_deref()
+                .unwrap_or(args.default_script_shell.as_deref().unwrap_or("bash")),
+        ) {
             return false;
         }
     } else if let Some(binary) = &mc.binary {
@@ -517,8 +532,19 @@ pub fn run(args: Args) -> Result<()> {
         std::process::exit(1);
     }
 
+    // Merge general config: CLI flags override config values
+    let general = &parsed_config.general;
+    let no_icons = args.no_icons || general.no_icons.unwrap_or(false);
+    let ui_type_str = args.ui_type.as_ref().or(general.ui_type.as_ref());
+    let default_script_shell = args
+        .default_script_shell
+        .as_deref()
+        .or(general.default_script_shell.as_deref())
+        .unwrap_or("bash")
+        .to_string();
+
     // Determine UI type
-    let ui_type = if let Some(ref ui_type_str) = args.ui_type {
+    let ui_type = if let Some(ref ui_type_str) = ui_type_str {
         ui_type_str
             .parse::<UIType>()
             .map_err(|e| anyhow::anyhow!(e))?
@@ -543,7 +569,7 @@ pub fn run(args: Args) -> Result<()> {
         .show(
             &parsed_config.entries,
             &parsed_config.addons,
-            args.no_icons,
+            no_icons,
             args.initial_query.as_deref(),
         )
         .context("Failed to show UI")?;
@@ -562,7 +588,7 @@ pub fn run(args: Args) -> Result<()> {
         .context("No matching configuration found")?;
 
     let interpreter = if mc.script.is_some() {
-        mc.binary.as_deref().unwrap_or(&args.default_script_shell)
+        mc.binary.as_deref().unwrap_or(&default_script_shell)
     } else {
         // Not used for binary commands
         ""
@@ -595,7 +621,7 @@ mod tests {
             print_only: false,
             refresh_cache: false,
             no_icons: true,
-            default_script_shell: "bash".to_string(),
+            default_script_shell: None,
             ui_type: None,
             initial_query: None,
         };
@@ -645,7 +671,7 @@ mod tests {
             print_only: false,
             refresh_cache: false,
             no_icons: true,
-            default_script_shell: "bash".to_string(),
+            default_script_shell: None,
             ui_type: None,
             initial_query: None,
         };
@@ -708,7 +734,7 @@ mod tests {
             print_only: false,
             refresh_cache: false,
             no_icons: true,
-            default_script_shell: "bash".to_string(),
+            default_script_shell: None,
             ui_type: None,
             initial_query: None,
         };
@@ -759,7 +785,7 @@ mod tests {
             print_only: false,
             refresh_cache: false,
             no_icons: true,
-            default_script_shell: "bash".to_string(),
+            default_script_shell: None,
             ui_type: None,
             initial_query: None,
         };
@@ -908,5 +934,95 @@ mod tests {
                 "--verbose".to_string()
             ])
         );
+    }
+
+    #[test]
+    fn test_general_config_parsing() {
+        let yaml_config = r#"
+        general:
+          ui_type: native
+          default_script_shell: zsh
+          no_icons: true
+        firefox:
+          binary: firefox
+          description: "Firefox browser"
+        "#;
+        let reader = Cursor::new(yaml_config);
+        let args = Args {
+            help: false,
+            version: false,
+            configfile: None,
+            print_only: false,
+            refresh_cache: false,
+            no_icons: false,
+            default_script_shell: None,
+            ui_type: None,
+            initial_query: None,
+        };
+        let parsed_config = read_config_from_reader(reader, &args).unwrap();
+
+        assert_eq!(parsed_config.general.ui_type, Some("native".to_string()));
+        assert_eq!(
+            parsed_config.general.default_script_shell,
+            Some("zsh".to_string())
+        );
+        assert_eq!(parsed_config.general.no_icons, Some(true));
+        assert_eq!(parsed_config.entries.len(), 1);
+    }
+
+    #[test]
+    fn test_config_without_general_section() {
+        let yaml_config = r#"
+        firefox:
+          binary: firefox
+          description: "Firefox browser"
+        "#;
+        let reader = Cursor::new(yaml_config);
+        let args = Args {
+            help: false,
+            version: false,
+            configfile: None,
+            print_only: false,
+            refresh_cache: false,
+            no_icons: false,
+            default_script_shell: None,
+            ui_type: None,
+            initial_query: None,
+        };
+        let parsed_config = read_config_from_reader(reader, &args).unwrap();
+
+        assert!(parsed_config.general.ui_type.is_none());
+        assert!(parsed_config.general.default_script_shell.is_none());
+        assert!(parsed_config.general.no_icons.is_none());
+        assert_eq!(parsed_config.entries.len(), 1);
+    }
+
+    #[test]
+    fn test_partial_general_config() {
+        let yaml_config = r#"
+        general:
+          no_icons: true
+        firefox:
+          binary: firefox
+          description: "Firefox browser"
+        "#;
+        let reader = Cursor::new(yaml_config);
+        let args = Args {
+            help: false,
+            version: false,
+            configfile: None,
+            print_only: false,
+            refresh_cache: false,
+            no_icons: false,
+            default_script_shell: None,
+            ui_type: None,
+            initial_query: None,
+        };
+        let parsed_config = read_config_from_reader(reader, &args).unwrap();
+
+        assert!(parsed_config.general.ui_type.is_none());
+        assert!(parsed_config.general.default_script_shell.is_none());
+        assert_eq!(parsed_config.general.no_icons, Some(true));
+        assert_eq!(parsed_config.entries.len(), 1);
     }
 }
