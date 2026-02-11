@@ -10,7 +10,8 @@ use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
 use iced::widget::operation::{focus, snap_to};
 use iced::widget::{
-    button, column, container, image, scrollable, svg, text, text_input, Column, Id, Row,
+    button, column, container, image, rich_text, scrollable, span, svg, text, text_input, Column,
+    Id, Row,
 };
 use iced::window;
 use iced::{Element, Length, Task};
@@ -215,6 +216,110 @@ lazy_static! {
     static ref PATTERN_SIMPLE_CURRENCY: Regex = Regex::new(
         r"(?i)^\s*(\d+(?:\.\d+)?)\s*([A-Z]{3})?$"
     ).unwrap();
+
+    // ANSI SGR escape sequence pattern
+    static ref ANSI_SGR_RE: Regex = Regex::new(r"\x1b\[([0-9;]*)m").unwrap();
+}
+
+fn ansi_color(code: u8) -> Option<iced::Color> {
+    match code {
+        30 => Some(iced::Color::from_rgb(0.0, 0.0, 0.0)),
+        31 => Some(iced::Color::from_rgb(0.8, 0.2, 0.2)),
+        32 => Some(iced::Color::from_rgb(0.2, 0.8, 0.2)),
+        33 => Some(iced::Color::from_rgb(0.8, 0.8, 0.2)),
+        34 => Some(iced::Color::from_rgb(0.3, 0.3, 0.9)),
+        35 => Some(iced::Color::from_rgb(0.8, 0.2, 0.8)),
+        36 => Some(iced::Color::from_rgb(0.2, 0.8, 0.8)),
+        37 => Some(iced::Color::from_rgb(0.9, 0.9, 0.9)),
+        90 => Some(iced::Color::from_rgb(0.5, 0.5, 0.5)),
+        91 => Some(iced::Color::from_rgb(1.0, 0.3, 0.3)),
+        92 => Some(iced::Color::from_rgb(0.3, 1.0, 0.3)),
+        93 => Some(iced::Color::from_rgb(1.0, 1.0, 0.3)),
+        94 => Some(iced::Color::from_rgb(0.5, 0.5, 1.0)),
+        95 => Some(iced::Color::from_rgb(1.0, 0.3, 1.0)),
+        96 => Some(iced::Color::from_rgb(0.3, 1.0, 1.0)),
+        97 => Some(iced::Color::from_rgb(1.0, 1.0, 1.0)),
+        _ => None,
+    }
+}
+
+fn ansi_to_spans<'a>(
+    s: &str,
+    font_size: f32,
+    default_color: iced::Color,
+) -> Vec<iced::widget::text::Span<'a, (), iced::Font>> {
+    let mut spans = Vec::new();
+    let mut fg = default_color;
+    let mut bold = false;
+    let mut underline = false;
+    let mut last_end = 0;
+
+    for cap in ANSI_SGR_RE.captures_iter(s) {
+        let m = cap.get(0).unwrap();
+        let before = &s[last_end..m.start()];
+        if !before.is_empty() {
+            let mut sp = span(before.to_owned()).size(font_size).color(fg);
+            if underline {
+                sp = sp.underline(true);
+            }
+            if bold {
+                sp = sp.font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..iced::Font::default()
+                });
+            }
+            spans.push(sp);
+        }
+        last_end = m.end();
+
+        let params = &cap[1];
+        if params.is_empty() {
+            // \x1b[m is equivalent to reset
+            fg = default_color;
+            bold = false;
+            underline = false;
+            continue;
+        }
+        for part in params.split(';') {
+            if let Ok(code) = part.parse::<u8>() {
+                match code {
+                    0 => {
+                        fg = default_color;
+                        bold = false;
+                        underline = false;
+                    }
+                    1 => bold = true,
+                    4 => underline = true,
+                    22 => bold = false,
+                    24 => underline = false,
+                    30..=37 | 90..=97 => {
+                        if let Some(c) = ansi_color(code) {
+                            fg = c;
+                        }
+                    }
+                    _ => {} // ignore unsupported codes
+                }
+            }
+        }
+    }
+
+    // Remaining text after the last escape sequence
+    let tail = &s[last_end..];
+    if !tail.is_empty() || spans.is_empty() {
+        let mut sp = span(tail.to_owned()).size(font_size).color(fg);
+        if underline {
+            sp = sp.underline(true);
+        }
+        if bold {
+            sp = sp.font(iced::Font {
+                weight: iced::font::Weight::Bold,
+                ..iced::Font::default()
+            });
+        }
+        spans.push(sp);
+    }
+
+    spans
 }
 
 fn is_currency_help_query(query: &str, trigger: &str) -> bool {
@@ -1341,10 +1446,11 @@ impl LauncherApp {
 
                 // Title + optional subtitle
                 let mut text_col = Column::new();
-                text_col = text_col.push(text(item.title.clone()).size(20).color(COLOR_TEXT_MAIN));
+                text_col =
+                    text_col.push(rich_text(ansi_to_spans(&item.title, 20.0, COLOR_TEXT_MAIN)));
                 if let Some(ref subtitle) = item.subtitle {
                     text_col =
-                        text_col.push(text(subtitle.clone()).size(14).color(COLOR_TEXT_MUTED));
+                        text_col.push(rich_text(ansi_to_spans(subtitle, 14.0, COLOR_TEXT_MUTED)));
                 }
                 item_row = item_row.push(text_col.width(Length::Fill));
 
