@@ -10,5 +10,6 @@ repos:
     rev: v1.0.0
     hooks:
       - id: cargo-clippy
+        args: ["--fix", "--", "-Dwarnings"]
       - id: cargo-fmt
       - id: cargo-test
