@@ -306,6 +306,14 @@ struct ScriptFilterResult {
     default_icon: Option<String>,
 }
 
+/// A file or directory entry for the file browser addon
+#[derive(Debug, Clone)]
+struct FileBrowserEntry {
+    name: String,
+    full_path: String,
+    is_dir: bool,
+}
+
 /// Active web search state when a web search keyword is matched
 #[derive(Debug, Clone)]
 struct WebSearchActiveState {
@@ -767,6 +775,73 @@ fn execute_script_filter(
     )
 }
 
+/// Read a directory and return entries, with dirs sorted first then files, alphabetically.
+fn read_directory(path: &str, show_hidden: bool) -> Vec<FileBrowserEntry> {
+    let dir_path = Path::new(path);
+    let entries = match fs::read_dir(dir_path) {
+        Ok(entries) => entries,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut dirs = Vec::new();
+    let mut files = Vec::new();
+
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !show_hidden && name.starts_with('.') {
+            continue;
+        }
+        let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+        let full_path = entry.path().to_string_lossy().to_string();
+        let fb_entry = FileBrowserEntry {
+            name,
+            full_path,
+            is_dir,
+        };
+        if is_dir {
+            dirs.push(fb_entry);
+        } else {
+            files.push(fb_entry);
+        }
+    }
+
+    dirs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    files.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    dirs.append(&mut files);
+    dirs
+}
+
+/// Guess a mimetype icon name from a file extension.
+fn mimetype_icon_name(path: &str) -> &'static str {
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    // Borrow ext as a &str for matching
+    match ext.as_str() {
+        "txt" | "md" | "log" | "cfg" | "conf" | "ini" | "toml" | "yaml" | "yml" | "json"
+        | "xml" | "csv" | "rst" | "tex" => "text-x-generic",
+        "rs" | "py" | "js" | "ts" | "go" | "c" | "cpp" | "h" | "java" | "rb" | "sh" | "bash"
+        | "zsh" | "fish" | "pl" | "lua" | "hs" | "ml" | "ex" | "exs" | "clj" | "scala" | "kt"
+        | "swift" | "r" | "sql" | "html" | "css" | "scss" | "less" | "jsx" | "tsx" | "vue"
+        | "svelte" => "text-x-script",
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "svg" | "webp" | "ico" | "tiff" | "tif" => {
+            "image-x-generic"
+        }
+        "mp3" | "wav" | "flac" | "ogg" | "aac" | "wma" | "m4a" | "opus" => "audio-x-generic",
+        "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" | "webm" | "m4v" => "video-x-generic",
+        "pdf" => "application-pdf",
+        "zip" | "tar" | "gz" | "bz2" | "xz" | "7z" | "rar" | "zst" => "package-x-generic",
+        "deb" | "rpm" => "package-x-generic",
+        "iso" | "img" => "media-optical",
+        "doc" | "docx" | "odt" | "rtf" => "x-office-document",
+        "xls" | "xlsx" | "ods" => "x-office-spreadsheet",
+        "ppt" | "pptx" | "odp" => "x-office-presentation",
+        _ => "text-x-generic",
+    }
+}
+
 /// The main application state
 struct LauncherApp {
     configs: Vec<RaffiConfig>,
@@ -801,6 +876,13 @@ struct LauncherApp {
     script_filter_secondary_action: Option<String>,
     // Web search state
     web_search_active: Option<WebSearchActiveState>,
+    // File browser state
+    file_browser_entries: Vec<FileBrowserEntry>,
+    file_browser_all_entries: Vec<FileBrowserEntry>,
+    file_browser_active: bool,
+    file_browser_show_hidden: bool,
+    file_browser_current_dir: String,
+    file_browser_error: Option<String>,
     current_modifiers: iced::keyboard::Modifiers,
     theme: ThemeColors,
 }
@@ -827,6 +909,9 @@ enum Message {
     ScriptFilterResult(u64, std::result::Result<ScriptFilterResult, String>),
     ScriptFilterItemSelected(usize),
     WebSearchSelected,
+    FileBrowserItemSelected(usize),
+    FileBrowserTabComplete,
+    FileBrowserToggleHidden,
     ModifiersChanged(iced::keyboard::Modifiers),
 }
 
@@ -859,6 +944,7 @@ impl LauncherApp {
         let search_input_id = TextInputId::unique();
         let scrollable_id = ScrollableId::unique();
         let items_container_id = ContainerId::unique();
+        let file_browser_show_hidden = addons.file_browser.show_hidden.unwrap_or(false);
 
         (
             LauncherApp {
@@ -891,6 +977,12 @@ impl LauncherApp {
                 script_filter_action: None,
                 script_filter_secondary_action: None,
                 web_search_active: None,
+                file_browser_entries: Vec::new(),
+                file_browser_all_entries: Vec::new(),
+                file_browser_active: false,
+                file_browser_show_hidden,
+                file_browser_current_dir: String::new(),
+                file_browser_error: None,
                 current_modifiers: iced::keyboard::Modifiers::empty(),
                 theme,
             },
@@ -920,9 +1012,99 @@ impl LauncherApp {
 
                 let mut tasks: Vec<Task<Message>> = Vec::new();
 
+                // Check for file browser trigger (/ or ~)
+                let trimmed = query.trim();
+                let is_file_browser_query = self.addons.file_browser.enabled
+                    && (trimmed.starts_with('/') || trimmed == "~" || trimmed.starts_with("~/"));
+                if is_file_browser_query {
+                    self.file_browser_active = true;
+                    self.file_browser_error = None;
+
+                    // Expand ~ to home directory
+                    let expanded = if trimmed == "~" {
+                        format!("{}/", std::env::var("HOME").unwrap_or_default())
+                    } else if trimmed.starts_with("~/") {
+                        format!(
+                            "{}/{}",
+                            std::env::var("HOME").unwrap_or_default(),
+                            &trimmed[2..]
+                        )
+                    } else {
+                        trimmed.to_string()
+                    };
+
+                    // Split into directory part and filter part at the last /
+                    let (dir_path, filter_text) = if expanded.ends_with('/') {
+                        (expanded.as_str(), "")
+                    } else if let Some(last_slash) = expanded.rfind('/') {
+                        (&expanded[..=last_slash], &expanded[last_slash + 1..])
+                    } else {
+                        (expanded.as_str(), "")
+                    };
+
+                    // Only re-read directory if the directory changed
+                    if dir_path != self.file_browser_current_dir {
+                        self.file_browser_current_dir = dir_path.to_string();
+                        let all_entries = read_directory(dir_path, self.file_browser_show_hidden);
+                        if all_entries.is_empty() && !Path::new(dir_path).is_dir() {
+                            self.file_browser_error =
+                                Some(format!("Cannot read directory: {}", dir_path));
+                        }
+                        self.file_browser_all_entries = all_entries;
+                    }
+
+                    // Apply fuzzy filter on filenames
+                    if filter_text.is_empty() {
+                        self.file_browser_entries = self.file_browser_all_entries.clone();
+                    } else {
+                        let matcher = SkimMatcherV2::default();
+                        let mut scored: Vec<(usize, i64)> = self
+                            .file_browser_all_entries
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(i, entry)| {
+                                matcher
+                                    .fuzzy_match(&entry.name, filter_text)
+                                    .map(|score| (i, score))
+                            })
+                            .collect();
+                        scored.sort_by(|a, b| b.1.cmp(&a.1));
+                        self.file_browser_entries = scored
+                            .into_iter()
+                            .map(|(i, _)| self.file_browser_all_entries[i].clone())
+                            .collect();
+                    }
+
+                    // Clear regular items and other addon states
+                    self.filtered_configs.clear();
+                    self.script_filter_results = None;
+                    self.script_filter_loading = false;
+                    self.script_filter_loading_name = None;
+                    self.script_filter_action = None;
+                    self.script_filter_secondary_action = None;
+                    self.web_search_active = None;
+                    self.calculator_result = None;
+                    self.currency_result = None;
+                    self.currency_loading = false;
+                    self.currency_error = None;
+                    self.pending_currency_request = None;
+                    self.multi_currency_result = None;
+                    self.multi_currency_loading = false;
+                    self.pending_multi_currency_request = None;
+                    self.currency_help = false;
+
+                    return Task::batch(tasks);
+                }
+
+                // Clear file browser state when not a file browser query
+                self.file_browser_active = false;
+                self.file_browser_entries.clear();
+                self.file_browser_all_entries.clear();
+                self.file_browser_current_dir.clear();
+                self.file_browser_error = None;
+
                 // Check for script filter keyword match
                 let mut script_filter_matched = false;
-                let trimmed = query.trim();
                 for sf_config in &self.addons.script_filters {
                     let keyword = &sf_config.keyword;
                     // Match "keyword" exactly or "keyword " prefix
@@ -1204,6 +1386,19 @@ impl LauncherApp {
                     current_idx += num_items;
                 }
 
+                // Check if file browser entries are selected
+                if self.file_browser_active {
+                    let num_entries = self.file_browser_entries.len();
+                    if num_entries > 0
+                        && self.selected_index >= current_idx
+                        && self.selected_index < current_idx + num_entries
+                    {
+                        let entry_idx = self.selected_index - current_idx;
+                        return self.update(Message::FileBrowserItemSelected(entry_idx));
+                    }
+                    current_idx += num_entries;
+                }
+
                 // Check if web search row is selected
                 if self.web_search_active.is_some() {
                     if self.selected_index == current_idx {
@@ -1292,6 +1487,16 @@ impl LauncherApp {
                         return self.update(Message::ScriptFilterItemSelected(item_idx));
                     }
                     current_idx += num_items;
+                }
+
+                // Check if file browser entries are clicked
+                if self.file_browser_active {
+                    let num_entries = self.file_browser_entries.len();
+                    if num_entries > 0 && idx >= current_idx && idx < current_idx + num_entries {
+                        let entry_idx = idx - current_idx;
+                        return self.update(Message::FileBrowserItemSelected(entry_idx));
+                    }
+                    current_idx += num_entries;
                 }
 
                 // Check if web search row is clicked
@@ -1515,6 +1720,72 @@ impl LauncherApp {
                 }
                 iced::exit()
             }
+            Message::FileBrowserItemSelected(idx) => {
+                if let Some(entry) = self.file_browser_entries.get(idx) {
+                    if entry.is_dir {
+                        // Navigate into directory: update search query to the dir path
+                        let new_query = format!("{}/", entry.full_path);
+                        self.search_query = new_query.clone();
+                        return Task::done(Message::SearchChanged(new_query));
+                    }
+                    // File selected
+                    if self.current_modifiers.alt() {
+                        // Alt+Enter: copy path to clipboard
+                        let _ = Command::new("wl-copy")
+                            .arg(&entry.full_path)
+                            .stdin(Stdio::null())
+                            .stdout(Stdio::null())
+                            .stderr(Stdio::null())
+                            .spawn();
+                    } else {
+                        // Enter: open with xdg-open
+                        let _ = Command::new("xdg-open")
+                            .arg(&entry.full_path)
+                            .stdin(Stdio::null())
+                            .stdout(Stdio::null())
+                            .stderr(Stdio::null())
+                            .spawn();
+                    }
+                }
+                iced::exit()
+            }
+            Message::FileBrowserTabComplete => {
+                if !self.file_browser_active {
+                    return Task::none();
+                }
+                // Compute which file browser entry is selected
+                let mut current_idx = 0;
+                if self.script_filter_loading {
+                    current_idx += 1;
+                } else if let Some(ref sf_result) = self.script_filter_results {
+                    current_idx += sf_result.items.len();
+                }
+                let entry_idx = self.selected_index.saturating_sub(current_idx);
+                if let Some(entry) = self.file_browser_entries.get(entry_idx) {
+                    let new_query = if entry.is_dir {
+                        format!("{}/", entry.full_path)
+                    } else {
+                        entry.full_path.clone()
+                    };
+                    self.search_query = new_query.clone();
+                    return Task::done(Message::SearchChanged(new_query));
+                }
+                Task::none()
+            }
+            Message::FileBrowserToggleHidden => {
+                self.file_browser_show_hidden = !self.file_browser_show_hidden;
+                if self.file_browser_active && !self.file_browser_current_dir.is_empty() {
+                    // Re-read and re-filter
+                    self.file_browser_all_entries = read_directory(
+                        &self.file_browser_current_dir,
+                        self.file_browser_show_hidden,
+                    );
+                    // Re-trigger search to apply filter
+                    let query = self.search_query.clone();
+                    return Task::done(Message::SearchChanged(query));
+                }
+                Task::none()
+            }
             Message::ModifiersChanged(modifiers) => {
                 self.current_modifiers = modifiers;
                 Task::none()
@@ -1558,6 +1829,7 @@ impl LauncherApp {
 
         // Track special items for index offset calculation
         let has_script_filter = self.script_filter_results.is_some() || self.script_filter_loading;
+        let has_file_browser = self.file_browser_active;
         let has_web_search = self.web_search_active.is_some();
         let has_currency = self.currency_result.is_some()
             || self.currency_loading
@@ -1720,6 +1992,130 @@ impl LauncherApp {
 
                 items_column = items_column.push(item_button);
                 special_item_idx += 1;
+            }
+        }
+
+        // Add file browser entries
+        if self.file_browser_active {
+            if let Some(ref err) = self.file_browser_error {
+                let err_row = Row::new()
+                    .spacing(16)
+                    .align_y(iced::Alignment::Center)
+                    .push(text(err.clone()).size(20).color(t.text_muted));
+
+                let err_button = button(err_row).padding(12).width(Length::Fill).style(
+                    move |_theme, _status| button::Style {
+                        text_color: t.text_muted,
+                        border: iced::Border {
+                            radius: 8.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
+                );
+
+                items_column = items_column.push(err_button);
+            }
+
+            for (idx, entry) in self.file_browser_entries.iter().enumerate() {
+                let is_selected = self.selected_index == special_item_idx;
+
+                let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
+
+                // Icon
+                if !self.icon_map.is_empty() {
+                    let icon_name = if entry.is_dir {
+                        "folder"
+                    } else {
+                        mimetype_icon_name(&entry.full_path)
+                    };
+                    if let Some(icon_path_str) = self.icon_map.get(icon_name) {
+                        let icon_path = PathBuf::from(icon_path_str);
+                        if icon_path.exists() {
+                            let is_svg = icon_path
+                                .extension()
+                                .and_then(|ext| ext.to_str())
+                                .map(|ext| ext.to_lowercase() == "svg")
+                                .unwrap_or(false);
+
+                            let icon_content: Element<Message> = if is_svg {
+                                svg(iced::widget::svg::Handle::from_path(&icon_path))
+                                    .width(Length::Fixed(40.0))
+                                    .height(Length::Fixed(40.0))
+                                    .content_fit(iced::ContentFit::Contain)
+                                    .into()
+                            } else {
+                                image(icon_path)
+                                    .width(Length::Fixed(40.0))
+                                    .height(Length::Fixed(40.0))
+                                    .content_fit(iced::ContentFit::Contain)
+                                    .into()
+                            };
+
+                            item_row = item_row.push(icon_content);
+                        }
+                    }
+                }
+
+                // Name + subtitle (full path)
+                let display_name = if entry.is_dir {
+                    format!("{}/", entry.name)
+                } else {
+                    entry.name.clone()
+                };
+
+                let name_color = if entry.is_dir { t.accent } else { t.text_main };
+
+                let mut text_col = Column::new();
+                text_col = text_col.push(text(display_name).size(20).color(name_color));
+                text_col =
+                    text_col.push(text(entry.full_path.clone()).size(14).color(t.text_muted));
+                item_row = item_row.push(text_col.width(Length::Fill));
+
+                let item_button = button(item_row)
+                    .on_press(Message::ItemClicked(special_item_idx))
+                    .padding(12)
+                    .width(Length::Fill)
+                    .style(move |_theme, status| {
+                        let base_style = button::Style {
+                            text_color: t.text_main,
+                            border: iced::Border {
+                                radius: 8.0.into(),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        };
+
+                        if is_selected {
+                            button::Style {
+                                background: Some(iced::Background::Color(t.selection_bg)),
+                                border: iced::Border {
+                                    color: t.accent,
+                                    width: 1.0,
+                                    radius: 8.0.into(),
+                                },
+                                ..base_style
+                            }
+                        } else {
+                            match status {
+                                button::Status::Hovered => button::Style {
+                                    background: Some(iced::Background::Color(iced::Color {
+                                        a: 0.1,
+                                        ..t.accent_hover
+                                    })),
+                                    ..base_style
+                                },
+                                _ => button::Style {
+                                    background: None,
+                                    ..base_style
+                                },
+                            }
+                        }
+                    });
+
+                items_column = items_column.push(item_button);
+                special_item_idx += 1;
+                let _ = idx; // used for iteration only
             }
         }
 
@@ -2187,6 +2583,7 @@ impl LauncherApp {
             && !has_calculator
             && !has_currency
             && !has_script_filter
+            && !has_file_browser
             && !has_web_search
         {
             let no_results = container(
@@ -2377,6 +2774,17 @@ impl LauncherApp {
                 key: keyboard::Key::Named(Named::Escape),
                 ..
             }) => Some(Message::Cancel),
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(Named::Tab),
+                ..
+            }) => Some(Message::FileBrowserTabComplete),
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Character(ref c),
+                modifiers,
+                ..
+            }) if c.as_str() == "h" && modifiers.control() => {
+                Some(Message::FileBrowserToggleHidden)
+            }
             Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
                 Some(Message::ModifiersChanged(m))
             }
@@ -2398,6 +2806,9 @@ impl LauncherApp {
             offset += 1;
         } else if let Some(ref sf_result) = self.script_filter_results {
             offset += sf_result.items.len();
+        }
+        if self.file_browser_active {
+            offset += self.file_browser_entries.len();
         }
         if self.web_search_active.is_some() {
             offset += 1;

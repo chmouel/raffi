@@ -66,6 +66,24 @@ impl Default for CalculatorAddonConfig {
     }
 }
 
+/// Configuration for the file browser addon
+#[derive(Deserialize, Debug, Clone)]
+pub struct FileBrowserAddonConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub show_hidden: Option<bool>,
+}
+
+impl Default for FileBrowserAddonConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            show_hidden: None,
+        }
+    }
+}
+
 /// Configuration for a script filter addon
 #[derive(Deserialize, Debug, Clone)]
 pub struct ScriptFilterConfig {
@@ -95,6 +113,8 @@ pub struct AddonsConfig {
     pub currency: CurrencyAddonConfig,
     #[serde(default)]
     pub calculator: CalculatorAddonConfig,
+    #[serde(default)]
+    pub file_browser: FileBrowserAddonConfig,
     #[serde(default)]
     pub script_filters: Vec<ScriptFilterConfig>,
     #[serde(default)]

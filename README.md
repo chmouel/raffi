@@ -144,6 +144,12 @@ Common search engines are pre-configured in the example config (Google, DuckDuck
 
 [See below for how to configure this](#web-search-configuration)
 
+#### File Browser
+
+The native interface includes a built-in file browser. Typing `/` browses the root filesystem and `~` browses the home directory. Selecting a directory navigates into it, while selecting a file opens it with `xdg-open`. Alt+Enter copies the file path to the clipboard instead. Tab autocompletes the selected entry into the search bar. Ctrl+H toggles hidden file visibility. Text after the last `/` fuzzy-filters the current directory listing (e.g., `/home/us` filters `/home/` by "us"). Directories are listed first in accent colour.
+
+The file browser is enabled by default and can be disabled or configured under `addons.file_browser` ([see below](#addon-configuration)).
+
 ## Configuration
 
 ### Fuzzel Configuration
@@ -303,7 +309,7 @@ myapp:
 
 ### Addon Configuration
 
-The native interface includes optional addons for calculations, currency conversion, script filters, and web searches.
+The native interface includes optional addons for calculations, currency conversion, file browsing, script filters, and web searches.
 
 ```yaml
 addons:
@@ -314,15 +320,19 @@ addons:
     currencies: ["EUR", "USD", "GBP"]
   calculator:
     enabled: true
+  file_browser:
+    enabled: true
+    show_hidden: false
 ```
 
 The `enabled` field controls whether the addon is active.
+The `show_hidden` field for the file browser sets the initial hidden-file visibility (default `false`; toggled at runtime with Ctrl+H).
 The `trigger` field sets the character that activates currency conversion. Defaults to `$` if omitted. Can be set to `€`, `£`, or any other symbol.
 The `default_currency` field sets the source currency used when none is specified (e.g., `€10 to GBP` converts from EUR). Defaults to USD if omitted.
 The `currencies` field for the currency addon defines which currencies are available for conversion.
 You don't need to add a prefix for the calculator; simply typing a valid expression will show the result.
 
-Both addons are enabled by default.
+All three addons are enabled by default.
 
 <img align="right" width="441" height="559" alt="optimized-pull-requests-dashboard" src="https://github.com/user-attachments/assets/48da3b90-b8dd-4f4d-8465-3ae27fe267c3" />
 
