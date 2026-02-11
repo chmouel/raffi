@@ -121,7 +121,8 @@ dynamic results in the launcher. This feature uses a subset of the
 When the configured keyword is typed, the script is executed with the remaining input
 passed as the final argument. The script must print JSON to stdout. On selection, the
 item's `arg` value (or `title` if `arg` is absent) is copied to the clipboard using
-`wl-copy`.
+`wl-copy`. Alternatively, a custom `action` can be configured to run any command with
+the selected value substituted via `{value}` placeholder.
 
 [See below for how to configure this](#script-filters-configuration)
 
@@ -266,13 +267,14 @@ described below.
 
 Here is the meaning of each field in the script filter configuration:
 
-| Field     | Required | Description                                      |
-|-----------|----------|--------------------------------------------------|
-| `name`    | yes      | Display name shown during loading                |
-| `keyword` | yes      | Text that activates the script filter            |
-| `command` | yes      | Executable to run                                |
-| `args`    | no       | Arguments passed before the query                |
-| `icon`    | no       | Fallback icon name for results without their own |
+| Field     | Required | Description                                                          |
+|-----------|----------|----------------------------------------------------------------------|
+| `name`    | yes      | Display name shown during loading                                    |
+| `keyword` | yes      | Text that activates the script filter                                |
+| `command` | yes      | Executable to run                                                    |
+| `args`    | no       | Arguments passed before the query                                    |
+| `icon`    | no       | Fallback icon name for results without their own                     |
+| `action`  | no       | Command template run on selection; `{value}` is replaced with the selected value. Executed via `sh -c`. If omitted, the value is copied to the clipboard with `wl-copy`. |
 
 The script must output JSON matching this structure (a subset of Alfred's format):
 

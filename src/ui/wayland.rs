@@ -540,6 +540,7 @@ struct LauncherApp {
     script_filter_loading: bool,
     script_filter_loading_name: Option<String>,
     script_filter_generation: u64,
+    script_filter_action: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -620,6 +621,7 @@ impl LauncherApp {
                 script_filter_loading: false,
                 script_filter_loading_name: None,
                 script_filter_generation: 0,
+                script_filter_action: None,
             },
             focus(search_input_id),
         )
@@ -665,6 +667,7 @@ impl LauncherApp {
                             self.script_filter_generation.wrapping_add(1);
                         self.script_filter_loading = true;
                         self.script_filter_loading_name = Some(sf_config.name.clone());
+                        self.script_filter_action = sf_config.action.clone();
                         self.script_filter_results = None;
 
                         tasks.push(execute_script_filter(
@@ -683,6 +686,7 @@ impl LauncherApp {
                     self.script_filter_results = None;
                     self.script_filter_loading = false;
                     self.script_filter_loading_name = None;
+                    self.script_filter_action = None;
                 }
 
                 // Determine trigger from config
@@ -1149,12 +1153,23 @@ impl LauncherApp {
                 if let Some(ref sf_result) = self.script_filter_results {
                     if let Some(item) = sf_result.items.get(idx) {
                         let value = item.arg.as_deref().unwrap_or(&item.title);
-                        let _ = Command::new("wl-copy")
-                            .arg(value)
-                            .stdin(Stdio::null())
-                            .stdout(Stdio::null())
-                            .stderr(Stdio::null())
-                            .spawn();
+                        if let Some(ref action_tpl) = self.script_filter_action {
+                            let cmd = action_tpl.replace("{value}", value);
+                            let _ = Command::new("sh")
+                                .arg("-c")
+                                .arg(&cmd)
+                                .stdin(Stdio::null())
+                                .stdout(Stdio::null())
+                                .stderr(Stdio::null())
+                                .spawn();
+                        } else {
+                            let _ = Command::new("wl-copy")
+                                .arg(value)
+                                .stdin(Stdio::null())
+                                .stdout(Stdio::null())
+                                .stderr(Stdio::null())
+                                .spawn();
+                        }
                     }
                 }
                 iced::exit()

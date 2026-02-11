@@ -346,3 +346,9 @@ addons:
       command: "batz"
       args: ["-j"]
       icon: "clock"
+    # Example with a custom action: open selected bookmark URL instead of copying
+    # - name: "Bookmarks"
+    #   keyword: "bm"
+    #   command: "my-bookmark-script"
+    #   args: ["-j"]
+    #   action: "xdg-open {value}"

@@ -75,6 +75,7 @@ pub struct ScriptFilterConfig {
     pub icon: Option<String>,
     #[serde(default)]
     pub args: Vec<String>,
+    pub action: Option<String>,
 }
 
 /// Container for all addon configurations
@@ -672,5 +673,47 @@ mod tests {
             &env_provider,
             &binary_checker
         ));
+    }
+
+    #[test]
+    fn test_script_filter_action_parsing() {
+        let yaml_config = r#"
+        addons:
+          script_filters:
+            - name: "Bookmarks"
+              keyword: "bm"
+              command: "my-bookmark-script"
+              args: ["-j"]
+              action: "xdg-open {value}"
+            - name: "Timezones"
+              keyword: "tz"
+              command: "batz"
+              args: ["-j"]
+        firefox:
+          binary: firefox
+          description: "Firefox browser"
+        "#;
+        let reader = Cursor::new(yaml_config);
+        let args = Args {
+            help: false,
+            version: false,
+            configfile: None,
+            print_only: false,
+            refresh_cache: false,
+            no_icons: true,
+            default_script_shell: "bash".to_string(),
+            ui_type: None,
+        };
+        let parsed_config = read_config_from_reader(reader, &args).unwrap();
+
+        assert_eq!(parsed_config.addons.script_filters.len(), 2);
+
+        let bm = &parsed_config.addons.script_filters[0];
+        assert_eq!(bm.name, "Bookmarks");
+        assert_eq!(bm.action, Some("xdg-open {value}".to_string()));
+
+        let tz = &parsed_config.addons.script_filters[1];
+        assert_eq!(tz.name, "Timezones");
+        assert_eq!(tz.action, None);
     }
 }
