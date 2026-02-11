@@ -163,6 +163,7 @@ border=bd93f9ff
 ```
 
 ### Raffi Configuration
+<img align="right" width="522" height="700" alt="image" src="https://github.com/user-attachments/assets/eed41ab5-d852-4c57-8e89-52d8b4da43b6" />
 
 Configuration is stored in:
 
