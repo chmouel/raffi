@@ -20,6 +20,7 @@ impl UI for FuzzelUI {
         _initial_query: Option<&str>,
         _theme: &ThemeMode,
         _theme_colors: Option<&ThemeColorsConfig>,
+        _max_history: u32,
     ) -> Result<String> {
         let input = make_fuzzel_input(configs, no_icons)?;
         run_fuzzel_with_input(&input)

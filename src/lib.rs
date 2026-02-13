@@ -151,6 +151,8 @@ pub struct GeneralConfig {
     pub theme: Option<String>,
     #[serde(default)]
     pub theme_colors: Option<ThemeColorsConfig>,
+    #[serde(default)]
+    pub max_history: Option<u32>,
 }
 
 /// Complete parsed configuration
@@ -678,6 +680,9 @@ pub fn run(args: Args) -> Result<()> {
         }
     };
 
+    // Determine max history size
+    let max_history = general.max_history.unwrap_or(10);
+
     // Get the appropriate UI implementation
     let ui = ui::get_ui(ui_type);
     let chosen = ui
@@ -688,6 +693,7 @@ pub fn run(args: Args) -> Result<()> {
             args.initial_query.as_deref(),
             &theme,
             parsed_config.general.theme_colors.as_ref(),
+            max_history,
         )
         .context("Failed to show UI")?;
 

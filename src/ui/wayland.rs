@@ -10,8 +10,7 @@ use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
 use iced::widget::operation::{focus, move_cursor_to_end, snap_to};
 use iced::widget::{
-    button, column, container, image, rich_text, scrollable, span, svg, text, text_input, Column,
-    Id, Row,
+    button, container, image, rich_text, scrollable, span, svg, text, text_input, Column, Id, Row,
 };
 use iced::window;
 use iced::{Element, Length, Task};
@@ -216,6 +215,7 @@ impl UI for WaylandUI {
         initial_query: Option<&str>,
         theme: &ThemeMode,
         theme_colors: Option<&ThemeColorsConfig>,
+        max_history: u32,
     ) -> Result<String> {
         run_wayland_ui(
             configs,
@@ -224,6 +224,7 @@ impl UI for WaylandUI {
             initial_query,
             theme,
             theme_colors,
+            max_history,
         )
     }
 }
@@ -882,6 +883,13 @@ struct LauncherApp {
     file_browser_error: Option<String>,
     current_modifiers: iced::keyboard::Modifiers,
     theme: ThemeColors,
+    // Command history state
+    history: Vec<String>,
+    history_index: Option<usize>,
+    history_saved_query: String,
+    history_search_in_progress: bool,
+    max_history: u32,
+    show_hints: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -910,6 +918,9 @@ enum Message {
     FileBrowserTabComplete,
     FileBrowserToggleHidden,
     ModifiersChanged(iced::keyboard::Modifiers),
+    HistoryPrevious,
+    HistoryNext,
+    ToggleHints,
 }
 
 impl LauncherApp {
@@ -920,6 +931,7 @@ impl LauncherApp {
         selected_item: SharedSelection,
         initial_query: Option<String>,
         theme: ThemeColors,
+        max_history: u32,
     ) -> (Self, Task<Message>) {
         let icon_map = if no_icons {
             HashMap::new()
@@ -982,6 +994,12 @@ impl LauncherApp {
                 file_browser_error: None,
                 current_modifiers: iced::keyboard::Modifiers::empty(),
                 theme,
+                history: load_history(max_history),
+                history_index: None,
+                history_saved_query: String::new(),
+                history_search_in_progress: false,
+                max_history,
+                show_hints: false,
             },
             if initial_query.is_empty() {
                 focus(search_input_id)
@@ -994,6 +1012,10 @@ impl LauncherApp {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::SearchChanged(query) => {
+                if self.current_modifiers.alt() && !self.history_search_in_progress {
+                    return Task::none();
+                }
+                self.history_search_in_progress = false;
                 self.search_query = query.clone();
                 self.filter_items(&query);
                 self.calculator_result = if self.addons.calculator.enabled {
@@ -1002,6 +1024,14 @@ impl LauncherApp {
                     None
                 };
                 self.selected_index = 0;
+                // Reset history navigation when the user types manually
+                // (but not when we programmatically set the query via history nav)
+                // We detect this by checking if the query matches the current history entry
+                if let Some(idx) = self.history_index {
+                    if self.history.get(idx).map(|h| h.as_str()) != Some(&query) {
+                        self.history_index = None;
+                    }
+                }
                 // Regenerate IDs to force complete view refresh
                 self.scrollable_id = ScrollableId::unique();
                 self.items_container_id = ContainerId::unique();
@@ -1453,6 +1483,7 @@ impl LauncherApp {
                     let count = self.mru_map.entry(description).or_insert(0);
                     *count += 1;
                     save_mru_map(&self.mru_map);
+                    self.save_query_to_history();
                 }
                 iced::exit()
             }
@@ -1551,6 +1582,7 @@ impl LauncherApp {
                     let count = self.mru_map.entry(description).or_insert(0);
                     *count += 1;
                     save_mru_map(&self.mru_map);
+                    self.save_query_to_history();
                 }
                 iced::exit()
             }
@@ -1570,6 +1602,7 @@ impl LauncherApp {
                         .stderr(Stdio::null())
                         .spawn();
                 }
+                self.save_query_to_history();
                 iced::exit()
             }
             Message::CurrencyConversionResult(request, result) => {
@@ -1612,6 +1645,7 @@ impl LauncherApp {
                         .stderr(Stdio::null())
                         .spawn();
                 }
+                self.save_query_to_history();
                 iced::exit()
             }
             Message::MultiCurrencyConversionResult(request, result) => {
@@ -1655,6 +1689,7 @@ impl LauncherApp {
                             .spawn();
                     }
                 }
+                self.save_query_to_history();
                 iced::exit()
             }
             Message::ScriptFilterResult(generation, result) => {
@@ -1703,6 +1738,7 @@ impl LauncherApp {
                         }
                     }
                 }
+                self.save_query_to_history();
                 iced::exit()
             }
             Message::WebSearchSelected => {
@@ -1711,6 +1747,7 @@ impl LauncherApp {
                         let _ = execute_web_search_url(&ws.url_template, &ws.query);
                     }
                 }
+                self.save_query_to_history();
                 iced::exit()
             }
             Message::FileBrowserItemSelected(idx) => {
@@ -1740,6 +1777,7 @@ impl LauncherApp {
                             .spawn();
                     }
                 }
+                self.save_query_to_history();
                 iced::exit()
             }
             Message::FileBrowserTabComplete => {
@@ -1783,6 +1821,63 @@ impl LauncherApp {
             }
             Message::ModifiersChanged(modifiers) => {
                 self.current_modifiers = modifiers;
+                Task::none()
+            }
+            Message::HistoryPrevious => {
+                if self.history.is_empty() || self.max_history == 0 {
+                    return Task::none();
+                }
+                match self.history_index {
+                    None => {
+                        // Start navigating: save current query, go to most recent entry
+                        self.history_saved_query = self.search_query.clone();
+                        self.history_index = Some(self.history.len() - 1);
+                    }
+                    Some(0) => {
+                        // Already at oldest entry, do nothing
+                        return Task::none();
+                    }
+                    Some(idx) => {
+                        self.history_index = Some(idx - 1);
+                    }
+                }
+                let query = self.history[self.history_index.unwrap()].clone();
+                let id = self.search_input_id.clone();
+                self.history_search_in_progress = true;
+                self.update(Message::SearchChanged(query))
+                    .chain(move_cursor_to_end(id))
+            }
+            Message::HistoryNext => {
+                if self.max_history == 0 {
+                    return Task::none();
+                }
+                match self.history_index {
+                    None => {
+                        // Not navigating history, do nothing
+                        Task::none()
+                    }
+                    Some(idx) => {
+                        if idx + 1 >= self.history.len() {
+                            // Past the end: restore saved query
+                            self.history_index = None;
+                            let query = self.history_saved_query.clone();
+                            let id = self.search_input_id.clone();
+                            self.history_search_in_progress = true;
+                            self.update(Message::SearchChanged(query))
+                                .chain(move_cursor_to_end(id))
+                        } else {
+                            self.history_index = Some(idx + 1);
+                            let query = self.history[idx + 1].clone();
+                            let id = self.search_input_id.clone();
+                            self.history_search_in_progress = true;
+                            self.update(Message::SearchChanged(query))
+                                .chain(move_cursor_to_end(id))
+                        }
+                    }
+                }
+            }
+            Message::ToggleHints => {
+                self.show_hints = !self.show_hints;
                 Task::none()
             }
         }
@@ -2716,19 +2811,98 @@ impl LauncherApp {
             .height(Length::Fill)
             .width(Length::Fill);
 
+        // Hint bar above the search input
+        let sep = span("  ·  ").size(12).color(t.border);
+        let mut hint_spans: Vec<iced::widget::text::Span<'_, (), iced::Font>> = Vec::new();
+
+        // Always-visible keybinding hints
+        if self.max_history > 0 {
+            hint_spans.push(span("Alt+P").size(12).color(t.accent));
+            hint_spans.push(span("/").size(12).color(t.text_muted));
+            hint_spans.push(span("N").size(12).color(t.accent));
+            hint_spans.push(span(" history").size(12).color(t.text_muted));
+        }
+        if self.file_browser_active {
+            if !hint_spans.is_empty() {
+                hint_spans.push(sep.clone());
+            }
+            hint_spans.push(span("Ctrl+H").size(12).color(t.accent));
+            hint_spans.push(span(" toggle hidden").size(12).color(t.text_muted));
+        }
+        if !hint_spans.is_empty() {
+            hint_spans.push(sep.clone());
+        }
+        hint_spans.push(span("Ctrl+/").size(12).color(t.accent));
+        hint_spans.push(span(" help").size(12).color(t.text_muted));
+
+        // Toggleable addon hints
+        if self.show_hints {
+            let mut addon_spans: Vec<iced::widget::text::Span<'_, (), iced::Font>> = Vec::new();
+            if self.addons.calculator.enabled {
+                addon_spans.push(span("math").size(12).color(t.text_muted));
+            }
+            if self.addons.currency.enabled {
+                let trigger = self.addons.currency.trigger.as_deref().unwrap_or("$");
+                if !addon_spans.is_empty() {
+                    addon_spans.push(sep.clone());
+                }
+                addon_spans.push(span(trigger.to_string()).size(12).color(t.accent));
+                addon_spans.push(span(" currency").size(12).color(t.text_muted));
+            }
+            if self.addons.file_browser.enabled {
+                if !addon_spans.is_empty() {
+                    addon_spans.push(sep.clone());
+                }
+                addon_spans.push(span("/").size(12).color(t.accent));
+                addon_spans.push(span(" files").size(12).color(t.text_muted));
+            }
+            for sf in &self.addons.script_filters {
+                if !addon_spans.is_empty() {
+                    addon_spans.push(sep.clone());
+                }
+                addon_spans.push(span(sf.keyword.clone()).size(12).color(t.accent));
+                addon_spans.push(
+                    span(format!(" {}", sf.name.to_lowercase()))
+                        .size(12)
+                        .color(t.text_muted),
+                );
+            }
+            for ws in &self.addons.web_searches {
+                if !addon_spans.is_empty() {
+                    addon_spans.push(sep.clone());
+                }
+                addon_spans.push(span(ws.keyword.clone()).size(12).color(t.accent));
+                addon_spans.push(
+                    span(format!(" {}", ws.name.to_lowercase()))
+                        .size(12)
+                        .color(t.text_muted),
+                );
+            }
+            if !addon_spans.is_empty() {
+                hint_spans.push(span("\n").size(12));
+                hint_spans.extend(addon_spans);
+            }
+        }
+
+        let mut main_column = Column::new()
+            .spacing(12)
+            .width(Length::Fill)
+            .height(Length::Fill);
+
+        let hint_row = container(rich_text(hint_spans))
+            .width(Length::Fill)
+            .align_x(iced::Alignment::End);
+        main_column = main_column.push(hint_row);
+
         // Main Layout
-        let content = column![
-            search_input,
-            container(items_scroll).padding(iced::Padding {
+        let content = main_column
+            .push(search_input)
+            .push(container(items_scroll).padding(iced::Padding {
                 top: 8.0,
                 right: 4.0,
                 bottom: 0.0,
-                left: 0.0
-            })
-        ]
-        .spacing(12)
-        .width(Length::Fill)
-        .height(Length::Fill);
+                left: 0.0,
+            }));
 
         container(content)
             .padding(20)
@@ -2777,9 +2951,24 @@ impl LauncherApp {
                 key: keyboard::Key::Character(ref c),
                 modifiers,
                 ..
+            }) if c.as_str() == "p" && modifiers.alt() => Some(Message::HistoryPrevious),
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Character(ref c),
+                modifiers,
+                ..
+            }) if c.as_str() == "n" && modifiers.alt() => Some(Message::HistoryNext),
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Character(ref c),
+                modifiers,
+                ..
             }) if c.as_str() == "h" && modifiers.control() => {
                 Some(Message::FileBrowserToggleHidden)
             }
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Character(ref c),
+                modifiers,
+                ..
+            }) if c.as_str() == "/" && modifiers.control() => Some(Message::ToggleHints),
             Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
                 Some(Message::ModifiersChanged(m))
             }
@@ -2823,6 +3012,22 @@ impl LauncherApp {
             offset += 1;
         }
         self.filtered_configs.len() + offset
+    }
+
+    /// Save the current search query to the command history.
+    fn save_query_to_history(&mut self) {
+        let query = self.search_query.trim().to_string();
+        if !query.is_empty() && self.max_history > 0 {
+            // Remove duplicate if present so the new entry goes to the end
+            self.history.retain(|h| h != &query);
+            self.history.push(query);
+            // Trim to max_history
+            if self.history.len() > self.max_history as usize {
+                let excess = self.history.len() - self.max_history as usize;
+                self.history.drain(..excess);
+            }
+            save_history(&self.history);
+        }
     }
 }
 
@@ -3421,6 +3626,40 @@ fn save_mru_map(map: &HashMap<String, u32>) {
     }
 }
 
+/// Load command history from the history cache file.
+/// Returns entries ordered oldest-first (newest at the end).
+fn load_history(max_history: u32) -> Vec<String> {
+    if max_history == 0 {
+        return Vec::new();
+    }
+    if let Ok(path) = super::get_history_cache_path() {
+        if let Ok(content) = fs::read_to_string(path) {
+            let mut entries: Vec<String> = content
+                .lines()
+                .filter(|l| !l.is_empty())
+                .map(|l| l.to_string())
+                .collect();
+            // Keep only the most recent max_history entries
+            if entries.len() > max_history as usize {
+                let excess = entries.len() - max_history as usize;
+                entries.drain(..excess);
+            }
+            return entries;
+        }
+    }
+    Vec::new()
+}
+
+/// Save command history to the history cache file.
+fn save_history(history: &[String]) {
+    if let Ok(path) = super::get_history_cache_path() {
+        let content = history.join("\n");
+        if let Err(e) = fs::write(&path, content) {
+            eprintln!("Warning: Failed to save history to {:?}: {}", path, e);
+        }
+    }
+}
+
 /// Run the Wayland UI with the provided configurations and return the selected item.
 fn run_wayland_ui(
     configs: &[RaffiConfig],
@@ -3429,6 +3668,7 @@ fn run_wayland_ui(
     initial_query: Option<&str>,
     theme_mode: &ThemeMode,
     theme_color_overrides: Option<&ThemeColorsConfig>,
+    max_history: u32,
 ) -> Result<String> {
     let theme_colors = ThemeColors::from_mode_with_overrides(theme_mode, theme_color_overrides);
     let iced_theme = match theme_mode {
@@ -3473,6 +3713,7 @@ fn run_wayland_ui(
                 selected_item_for_new.clone(),
                 initial_query_owned.clone(),
                 theme_colors,
+                max_history,
             )
         },
         LauncherApp::update,
