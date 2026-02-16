@@ -729,9 +729,9 @@ mod tests {
     #[test]
     fn test_read_config_from_reader() {
         let yaml_config = r#"
-        firefox:
-          binary: firefox
-          description: "Firefox browser"
+        shell:
+          binary: sh
+          description: "Shell"
         hello_script:
           script: "echo hello"
           description: "Hello script"
@@ -758,8 +758,8 @@ mod tests {
 
         let expected_configs = vec![
             RaffiConfig {
-                binary: Some("firefox".to_string()),
-                description: Some("Firefox browser".to_string()),
+                binary: Some("sh".to_string()),
+                description: Some("Shell".to_string()),
                 ..Default::default()
             },
             RaffiConfig {
@@ -783,9 +783,9 @@ mod tests {
             currencies: ["USD", "EUR", "GBP"]
           calculator:
             enabled: false
-        firefox:
-          binary: firefox
-          description: "Firefox browser"
+        shell:
+          binary: sh
+          description: "Shell"
         "#;
         let reader = Cursor::new(yaml_config);
         let args = Args {
@@ -899,9 +899,9 @@ mod tests {
               keyword: "tz"
               command: "batz"
               args: ["-j"]
-        firefox:
-          binary: firefox
-          description: "Firefox browser"
+        shell:
+          binary: sh
+          description: "Shell"
         "#;
         let reader = Cursor::new(yaml_config);
         let args = Args {
@@ -1070,9 +1070,9 @@ mod tests {
           ui_type: native
           default_script_shell: zsh
           no_icons: true
-        firefox:
-          binary: firefox
-          description: "Firefox browser"
+        shell:
+          binary: sh
+          description: "Shell"
         "#;
         let reader = Cursor::new(yaml_config);
         let args = Args {
@@ -1101,9 +1101,9 @@ mod tests {
     #[test]
     fn test_config_without_general_section() {
         let yaml_config = r#"
-        firefox:
-          binary: firefox
-          description: "Firefox browser"
+        shell:
+          binary: sh
+          description: "Shell"
         "#;
         let reader = Cursor::new(yaml_config);
         let args = Args {
@@ -1131,9 +1131,9 @@ mod tests {
         let yaml_config = r#"
         general:
           no_icons: true
-        firefox:
-          binary: firefox
-          description: "Firefox browser"
+        shell:
+          binary: sh
+          description: "Shell"
         "#;
         let reader = Cursor::new(yaml_config);
         let args = Args {
@@ -1161,9 +1161,9 @@ mod tests {
         let yaml_config = r#"
         general:
           theme: light
-        firefox:
-          binary: firefox
-          description: "Firefox browser"
+        shell:
+          binary: sh
+          description: "Shell"
         "#;
         let reader = Cursor::new(yaml_config);
         let args = Args {
@@ -1216,9 +1216,9 @@ mod tests {
             - name: "DuckDuckGo"
               keyword: "ddg"
               url: "https://duckduckgo.com/?q={query}"
-        firefox:
-          binary: firefox
-          description: "Firefox browser"
+        shell:
+          binary: sh
+          description: "Shell"
         "#;
         let reader = Cursor::new(yaml_config);
         let args = Args {
