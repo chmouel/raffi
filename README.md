@@ -145,7 +145,7 @@ Common search engines are pre-configured in the example config (Google, DuckDuck
 
 The native interface supports text snippets, which let you define reusable text values that can be searched and copied to the clipboard. Snippets can come from three sources: inline in the config, an external YAML file, or a command's output (using the same Alfred JSON format as script filters).
 
-Type a configured keyword to display the snippets from that source, then continue typing to fuzzy-filter by name. Selecting a snippet copies its value to the clipboard via `wl-copy`.
+Type a configured keyword to display the snippets from that source, then continue typing to fuzzy-filter by name. By default, selecting a snippet copies its value to the clipboard via `wl-copy` (Enter) or types it into the focused app via `wtype`/`ydotool` (Ctrl+Enter). These actions can be customised with the `action` and `secondary_action` fields.
 
 [See below for how to configure this](#text-snippets-configuration)
 
@@ -388,8 +388,8 @@ Here is the meaning of each field in the script filter configuration:
 | `command` | yes      | Executable to run                                                    |
 | `args`    | no       | Arguments passed before the query                                    |
 | `icon`    | no       | Fallback icon name for results without their own                     |
-| `action`  | no       | Command template run on Enter; `{value}` is replaced with the selected value. Executed via `sh -c`. If omitted, the value is copied to the clipboard with `wl-copy`. |
-| `secondary_action` | no | Command template run on Alt+Enter; same `{value}` substitution and `sh -c` execution as `action`. If omitted, Alt+Enter behaves the same as Enter. |
+| `action`  | no       | Action on Enter. Use `"copy"` to copy to clipboard, `"insert"` to type into the focused app via wtype/ydotool, or a command template where `{value}` is replaced with the selected value (executed via `sh -c`). Defaults to `"copy"`. |
+| `secondary_action` | no | Action on Ctrl+Enter. Accepts the same values as `action`. If omitted, Ctrl+Enter behaves the same as Enter. |
 
 The script must output JSON matching this structure (a subset of Alfred's format):
 
@@ -525,8 +525,27 @@ Field descriptions:
 | `command`   | no       | Executable that outputs Alfred Script Filter JSON                      |
 | `directory` | no       | Path to a directory of `.snippet` files (cached per session)           |
 | `args`      | no       | Arguments passed to the command                                        |
+| `action`    | no       | Action on Enter. Use `"copy"` to copy to clipboard, `"insert"` to type into the focused app via wtype/ydotool, or a command template where `{value}` is replaced with the selected value (executed via `sh -c`). Defaults to `"copy"`. |
+| `secondary_action` | no | Action on Ctrl+Enter. Accepts the same values as `action`. Defaults to `"insert"`. |
 
-Exactly one of `snippets`, `file`, `command`, or `directory` should be specified per entry. On selection, the snippet's value is copied to the clipboard using `wl-copy`.
+Exactly one of `snippets`, `file`, `command`, or `directory` should be specified per entry.
+
+An example with custom actions (type on Enter, copy on Ctrl+Enter):
+
+```yaml
+addons:
+  text_snippets:
+    - name: "Emails"
+      keyword: "em"
+      icon: "mail"
+      action: "insert"
+      secondary_action: "copy"
+      snippets:
+        - name: "Personal Email"
+          value: "user@example.com"
+        - name: "Work Email"
+          value: "user@company.com"
+```
 
 ## Development
 
@@ -542,21 +561,27 @@ pre-commit install
 ## Screenshots
 
 ### File Browser (`/`)
+
 <img width="321" height="224" alt="optimized-file-browse" src="https://github.com/user-attachments/assets/bbfbe937-c590-43c9-8853-9aaf786a3dc6" />
 
 ### Currency Converter (`$`)
+
 <img width="522" height="150" alt="image" src="https://github.com/user-attachments/assets/aaf35e3f-1cef-4604-b87a-ecfa626300c1" />
 
 ## Calculator
+
 <img width="522" height="150" alt="image" src="https://github.com/user-attachments/assets/eb7069c9-21f7-413d-b455-c2db186591d5" />
 
 ### Script Filter with github PR browser
+
 <img width="441" height="559" alt="optimized-pull-requests-dashboard" src="https://github.com/user-attachments/assets/48da3b90-b8dd-4f4d-8465-3ae27fe267c3" />
 
 ### Script Filter with timezone converter
+
 <img width="522" height="400" alt="image" src="https://github.com/user-attachments/assets/f65acf34-b499-477d-9952-48590723d5bb" />
 
 ### Light Theme
+
 <img width="403" height="473" alt="suspend-to-sleep-then-hibernate" src="https://github.com/user-attachments/assets/9c6549dc-be51-422d-9b82-5dbbb89779b6" />
 
 ## Licence

@@ -6,7 +6,7 @@
 #   max_history: 10          # Max search query history entries (0 to disable, navigate with Alt-P/N)
 #   theme: dark
 #   font_size: 20            # Base font size in px (default: 20). Other sizes and paddings
-#                            #   scale proportionally (input=24, items=20, subtitles=14, hints=12)
+#                            # scale proportionally (input=24, items=20, subtitles=14, hints=12)
 #   font_family: "Inter"     # Font family name (default: system sans-serif)
 #   window_width: 800        # Window width in pixels (default: 800)
 #   window_height: 600       # Window height in pixels (default: 600)
@@ -369,18 +369,28 @@ addons:
       command: "batz"
       args: ["-j"]
       icon: "clock"
-    # Example with a custom action and secondary action (Alt+Enter):
+    # action/secondary_action accept two special keywords:
+    #   "copy"   — copy to clipboard via wl-copy (default for Enter)
+    #   "insert" — type into focused app via wtype/ydotool
+    # Any other string is run as a shell command via sh -c, with {value} replaced.
+    # Example with a custom action and secondary action (Ctrl+Enter):
     # - name: "Bookmarks"
     #   keyword: "bm"
     #   command: "my-bookmark-script"
     #   args: ["-j"]
-    #   action: "wl-copy {value}"
+    #   action: "copy"
     #   secondary_action: "xdg-open {value}"
 
   # text_snippets:
   #   - name: "Emails"
   #     keyword: "em"
   #     icon: "mail"
+  #     # action/secondary_action accept two special keywords:
+  #     #   "copy"   — copy to clipboard via wl-copy (default for Enter)
+  #     #   "insert" — type into focused app via wtype/ydotool (default for Ctrl+Enter)
+  #     # Any other string is run as a shell command via sh -c, with {value} replaced.
+  #     action: "insert"                       # primary action on Enter: type into focused app
+  #     secondary_action: "copy"               # secondary action on Ctrl+Enter: copy to clipboard
   #     snippets:
   #       - name: "Personal Email"
   #         value: "user@example.com"

@@ -130,6 +130,10 @@ pub struct TextSnippetSourceConfig {
     pub directory: Option<String>,
     #[serde(default)]
     pub args: Vec<String>,
+    #[serde(default)]
+    pub action: Option<String>,
+    #[serde(default)]
+    pub secondary_action: Option<String>,
 }
 
 /// Container for all addon configurations
@@ -991,6 +995,55 @@ mod tests {
         assert_eq!(tz.name, "Timezones");
         assert_eq!(tz.action, None);
         assert_eq!(tz.secondary_action, None);
+    }
+
+    #[test]
+    fn test_text_snippet_action_parsing() {
+        let yaml_config = r#"
+        addons:
+          text_snippets:
+            - name: "Emails"
+              keyword: "em"
+              action: "wl-copy {value}"
+              secondary_action: "wtype {value}"
+              snippets:
+                - name: "Personal"
+                  value: "user@example.com"
+            - name: "Plain"
+              keyword: "pl"
+              snippets:
+                - name: "Hello"
+                  value: "hello"
+        shell:
+          binary: sh
+          description: "Shell"
+        "#;
+        let reader = Cursor::new(yaml_config);
+        let args = Args {
+            help: false,
+            version: false,
+            configfile: None,
+            print_only: false,
+            refresh_cache: false,
+            no_icons: true,
+            default_script_shell: None,
+            ui_type: None,
+            initial_query: None,
+            theme: None,
+        };
+        let parsed_config = read_config_from_reader(reader, &args).unwrap();
+
+        assert_eq!(parsed_config.addons.text_snippets.len(), 2);
+
+        let em = &parsed_config.addons.text_snippets[0];
+        assert_eq!(em.name, "Emails");
+        assert_eq!(em.action, Some("wl-copy {value}".to_string()));
+        assert_eq!(em.secondary_action, Some("wtype {value}".to_string()));
+
+        let pl = &parsed_config.addons.text_snippets[1];
+        assert_eq!(pl.name, "Plain");
+        assert_eq!(pl.action, None);
+        assert_eq!(pl.secondary_action, None);
     }
 
     #[test]

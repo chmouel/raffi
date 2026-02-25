@@ -812,6 +812,72 @@ fn filter_snippets(snippets: &[TextSnippet], query: &str) -> Vec<usize> {
     scored.into_iter().map(|(i, _)| i).collect()
 }
 
+/// Detect a typing tool (`wtype` or `ydotool`) in `$PATH` and spawn a shell
+/// process that sleeps briefly (letting the raffi window close) then types the
+/// text.  The child process is fully detached so it survives raffi's exit.
+/// Returns `true` if a tool was found, `false` otherwise.
+fn spawn_insert(value: &str) -> bool {
+    let tool = std::env::var_os("PATH").and_then(|paths| {
+        for dir in std::env::split_paths(&paths) {
+            if dir.join("wtype").is_file() {
+                return Some("wtype");
+            }
+            if dir.join("ydotool").is_file() {
+                return Some("ydotool");
+            }
+        }
+        None
+    });
+    let Some(tool) = tool else {
+        return false;
+    };
+    let type_cmd = if tool == "ydotool" {
+        "ydotool type -- \"$RAFFI_INSERT_VALUE\"".to_string()
+    } else {
+        "wtype -- \"$RAFFI_INSERT_VALUE\"".to_string()
+    };
+    let _ = Command::new("sh")
+        .arg("-c")
+        .arg(format!("sleep 0.2 && {type_cmd}"))
+        .env("RAFFI_INSERT_VALUE", value)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+    true
+}
+
+/// Execute an action for a selected value. Recognizes two special keywords:
+/// - `"insert"` — type into the focused app via `spawn_insert` (wtype/ydotool)
+/// - `"copy"` — copy to clipboard via `wl-copy`
+/// - Any other string is executed as a shell command via `sh -c`, with `{value}`
+///   replaced by the actual value.
+fn execute_action(action: &str, value: &str) {
+    match action {
+        "insert" => {
+            spawn_insert(value);
+        }
+        "copy" => {
+            let _ = Command::new("wl-copy")
+                .arg(value)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn();
+        }
+        _ => {
+            let cmd = action.replace("{value}", value);
+            let _ = Command::new("sh")
+                .arg("-c")
+                .arg(&cmd)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn();
+        }
+    }
+}
+
 /// Read a directory and return entries, with dirs sorted first then files, alphabetically.
 fn read_directory(path: &str, show_hidden: bool) -> Vec<FileBrowserEntry> {
     let dir_path = Path::new(path);
@@ -917,6 +983,8 @@ struct LauncherApp {
     text_snippet_active: bool,
     text_snippet_loading: bool,
     text_snippet_icon: Option<String>,
+    text_snippet_action: Option<String>,
+    text_snippet_secondary_action: Option<String>,
     text_snippet_generation: u64,
     text_snippet_file_cache: HashMap<String, Vec<TextSnippet>>,
     // Web search state
@@ -1042,6 +1110,8 @@ impl LauncherApp {
                 text_snippet_active: false,
                 text_snippet_loading: false,
                 text_snippet_icon: None,
+                text_snippet_action: None,
+                text_snippet_secondary_action: None,
                 text_snippet_generation: 0,
                 text_snippet_file_cache: HashMap::new(),
                 web_search_active: None,
@@ -1170,6 +1240,8 @@ impl LauncherApp {
                     self.text_snippet_filtered.clear();
                     self.text_snippet_loading = false;
                     self.text_snippet_icon = None;
+                    self.text_snippet_action = None;
+                    self.text_snippet_secondary_action = None;
                     self.web_search_active = None;
                     self.calculator_result = None;
                     self.currency_result = None;
@@ -1253,6 +1325,8 @@ impl LauncherApp {
                             self.filtered_configs.clear();
                             self.text_snippet_active = true;
                             self.text_snippet_icon = ts_config.icon.clone();
+                            self.text_snippet_action = ts_config.action.clone();
+                            self.text_snippet_secondary_action = ts_config.secondary_action.clone();
 
                             if let Some(ref snippets) = ts_config.snippets {
                                 // Inline snippets
@@ -1380,6 +1454,8 @@ impl LauncherApp {
                         self.text_snippet_filtered.clear();
                         self.text_snippet_loading = false;
                         self.text_snippet_icon = None;
+                        self.text_snippet_action = None;
+                        self.text_snippet_secondary_action = None;
                     }
 
                     // Check for web search keyword match
@@ -1959,30 +2035,14 @@ impl LauncherApp {
                 if let Some(ref sf_result) = self.script_filter_results {
                     if let Some(item) = sf_result.items.get(idx) {
                         let value = item.arg.as_deref().unwrap_or(&item.title);
-                        let action_tpl = if self.current_modifiers.alt() {
+                        let action = if self.current_modifiers.control() {
                             self.script_filter_secondary_action
-                                .as_ref()
-                                .or(self.script_filter_action.as_ref())
+                                .as_deref()
+                                .or(self.script_filter_action.as_deref())
                         } else {
-                            self.script_filter_action.as_ref()
+                            self.script_filter_action.as_deref()
                         };
-                        if let Some(action_tpl) = action_tpl {
-                            let cmd = action_tpl.replace("{value}", value);
-                            let _ = Command::new("sh")
-                                .arg("-c")
-                                .arg(&cmd)
-                                .stdin(Stdio::null())
-                                .stdout(Stdio::null())
-                                .stderr(Stdio::null())
-                                .spawn();
-                        } else {
-                            let _ = Command::new("wl-copy")
-                                .arg(value)
-                                .stdin(Stdio::null())
-                                .stdout(Stdio::null())
-                                .stderr(Stdio::null())
-                                .spawn();
-                        }
+                        execute_action(action.unwrap_or("copy"), value);
                     }
                 }
                 self.save_query_to_history();
@@ -2027,12 +2087,15 @@ impl LauncherApp {
             Message::TextSnippetSelected(idx) => {
                 if let Some(&snippet_idx) = self.text_snippet_filtered.get(idx) {
                     if let Some(snippet) = self.text_snippet_items.get(snippet_idx) {
-                        let _ = Command::new("wl-copy")
-                            .arg(&snippet.value)
-                            .stdin(Stdio::null())
-                            .stdout(Stdio::null())
-                            .stderr(Stdio::null())
-                            .spawn();
+                        let value = &snippet.value;
+                        let action = if self.current_modifiers.control() {
+                            self.text_snippet_secondary_action
+                                .as_deref()
+                                .unwrap_or("insert")
+                        } else {
+                            self.text_snippet_action.as_deref().unwrap_or("copy")
+                        };
+                        execute_action(action, value);
                     }
                 }
                 self.save_query_to_history();
@@ -2056,8 +2119,8 @@ impl LauncherApp {
                         return Task::done(Message::SearchChanged(new_query));
                     }
                     // File selected
-                    if self.current_modifiers.alt() {
-                        // Alt+Enter: copy path to clipboard
+                    if self.current_modifiers.control() {
+                        // Ctrl+Enter: copy path to clipboard
                         let _ = Command::new("wl-copy")
                             .arg(&entry.full_path)
                             .stdin(Stdio::null())
