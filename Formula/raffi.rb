@@ -5,13 +5,13 @@
 class Raffi < Formula
   desc "raffi - fuzzel launcher based on yaml configuration"
   homepage "https://github.com/chmouel/raffi"
-  version "0.16.0"
+  version "0.17.0"
   depends_on :linux
 
   on_intel do
     if Hardware::CPU.is_64_bit?
-      url "https://github.com/chmouel/raffi/releases/download/v0.16.0/raffi_0.16.0_linux_x86_64.tar.gz"
-      sha256 "346c10bca73a34681473acb2c11743a513f90f52b718b9a822e09ad1d9e24cd9"
+      url "https://github.com/chmouel/raffi/releases/download/v0.17.0/raffi_0.17.0_linux_x86_64.tar.gz"
+      sha256 "499e9cc2ad0318ad16e84826c2d5106bdac5f093887f78b39e95f36fee70e42f"
 
       def install
         bin.install "raffi" => "raffi"
