@@ -55,12 +55,65 @@ jobs:
           name: raffi-x86_64-unknown-linux-gnu
           path: target/linux_amd64/raffi
 
+      - name: Generate AI changelog
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          # Install aichat from pre-built binary
+          AICHAT_VERSION="v0.29.0"
+          curl -fsSL "https://github.com/sigoden/aichat/releases/download/${AICHAT_VERSION}/aichat-${AICHAT_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            -o /tmp/aichat.tar.gz
+          tar xzf /tmp/aichat.tar.gz -C /usr/local/bin aichat || true
+
+          # Determine previous tag
+          CURRENT_TAG="${GITHUB_REF#refs/tags/}"
+          PREVIOUS_TAG=$(git tag --sort=-v:refname | grep -v "^${CURRENT_TAG}$" | head -n1)
+          if [ -z "$PREVIOUS_TAG" ]; then
+            GIT_LOG=$(git log --oneline --no-merges)
+          else
+            GIT_LOG=$(git log --oneline --no-merges "${PREVIOUS_TAG}..${CURRENT_TAG}")
+          fi
+
+          # Filter noise commits
+          FILTERED_LOG=$(echo "$GIT_LOG" | grep -v -E '^\S+ (Brew formula update|\[release\]|Merge pull request|Merge branch)' || true)
+
+          if [ -n "$FILTERED_LOG" ] && command -v aichat &>/dev/null && [ -n "$GEMINI_API_KEY" ]; then
+            PROMPT="You are generating release notes for Raffi (a fuzzel/dmenu launcher configured via YAML) version ${CURRENT_TAG}.
+
+          Below are the git commit messages since the last release. Generate concise, user-facing release notes in Markdown:
+
+          - Group into sections: **New Features**, **Bug Fixes**, **Improvements**, **Dependencies** — only include sections that have changes
+          - Consolidate dependency bumps (e.g. multiple dependabot commits) into a single summary line
+          - Write descriptions in imperative mood, no commit hashes or author names
+          - Maximum 15 bullet points total
+          - Do not include a title/header — start directly with the first section
+
+          Commits:
+          ${FILTERED_LOG}"
+
+            echo "$PROMPT" | aichat -m gemini:gemini-2.5-flash -S > release-notes.md 2>/dev/null || true
+          fi
+
+          # Fallback: if release-notes.md is empty or missing, generate plain changelog
+          if [ ! -s release-notes.md ]; then
+            echo "## Changes" > release-notes.md
+            echo "" >> release-notes.md
+            echo "$FILTERED_LOG" | while IFS= read -r line; do
+              # Strip commit hash prefix
+              msg=$(echo "$line" | sed 's/^[a-f0-9]* //')
+              [ -n "$msg" ] && echo "- ${msg}" >> release-notes.md
+            done
+          fi
+
+          echo "--- Generated release notes ---"
+          cat release-notes.md
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v5
         with:
           distribution: goreleaser
           version: latest
-          args: release --rm-dist
+          args: release --rm-dist --release-notes=release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AUR_PRIVATE_KEY: ${{ secrets.AUR_PRIVATE_KEY }}
