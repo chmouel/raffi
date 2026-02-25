@@ -5,6 +5,12 @@
 #   no_icons: false          # Hide icons
 #   max_history: 10          # Max search query history entries (0 to disable, navigate with Alt-P/N)
 #   theme: dark
+#   font_size: 20            # Base font size in px (default: 20). Other sizes and paddings
+#                            #   scale proportionally (input=24, items=20, subtitles=14, hints=12)
+#   font_family: "Inter"     # Font family name (default: system sans-serif)
+#   window_width: 800        # Window width in pixels (default: 800)
+#   window_height: 600       # Window height in pixels (default: 600)
+#   padding: 20              # Outer window padding in pixels (default: 20, scales with font_size)
 #   theme_colors:            # Override individual colours (hex: #RGB, #RRGGBB, or #RRGGBBAA)
 #     bg_base: "#1e1e2e"
 #     bg_input: "#313244"

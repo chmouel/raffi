@@ -22,7 +22,7 @@ type ContainerId = Id;
 type ScrollableId = Id;
 type TextInputId = Id;
 
-use super::UI;
+use super::{FontSizes, UISettings, UI};
 use crate::{
     execute_web_search_url, read_icon_map, AddonsConfig, RaffiConfig, TextSnippet,
     ThemeColorsConfig, ThemeMode,
@@ -212,21 +212,9 @@ impl UI for WaylandUI {
         &self,
         configs: &[RaffiConfig],
         addons: &AddonsConfig,
-        no_icons: bool,
-        initial_query: Option<&str>,
-        theme: &ThemeMode,
-        theme_colors: Option<&ThemeColorsConfig>,
-        max_history: u32,
+        settings: &UISettings,
     ) -> Result<String> {
-        run_wayland_ui(
-            configs,
-            addons,
-            no_icons,
-            initial_query,
-            theme,
-            theme_colors,
-            max_history,
-        )
+        run_wayland_ui(configs, addons, settings)
     }
 }
 
@@ -942,6 +930,7 @@ struct LauncherApp {
     file_browser_error: Option<String>,
     current_modifiers: iced::keyboard::Modifiers,
     theme: ThemeColors,
+    font_sizes: FontSizes,
     // Command history state
     history: Vec<String>,
     history_index: Option<usize>,
@@ -985,6 +974,7 @@ enum Message {
 }
 
 impl LauncherApp {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         mut configs: Vec<RaffiConfig>,
         addons: AddonsConfig,
@@ -993,6 +983,7 @@ impl LauncherApp {
         initial_query: Option<String>,
         theme: ThemeColors,
         max_history: u32,
+        font_sizes: FontSizes,
     ) -> (Self, Task<Message>) {
         let icon_map = if no_icons {
             HashMap::new()
@@ -1062,6 +1053,7 @@ impl LauncherApp {
                 file_browser_error: None,
                 current_modifiers: iced::keyboard::Modifiers::empty(),
                 theme,
+                font_sizes,
                 history: load_history(max_history),
                 history_index: None,
                 history_saved_query: String::new(),
@@ -2190,13 +2182,14 @@ impl LauncherApp {
 
     fn view(&self) -> Element<'_, Message> {
         let t = self.theme;
+        let fs = self.font_sizes;
         // --- Search Input Styling ---
         let search_input = text_input("Type to search...", &self.search_query)
             .id(self.search_input_id.clone())
             .on_input(Message::SearchChanged)
             .on_submit(Message::Submit)
-            .padding(16)
-            .size(24)
+            .padding(fs.input_padding)
+            .size(fs.input)
             .style(move |_theme, status| {
                 let border_color = if matches!(status, text_input::Status::Focused { .. }) {
                     t.accent
@@ -2247,12 +2240,14 @@ impl LauncherApp {
             let loading_row = Row::new()
                 .spacing(16)
                 .align_y(iced::Alignment::Center)
-                .push(text(loading_text).size(20).color(t.text_muted));
+                .push(text(loading_text).size(fs.item).color(t.text_muted));
 
             let is_selected = self.selected_index == special_item_idx;
 
-            let loading_button = button(loading_row).padding(12).width(Length::Fill).style(
-                move |_theme, _status| {
+            let loading_button = button(loading_row)
+                .padding(fs.item_padding)
+                .width(Length::Fill)
+                .style(move |_theme, _status| {
                     let base_style = button::Style {
                         text_color: t.text_muted,
                         border: iced::Border {
@@ -2278,8 +2273,7 @@ impl LauncherApp {
                             ..base_style
                         }
                     }
-                },
-            );
+                });
 
             items_column = items_column.push(loading_button);
             special_item_idx += 1;
@@ -2338,16 +2332,20 @@ impl LauncherApp {
 
                 // Title + optional subtitle
                 let mut text_col = Column::new();
-                text_col = text_col.push(rich_text(ansi_to_spans(&item.title, 20.0, t.text_main)));
+                text_col =
+                    text_col.push(rich_text(ansi_to_spans(&item.title, fs.item, t.text_main)));
                 if let Some(ref subtitle) = item.subtitle {
-                    text_col =
-                        text_col.push(rich_text(ansi_to_spans(subtitle, 14.0, t.text_muted)));
+                    text_col = text_col.push(rich_text(ansi_to_spans(
+                        subtitle,
+                        fs.subtitle,
+                        t.text_muted,
+                    )));
                 }
                 item_row = item_row.push(text_col.width(Length::Fill));
 
                 let item_button = button(item_row)
                     .on_press(Message::ItemClicked(special_item_idx))
-                    .padding(12)
+                    .padding(fs.item_padding)
                     .width(Length::Fill)
                     .style(move |_theme, status| {
                         let base_style = button::Style {
@@ -2396,12 +2394,18 @@ impl LauncherApp {
             let loading_row = Row::new()
                 .spacing(16)
                 .align_y(iced::Alignment::Center)
-                .push(text("Loading snippets...").size(20).color(t.text_muted));
+                .push(
+                    text("Loading snippets...")
+                        .size(fs.item)
+                        .color(t.text_muted),
+                );
 
             let is_selected = self.selected_index == special_item_idx;
 
-            let loading_button = button(loading_row).padding(12).width(Length::Fill).style(
-                move |_theme, _status| {
+            let loading_button = button(loading_row)
+                .padding(fs.item_padding)
+                .width(Length::Fill)
+                .style(move |_theme, _status| {
                     let base_style = button::Style {
                         text_color: t.text_muted,
                         border: iced::Border {
@@ -2427,8 +2431,7 @@ impl LauncherApp {
                             ..base_style
                         }
                     }
-                },
-            );
+                });
 
             items_column = items_column.push(loading_button);
             special_item_idx += 1;
@@ -2471,18 +2474,19 @@ impl LauncherApp {
 
                     // Name (title) + truncated value (subtitle)
                     let mut text_col = Column::new();
-                    text_col = text_col.push(text(&snippet.name).size(20).color(t.text_main));
+                    text_col = text_col.push(text(&snippet.name).size(fs.item).color(t.text_main));
                     let truncated_value = if snippet.value.len() > 80 {
                         format!("{}...", &snippet.value[..80])
                     } else {
                         snippet.value.clone()
                     };
-                    text_col = text_col.push(text(truncated_value).size(14).color(t.text_muted));
+                    text_col =
+                        text_col.push(text(truncated_value).size(fs.subtitle).color(t.text_muted));
                     item_row = item_row.push(text_col.width(Length::Fill));
 
                     let item_button = button(item_row)
                         .on_press(Message::ItemClicked(special_item_idx))
-                        .padding(12)
+                        .padding(fs.item_padding)
                         .width(Length::Fill)
                         .style(move |_theme, status| {
                             let base_style = button::Style {
@@ -2534,18 +2538,19 @@ impl LauncherApp {
                 let err_row = Row::new()
                     .spacing(16)
                     .align_y(iced::Alignment::Center)
-                    .push(text(err.clone()).size(20).color(t.text_muted));
+                    .push(text(err.clone()).size(fs.item).color(t.text_muted));
 
-                let err_button = button(err_row).padding(12).width(Length::Fill).style(
-                    move |_theme, _status| button::Style {
+                let err_button = button(err_row)
+                    .padding(fs.item_padding)
+                    .width(Length::Fill)
+                    .style(move |_theme, _status| button::Style {
                         text_color: t.text_muted,
                         border: iced::Border {
                             radius: 8.0.into(),
                             ..Default::default()
                         },
                         ..Default::default()
-                    },
-                );
+                    });
 
                 items_column = items_column.push(err_button);
             }
@@ -2600,14 +2605,17 @@ impl LauncherApp {
                 let name_color = if entry.is_dir { t.accent } else { t.text_main };
 
                 let mut text_col = Column::new();
-                text_col = text_col.push(text(display_name).size(20).color(name_color));
-                text_col =
-                    text_col.push(text(entry.full_path.clone()).size(14).color(t.text_muted));
+                text_col = text_col.push(text(display_name).size(fs.item).color(name_color));
+                text_col = text_col.push(
+                    text(entry.full_path.clone())
+                        .size(fs.subtitle)
+                        .color(t.text_muted),
+                );
                 item_row = item_row.push(text_col.width(Length::Fill));
 
                 let item_button = button(item_row)
                     .on_press(Message::ItemClicked(special_item_idx))
-                    .padding(12)
+                    .padding(fs.item_padding)
                     .width(Length::Fill)
                     .style(move |_theme, status| {
                         let base_style = button::Style {
@@ -2691,49 +2699,48 @@ impl LauncherApp {
             if ws.query.is_empty() {
                 // Hint row (not clickable)
                 let hint = format!("Search {}: type your query...", ws.name);
-                ws_row = ws_row.push(text(hint).size(20).color(t.text_muted));
+                ws_row = ws_row.push(text(hint).size(fs.item).color(t.text_muted));
 
-                let ws_button =
-                    button(ws_row)
-                        .padding(12)
-                        .width(Length::Fill)
-                        .style(move |_theme, _status| {
-                            let base_style = button::Style {
-                                text_color: t.text_muted,
-                                border: iced::Border {
-                                    radius: 8.0.into(),
-                                    ..Default::default()
-                                },
+                let ws_button = button(ws_row)
+                    .padding(fs.item_padding)
+                    .width(Length::Fill)
+                    .style(move |_theme, _status| {
+                        let base_style = button::Style {
+                            text_color: t.text_muted,
+                            border: iced::Border {
+                                radius: 8.0.into(),
                                 ..Default::default()
-                            };
+                            },
+                            ..Default::default()
+                        };
 
-                            if is_selected {
-                                button::Style {
-                                    background: Some(iced::Background::Color(t.selection_bg)),
-                                    border: iced::Border {
-                                        color: t.accent,
-                                        width: 1.0,
-                                        radius: 8.0.into(),
-                                    },
-                                    ..base_style
-                                }
-                            } else {
-                                button::Style {
-                                    background: None,
-                                    ..base_style
-                                }
+                        if is_selected {
+                            button::Style {
+                                background: Some(iced::Background::Color(t.selection_bg)),
+                                border: iced::Border {
+                                    color: t.accent,
+                                    width: 1.0,
+                                    radius: 8.0.into(),
+                                },
+                                ..base_style
                             }
-                        });
+                        } else {
+                            button::Style {
+                                background: None,
+                                ..base_style
+                            }
+                        }
+                    });
 
                 items_column = items_column.push(ws_button);
             } else {
                 // Clickable row with query
                 let label = format!("Search {} for '{}'", ws.name, ws.query);
-                ws_row = ws_row.push(text(label).size(20).color(t.accent));
+                ws_row = ws_row.push(text(label).size(fs.item).color(t.accent));
 
                 let ws_button = button(ws_row)
                     .on_press(Message::WebSearchSelected)
-                    .padding(12)
+                    .padding(fs.item_padding)
                     .width(Length::Fill)
                     .style(move |_theme, status| {
                         let base_style = button::Style {
@@ -2785,64 +2792,12 @@ impl LauncherApp {
             let help_row = Row::new()
                 .spacing(16)
                 .align_y(iced::Alignment::Center)
-                .push(text(help_text).size(20).color(t.text_muted));
+                .push(text(help_text).size(fs.item).color(t.text_muted));
 
-            let help_button =
-                button(help_row)
-                    .padding(12)
-                    .width(Length::Fill)
-                    .style(move |_theme, _status| {
-                        let base_style = button::Style {
-                            text_color: t.text_muted,
-                            border: iced::Border {
-                                radius: 8.0.into(),
-                                ..Default::default()
-                            },
-                            ..Default::default()
-                        };
-
-                        if is_selected {
-                            button::Style {
-                                background: Some(iced::Background::Color(t.selection_bg)),
-                                border: iced::Border {
-                                    color: t.accent,
-                                    width: 1.0,
-                                    radius: 8.0.into(),
-                                },
-                                ..base_style
-                            }
-                        } else {
-                            button::Style {
-                                background: None,
-                                ..base_style
-                            }
-                        }
-                    });
-
-            items_column = items_column.push(help_button);
-            special_item_idx += 1;
-        }
-
-        // Add currency result/loading as first item if present
-        if self.currency_loading {
-            let loading_text = if let Some(ref req) = self.pending_currency_request {
-                format!(
-                    "Converting {} {} to {}...",
-                    req.amount, req.from_currency, req.to_currency
-                )
-            } else {
-                "Converting...".to_string()
-            };
-
-            let loading_row = Row::new()
-                .spacing(16)
-                .align_y(iced::Alignment::Center)
-                .push(text(loading_text).size(20).color(t.text_muted));
-
-            let is_selected = self.selected_index == special_item_idx;
-
-            let loading_button = button(loading_row).padding(12).width(Length::Fill).style(
-                move |_theme, _status| {
+            let help_button = button(help_row)
+                .padding(fs.item_padding)
+                .width(Length::Fill)
+                .style(move |_theme, _status| {
                     let base_style = button::Style {
                         text_color: t.text_muted,
                         border: iced::Border {
@@ -2868,8 +2823,60 @@ impl LauncherApp {
                             ..base_style
                         }
                     }
-                },
-            );
+                });
+
+            items_column = items_column.push(help_button);
+            special_item_idx += 1;
+        }
+
+        // Add currency result/loading as first item if present
+        if self.currency_loading {
+            let loading_text = if let Some(ref req) = self.pending_currency_request {
+                format!(
+                    "Converting {} {} to {}...",
+                    req.amount, req.from_currency, req.to_currency
+                )
+            } else {
+                "Converting...".to_string()
+            };
+
+            let loading_row = Row::new()
+                .spacing(16)
+                .align_y(iced::Alignment::Center)
+                .push(text(loading_text).size(fs.item).color(t.text_muted));
+
+            let is_selected = self.selected_index == special_item_idx;
+
+            let loading_button = button(loading_row)
+                .padding(fs.item_padding)
+                .width(Length::Fill)
+                .style(move |_theme, _status| {
+                    let base_style = button::Style {
+                        text_color: t.text_muted,
+                        border: iced::Border {
+                            radius: 8.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    };
+
+                    if is_selected {
+                        button::Style {
+                            background: Some(iced::Background::Color(t.selection_bg)),
+                            border: iced::Border {
+                                color: t.accent,
+                                width: 1.0,
+                                radius: 8.0.into(),
+                            },
+                            ..base_style
+                        }
+                    } else {
+                        button::Style {
+                            background: None,
+                            ..base_style
+                        }
+                    }
+                });
 
             items_column = items_column.push(loading_button);
             special_item_idx += 1;
@@ -2886,13 +2893,13 @@ impl LauncherApp {
             let currency_row = Row::new()
                 .spacing(16)
                 .align_y(iced::Alignment::Center)
-                .push(text(currency_text).size(20).color(t.accent));
+                .push(text(currency_text).size(fs.item).color(t.accent));
 
             let is_selected = self.selected_index == special_item_idx;
 
             let currency_button = button(currency_row)
                 .on_press(Message::CurrencyResultCopied)
-                .padding(12)
+                .padding(fs.item_padding)
                 .width(Length::Fill)
                 .style(move |_theme, status| {
                     let base_style = button::Style {
@@ -2951,12 +2958,14 @@ impl LauncherApp {
             let loading_row = Row::new()
                 .spacing(16)
                 .align_y(iced::Alignment::Center)
-                .push(text(loading_text).size(20).color(t.text_muted));
+                .push(text(loading_text).size(fs.item).color(t.text_muted));
 
             let is_selected = self.selected_index == special_item_idx;
 
-            let loading_button = button(loading_row).padding(12).width(Length::Fill).style(
-                move |_theme, _status| {
+            let loading_button = button(loading_row)
+                .padding(fs.item_padding)
+                .width(Length::Fill)
+                .style(move |_theme, _status| {
                     let base_style = button::Style {
                         text_color: t.text_muted,
                         border: iced::Border {
@@ -2982,8 +2991,7 @@ impl LauncherApp {
                             ..base_style
                         }
                     }
-                },
-            );
+                });
 
             items_column = items_column.push(loading_button);
             special_item_idx += 1;
@@ -3001,13 +3009,13 @@ impl LauncherApp {
                 let conversion_row = Row::new()
                     .spacing(16)
                     .align_y(iced::Alignment::Center)
-                    .push(text(conversion_text).size(20).color(t.accent));
+                    .push(text(conversion_text).size(fs.item).color(t.accent));
 
                 let is_selected = self.selected_index == special_item_idx;
 
                 let conversion_button = button(conversion_row)
                     .on_press(Message::MultiCurrencyResultCopied(idx))
-                    .padding(12)
+                    .padding(fs.item_padding)
                     .width(Length::Fill)
                     .style(move |_theme, status| {
                         let base_style = button::Style {
@@ -3063,13 +3071,13 @@ impl LauncherApp {
             let calc_row = Row::new()
                 .spacing(16)
                 .align_y(iced::Alignment::Center)
-                .push(text(calc_text).size(20).color(t.accent));
+                .push(text(calc_text).size(fs.item).color(t.accent));
 
             let is_selected = self.selected_index == special_item_idx;
 
             let calc_button = button(calc_row)
                 .on_press(Message::CalculatorSelected)
-                .padding(12)
+                .padding(fs.item_padding)
                 .width(Length::Fill)
                 .style(move |_theme, status| {
                     let base_style = button::Style {
@@ -3122,7 +3130,7 @@ impl LauncherApp {
         {
             let no_results = container(
                 text("No matching results found.")
-                    .size(18)
+                    .size(fs.subtitle)
                     .color(t.text_muted),
             )
             .width(Length::Fill)
@@ -3195,14 +3203,14 @@ impl LauncherApp {
                 }
 
                 // Text Content
-                let text_widget = text(description).size(20).width(Length::Fill);
+                let text_widget = text(description).size(fs.item).width(Length::Fill);
                 item_row = item_row.push(text_widget);
 
                 let is_selected = display_idx == self.selected_index;
 
                 let item_button = button(item_row)
                     .on_press(Message::ItemClicked(display_idx))
-                    .padding(12)
+                    .padding(fs.item_padding)
                     .width(Length::Fill)
                     .style(move |_theme, status| {
                         let base_style = button::Style {
@@ -3256,58 +3264,58 @@ impl LauncherApp {
             .width(Length::Fill);
 
         // Hint bar above the search input
-        let sep = span("  ·  ").size(12).color(t.border);
+        let sep = span("  ·  ").size(fs.hint).color(t.border);
         let mut hint_spans: Vec<iced::widget::text::Span<'_, (), iced::Font>> = Vec::new();
 
         // Always-visible keybinding hints
         if self.max_history > 0 {
-            hint_spans.push(span("Alt+P").size(12).color(t.accent));
-            hint_spans.push(span("/").size(12).color(t.text_muted));
-            hint_spans.push(span("N").size(12).color(t.accent));
-            hint_spans.push(span(" history").size(12).color(t.text_muted));
+            hint_spans.push(span("Alt+P").size(fs.hint).color(t.accent));
+            hint_spans.push(span("/").size(fs.hint).color(t.text_muted));
+            hint_spans.push(span("N").size(fs.hint).color(t.accent));
+            hint_spans.push(span(" history").size(fs.hint).color(t.text_muted));
         }
         if self.file_browser_active {
             if !hint_spans.is_empty() {
                 hint_spans.push(sep.clone());
             }
-            hint_spans.push(span("Ctrl+H").size(12).color(t.accent));
-            hint_spans.push(span(" toggle hidden").size(12).color(t.text_muted));
+            hint_spans.push(span("Ctrl+H").size(fs.hint).color(t.accent));
+            hint_spans.push(span(" toggle hidden").size(fs.hint).color(t.text_muted));
         }
         if !hint_spans.is_empty() {
             hint_spans.push(sep.clone());
         }
-        hint_spans.push(span("Ctrl+/").size(12).color(t.accent));
-        hint_spans.push(span(" help").size(12).color(t.text_muted));
+        hint_spans.push(span("Ctrl+/").size(fs.hint).color(t.accent));
+        hint_spans.push(span(" help").size(fs.hint).color(t.text_muted));
 
         // Toggleable addon hints
         if self.show_hints {
             let mut addon_spans: Vec<iced::widget::text::Span<'_, (), iced::Font>> = Vec::new();
             if self.addons.calculator.enabled {
-                addon_spans.push(span("math").size(12).color(t.text_muted));
+                addon_spans.push(span("math").size(fs.hint).color(t.text_muted));
             }
             if self.addons.currency.enabled {
                 let trigger = self.addons.currency.trigger.as_deref().unwrap_or("$");
                 if !addon_spans.is_empty() {
                     addon_spans.push(sep.clone());
                 }
-                addon_spans.push(span(trigger.to_string()).size(12).color(t.accent));
-                addon_spans.push(span(" currency").size(12).color(t.text_muted));
+                addon_spans.push(span(trigger.to_string()).size(fs.hint).color(t.accent));
+                addon_spans.push(span(" currency").size(fs.hint).color(t.text_muted));
             }
             if self.addons.file_browser.enabled {
                 if !addon_spans.is_empty() {
                     addon_spans.push(sep.clone());
                 }
-                addon_spans.push(span("/").size(12).color(t.accent));
-                addon_spans.push(span(" files").size(12).color(t.text_muted));
+                addon_spans.push(span("/").size(fs.hint).color(t.accent));
+                addon_spans.push(span(" files").size(fs.hint).color(t.text_muted));
             }
             for sf in &self.addons.script_filters {
                 if !addon_spans.is_empty() {
                     addon_spans.push(sep.clone());
                 }
-                addon_spans.push(span(sf.keyword.clone()).size(12).color(t.accent));
+                addon_spans.push(span(sf.keyword.clone()).size(fs.hint).color(t.accent));
                 addon_spans.push(
                     span(format!(" {}", sf.name.to_lowercase()))
-                        .size(12)
+                        .size(fs.hint)
                         .color(t.text_muted),
                 );
             }
@@ -3315,10 +3323,10 @@ impl LauncherApp {
                 if !addon_spans.is_empty() {
                     addon_spans.push(sep.clone());
                 }
-                addon_spans.push(span(ts.keyword.clone()).size(12).color(t.accent));
+                addon_spans.push(span(ts.keyword.clone()).size(fs.hint).color(t.accent));
                 addon_spans.push(
                     span(format!(" {}", ts.name.to_lowercase()))
-                        .size(12)
+                        .size(fs.hint)
                         .color(t.text_muted),
                 );
             }
@@ -3326,15 +3334,15 @@ impl LauncherApp {
                 if !addon_spans.is_empty() {
                     addon_spans.push(sep.clone());
                 }
-                addon_spans.push(span(ws.keyword.clone()).size(12).color(t.accent));
+                addon_spans.push(span(ws.keyword.clone()).size(fs.hint).color(t.accent));
                 addon_spans.push(
                     span(format!(" {}", ws.name.to_lowercase()))
-                        .size(12)
+                        .size(fs.hint)
                         .color(t.text_muted),
                 );
             }
             if !addon_spans.is_empty() {
-                hint_spans.push(span("\n").size(12));
+                hint_spans.push(span("\n").size(fs.hint));
                 hint_spans.extend(addon_spans);
             }
         }
@@ -3353,14 +3361,14 @@ impl LauncherApp {
         let content = main_column
             .push(search_input)
             .push(container(items_scroll).padding(iced::Padding {
-                top: 8.0,
+                top: fs.scroll_top_padding,
                 right: 4.0,
                 bottom: 0.0,
                 left: 0.0,
             }));
 
         container(content)
-            .padding(20)
+            .padding(fs.outer_padding)
             .width(Length::Fill)
             .height(Length::Fill)
             .style(move |_theme| container::Style {
@@ -3578,6 +3586,55 @@ fn fuzzy_match_configs(configs: &[RaffiConfig], query: &str) -> Vec<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_font_sizes_default() {
+        let fs = FontSizes::default_sizes();
+        assert_eq!(fs.input, 24.0);
+        assert_eq!(fs.item, 20.0);
+        assert_eq!(fs.subtitle, 14.0);
+        assert_eq!(fs.hint, 12.0);
+        assert_eq!(fs.input_padding, 16.0);
+        assert_eq!(fs.item_padding, 12.0);
+        assert_eq!(fs.outer_padding, 20.0);
+        assert_eq!(fs.scroll_top_padding, 8.0);
+    }
+
+    #[test]
+    fn test_font_sizes_from_base() {
+        // Base 20 should produce default sizes
+        let fs = FontSizes::from_base(20.0);
+        assert_eq!(fs.input, 24.0);
+        assert_eq!(fs.item, 20.0);
+        assert_eq!(fs.subtitle, 14.0);
+        assert_eq!(fs.hint, 12.0);
+        assert_eq!(fs.input_padding, 16.0);
+        assert_eq!(fs.item_padding, 12.0);
+        assert_eq!(fs.outer_padding, 20.0);
+        assert_eq!(fs.scroll_top_padding, 8.0);
+
+        // Base 40 should double all sizes
+        let fs = FontSizes::from_base(40.0);
+        assert_eq!(fs.input, 48.0);
+        assert_eq!(fs.item, 40.0);
+        assert_eq!(fs.subtitle, 28.0);
+        assert_eq!(fs.hint, 24.0);
+        assert_eq!(fs.input_padding, 32.0);
+        assert_eq!(fs.item_padding, 24.0);
+        assert_eq!(fs.outer_padding, 40.0);
+        assert_eq!(fs.scroll_top_padding, 16.0);
+
+        // Base 10 should halve all sizes
+        let fs = FontSizes::from_base(10.0);
+        assert_eq!(fs.input, 12.0);
+        assert_eq!(fs.item, 10.0);
+        assert_eq!(fs.subtitle, 7.0);
+        assert_eq!(fs.hint, 6.0);
+        assert_eq!(fs.input_padding, 8.0);
+        assert_eq!(fs.item_padding, 6.0);
+        assert_eq!(fs.outer_padding, 10.0);
+        assert_eq!(fs.scroll_top_padding, 4.0);
+    }
 
     #[test]
     fn test_fuzzy_match_configs() {
@@ -4181,14 +4238,11 @@ fn save_history(history: &[String]) {
 fn run_wayland_ui(
     configs: &[RaffiConfig],
     addons: &AddonsConfig,
-    no_icons: bool,
-    initial_query: Option<&str>,
-    theme_mode: &ThemeMode,
-    theme_color_overrides: Option<&ThemeColorsConfig>,
-    max_history: u32,
+    settings: &UISettings,
 ) -> Result<String> {
-    let theme_colors = ThemeColors::from_mode_with_overrides(theme_mode, theme_color_overrides);
-    let iced_theme = match theme_mode {
+    let theme_colors =
+        ThemeColors::from_mode_with_overrides(&settings.theme, settings.theme_colors.as_ref());
+    let iced_theme = match settings.theme {
         ThemeMode::Dark => iced::Theme::Dark,
         ThemeMode::Light => iced::Theme::Light,
     };
@@ -4202,10 +4256,15 @@ fn run_wayland_ui(
     let configs_for_new = configs_owned.clone();
     let addons_for_new = addons_owned.clone();
     let selected_item_for_new = selected_item_clone.clone();
-    let initial_query_owned = initial_query.map(|s| s.to_string());
+    let initial_query_owned = settings.initial_query.clone();
+    let no_icons = settings.no_icons;
+    let max_history = settings.max_history;
+    let font_sizes = settings.font_sizes;
+    let window_width = settings.window_width;
+    let window_height = settings.window_height;
 
     let window_settings = window::Settings {
-        size: iced::Size::new(800.0, 600.0),
+        size: iced::Size::new(window_width, window_height),
         position: window::Position::Centered,
         decorations: false,
         transparent: true,
@@ -4221,7 +4280,7 @@ fn run_wayland_ui(
         ..Default::default()
     };
 
-    let result = iced::application(
+    let mut app = iced::application(
         move || {
             LauncherApp::new(
                 configs_for_new.clone(),
@@ -4231,6 +4290,7 @@ fn run_wayland_ui(
                 initial_query_owned.clone(),
                 theme_colors,
                 max_history,
+                font_sizes,
             )
         },
         LauncherApp::update,
@@ -4238,8 +4298,22 @@ fn run_wayland_ui(
     )
     .subscription(LauncherApp::subscription)
     .theme(move |_state: &LauncherApp| iced_theme.clone())
-    .window(window_settings)
-    .run();
+    .window(window_settings);
+
+    // Apply custom default font if configured.
+    // iced resolves system fonts by family name at runtime.
+    if let Some(ref family) = settings.font_family {
+        let family_owned = family.clone();
+        // Leak the string to get a 'static str, as iced::Font requires it.
+        // This is acceptable since the application runs once.
+        let family_static: &'static str = Box::leak(family_owned.into_boxed_str());
+        app = app.default_font(iced::Font {
+            family: iced::font::Family::Name(family_static),
+            ..iced::Font::default()
+        });
+    }
+
+    let result = app.run();
 
     if let Err(e) = result {
         return Err(anyhow::anyhow!("Failed to run UI: {:?}", e));

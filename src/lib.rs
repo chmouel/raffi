@@ -181,6 +181,16 @@ pub struct GeneralConfig {
     pub theme_colors: Option<ThemeColorsConfig>,
     #[serde(default)]
     pub max_history: Option<u32>,
+    #[serde(default)]
+    pub font_size: Option<f32>,
+    #[serde(default)]
+    pub font_family: Option<String>,
+    #[serde(default)]
+    pub window_width: Option<f32>,
+    #[serde(default)]
+    pub window_height: Option<f32>,
+    #[serde(default)]
+    pub padding: Option<f32>,
 }
 
 /// Complete parsed configuration
@@ -718,18 +728,35 @@ pub fn run(args: Args) -> Result<()> {
     // Determine max history size
     let max_history = general.max_history.unwrap_or(10);
 
+    // Determine font sizes (and proportional paddings)
+    let mut font_sizes = if let Some(base) = general.font_size {
+        ui::FontSizes::from_base(base)
+    } else {
+        ui::FontSizes::default_sizes()
+    };
+
+    // Override outer padding if explicitly set
+    if let Some(padding) = general.padding {
+        font_sizes.outer_padding = padding;
+    }
+
+    // Build UI settings
+    let ui_settings = ui::UISettings {
+        no_icons,
+        initial_query: args.initial_query.clone(),
+        theme,
+        theme_colors: parsed_config.general.theme_colors.clone(),
+        max_history,
+        font_sizes,
+        font_family: general.font_family.clone(),
+        window_width: general.window_width.unwrap_or(800.0),
+        window_height: general.window_height.unwrap_or(600.0),
+    };
+
     // Get the appropriate UI implementation
     let ui = ui::get_ui(ui_type);
     let chosen = ui
-        .show(
-            &parsed_config.entries,
-            &parsed_config.addons,
-            no_icons,
-            args.initial_query.as_deref(),
-            &theme,
-            parsed_config.general.theme_colors.as_ref(),
-            max_history,
-        )
+        .show(&parsed_config.entries, &parsed_config.addons, &ui_settings)
         .context("Failed to show UI")?;
 
     let chosen_name = chosen.trim();
@@ -1189,6 +1216,38 @@ mod tests {
         assert!(parsed_config.general.default_script_shell.is_none());
         assert_eq!(parsed_config.general.no_icons, Some(true));
         assert_eq!(parsed_config.entries.len(), 1);
+    }
+
+    #[test]
+    fn test_general_config_ui_settings_parsing() {
+        let yaml_config = r#"
+        general:
+          font_size: 16
+          font_family: "Inter"
+          window_width: 900
+          window_height: 500
+        shell:
+          binary: sh
+          description: "Shell"
+        "#;
+        let reader = Cursor::new(yaml_config);
+        let args = Args {
+            help: false,
+            version: false,
+            configfile: None,
+            print_only: false,
+            refresh_cache: false,
+            no_icons: false,
+            default_script_shell: None,
+            ui_type: None,
+            initial_query: None,
+            theme: None,
+        };
+        let parsed_config = read_config_from_reader(reader, &args).unwrap();
+        assert_eq!(parsed_config.general.font_size, Some(16.0));
+        assert_eq!(parsed_config.general.font_family, Some("Inter".to_string()));
+        assert_eq!(parsed_config.general.window_width, Some(900.0));
+        assert_eq!(parsed_config.general.window_height, Some(500.0));
     }
 
     #[test]
