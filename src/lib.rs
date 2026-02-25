@@ -369,6 +369,7 @@ fn get_icon_map() -> Result<HashMap<String, String>> {
             let mut dir = datadir.clone();
             dir.push(subdir);
             for entry in walkdir::WalkDir::new(dir)
+                .follow_links(true)
                 .into_iter()
                 .filter_map(Result::ok)
             {
