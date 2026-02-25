@@ -1,3 +1,4 @@
+version: 2
 project_name: raffi
 builds:
   - main: dummy.go
@@ -24,18 +25,6 @@ archives:
       - README.md
 checksum:
   name_template: "checksums.txt"
-
-brews:
-  - name: raffi
-    repository:
-      owner: chmouel
-      name: raffi
-    folder: Formula
-    homepage: "https://github.com/chmouel/raffi"
-    description: "raffi - fuzzel launcher based on yaml configuration"
-    install: |
-      bin.install "raffi" => "raffi"
-      prefix.install_metafiles
 
 nfpms:
   - file_name_template: >-
@@ -76,7 +65,7 @@ aurs:
     private_key: "{{ .Env.AUR_PRIVATE_KEY }}"
     git_url: ssh://aur@aur.archlinux.org/raffi-bin.git
     depends:
-    - fuzzel
+      - fuzzel
     package: |
       # bin
       install -Dm755 "./raffi" "${pkgdir}/usr/bin/raffi"
