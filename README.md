@@ -119,8 +119,8 @@ dynamic results in the launcher. This feature uses a subset of the
 
 When the configured keyword is typed, the script is executed with the remaining input
 passed as the final argument. The script must print JSON to stdout. On selection, the
-item's `arg` value (or `title` if `arg` is absent) is copied to the clipboard using
-`wl-copy`. Alternatively, a custom `action` can be configured to run any command with
+item's `arg` value (or `title` if `arg` is absent) is copied to the clipboard
+(auto-detecting `wl-copy`, `xclip`, or `xsel`). Alternatively, a custom `action` can be configured to run any command with
 the selected value substituted via `{value}` placeholder. A `secondary_action` can
 also be defined, which is triggered with Alt+Enter instead of Enter.
 
@@ -145,7 +145,7 @@ Common search engines are pre-configured in the example config (Google, DuckDuck
 
 The native interface supports text snippets, which let you define reusable text values that can be searched and copied to the clipboard. Snippets can come from three sources: inline in the config, an external YAML file, or a command's output (using the same Alfred JSON format as script filters).
 
-Type a configured keyword to display the snippets from that source, then continue typing to fuzzy-filter by name. By default, selecting a snippet copies its value to the clipboard via `wl-copy` (Enter) or types it into the focused app via `wtype`/`ydotool` (Ctrl+Enter). These actions can be customised with the `action` and `secondary_action` fields.
+Type a configured keyword to display the snippets from that source, then continue typing to fuzzy-filter by name. By default, selecting a snippet copies its value to the clipboard (Enter) using the first available tool (`wl-copy`, `xclip`, or `xsel`), or types it into the focused app via `wtype`/`ydotool` (Ctrl+Enter). These actions can be customised with the `action` and `secondary_action` fields.
 
 [See below for how to configure this](#text-snippets-configuration)
 
@@ -525,7 +525,7 @@ Field descriptions:
 | `command`   | no       | Executable that outputs Alfred Script Filter JSON                      |
 | `directory` | no       | Path to a directory of `.snippet` files (cached per session)           |
 | `args`      | no       | Arguments passed to the command                                        |
-| `action`    | no       | Action on Enter. Use `"copy"` to copy to clipboard, `"insert"` to type into the focused app via wtype/ydotool, or a command template where `{value}` is replaced with the selected value (executed via `sh -c`). Defaults to `"copy"`. |
+| `action`    | no       | Action on Enter. Use `"copy"` to copy to clipboard (auto-detects wl-copy/xclip/xsel), `"insert"` to type into the focused app via wtype/ydotool, or a command template where `{value}` is replaced with the selected value (executed via `sh -c`). Defaults to `"copy"`. |
 | `secondary_action` | no | Action on Ctrl+Enter. Accepts the same values as `action`. Defaults to `"insert"`. |
 
 Exactly one of `snippets`, `file`, `command`, or `directory` should be specified per entry.

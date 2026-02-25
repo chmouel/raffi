@@ -847,9 +847,45 @@ fn spawn_insert(value: &str) -> bool {
     true
 }
 
+/// Copy a value to the clipboard using the first available tool.
+/// Fallback chain: wl-copy → xclip → xsel.
+fn spawn_copy(value: &str) -> bool {
+    let tool = std::env::var_os("PATH").and_then(|paths| {
+        for dir in std::env::split_paths(&paths) {
+            if dir.join("wl-copy").is_file() {
+                return Some("wl-copy");
+            }
+            if dir.join("xclip").is_file() {
+                return Some("xclip");
+            }
+            if dir.join("xsel").is_file() {
+                return Some("xsel");
+            }
+        }
+        None
+    });
+    let Some(tool) = tool else {
+        return false;
+    };
+    let copy_cmd = match tool {
+        "xclip" => "printf '%s' \"$RAFFI_COPY_VALUE\" | xclip -selection clipboard".to_string(),
+        "xsel" => "printf '%s' \"$RAFFI_COPY_VALUE\" | xsel --clipboard --input".to_string(),
+        _ => "wl-copy -- \"$RAFFI_COPY_VALUE\"".to_string(),
+    };
+    let _ = Command::new("sh")
+        .arg("-c")
+        .arg(&copy_cmd)
+        .env("RAFFI_COPY_VALUE", value)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+    true
+}
+
 /// Execute an action for a selected value. Recognizes two special keywords:
 /// - `"insert"` — type into the focused app via `spawn_insert` (wtype/ydotool)
-/// - `"copy"` — copy to clipboard via `wl-copy`
+/// - `"copy"` — copy to clipboard via the first available tool (wl-copy/xclip/xsel)
 /// - Any other string is executed as a shell command via `sh -c`, with `{value}`
 ///   replaced by the actual value.
 fn execute_action(action: &str, value: &str) {
@@ -858,12 +894,7 @@ fn execute_action(action: &str, value: &str) {
             spawn_insert(value);
         }
         "copy" => {
-            let _ = Command::new("wl-copy")
-                .arg(value)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn();
+            spawn_copy(value);
         }
         _ => {
             let cmd = action.replace("{value}", value);
@@ -1917,13 +1948,7 @@ impl LauncherApp {
                     } else {
                         format!("{}", calc.result)
                     };
-                    // Copy result to clipboard using wl-copy
-                    let _ = Command::new("wl-copy")
-                        .arg(&result_str)
-                        .stdin(Stdio::null())
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .spawn();
+                    spawn_copy(&result_str);
                 }
                 self.save_query_to_history();
                 iced::exit()
@@ -1960,13 +1985,7 @@ impl LauncherApp {
                 if let Some(ref currency) = self.currency_result {
                     // Format the result for clipboard
                     let result_str = format!("{:.2}", currency.converted_amount);
-                    // Copy result to clipboard using wl-copy
-                    let _ = Command::new("wl-copy")
-                        .arg(&result_str)
-                        .stdin(Stdio::null())
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .spawn();
+                    spawn_copy(&result_str);
                 }
                 self.save_query_to_history();
                 iced::exit()
@@ -2003,13 +2022,7 @@ impl LauncherApp {
                     if let Some(conversion) = multi_result.conversions.get(idx) {
                         // Format the result for clipboard
                         let result_str = format!("{:.2}", conversion.converted_amount);
-                        // Copy result to clipboard using wl-copy
-                        let _ = Command::new("wl-copy")
-                            .arg(&result_str)
-                            .stdin(Stdio::null())
-                            .stdout(Stdio::null())
-                            .stderr(Stdio::null())
-                            .spawn();
+                        spawn_copy(&result_str);
                     }
                 }
                 self.save_query_to_history();
@@ -2121,12 +2134,7 @@ impl LauncherApp {
                     // File selected
                     if self.current_modifiers.control() {
                         // Ctrl+Enter: copy path to clipboard
-                        let _ = Command::new("wl-copy")
-                            .arg(&entry.full_path)
-                            .stdin(Stdio::null())
-                            .stdout(Stdio::null())
-                            .stderr(Stdio::null())
-                            .spawn();
+                        spawn_copy(&entry.full_path);
                     } else {
                         // Enter: open with xdg-open
                         let _ = Command::new("xdg-open")
