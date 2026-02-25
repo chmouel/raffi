@@ -57,18 +57,7 @@ nfpms:
     bindir: /usr/bin
 
 changelog:
-  sort: asc
-  use: github
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-      - "^Brew formula update"
-      - Merge pull request
-      - Merge branch
-      - go mod tidy
-      - Update README.md
-      - "[release] "
+  disable: true
 
 universal_binaries:
   - replace: true
