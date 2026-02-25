@@ -24,7 +24,8 @@ type TextInputId = Id;
 
 use super::UI;
 use crate::{
-    execute_web_search_url, read_icon_map, AddonsConfig, RaffiConfig, ThemeColorsConfig, ThemeMode,
+    execute_web_search_url, read_icon_map, AddonsConfig, RaffiConfig, TextSnippet,
+    ThemeColorsConfig, ThemeMode,
 };
 
 // --- Theme Colors ---
@@ -773,6 +774,56 @@ fn execute_script_filter(
     )
 }
 
+fn execute_text_snippet_command(
+    command: String,
+    args: Vec<String>,
+    generation: u64,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            let output = Command::new(&command)
+                .args(&args)
+                .stdin(Stdio::null())
+                .stderr(Stdio::null())
+                .output();
+
+            match output {
+                Ok(output) if output.status.success() => {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    match serde_json::from_str::<ScriptFilterResponse>(&stdout) {
+                        Ok(response) => Ok(response
+                            .items
+                            .into_iter()
+                            .map(|item| TextSnippet {
+                                name: item.title,
+                                value: item.arg.unwrap_or_default(),
+                            })
+                            .collect()),
+                        Err(e) => Err(format!("Invalid JSON: {}", e)),
+                    }
+                }
+                Ok(output) => Err(format!("Command exited with status {}", output.status)),
+                Err(e) => Err(format!("Failed to execute: {}", e)),
+            }
+        },
+        move |result| Message::TextSnippetCommandResult(generation, result),
+    )
+}
+
+fn filter_snippets(snippets: &[TextSnippet], query: &str) -> Vec<usize> {
+    if query.is_empty() {
+        return (0..snippets.len()).collect();
+    }
+    let matcher = SkimMatcherV2::default();
+    let mut scored: Vec<(usize, i64)> = snippets
+        .iter()
+        .enumerate()
+        .filter_map(|(i, s)| matcher.fuzzy_match(&s.name, query).map(|score| (i, score)))
+        .collect();
+    scored.sort_by(|a, b| b.1.cmp(&a.1));
+    scored.into_iter().map(|(i, _)| i).collect()
+}
+
 /// Read a directory and return entries, with dirs sorted first then files, alphabetically.
 fn read_directory(path: &str, show_hidden: bool) -> Vec<FileBrowserEntry> {
     let dir_path = Path::new(path);
@@ -872,6 +923,14 @@ struct LauncherApp {
     script_filter_generation: u64,
     script_filter_action: Option<String>,
     script_filter_secondary_action: Option<String>,
+    // Text snippet state
+    text_snippet_items: Vec<TextSnippet>,
+    text_snippet_filtered: Vec<usize>,
+    text_snippet_active: bool,
+    text_snippet_loading: bool,
+    text_snippet_icon: Option<String>,
+    text_snippet_generation: u64,
+    text_snippet_file_cache: HashMap<String, Vec<TextSnippet>>,
     // Web search state
     web_search_active: Option<WebSearchActiveState>,
     // File browser state
@@ -913,6 +972,8 @@ enum Message {
     MultiCurrencyResultCopied(usize), // index of conversion to copy
     ScriptFilterResult(u64, std::result::Result<ScriptFilterResult, String>),
     ScriptFilterItemSelected(usize),
+    TextSnippetCommandResult(u64, std::result::Result<Vec<TextSnippet>, String>),
+    TextSnippetSelected(usize),
     WebSearchSelected,
     FileBrowserItemSelected(usize),
     FileBrowserTabComplete,
@@ -985,6 +1046,13 @@ impl LauncherApp {
                 script_filter_generation: 0,
                 script_filter_action: None,
                 script_filter_secondary_action: None,
+                text_snippet_items: Vec::new(),
+                text_snippet_filtered: Vec::new(),
+                text_snippet_active: false,
+                text_snippet_loading: false,
+                text_snippet_icon: None,
+                text_snippet_generation: 0,
+                text_snippet_file_cache: HashMap::new(),
                 web_search_active: None,
                 file_browser_entries: Vec::new(),
                 file_browser_all_entries: Vec::new(),
@@ -1105,6 +1173,11 @@ impl LauncherApp {
                     self.script_filter_loading_name = None;
                     self.script_filter_action = None;
                     self.script_filter_secondary_action = None;
+                    self.text_snippet_active = false;
+                    self.text_snippet_items.clear();
+                    self.text_snippet_filtered.clear();
+                    self.text_snippet_loading = false;
+                    self.text_snippet_icon = None;
                     self.web_search_active = None;
                     self.calculator_result = None;
                     self.currency_result = None;
@@ -1170,30 +1243,179 @@ impl LauncherApp {
                     self.script_filter_action = None;
                     self.script_filter_secondary_action = None;
 
-                    // Check for web search keyword match
-                    let mut web_search_matched = false;
-                    for ws_config in &self.addons.web_searches {
-                        let keyword = &ws_config.keyword;
+                    // Check for text snippet keyword match
+                    let mut text_snippet_matched = false;
+                    for ts_config in &self.addons.text_snippets {
+                        let keyword = &ts_config.keyword;
                         if trimmed == keyword.as_str()
                             || trimmed.starts_with(&format!("{} ", keyword))
                         {
-                            web_search_matched = true;
-                            let ws_query = if trimmed.len() > keyword.len() {
+                            text_snippet_matched = true;
+                            let ts_query = if trimmed.len() > keyword.len() {
                                 trimmed[keyword.len()..].trim_start().to_string()
                             } else {
                                 String::new()
                             };
 
-                            // Clear regular config items when web search is active
+                            // Clear regular config items
                             self.filtered_configs.clear();
+                            self.text_snippet_active = true;
+                            self.text_snippet_icon = ts_config.icon.clone();
 
-                            self.web_search_active = Some(WebSearchActiveState {
-                                name: ws_config.name.clone(),
-                                query: ws_query,
-                                url_template: ws_config.url.clone(),
-                                icon: ws_config.icon.clone(),
-                            });
+                            if let Some(ref snippets) = ts_config.snippets {
+                                // Inline snippets
+                                self.text_snippet_items = snippets.clone();
+                                self.text_snippet_filtered =
+                                    filter_snippets(&self.text_snippet_items, &ts_query);
+                                self.text_snippet_loading = false;
+                            } else if let Some(ref file_path) = ts_config.file {
+                                // File source: use cache or read
+                                if let Some(cached) =
+                                    self.text_snippet_file_cache.get(file_path).cloned()
+                                {
+                                    self.text_snippet_items = cached;
+                                } else {
+                                    match fs::read_to_string(file_path) {
+                                        Ok(contents) => {
+                                            match serde_yaml::from_str::<Vec<TextSnippet>>(
+                                                &contents,
+                                            ) {
+                                                Ok(snippets) => {
+                                                    self.text_snippet_file_cache.insert(
+                                                        file_path.clone(),
+                                                        snippets.clone(),
+                                                    );
+                                                    self.text_snippet_items = snippets;
+                                                }
+                                                Err(e) => {
+                                                    eprintln!(
+                                                        "Text snippets: invalid YAML in {}: {}",
+                                                        file_path, e
+                                                    );
+                                                    self.text_snippet_items = Vec::new();
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            eprintln!(
+                                                "Text snippets: cannot read {}: {}",
+                                                file_path, e
+                                            );
+                                            self.text_snippet_items = Vec::new();
+                                        }
+                                    }
+                                }
+                                self.text_snippet_filtered =
+                                    filter_snippets(&self.text_snippet_items, &ts_query);
+                                self.text_snippet_loading = false;
+                            } else if let Some(ref dir_path) = ts_config.directory {
+                                // Directory source: read .snippet files
+                                if let Some(cached) =
+                                    self.text_snippet_file_cache.get(dir_path).cloned()
+                                {
+                                    self.text_snippet_items = cached;
+                                } else {
+                                    match fs::read_dir(dir_path) {
+                                        Ok(entries) => {
+                                            let mut snippets = Vec::new();
+                                            for entry in entries.flatten() {
+                                                let path = entry.path();
+                                                if path.extension().and_then(|e| e.to_str())
+                                                    == Some("snippet")
+                                                {
+                                                    if let Ok(contents) = fs::read_to_string(&path)
+                                                    {
+                                                        let mut lines = contents.lines();
+                                                        if let Some(name) = lines.next() {
+                                                            let name = name.trim().to_string();
+                                                            // Skip the --- separator
+                                                            if let Some(sep) = lines.next() {
+                                                                if sep.trim() == "---" {
+                                                                    let value: String = lines
+                                                                        .collect::<Vec<&str>>()
+                                                                        .join("\n");
+                                                                    if !value.is_empty() {
+                                                                        snippets.push(
+                                                                            TextSnippet {
+                                                                                name,
+                                                                                value,
+                                                                            },
+                                                                        );
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            snippets.sort_by(|a, b| a.name.cmp(&b.name));
+                                            self.text_snippet_file_cache
+                                                .insert(dir_path.clone(), snippets.clone());
+                                            self.text_snippet_items = snippets;
+                                        }
+                                        Err(e) => {
+                                            eprintln!(
+                                                "Text snippets: cannot read directory {}: {}",
+                                                dir_path, e
+                                            );
+                                            self.text_snippet_items = Vec::new();
+                                        }
+                                    }
+                                }
+                                self.text_snippet_filtered =
+                                    filter_snippets(&self.text_snippet_items, &ts_query);
+                                self.text_snippet_loading = false;
+                            } else if let Some(ref command) = ts_config.command {
+                                // Command source: async
+                                self.text_snippet_generation =
+                                    self.text_snippet_generation.wrapping_add(1);
+                                self.text_snippet_loading = true;
+                                self.text_snippet_items.clear();
+                                self.text_snippet_filtered.clear();
+                                tasks.push(execute_text_snippet_command(
+                                    command.clone(),
+                                    ts_config.args.clone(),
+                                    self.text_snippet_generation,
+                                ));
+                            }
                             break;
+                        }
+                    }
+
+                    if !text_snippet_matched {
+                        self.text_snippet_active = false;
+                        self.text_snippet_items.clear();
+                        self.text_snippet_filtered.clear();
+                        self.text_snippet_loading = false;
+                        self.text_snippet_icon = None;
+                    }
+
+                    // Check for web search keyword match
+                    let mut web_search_matched = false;
+                    if !text_snippet_matched {
+                        for ws_config in &self.addons.web_searches {
+                            let keyword = &ws_config.keyword;
+                            if trimmed == keyword.as_str()
+                                || trimmed.starts_with(&format!("{} ", keyword))
+                            {
+                                web_search_matched = true;
+                                let ws_query = if trimmed.len() > keyword.len() {
+                                    trimmed[keyword.len()..].trim_start().to_string()
+                                } else {
+                                    String::new()
+                                };
+
+                                // Clear regular config items when web search is active
+                                self.filtered_configs.clear();
+
+                                self.web_search_active = Some(WebSearchActiveState {
+                                    name: ws_config.name.clone(),
+                                    query: ws_query,
+                                    url_template: ws_config.url.clone(),
+                                    icon: ws_config.icon.clone(),
+                                });
+                                break;
+                            }
                         }
                     }
 
@@ -1409,6 +1631,24 @@ impl LauncherApp {
                     current_idx += num_items;
                 }
 
+                // Check if text snippet loading/results are selected
+                if self.text_snippet_loading {
+                    if self.selected_index == current_idx {
+                        return Task::none();
+                    }
+                    current_idx += 1;
+                } else if self.text_snippet_active {
+                    let num_items = self.text_snippet_filtered.len();
+                    if num_items > 0
+                        && self.selected_index >= current_idx
+                        && self.selected_index < current_idx + num_items
+                    {
+                        let item_idx = self.selected_index - current_idx;
+                        return self.update(Message::TextSnippetSelected(item_idx));
+                    }
+                    current_idx += num_items;
+                }
+
                 // Check if file browser entries are selected
                 if self.file_browser_active {
                     let num_entries = self.file_browser_entries.len();
@@ -1509,6 +1749,21 @@ impl LauncherApp {
                     if idx >= current_idx && idx < current_idx + num_items {
                         let item_idx = idx - current_idx;
                         return self.update(Message::ScriptFilterItemSelected(item_idx));
+                    }
+                    current_idx += num_items;
+                }
+
+                // Check if text snippet loading/results are clicked
+                if self.text_snippet_loading {
+                    if idx == current_idx {
+                        return Task::none();
+                    }
+                    current_idx += 1;
+                } else if self.text_snippet_active {
+                    let num_items = self.text_snippet_filtered.len();
+                    if num_items > 0 && idx >= current_idx && idx < current_idx + num_items {
+                        let item_idx = idx - current_idx;
+                        return self.update(Message::TextSnippetSelected(item_idx));
                     }
                     current_idx += num_items;
                 }
@@ -1741,6 +1996,56 @@ impl LauncherApp {
                 self.save_query_to_history();
                 iced::exit()
             }
+            Message::TextSnippetCommandResult(generation, result) => {
+                if generation != self.text_snippet_generation {
+                    return Task::none();
+                }
+                self.text_snippet_loading = false;
+                match result {
+                    Ok(snippets) => {
+                        self.text_snippet_items = snippets;
+                        // Re-filter with current query
+                        let trimmed = self.search_query.trim();
+                        let ts_query = self
+                            .addons
+                            .text_snippets
+                            .iter()
+                            .find(|ts| {
+                                trimmed == ts.keyword
+                                    || trimmed.starts_with(&format!("{} ", ts.keyword))
+                            })
+                            .map(|ts| {
+                                if trimmed.len() > ts.keyword.len() {
+                                    trimmed[ts.keyword.len()..].trim_start().to_string()
+                                } else {
+                                    String::new()
+                                }
+                            })
+                            .unwrap_or_default();
+                        self.text_snippet_filtered =
+                            filter_snippets(&self.text_snippet_items, &ts_query);
+                    }
+                    Err(_) => {
+                        self.text_snippet_items.clear();
+                        self.text_snippet_filtered.clear();
+                    }
+                }
+                Task::none()
+            }
+            Message::TextSnippetSelected(idx) => {
+                if let Some(&snippet_idx) = self.text_snippet_filtered.get(idx) {
+                    if let Some(snippet) = self.text_snippet_items.get(snippet_idx) {
+                        let _ = Command::new("wl-copy")
+                            .arg(&snippet.value)
+                            .stdin(Stdio::null())
+                            .stdout(Stdio::null())
+                            .stderr(Stdio::null())
+                            .spawn();
+                    }
+                }
+                self.save_query_to_history();
+                iced::exit()
+            }
             Message::WebSearchSelected => {
                 if let Some(ref ws) = self.web_search_active {
                     if !ws.query.is_empty() {
@@ -1919,6 +2224,7 @@ impl LauncherApp {
 
         // Track special items for index offset calculation
         let has_script_filter = self.script_filter_results.is_some() || self.script_filter_loading;
+        let has_text_snippet = self.text_snippet_active || self.text_snippet_loading;
         let has_file_browser = self.file_browser_active;
         let has_web_search = self.web_search_active.is_some();
         let has_currency = self.currency_result.is_some()
@@ -2082,6 +2388,143 @@ impl LauncherApp {
 
                 items_column = items_column.push(item_button);
                 special_item_idx += 1;
+            }
+        }
+
+        // Add text snippet loading/results
+        if self.text_snippet_loading {
+            let loading_row = Row::new()
+                .spacing(16)
+                .align_y(iced::Alignment::Center)
+                .push(text("Loading snippets...").size(20).color(t.text_muted));
+
+            let is_selected = self.selected_index == special_item_idx;
+
+            let loading_button = button(loading_row).padding(12).width(Length::Fill).style(
+                move |_theme, _status| {
+                    let base_style = button::Style {
+                        text_color: t.text_muted,
+                        border: iced::Border {
+                            radius: 8.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    };
+
+                    if is_selected {
+                        button::Style {
+                            background: Some(iced::Background::Color(t.selection_bg)),
+                            border: iced::Border {
+                                color: t.accent,
+                                width: 1.0,
+                                radius: 8.0.into(),
+                            },
+                            ..base_style
+                        }
+                    } else {
+                        button::Style {
+                            background: None,
+                            ..base_style
+                        }
+                    }
+                },
+            );
+
+            items_column = items_column.push(loading_button);
+            special_item_idx += 1;
+        } else if self.text_snippet_active {
+            for (display_idx, &snippet_idx) in self.text_snippet_filtered.iter().enumerate() {
+                if let Some(snippet) = self.text_snippet_items.get(snippet_idx) {
+                    let is_selected = self.selected_index == special_item_idx;
+
+                    let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
+
+                    // Icon
+                    if let Some(ref icon_name) = self.text_snippet_icon {
+                        if let Some(icon_path_str) = self.icon_map.get(icon_name) {
+                            let icon_path = PathBuf::from(icon_path_str);
+                            if icon_path.exists() {
+                                let is_svg = icon_path
+                                    .extension()
+                                    .and_then(|ext| ext.to_str())
+                                    .map(|ext| ext.to_lowercase() == "svg")
+                                    .unwrap_or(false);
+
+                                let icon_content: Element<Message> = if is_svg {
+                                    svg(iced::widget::svg::Handle::from_path(&icon_path))
+                                        .width(Length::Fixed(40.0))
+                                        .height(Length::Fixed(40.0))
+                                        .content_fit(iced::ContentFit::Contain)
+                                        .into()
+                                } else {
+                                    image(icon_path)
+                                        .width(Length::Fixed(40.0))
+                                        .height(Length::Fixed(40.0))
+                                        .content_fit(iced::ContentFit::Contain)
+                                        .into()
+                                };
+
+                                item_row = item_row.push(icon_content);
+                            }
+                        }
+                    }
+
+                    // Name (title) + truncated value (subtitle)
+                    let mut text_col = Column::new();
+                    text_col = text_col.push(text(&snippet.name).size(20).color(t.text_main));
+                    let truncated_value = if snippet.value.len() > 80 {
+                        format!("{}...", &snippet.value[..80])
+                    } else {
+                        snippet.value.clone()
+                    };
+                    text_col = text_col.push(text(truncated_value).size(14).color(t.text_muted));
+                    item_row = item_row.push(text_col.width(Length::Fill));
+
+                    let item_button = button(item_row)
+                        .on_press(Message::ItemClicked(special_item_idx))
+                        .padding(12)
+                        .width(Length::Fill)
+                        .style(move |_theme, status| {
+                            let base_style = button::Style {
+                                text_color: t.text_main,
+                                border: iced::Border {
+                                    radius: 8.0.into(),
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            };
+
+                            if is_selected {
+                                button::Style {
+                                    background: Some(iced::Background::Color(t.selection_bg)),
+                                    border: iced::Border {
+                                        color: t.accent,
+                                        width: 1.0,
+                                        radius: 8.0.into(),
+                                    },
+                                    ..base_style
+                                }
+                            } else {
+                                match status {
+                                    button::Status::Hovered => button::Style {
+                                        background: Some(iced::Background::Color(iced::Color {
+                                            a: 0.1,
+                                            ..t.accent_hover
+                                        })),
+                                        ..base_style
+                                    },
+                                    _ => button::Style {
+                                        background: None,
+                                        ..base_style
+                                    },
+                                }
+                            }
+                        });
+
+                    items_column = items_column.push(item_button);
+                    special_item_idx += 1;
+                    let _ = display_idx;
+                }
             }
         }
 
@@ -2673,6 +3116,7 @@ impl LauncherApp {
             && !has_calculator
             && !has_currency
             && !has_script_filter
+            && !has_text_snippet
             && !has_file_browser
             && !has_web_search
         {
@@ -2867,6 +3311,17 @@ impl LauncherApp {
                         .color(t.text_muted),
                 );
             }
+            for ts in &self.addons.text_snippets {
+                if !addon_spans.is_empty() {
+                    addon_spans.push(sep.clone());
+                }
+                addon_spans.push(span(ts.keyword.clone()).size(12).color(t.accent));
+                addon_spans.push(
+                    span(format!(" {}", ts.name.to_lowercase()))
+                        .size(12)
+                        .color(t.text_muted),
+                );
+            }
             for ws in &self.addons.web_searches {
                 if !addon_spans.is_empty() {
                     addon_spans.push(sep.clone());
@@ -2990,6 +3445,11 @@ impl LauncherApp {
             offset += 1;
         } else if let Some(ref sf_result) = self.script_filter_results {
             offset += sf_result.items.len();
+        }
+        if self.text_snippet_loading {
+            offset += 1;
+        } else if self.text_snippet_active {
+            offset += self.text_snippet_filtered.len();
         }
         if self.file_browser_active {
             offset += self.file_browser_entries.len();
@@ -3590,6 +4050,63 @@ mod tests {
 
         // Wrong trigger should not match
         assert!(try_parse_multi_currency_conversion("$10", &config, "USD", "€").is_none());
+    }
+
+    #[test]
+    fn test_filter_snippets_empty_query_returns_all() {
+        let snippets = vec![
+            TextSnippet {
+                name: "Alpha".to_string(),
+                value: "a".to_string(),
+            },
+            TextSnippet {
+                name: "Beta".to_string(),
+                value: "b".to_string(),
+            },
+            TextSnippet {
+                name: "Gamma".to_string(),
+                value: "c".to_string(),
+            },
+        ];
+        let result = filter_snippets(&snippets, "");
+        assert_eq!(result, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_filter_snippets_partial_query() {
+        let snippets = vec![
+            TextSnippet {
+                name: "Personal Email".to_string(),
+                value: "user@example.com".to_string(),
+            },
+            TextSnippet {
+                name: "Work Email".to_string(),
+                value: "user@company.com".to_string(),
+            },
+            TextSnippet {
+                name: "Phone Number".to_string(),
+                value: "+1234567890".to_string(),
+            },
+        ];
+        let result = filter_snippets(&snippets, "work");
+        assert!(!result.is_empty());
+        assert!(result.contains(&1));
+    }
+
+    #[test]
+    fn test_filter_snippets_no_match() {
+        let snippets = vec![
+            TextSnippet {
+                name: "Alpha".to_string(),
+                value: "a".to_string(),
+            },
+            TextSnippet {
+                name: "Beta".to_string(),
+                value: "b".to_string(),
+            },
+        ];
+        let result = filter_snippets(&snippets, "zzzzz");
+        assert!(result.is_empty());
     }
 }
 

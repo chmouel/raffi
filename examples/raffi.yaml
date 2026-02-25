@@ -371,6 +371,29 @@ addons:
     #   action: "wl-copy {value}"
     #   secondary_action: "xdg-open {value}"
 
+  # text_snippets:
+  #   - name: "Emails"
+  #     keyword: "em"
+  #     icon: "mail"
+  #     snippets:
+  #       - name: "Personal Email"
+  #         value: "user@example.com"
+  #       - name: "Work Email"
+  #         value: "user@company.com"
+  #   - name: "Templates"
+  #     keyword: "tpl"
+  #     icon: "document"
+  #     file: "~/.config/raffi/snippets.yaml"
+  #   - name: "Dynamic"
+  #     keyword: "dyn"
+  #     icon: "terminal"
+  #     command: "my-snippet-gen"
+  #     args: ["-j"]
+  #   - name: "Snippets"
+  #     keyword: "sn"
+  #     icon: "snippets"
+  #     directory: "~/.local/share/snippets"
+
   web_searches:
     - name: "Google"
       keyword: "g"

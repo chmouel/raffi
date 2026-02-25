@@ -106,6 +106,32 @@ pub struct WebSearchConfig {
     pub icon: Option<String>,
 }
 
+/// A single text snippet entry
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct TextSnippet {
+    pub name: String,
+    pub value: String,
+}
+
+/// Configuration for a text snippet source
+#[derive(Deserialize, Debug, Clone)]
+pub struct TextSnippetSourceConfig {
+    pub name: String,
+    pub keyword: String,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub snippets: Option<Vec<TextSnippet>>,
+    #[serde(default)]
+    pub file: Option<String>,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub directory: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
 /// Container for all addon configurations
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct AddonsConfig {
@@ -119,6 +145,8 @@ pub struct AddonsConfig {
     pub script_filters: Vec<ScriptFilterConfig>,
     #[serde(default)]
     pub web_searches: Vec<WebSearchConfig>,
+    #[serde(default)]
+    pub text_snippets: Vec<TextSnippetSourceConfig>,
 }
 
 fn default_true() -> bool {
@@ -435,6 +463,12 @@ pub fn read_config_from_reader<R: Read>(reader: R, args: &Args) -> Result<Parsed
     for ws in &mut addons.web_searches {
         ws.url = expand_config_value(&ws.url);
         ws.icon = ws.icon.as_ref().map(|s| expand_config_value(s));
+    }
+    for ts in &mut addons.text_snippets {
+        ts.icon = ts.icon.as_ref().map(|s| expand_config_value(s));
+        ts.file = ts.file.as_ref().map(|s| expand_config_value(s));
+        ts.command = ts.command.as_ref().map(|s| expand_config_value(s));
+        ts.directory = ts.directory.as_ref().map(|s| expand_config_value(s));
     }
 
     Ok(ParsedConfig {
@@ -1248,5 +1282,147 @@ mod tests {
         assert_eq!(ddg.keyword, "ddg");
         assert_eq!(ddg.url, "https://duckduckgo.com/?q={query}");
         assert!(ddg.icon.is_none());
+    }
+
+    #[test]
+    fn test_text_snippet_config_parsing() {
+        let yaml_config = r#"
+        addons:
+          text_snippets:
+            - name: "Emails"
+              keyword: "em"
+              icon: "mail"
+              snippets:
+                - name: "Personal Email"
+                  value: "user@example.com"
+                - name: "Work Email"
+                  value: "user@company.com"
+            - name: "Templates"
+              keyword: "tpl"
+              file: "~/.config/raffi/snippets.yaml"
+            - name: "Dynamic"
+              keyword: "dyn"
+              command: "my-snippet-gen"
+              args: ["-j"]
+        shell:
+          binary: sh
+          description: "Shell"
+        "#;
+        let reader = Cursor::new(yaml_config);
+        let args = Args {
+            help: false,
+            version: false,
+            configfile: None,
+            print_only: false,
+            refresh_cache: false,
+            no_icons: true,
+            default_script_shell: None,
+            ui_type: None,
+            initial_query: None,
+            theme: None,
+        };
+        let parsed_config = read_config_from_reader(reader, &args).unwrap();
+
+        assert_eq!(parsed_config.addons.text_snippets.len(), 3);
+
+        // Inline snippets source
+        let emails = &parsed_config.addons.text_snippets[0];
+        assert_eq!(emails.name, "Emails");
+        assert_eq!(emails.keyword, "em");
+        assert_eq!(emails.icon, Some("mail".to_string()));
+        let snippets = emails.snippets.as_ref().unwrap();
+        assert_eq!(snippets.len(), 2);
+        assert_eq!(snippets[0].name, "Personal Email");
+        assert_eq!(snippets[0].value, "user@example.com");
+        assert_eq!(snippets[1].name, "Work Email");
+        assert_eq!(snippets[1].value, "user@company.com");
+
+        // File source
+        let templates = &parsed_config.addons.text_snippets[1];
+        assert_eq!(templates.name, "Templates");
+        assert_eq!(templates.keyword, "tpl");
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(
+            templates.file,
+            Some(format!("{home}/.config/raffi/snippets.yaml"))
+        );
+        assert!(templates.snippets.is_none());
+        assert!(templates.command.is_none());
+
+        // Command source
+        let dynamic = &parsed_config.addons.text_snippets[2];
+        assert_eq!(dynamic.name, "Dynamic");
+        assert_eq!(dynamic.keyword, "dyn");
+        assert_eq!(dynamic.command, Some("my-snippet-gen".to_string()));
+        assert_eq!(dynamic.args, vec!["-j".to_string()]);
+        assert!(dynamic.snippets.is_none());
+        assert!(dynamic.file.is_none());
+    }
+
+    #[test]
+    fn test_text_snippet_directory_config_parsing() {
+        let yaml_config = r#"
+        addons:
+          text_snippets:
+            - name: "Snippets"
+              keyword: "sn"
+              icon: "snippets"
+              directory: "~/.local/share/snippets"
+        shell:
+          binary: sh
+          description: "Shell"
+        "#;
+        let reader = Cursor::new(yaml_config);
+        let args = Args {
+            help: false,
+            version: false,
+            configfile: None,
+            print_only: false,
+            refresh_cache: false,
+            no_icons: true,
+            default_script_shell: None,
+            ui_type: None,
+            initial_query: None,
+            theme: None,
+        };
+        let parsed_config = read_config_from_reader(reader, &args).unwrap();
+
+        assert_eq!(parsed_config.addons.text_snippets.len(), 1);
+        let snippets_dir = &parsed_config.addons.text_snippets[0];
+        assert_eq!(snippets_dir.name, "Snippets");
+        assert_eq!(snippets_dir.keyword, "sn");
+        assert_eq!(snippets_dir.icon, Some("snippets".to_string()));
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(
+            snippets_dir.directory,
+            Some(format!("{home}/.local/share/snippets"))
+        );
+        assert!(snippets_dir.snippets.is_none());
+        assert!(snippets_dir.file.is_none());
+        assert!(snippets_dir.command.is_none());
+    }
+
+    #[test]
+    fn test_text_snippet_defaults_to_empty() {
+        let yaml_config = r#"
+        shell:
+          binary: sh
+          description: "Shell"
+        "#;
+        let reader = Cursor::new(yaml_config);
+        let args = Args {
+            help: false,
+            version: false,
+            configfile: None,
+            print_only: false,
+            refresh_cache: false,
+            no_icons: true,
+            default_script_shell: None,
+            ui_type: None,
+            initial_query: None,
+            theme: None,
+        };
+        let parsed_config = read_config_from_reader(reader, &args).unwrap();
+        assert!(parsed_config.addons.text_snippets.is_empty());
     }
 }

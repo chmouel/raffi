@@ -141,6 +141,14 @@ Common search engines are pre-configured in the example config (Google, DuckDuck
 
 [See below for how to configure this](#web-search-configuration)
 
+#### Text Snippets
+
+The native interface supports text snippets, which let you define reusable text values that can be searched and copied to the clipboard. Snippets can come from three sources: inline in the config, an external YAML file, or a command's output (using the same Alfred JSON format as script filters).
+
+Type a configured keyword to display the snippets from that source, then continue typing to fuzzy-filter by name. Selecting a snippet copies its value to the clipboard via `wl-copy`.
+
+[See below for how to configure this](#text-snippets-configuration)
+
 #### File Browser
 
 The native interface includes a built-in file browser. Typing `/` browses the root filesystem and `~` browses the home directory. Selecting a directory navigates into it, while selecting a file opens it with `xdg-open`. Alt+Enter copies the file path to the clipboard instead. Tab autocompletes the selected entry into the search bar. Ctrl+H toggles hidden file visibility. Text after the last `/` fuzzy-filters the current directory listing (e.g., `/home/us` filters `/home/` by "us"). Directories are listed first in accent colour.
@@ -304,7 +312,7 @@ myapp:
 
 ### Addon Configuration
 
-The native interface includes optional addons for calculations, currency conversion, file browsing, script filters, and web searches.
+The native interface includes optional addons for calculations, currency conversion, file browsing, script filters, text snippets, and web searches.
 
 ```yaml
 addons:
@@ -423,6 +431,95 @@ Field descriptions:
 
 The URL template's `{query}` placeholder is replaced with your search terms, automatically percent-encoded for safe URL use. For example, `g hello world` becomes `https://google.com/search?q=hello%20world`.
 
+### Text Snippets Configuration
+
+Text snippets are configured under `addons.text_snippets`. Each entry defines a keyword and a source for the snippets (inline, file, or command).
+
+Inline snippets:
+
+```yaml
+addons:
+  text_snippets:
+    - name: "Emails"
+      keyword: "em"
+      icon: "mail"
+      snippets:
+        - name: "Personal Email"
+          value: "user@example.com"
+        - name: "Work Email"
+          value: "user@company.com"
+```
+
+File source (YAML file containing a list of `name`/`value` pairs):
+
+```yaml
+addons:
+  text_snippets:
+    - name: "Templates"
+      keyword: "tpl"
+      icon: "document"
+      file: "~/.config/raffi/snippets.yaml"
+```
+
+The snippet file uses the same format:
+
+```yaml
+- name: "Greeting"
+  value: "Hello, world!"
+- name: "Signature"
+  value: "Best regards, User"
+```
+
+Command source (outputs Alfred Script Filter JSON):
+
+```yaml
+addons:
+  text_snippets:
+    - name: "Dynamic"
+      keyword: "dyn"
+      icon: "terminal"
+      command: "my-snippet-gen"
+      args: ["-j"]
+```
+
+The command must output JSON in the same format used by [script filters](#script-filters-configuration). The `title` field maps to the snippet name and `arg` to the snippet value.
+
+Directory source (a directory of `.snippet` files):
+
+```yaml
+addons:
+  text_snippets:
+    - name: "Snippets"
+      keyword: "sn"
+      icon: "snippets"
+      directory: "~/.local/share/desktop-config/snippets"
+```
+
+Each `.snippet` file has the format:
+
+```
+Description (first line)
+---
+Actual snippet content (everything after the separator)
+```
+
+The first line becomes the snippet name, everything after `---` becomes the value. Files are sorted alphabetically by name and cached per session.
+
+Field descriptions:
+
+| Field       | Required | Description                                                            |
+|-------------|----------|------------------------------------------------------------------------|
+| `name`      | yes      | Display name shown during loading (command source)                     |
+| `keyword`   | yes      | Text that activates the snippet source                                 |
+| `icon`      | no       | Icon name from your icon cache to display next to each snippet         |
+| `snippets`  | no       | Inline list of snippets (each with `name` and `value`)                 |
+| `file`      | no       | Path to a YAML file containing snippets (cached per session)           |
+| `command`   | no       | Executable that outputs Alfred Script Filter JSON                      |
+| `directory` | no       | Path to a directory of `.snippet` files (cached per session)           |
+| `args`      | no       | Arguments passed to the command                                        |
+
+Exactly one of `snippets`, `file`, `command`, or `directory` should be specified per entry. On selection, the snippet's value is copied to the clipboard using `wl-copy`.
+
 ## Development
 
 Contributions are welcome. Issues, feature requests, and pull requests can be submitted via GitHub.
@@ -445,10 +542,10 @@ pre-commit install
 ## Calculator
 <img width="522" height="150" alt="image" src="https://github.com/user-attachments/assets/eb7069c9-21f7-413d-b455-c2db186591d5" />
 
-### Script Filter with github PR browser 
+### Script Filter with github PR browser
 <img width="441" height="559" alt="optimized-pull-requests-dashboard" src="https://github.com/user-attachments/assets/48da3b90-b8dd-4f4d-8465-3ae27fe267c3" />
 
-### Script Filter with timezone converter 
+### Script Filter with timezone converter
 <img width="522" height="400" alt="image" src="https://github.com/user-attachments/assets/f65acf34-b499-477d-9952-48590723d5bb" />
 
 ### Light Theme
