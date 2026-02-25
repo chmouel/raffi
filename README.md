@@ -218,6 +218,10 @@ general:
   theme: light
   no_icons: true
   default_script_shell: /bin/zsh
+  font_size: 20
+  font_family: "Inter"
+  window_width: 900
+  window_height: 500
   theme_colors:
     accent: "#cba6f7"
 ```
@@ -226,6 +230,10 @@ The `ui_type` field selects the interface (`fuzzel` or `native`).
 The `theme` field selects the colour theme for the native interface. `dark` (default) uses a Dracula‑inspired palette; `light` uses Rose Pine Dawn.
 The `no_icons` field disables icon loading when set to true.
 The `default_script_shell` field sets the default interpreter for inline scripts.
+The `font_size` field sets the base font size in pixels (default: 20). Other UI sizes and paddings scale proportionally: input text is 1.2×, subtitles are 0.7×, and hint text is 0.6× the base size.
+The `font_family` field sets the font family name (e.g. `"Inter"`, `"Fira Sans"`). When omitted, the system default sans-serif font is used.
+The `window_width` and `window_height` fields set the launcher window dimensions in pixels (defaults: 800×600).
+The `padding` field overrides the outer window padding in pixels (default: 20). When not set, it scales automatically with `font_size`.
 
 Individual theme colours can be customised under `theme_colors`. Each field
 accepts a hex colour string (`#RGB`, `#RRGGBB`, or `#RRGGBBAA`). Only the
