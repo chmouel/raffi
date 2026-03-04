@@ -1,6 +1,6 @@
 # Raffi Application Launcher
 
-<img src="assets/logo.png" alt="Raffi logo" width="150" align="right"/>
+<img src="assets/logo.png" alt="Raffi logo" width="150"/>
 
 Raffi is an application launcher designed to sit on top of Fuzzel, or, if preferred, operate using its own built‑in interface. It allows commands and scripts to be defined in a YAML configuration file, with support for icons, arguments, conditional visibility, and script execution through configurable interpreters.
 
