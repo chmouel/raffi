@@ -1,0 +1,226 @@
+---
+title: Installation
+description: Install Raffi on Linux via cargo, AUR, Homebrew, NixOS, or build from source
+---
+
+import { Aside, Tabs, TabItem, Card, CardGrid, Steps } from '@astrojs/starlight/components';
+
+Raffi can be installed through multiple package managers or built from source. Choose the method that works best for your system.
+
+## Prerequisites
+
+<Aside type="note">
+  If you plan to use the default Fuzzel interface, you'll need to install [Fuzzel](https://codeberg.org/dnkl/fuzzel) separately. For the native interface, no additional dependencies are required.
+</Aside>
+
+## Installation Methods
+
+<Tabs>
+  <TabItem label="Cargo">
+    Install directly from [crates.io](https://crates.io) using Rust's package manager:
+
+    ```bash
+    cargo install raffi
+    ```
+
+    This will download, compile, and install the latest version of Raffi with all features enabled.
+
+    <details>
+<summary>What you need</summary>
+
+      - Rust toolchain (install via [rustup](https://rustup.rs/))
+      - Cargo (comes with Rust)
+    </details>
+  </TabItem>
+
+  <TabItem label="AUR (Arch Linux)">
+    On Arch Linux and derivatives, install from the AUR using your preferred helper:
+
+    ```bash
+    yay -S raffi-bin
+    ```
+
+    Or with `paru`:
+
+    ```bash
+    paru -S raffi-bin
+    ```
+
+    <Aside type="note">
+      The `raffi-bin` package installs a prebuilt binary. For building from source on Arch, use the `raffi` package instead.
+    </Aside>
+  </TabItem>
+
+  <TabItem label="NixOS/Nix">
+    On NixOS or systems with Nix installed (unstable channel):
+
+    ```bash
+    nix-shell -p raffi
+    ```
+
+    Or add to your NixOS configuration:
+
+    ```nix
+    environment.systemPackages = with pkgs; [
+      raffi
+    ];
+    ```
+  </TabItem>
+
+  <TabItem label="Homebrew">
+    Install using LinuxBrew or Homebrew:
+
+    ```bash
+    brew tap chmouel/raffi https://github.com/chmouel/raffi
+    brew install raffi
+    ```
+  </TabItem>
+</Tabs>
+
+## Prebuilt Binaries
+
+Prebuilt binaries for various platforms are available from the [GitHub releases page](https://github.com/chmouel/raffi/releases).
+
+<Steps>
+1. **Download the archive**
+
+   Visit the [releases page](https://github.com/chmouel/raffi/releases) and download the archive or package for your platform.
+
+2. **Extract the binary**
+
+   Extract the archive and move the `raffi` binary to a directory in your `PATH`:
+
+       ```bash
+       tar xzf raffi-*.tar.gz
+       sudo mv raffi /usr/local/bin/
+       ```
+
+3. **Make it executable**
+
+   Ensure the binary has execute permissions:
+
+       ```bash
+       chmod +x /usr/local/bin/raffi
+       ```
+
+</Steps>
+
+## Building from Source
+
+### Full Build (with Native UI)
+
+Clone the repository and build with all features:
+
+```bash
+git clone https://github.com/chmouel/raffi.git
+cd raffi
+cargo build --release
+```
+
+The binary will be available at `target/release/raffi` (approximately 15 MB).
+
+### Minimal Build (Fuzzel Only)
+
+<Aside type="caution">
+  The minimal build disables the native UI and all addons (calculator, currency converter, file browser, etc.). You'll only be able to use Raffi with Fuzzel.
+</Aside>
+
+For a significantly smaller binary with only Fuzzel support:
+
+```bash
+git clone https://github.com/chmouel/raffi.git
+cd raffi
+cargo build --release --no-default-features
+```
+
+This removes the `iced` GUI dependency, reducing the binary size from ~15 MB to ~1.1 MB.
+
+<Tabs>
+<TabItem label="Full build (with native UI)">
+```bash
+# ~15 MB binary with all features
+cargo build --release
+```
+</TabItem>
+<TabItem label="Minimal build (Fuzzel only)">
+```bash
+# ~1.1 MB binary, Fuzzel integration only
+cargo build --release --no-default-features
+```
+</TabItem>
+</Tabs>
+
+### Install Locally
+
+After building, install to your local bin directory:
+
+```bash
+cargo install --path .
+```
+
+Or manually copy the binary:
+
+```bash
+sudo cp target/release/raffi /usr/local/bin/
+```
+
+## Verify Installation
+
+Check that Raffi is installed correctly:
+
+```bash
+raffi --help
+```
+
+You should see the help output with available options:
+
+```
+Usage: raffi [OPTIONS]
+
+Options:
+  -p, --print-only              Print command instead of executing
+  -c, --configfile <FILE>       Use custom configuration file
+  -r, --refresh-cache           Refresh icon cache
+  -I, --disable-icons           Disable icons
+  -u, --ui-type <TYPE>          Select UI: fuzzel or native
+  -i, --initial-query <QUERY>   Pre-fill search (native mode)
+  -t, --theme <THEME>           Theme: dark or light (native mode)
+  --default-script-shell <SHELL> Default interpreter for scripts
+```
+
+## Development Setup
+
+For contributors who want to set up the development environment:
+
+<Steps>
+1. **Clone the repository**
+
+   ```bash
+       git clone https://github.com/chmouel/raffi.git
+       cd raffi
+       ```
+
+2. **Install pre-commit hooks**
+
+   Set up pre-commit hooks that run `cargo clippy` before commits:
+
+       ```bash
+       pip install pre-commit
+       pre-commit install
+       ```
+
+3. **Build and test**
+
+   ```bash
+       cargo build
+       cargo test
+       cargo clippy
+       ```
+
+</Steps>
+
+## Next Steps
+
+<Card title="Quick Start Guide" icon="rocket">
+  Learn how to configure and use Raffi for the first time
+</Card>

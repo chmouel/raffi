@@ -1,0 +1,200 @@
+---
+title: General Settings
+description: Configure Raffi's UI, theme, fonts, and window properties
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Overview
+
+The `general` section in your configuration file sets persistent defaults for Raffi's appearance and behavior. These settings are equivalent to command-line flags but are applied automatically on every launch.
+
+<Aside type="note">
+Command-line flags always override settings from the configuration file.
+</Aside>
+
+## Configuration Options
+
+All fields in the `general` section are optional.
+
+**`ui_type`** `string` (default: `fuzzel`)
+
+UI backend selection. Valid options:
+  - `fuzzel` - Uses external Fuzzel launcher (default)
+  - `native` - Uses built-in iced-based GUI
+  
+  Equivalent to `-u` or `--ui-type` flag.
+
+
+**`theme`** `string` (default: `dark`)
+
+Color theme for the native interface. Valid options:
+  - `dark` - Dracula-inspired palette (default)
+  - `light` - Rose Pine Dawn palette
+  
+  Equivalent to `-t` or `--theme` flag. Only applies to native UI.
+
+
+**`no_icons`** `boolean` (default: `false`)
+
+Disables icon loading for faster startup.
+  
+  Equivalent to `-I` or `--disable-icons` flag.
+
+
+**`default_script_shell`** `string` (default: `bash`)
+
+Default interpreter for inline scripts. Common values:
+  - `bash` (default)
+  - `/bin/zsh`
+  - `python3`
+  
+  Equivalent to `--default-script-shell` flag.
+
+
+**`max_history`** `number` (default: `10`)
+
+Maximum number of search query history entries.
+  
+  Set to `0` to disable history. Navigate history with Alt+P (previous) and Alt+N (next) in native mode.
+
+
+## Font and Typography
+
+**`font_size`** `number` (default: `20`)
+
+Base font size in pixels. Other UI elements scale proportionally:
+  - Input text: 1.2× base size (24px by default)
+  - Item descriptions: 1.0× base size (20px by default)
+  - Subtitles: 0.7× base size (14px by default)
+  - Hints: 0.6× base size (12px by default)
+
+
+**`font_family`** `string`
+
+Font family name (e.g., `"Inter"`, `"Fira Sans"`, `"Roboto"`).
+  
+  When omitted, the system default sans-serif font is used.
+
+
+## Window Dimensions
+
+**`window_width`** `number` (default: `800`)
+
+Launcher window width in pixels (native mode only).
+
+
+**`window_height`** `number` (default: `600`)
+
+Launcher window height in pixels (native mode only).
+
+
+**`padding`** `number` (default: `20`)
+
+Outer window padding in pixels.
+  
+  When not set, padding scales automatically with `font_size`.
+
+
+## Theme Colors
+
+Customize individual theme colors under the `theme_colors` section. Each field accepts hex color strings in the format `#RGB`, `#RRGGBB`, or `#RRGGBBAA`.
+
+Only specified colors are overridden; the rest come from the base theme selected via `theme`.
+
+**`theme_colors.bg_base`** `string`
+
+Base background color.
+
+
+**`theme_colors.bg_input`** `string`
+
+Input field background color.
+
+
+**`theme_colors.accent`** `string`
+
+Primary accent color (used for highlights and selected items).
+
+
+**`theme_colors.accent_hover`** `string`
+
+Accent color for hover states.
+
+
+**`theme_colors.text_main`** `string`
+
+Primary text color.
+
+
+**`theme_colors.text_muted`** `string`
+
+Muted/secondary text color.
+
+
+**`theme_colors.selection_bg`** `string`
+
+Background color for selected items.
+
+
+**`theme_colors.border`** `string`
+
+Border color.
+
+
+## Example Configurations
+
+### Native UI with Light Theme
+
+```yaml
+general:
+  ui_type: native
+  theme: light
+  font_size: 18
+  font_family: "Inter"
+  window_width: 900
+  window_height: 500
+```
+
+### Custom Theme Colors (Catppuccin Mocha)
+
+```yaml
+general:
+  theme: dark
+  theme_colors:
+    bg_base: "#1e1e2e"
+    bg_input: "#313244"
+    accent: "#cba6f7"
+    accent_hover: "#89b4fa"
+    text_main: "#cdd6f4"
+    text_muted: "#6c7086"
+    selection_bg: "#45475a"
+    border: "#585b70"
+```
+
+### Minimal Fuzzel Configuration
+
+```yaml
+general:
+  ui_type: fuzzel
+  no_icons: true
+  default_script_shell: /bin/zsh
+```
+
+## Command-Line Override
+
+All general settings can be overridden with command-line flags:
+
+```bash
+# Override UI type
+raffi --ui-type native
+
+# Override theme
+raffi --theme light
+
+# Disable icons
+raffi --disable-icons
+
+# Set custom script shell
+raffi --default-script-shell /bin/zsh
+```

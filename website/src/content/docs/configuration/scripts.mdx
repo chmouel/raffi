@@ -1,0 +1,278 @@
+---
+title: Scripts
+description: Execute inline scripts with bash, python, or custom interpreters
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Overview
+
+Raffi entries can execute inline scripts instead of launching binaries directly. Scripts are useful for:
+
+- Running shell commands
+- Executing Python/Ruby/Perl code
+- Chaining multiple commands
+- Setting up environments before launching applications
+
+## Script Configuration
+
+**`script`** `string` (required)
+
+Inline script content. Can be a single line or multi-line string.
+  
+  The script is executed using the interpreter specified in `binary` (or the default script shell).
+
+
+**`binary`** `string`
+
+Script interpreter. Defaults to `bash` (or the value set via `--default-script-shell` or `general.default_script_shell`).
+  
+  Common values:
+
+- `bash` (default)
+- `python3`
+- `ruby`
+- `perl`
+- `/bin/zsh`
+
+
+**`args`** `array`
+
+Arguments passed to the script (not the interpreter).
+  
+  These are available as `$1`, `$2`, etc. in shell scripts or `sys.argv` in Python.
+
+
+## Bash Scripts
+
+### Single-Line Script
+
+```yaml
+hello_script:
+  script: "echo 'Hello, World!'"
+  description: "Hello Script"
+  icon: "script"
+```
+
+### Multi-Line Script
+
+```yaml
+hello_script:
+  script: |
+    echo "hello world and show me your env"
+    env
+  description: "Hello Script"
+  icon: "script"
+```
+
+### Script with Arguments
+
+```yaml
+backup_script:
+  script: |
+    SOURCE=$1
+    DEST=$2
+    rsync -av "$SOURCE" "$DEST"
+    notify-send "Backup complete" "$SOURCE → $DEST"
+  args: ["~/Documents", "~/Backups"]
+  description: "Backup Documents"
+  icon: "backup"
+```
+
+## Python Scripts
+
+### Basic Python Script
+
+```yaml
+hello_python:
+  binary: python3
+  script: |
+    import os
+    print("hello world and show me your env")
+    print(os.environ)
+  description: "Hello Python script"
+  icon: "python"
+```
+
+### Python Script with Arguments
+
+```yaml
+process_data:
+  binary: python3
+  script: |
+    import sys
+    import json
+    
+    input_file = sys.argv[1]
+    with open(input_file) as f:
+        data = json.load(f)
+    
+    print(f"Processed {len(data)} records")
+  args: ["~/data/input.json"]
+  description: "Process Data"
+  icon: "python"
+```
+
+## Custom Interpreters
+
+### Ruby Script
+
+```yaml
+ruby_script:
+  binary: ruby
+  script: |
+    puts "Hello from Ruby!"
+    puts "Ruby version: #{RUBY_VERSION}"
+  description: "Ruby Hello"
+  icon: "ruby"
+```
+
+### Perl Script
+
+```yaml
+perl_script:
+  binary: perl
+  script: |
+    print "Hello from Perl!\n";
+    print "Perl version: $^V\n";
+  description: "Perl Hello"
+  icon: "perl"
+```
+
+### Zsh Script
+
+```yaml
+zsh_script:
+  binary: /bin/zsh
+  script: |
+    echo "Hello from Zsh!"
+    echo "Zsh version: $ZSH_VERSION"
+  description: "Zsh Hello"
+  icon: "terminal"
+```
+
+## Default Script Shell
+
+Set a default interpreter for all scripts:
+
+### Via Configuration
+
+```yaml
+general:
+  default_script_shell: /bin/zsh
+
+my_script:
+  script: "echo 'This runs with zsh'"
+  description: "My Script"
+```
+
+### Via Command Line
+
+```bash
+raffi --default-script-shell /bin/zsh
+```
+
+<Aside type="note">
+The `binary` field in individual entries overrides the default script shell.
+</Aside>
+
+## Script Execution
+
+When an entry with a `script` field is selected:
+
+1. Raffi checks if the interpreter exists in PATH
+2. The script is executed as: `<interpreter> -c "<script>"`
+3. If `args` are present, they're passed to the script (not the interpreter)
+
+### Print-Only Mode
+
+To see the exact command without executing:
+
+```bash
+raffi --print-only
+```
+
+For a script entry, this outputs:
+
+```bash
+#!/usr/bin/env -S bash
+echo "hello world and show me your env"
+env
+```
+
+## Real-World Examples
+
+### Password Generator
+
+```yaml
+passgen:
+  binary: kitty-ctrl
+  args: ["jump", "-t", "GeneratePassword", "genpasswd"]
+  description: "Password Generator"
+  icon: password
+```
+
+### System Monitoring
+
+```yaml
+bpytop:
+  binary: kitty-ctrl
+  args: ["jump", "bpytop"]
+  description: "BpyTOP"
+  icon: bashtop
+  ifexist: bpytop
+```
+
+### Custom Window Management
+
+```yaml
+center-window:
+  binary: wmctrl-resize-and-center
+  description: "Center window"
+  icon: wmsnap
+
+snap-window-around:
+  binary: wmctrl-resize-and-center
+  args: [rotate]
+  description: "Snap window around"
+  icon: wmaround
+  ifenveq: [XDG_SESSION_TYPE, x11]
+```
+
+## Path Expansion in Scripts
+
+<Aside type="caution">
+Path expansion (`~/` and `${VAR}`) is **not** applied to script content.
+</Aside>
+
+If you need path expansion in scripts, do it explicitly:
+
+```yaml
+backup:
+  script: |
+    HOME=$HOME
+    SOURCE="$HOME/Documents"
+    DEST="$HOME/Backups"
+    rsync -av "$SOURCE" "$DEST"
+  description: "Backup"
+```
+
+Or use arguments with expansion:
+
+```yaml
+backup:
+  script: |
+    rsync -av "$1" "$2"
+  args: ["~/Documents", "~/Backups"]
+  description: "Backup"
+```
+
+## Validation
+
+Script entries are validated on startup:
+
+1. **Interpreter check**: The `binary` (or default shell) must exist in PATH
+2. **Conditional checks**: If `ifexist`, `ifenvset`, or `ifenveq` are present, they must pass
+3. **Disabled check**: If `disabled: true`, the entry is hidden
+
+If validation fails, the entry is automatically hidden from the launcher.

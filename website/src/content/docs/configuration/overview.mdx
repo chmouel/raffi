@@ -1,0 +1,115 @@
+---
+title: Configuration Overview
+description: Learn how to configure Raffi's launcher entries and settings
+---
+
+import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
+
+## Configuration File Location
+
+Raffi's configuration is stored in:
+
+```
+$HOME/.config/raffi/raffi.yaml
+```
+
+You can override this location using the `-c` or `--configfile` flag:
+
+```bash
+raffi --configfile /path/to/custom/config.yaml
+```
+
+## Basic Structure
+
+The configuration file is a YAML file with three main sections:
+
+1. **General settings** - UI preferences, theme, fonts, window dimensions
+2. **Entries** - Application launcher entries
+3. **Addons** - Optional features like script filters, web searches, text snippets
+
+### Minimal Example
+
+```yaml
+firefox:
+  binary: firefox
+  args: [--marionette]
+  icon: firefox
+  description: Firefox browser with marionette enabled
+```
+
+### Complete Structure
+
+```yaml
+# General settings (optional)
+general:
+  ui_type: native
+  theme: dark
+  font_size: 20
+  window_width: 800
+  window_height: 600
+
+# Launcher entries
+firefox:
+  binary: firefox
+  description: "Firefox"
+  icon: firefox
+  args: ["--marionette"]
+
+terminal:
+  binary: kitty
+  description: "Terminal"
+  icon: terminal
+
+# Addons (optional)
+addons:
+  script_filters:
+    - name: "Timezones"
+      keyword: "tz"
+      command: "batz"
+      args: ["-j"]
+  
+  web_searches:
+    - name: "Google"
+      keyword: "g"
+      url: "https://google.com/search?q={query}"
+```
+
+## Configuration Sections
+
+<CardGrid>
+  <Card title="General Settings" icon="gear">
+    UI type, theme, fonts, and window settings
+  </Card>
+  <Card title="Entries" icon="rocket">
+    Define launcher entries with binaries, scripts, and arguments
+  </Card>
+  <Card title="Icons" icon="image">
+    Icon caching, discovery, and path configuration
+  </Card>
+  <Card title="Scripts" icon="code">
+    Inline scripts with bash, python, or custom interpreters
+  </Card>
+  <Card title="Conditions" icon="filter">
+    Conditional visibility based on environment or binary existence
+  </Card>
+</CardGrid>
+
+## Path Expansion
+
+Most configuration fields support path expansion:
+
+- `~/` expands to your home directory
+- `${VAR}` expands to environment variable values
+- Unset variables expand to empty strings
+
+```yaml
+myapp:
+  binary: ${HOME}/bin/myapp
+  args: ["${XDG_DATA_HOME}/files", "~/Documents"]
+  icon: ~/icons/myapp.png
+  ifexist: ~/bin/myapp
+```
+
+<Aside type="note">
+Path expansion is **not** applied to script content (`script` field). Only use it for paths, binaries, icons, and arguments.
+</Aside>

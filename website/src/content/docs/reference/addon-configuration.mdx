@@ -1,0 +1,728 @@
+---
+title: Addon Configuration
+description: Configuration reference for built-in addons (currency, calculator, file browser, script filters, web searches, text snippets)
+---
+
+The native UI includes several built-in addons that can be configured under the `addons` section of `raffi.yaml`. All addons are enabled by default.
+
+## Currency Converter
+
+Converts between currencies using exchange rates from the Frankfurter API. Rates are cached for one hour.
+
+### Configuration
+
+**`addons.currency.enabled`** `boolean` (default: `true`)
+
+Enable or disable the currency converter addon.
+  
+  ```yaml
+  addons:
+    currency:
+      enabled: true
+  ```
+
+
+**`addons.currency.trigger`** `string` (default: `$`)
+
+Character that activates currency conversion.
+  
+  Common values: `$`, `€`, `£`, `¥`
+  
+  ```yaml
+  addons:
+    currency:
+      trigger: "€"
+  ```
+
+
+**`addons.currency.default_currency`** `string` (default: `USD`)
+
+Source currency used when none is specified in the query.
+  
+  Must be a valid 3-letter ISO currency code (e.g., `USD`, `EUR`, `GBP`, `JPY`).
+  
+  ```yaml
+  addons:
+    currency:
+      default_currency: EUR
+  ```
+
+
+**`addons.currency.currencies`** `array[string]`
+
+List of available currencies for conversion.
+  
+  If omitted, all currencies supported by the Frankfurter API are available. Specify a subset to limit options.
+  
+  ```yaml
+  addons:
+    currency:
+      currencies: ["EUR", "USD", "GBP", "JPY", "CHF"]
+  ```
+
+
+### Usage Examples
+
+With trigger `$` and default currency `USD`:
+
+```
+$10 to eur          → Converts 10 USD to EUR
+$50 gbp to usd      → Converts 50 GBP to USD
+$100eur to jpy      → Converts 100 EUR to JPY
+```
+
+With trigger `€` and default currency `EUR`:
+
+```
+€10 to usd          → Converts 10 EUR to USD
+€50 to gbp          → Converts 50 EUR to GBP
+```
+
+### Complete Example
+
+```yaml
+addons:
+  currency:
+    enabled: true
+    trigger: "€"
+    default_currency: EUR
+    currencies: ["EUR", "USD", "GBP", "JPY"]
+```
+
+## Calculator
+
+Evaluates mathematical expressions as you type. Results can be copied to the clipboard with Enter (requires `wl-copy`).
+
+### Configuration
+
+**`addons.calculator.enabled`** `boolean` (default: `true`)
+
+Enable or disable the calculator addon.
+  
+  ```yaml
+  addons:
+    calculator:
+      enabled: true
+  ```
+
+
+### Supported Operations
+
+- Basic arithmetic: `+`, `-`, `*`, `/`, `%`, `^`
+- Functions: `sqrt`, `sin`, `cos`, `tan`, `log`, `ln`, `exp`, `abs`, `floor`, `ceil`
+- Constants: Standard mathematical constants
+
+### Usage Examples
+
+```
+2 + 2               → 4
+10 * 5              → 50
+sqrt(16)            → 4
+sin(0.5)            → ~0.479
+2^8                 → 256
+```
+
+No trigger character is needed; simply type a valid expression.
+
+## File Browser
+
+Browses the filesystem with fuzzy filtering. Selecting a directory navigates into it; selecting a file opens it with `xdg-open`. Hidden files can be toggled with Ctrl+H.
+
+### Configuration
+
+**`addons.file_browser.enabled`** `boolean` (default: `true`)
+
+Enable or disable the file browser addon.
+  
+  ```yaml
+  addons:
+    file_browser:
+      enabled: true
+  ```
+
+
+**`addons.file_browser.show_hidden`** `boolean` (default: `false`)
+
+Show hidden files by default.
+  
+  Can be toggled at runtime with Ctrl+H.
+  
+  ```yaml
+  addons:
+    file_browser:
+      show_hidden: true
+  ```
+
+
+### Usage
+
+- Type `/` to browse from root
+- Type `~` to browse from home directory
+- Text after the last `/` filters the current directory (e.g., `/home/us` filters `/home/` by "us")
+- Enter: Navigate into directory or open file
+- Alt+Enter: Copy file/directory path to clipboard
+- Tab: Autocomplete selected entry into search bar
+- Ctrl+H: Toggle hidden file visibility
+
+Directories are listed first in accent color.
+
+### Example
+
+```yaml
+addons:
+  file_browser:
+    enabled: true
+    show_hidden: false
+```
+
+## Script Filters
+
+Script filters allow external commands to provide dynamic results using the [Alfred Script Filter JSON format](https://www.alfredapp.com/help/workflows/inputs/script-filter/json/).
+
+### Configuration
+
+**`addons.script_filters`** `array[object]` (default: `[]`)
+
+List of script filter configurations.
+  
+  Each entry defines a keyword-triggered dynamic source.
+
+
+### Script Filter Fields
+
+**`name`** `string` (required)
+
+Display name shown during loading.
+  
+  ```yaml
+  addons:
+    script_filters:
+      - name: "Timezones"
+  ```
+
+
+**`keyword`** `string` (required)
+
+Text that activates the script filter.
+  
+  ```yaml
+  addons:
+    script_filters:
+      - keyword: "tz"
+  ```
+
+
+**`command`** `string` (required)
+
+Executable to run.
+  
+  Supports tilde and environment variable expansion.
+  
+  ```yaml
+  addons:
+    script_filters:
+      - command: "batz"
+  ```
+
+
+**`args`** `array[string]` (default: `[]`)
+
+Arguments passed to the command before the user's query.
+  
+  ```yaml
+  addons:
+    script_filters:
+      - command: "my-script"
+        args: ["-j", "--verbose"]
+  ```
+
+
+**`icon`** `string`
+
+Fallback icon name for results without their own icon.
+  
+  ```yaml
+  addons:
+    script_filters:
+      - icon: "clock"
+  ```
+
+
+**`action`** `string` (default: `copy`)
+
+Action to perform on Enter.
+  
+  Special values:
+
+- `copy` - Copy to clipboard via `wl-copy`/`xclip`/`xsel`
+- `insert` - Type into focused app via `wtype`/`ydotool`
+  
+  Any other string is executed as a shell command via `sh -c`, with `{value}` replaced by the selected value.
+  
+  ```yaml
+  addons:
+    script_filters:
+      - action: "copy"                    # Copy to clipboard
+      - action: "xdg-open {value}"        # Open in browser
+      - action: "notify-send {value}"    # Show notification
+  ```
+
+
+**`secondary_action`** `string`
+
+Action to perform on Ctrl+Enter.
+  
+  Accepts the same values as `action`. If omitted, Ctrl+Enter behaves the same as Enter.
+  
+  ```yaml
+  addons:
+    script_filters:
+      - action: "copy"
+        secondary_action: "xdg-open {value}"
+  ```
+
+
+### JSON Output Format
+
+The script must output JSON matching this structure:
+
+```json
+{
+  "items": [
+    {
+      "title": "New York",
+      "subtitle": "EST (UTC-5) — 14:30",
+      "arg": "America/New_York",
+      "icon": { "path": "/usr/share/icons/clock.png" }
+    }
+  ]
+}
+```
+
+**JSON Fields:**
+
+- `title` (required): Main text displayed for the item
+- `subtitle` (optional): Secondary text shown below the title
+- `arg` (optional): Value used in actions (falls back to `title` if omitted)
+- `icon.path` (optional): Absolute path to a PNG or SVG icon
+
+The `title` and `subtitle` fields support ANSI color codes for colored text rendering.
+
+### Example: Timezone Converter
+
+```yaml
+addons:
+  script_filters:
+    - name: "Timezones"
+      keyword: "tz"
+      command: "batz"        # https://github.com/chmouel/batzconverter
+      args: ["-j"]
+      icon: "clock"
+```
+
+Usage: Type `tz paris` to see current time in Paris.
+
+### Example: Bookmarks with Actions
+
+```yaml
+addons:
+  script_filters:
+    - name: "Bookmarks"
+      keyword: "bm"
+      command: "my-bookmark-script"
+      args: ["-j"]
+      action: "copy"                    # Enter: Copy URL
+      secondary_action: "xdg-open {value}"  # Ctrl+Enter: Open in browser
+      icon: "bookmark"
+```
+
+## Web Searches
+
+Quick web searches via URL templates. Type a keyword followed by your query to open your browser with search results.
+
+### Configuration
+
+**`addons.web_searches`** `array[object]` (default: `[]`)
+
+List of web search configurations.
+
+
+### Web Search Fields
+
+**`name`** `string` (required)
+
+Display name shown in the search row (e.g., "Search Google for...").
+  
+  ```yaml
+  addons:
+    web_searches:
+      - name: "Google"
+  ```
+
+
+**`keyword`** `string` (required)
+
+Text that activates the web search.
+  
+  ```yaml
+  addons:
+    web_searches:
+      - keyword: "g"
+  ```
+
+
+**`url`** `string` (required)
+
+URL template with `{query}` placeholder.
+  
+  The `{query}` placeholder is replaced with the search terms, automatically percent-encoded.
+  
+  ```yaml
+  addons:
+    web_searches:
+      - url: "https://google.com/search?q={query}"
+  ```
+
+
+**`icon`** `string`
+
+Icon name from your icon cache.
+  
+  ```yaml
+  addons:
+    web_searches:
+      - icon: "google"
+  ```
+
+
+### Example: Common Search Engines
+
+```yaml
+addons:
+  web_searches:
+    - name: "Google"
+      keyword: "g"
+      url: "https://google.com/search?q={query}"
+      icon: "google"
+    
+    - name: "DuckDuckGo"
+      keyword: "ddg"
+      url: "https://duckduckgo.com/?q={query}"
+      icon: "duckduckgo"
+    
+    - name: "GitHub"
+      keyword: "gh"
+      url: "https://github.com/search?q={query}&type=repositories"
+      icon: "github"
+    
+    - name: "Wikipedia"
+      keyword: "wiki"
+      url: "https://en.wikipedia.org/wiki/Special:Search?search={query}"
+      icon: "wikipedia"
+```
+
+### Usage Examples
+
+```
+g rust traits       → Opens Google search for "rust traits"
+ddg wayland        → Opens DuckDuckGo search for "wayland"
+gh iced            → Opens GitHub search for "iced" repositories
+```
+
+## Text Snippets
+
+Reusable text values that can be searched and copied/typed. Snippets can come from inline definitions, external files, commands, or directories.
+
+### Configuration
+
+**`addons.text_snippets`** `array[object]` (default: `[]`)
+
+List of text snippet source configurations.
+
+
+### Text Snippet Fields
+
+**`name`** `string` (required)
+
+Display name shown during loading (for command sources).
+  
+  ```yaml
+  addons:
+    text_snippets:
+      - name: "Emails"
+  ```
+
+
+**`keyword`** `string` (required)
+
+Text that activates this snippet source.
+  
+  ```yaml
+  addons:
+    text_snippets:
+      - keyword: "em"
+  ```
+
+
+**`icon`** `string`
+
+Icon name displayed next to each snippet.
+  
+  ```yaml
+  addons:
+    text_snippets:
+      - icon: "mail"
+  ```
+
+
+**`snippets`** `array[object]`
+
+Inline list of snippets.
+  
+  Each snippet has:
+
+- `name` (string, required): Display name
+- `value` (string, required): Snippet content
+  
+  ```yaml
+  addons:
+    text_snippets:
+      - snippets:
+          - name: "Personal Email"
+            value: "user@example.com"
+          - name: "Work Email"
+            value: "user@company.com"
+  ```
+
+
+**`file`** `string`
+
+Path to a YAML file containing snippets.
+  
+  The file must contain a list of objects with `name` and `value` fields. Supports tilde and environment variable expansion. File contents are cached per session.
+  
+  ```yaml
+  addons:
+    text_snippets:
+      - file: "~/.config/raffi/snippets.yaml"
+  ```
+  
+  File format:
+
+  ```yaml
+  - name: "Greeting"
+    value: "Hello, world!"
+  - name: "Signature"
+    value: "Best regards, User"
+  ```
+
+
+**`command`** `string`
+
+Executable that outputs Alfred Script Filter JSON.
+  
+  The `title` field maps to snippet name, `arg` to snippet value. Supports tilde and environment variable expansion.
+  
+  ```yaml
+  addons:
+    text_snippets:
+      - command: "my-snippet-gen"
+  ```
+
+
+**`directory`** `string`
+
+Path to a directory of `.snippet` files.
+  
+  Each `.snippet` file format:
+
+  ```
+  Description (first line)
+  ---
+  Actual snippet content (everything after the separator)
+  ```
+  
+  Supports tilde and environment variable expansion. Files are cached per session.
+  
+  ```yaml
+  addons:
+    text_snippets:
+      - directory: "~/.local/share/snippets"
+  ```
+
+
+**`args`** `array[string]` (default: `[]`)
+
+Arguments passed to the command.
+  
+  ```yaml
+  addons:
+    text_snippets:
+      - command: "my-snippet-gen"
+        args: ["-j", "--verbose"]
+  ```
+
+
+**`action`** `string` (default: `copy`)
+
+Action to perform on Enter.
+  
+  Special values:
+
+- `copy` - Copy to clipboard via `wl-copy`/`xclip`/`xsel` (default)
+- `insert` - Type into focused app via `wtype`/`ydotool`
+  
+  Any other string is executed as a shell command via `sh -c`, with `{value}` replaced by the snippet value.
+  
+  ```yaml
+  addons:
+    text_snippets:
+      - action: "copy"                    # Copy to clipboard
+      - action: "insert"                  # Type into app
+      - action: "notify-send {value}"    # Custom command
+  ```
+
+
+**`secondary_action`** `string` (default: `insert`)
+
+Action to perform on Ctrl+Enter.
+  
+  Accepts the same values as `action`. Defaults to `insert` if omitted.
+  
+  ```yaml
+  addons:
+    text_snippets:
+      - action: "insert"          # Enter: Type
+        secondary_action: "copy"  # Ctrl+Enter: Copy
+  ```
+
+
+**Note:** Exactly one of `snippets`, `file`, `command`, or `directory` should be specified per entry.
+
+### Example: Inline Snippets
+
+```yaml
+addons:
+  text_snippets:
+    - name: "Emails"
+      keyword: "em"
+      icon: "mail"
+      action: "copy"
+      snippets:
+        - name: "Personal Email"
+          value: "user@example.com"
+        - name: "Work Email"
+          value: "user@company.com"
+```
+
+### Example: File-Based Snippets
+
+```yaml
+addons:
+  text_snippets:
+    - name: "Templates"
+      keyword: "tpl"
+      icon: "document"
+      file: "~/.config/raffi/snippets.yaml"
+```
+
+### Example: Command-Based Snippets
+
+```yaml
+addons:
+  text_snippets:
+    - name: "Dynamic"
+      keyword: "dyn"
+      icon: "terminal"
+      command: "my-snippet-gen"
+      args: ["-j"]
+```
+
+### Example: Directory-Based Snippets
+
+```yaml
+addons:
+  text_snippets:
+    - name: "Code Snippets"
+      keyword: "sn"
+      icon: "code"
+      directory: "~/.local/share/snippets"
+```
+
+### Example: Custom Actions
+
+```yaml
+addons:
+  text_snippets:
+    - name: "URLs"
+      keyword: "url"
+      icon: "web-browser"
+      action: "xdg-open {value}"        # Enter: Open in browser
+      secondary_action: "copy"          # Ctrl+Enter: Copy URL
+      snippets:
+        - name: "GitHub"
+          value: "https://github.com"
+        - name: "Documentation"
+          value: "https://docs.example.com"
+```
+
+## Complete Addon Example
+
+```yaml
+addons:
+  currency:
+    enabled: true
+    trigger: "$"
+    default_currency: USD
+    currencies: ["USD", "EUR", "GBP", "JPY"]
+  
+  calculator:
+    enabled: true
+  
+  file_browser:
+    enabled: true
+    show_hidden: false
+  
+  script_filters:
+    - name: "Timezones"
+      keyword: "tz"
+      command: "batz"
+      args: ["-j"]
+      icon: "clock"
+    
+    - name: "Bookmarks"
+      keyword: "bm"
+      command: "my-bookmark-script"
+      args: ["-j"]
+      action: "copy"
+      secondary_action: "xdg-open {value}"
+      icon: "bookmark"
+  
+  web_searches:
+    - name: "Google"
+      keyword: "g"
+      url: "https://google.com/search?q={query}"
+      icon: "google"
+    
+    - name: "GitHub"
+      keyword: "gh"
+      url: "https://github.com/search?q={query}&type=repositories"
+      icon: "github"
+  
+  text_snippets:
+    - name: "Emails"
+      keyword: "em"
+      icon: "mail"
+      action: "insert"
+      secondary_action: "copy"
+      snippets:
+        - name: "Personal Email"
+          value: "user@example.com"
+        - name: "Work Email"
+          value: "user@company.com"
+    
+    - name: "Templates"
+      keyword: "tpl"
+      icon: "document"
+      file: "~/.config/raffi/snippets.yaml"
+```

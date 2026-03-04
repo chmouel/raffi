@@ -1,0 +1,93 @@
+---
+title: Hyprland Integration
+description: Configure Raffi as your application launcher in Hyprland
+---
+
+# Hyprland Integration
+
+Raffi works perfectly with Hyprland, providing a fast and elegant application launcher for your Wayland environment.
+
+## Configuration
+
+Add the following to your Hyprland configuration file (typically `~/.config/hypr/hyprland.conf`):
+
+```ini
+$super = SUPER
+bind = $super, R, exec, (val=$(raffi -pI); echo $val | grep -q . && hyprctl dispatch exec "$val")
+```
+
+## How It Works
+
+- `raffi -pI` runs Raffi in print-only mode with icons disabled for faster startup
+- The selected command is stored in the `$val` variable
+- `grep -q .` checks if the output is non-empty (user didn't cancel)
+- `hyprctl dispatch exec` launches the selected application through Hyprland's IPC
+- The keybinding is `Super+R`
+
+## Customization
+
+### Using a Different Keybinding
+
+You can bind Raffi to any key combination:
+
+```ini
+# Use Super+Space
+bind = $super, Space, exec, (val=$(raffi -pI); echo $val | grep -q . && hyprctl dispatch exec "$val")
+
+# Use Super+D (like dmenu/rofi)
+bind = $super, D, exec, (val=$(raffi -pI); echo $val | grep -q . && hyprctl dispatch exec "$val")
+
+# Use Alt+Space
+bind = ALT, Space, exec, (val=$(raffi -pI); echo $val | grep -q . && hyprctl dispatch exec "$val")
+```
+
+### Enable Icons
+
+If you prefer to use icons (slightly slower startup):
+
+```ini
+bind = $super, R, exec, (val=$(raffi -p); echo $val | grep -q . && hyprctl dispatch exec "$val")
+```
+
+### Use Native UI
+
+To use Raffi's built-in native interface instead of Fuzzel:
+
+```ini
+bind = $super, R, exec, (val=$(raffi -p -u native); echo $val | grep -q . && hyprctl dispatch exec "$val")
+```
+
+### Use Custom Config
+
+Specify a custom configuration file:
+
+```ini
+bind = $super, R, exec, (val=$(raffi -pI -c ~/.config/raffi/custom.yaml); echo $val | grep -q . && hyprctl dispatch exec "$val")
+```
+
+## Testing
+
+After adding the configuration:
+
+1. Reload Hyprland: `hyprctl reload`
+2. Press `Super+R` to launch Raffi
+3. Select an application and press Enter to launch it
+
+## Troubleshooting
+
+### Launcher doesn't appear
+
+- Verify Raffi is installed: `which raffi`
+- If using Fuzzel mode (default), ensure Fuzzel is installed
+- Check Hyprland logs: `journalctl --user -xe`
+
+### Applications launch multiple times or don't launch
+
+- The `grep -q .` check prevents execution when you cancel the launcher
+- Ensure you're using the full command including the conditional check
+- Test manually: `val=$(raffi -pI); echo $val | grep -q . && hyprctl dispatch exec "$val"`
+
+### Command line appears in launcher
+
+- This is normal when using Fuzzel mode with complex shell commands
+- Consider using the native UI with `-u native` for a cleaner experience
