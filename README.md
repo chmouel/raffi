@@ -157,9 +157,13 @@ The file browser is enabled by default and can be disabled or configured under `
 
 #### Emoji & Nerd Fonts Picker
 
-The native interface includes a built-in emoji and icon picker. It is **disabled by default** and must be explicitly enabled. Type the configured keyword (default `emoji`) to open the picker, then continue typing to fuzzy-filter by name. The picker includes a large selection of Unicode emojis (smileys, people, animals, food, travel, objects, symbols, and more) as well as common Nerd Fonts v3 icons (Font Awesome, Devicons, Codicons, and Powerline symbols).
+The native interface includes an emoji and icon picker. It is **disabled by default** and must be explicitly enabled. Type the configured keyword (default `emoji`) to open the picker, then continue typing to fuzzy-filter by name.
+
+Emoji data is sourced from the [rofimoji](https://github.com/fdw/rofimoji) project. On first use the configured data files are automatically downloaded from GitHub and cached locally under `$XDG_CACHE_HOME/raffi/emoji/`. By default the 10 standard Unicode emoji categories are fetched (~1,900 entries). You can choose from over 350 available data files including Nerd Fonts, Font Awesome, gitmoji, kaomoji, and many more (see the full list at [rofimoji data](https://github.com/fdw/rofimoji/tree/main/src/picker/data)). A small built-in fallback set (~50 common emojis) is available when offline and no cached files exist.
 
 Pressing Enter copies the selected character to the clipboard. Ctrl+Enter types it into the focused application via `wtype` or `ydotool`. Both actions can be customised with `action` and `secondary_action` fields.
+
+Use `--refresh-cache` to re-download the data files.
 
 [See below for how to configure this](#emoji--nerd-fonts-picker-configuration)
 
@@ -345,6 +349,10 @@ addons:
   emoji:
     enabled: false
     trigger: "emoji"
+    data_files:
+      - emojis_smileys_emotion
+      - nerd_font
+      - gitmoji
 ```
 
 The `enabled` field controls whether the addon is active.
@@ -367,6 +375,11 @@ addons:
     trigger: "emoji"
     action: "copy"
     secondary_action: "insert"
+    data_files:
+      - emojis_smileys_emotion
+      - emojis_animals_nature
+      - nerd_font
+      - gitmoji
 ```
 
 Field descriptions:
@@ -377,8 +390,29 @@ Field descriptions:
 | `trigger`          | no       | Keyword that activates the picker (default: `emoji`). Type this to open the list.                 |
 | `action`           | no       | Action on Enter. Use `"copy"` to copy to clipboard, `"insert"` to type into the focused app, or a shell command template with `{value}`. Defaults to `"copy"`. |
 | `secondary_action` | no       | Action on Ctrl+Enter. Accepts the same values as `action`. Defaults to `"insert"`.                |
+| `data_files`       | no       | List of data file names to load (without `.csv` extension). Files are downloaded from the [rofimoji data repository](https://github.com/fdw/rofimoji/tree/main/src/picker/data) and cached locally. When omitted, defaults to the 10 standard Unicode emoji categories. |
 
-Type the trigger keyword (e.g., `emoji`) to list all available emojis and Nerd Fonts icons. Continue typing after the keyword to fuzzy-filter by name (e.g., `emoji heart` to find heart-related entries). The picker includes Unicode emojis as well as Nerd Fonts v3 icons (Font Awesome, Devicons, Codicons, and Powerline symbols).
+Type the trigger keyword (e.g., `emoji`) to list available emojis and icons. Continue typing after the keyword to fuzzy-filter by name (e.g., `emoji heart` to find heart-related entries).
+
+Available data files include (among [many others](https://github.com/fdw/rofimoji/tree/main/src/picker/data)):
+
+| File name | Description |
+|---|---|
+| `emojis_smileys_emotion` | Smiley and emotion emojis |
+| `emojis_people_body` | People and body emojis |
+| `emojis_animals_nature` | Animal and nature emojis |
+| `emojis_food_drink` | Food and drink emojis |
+| `emojis_travel_places` | Travel and places emojis |
+| `emojis_activities` | Activity emojis |
+| `emojis_objects` | Object emojis |
+| `emojis_symbols` | Symbol emojis |
+| `emojis_flags` | Flag emojis |
+| `nerd_font` | Nerd Fonts v3 icons (~10,700 icons) |
+| `fontawesome6` | Font Awesome 6 icons |
+| `gitmoji` | Git commit message emojis |
+| `kaomoji` | Japanese text emoticons |
+
+Data files are downloaded on first use and cached at `$XDG_CACHE_HOME/raffi/emoji/`. Use `--refresh-cache` to re-download them.
 
 #### Script Filters Configuration
 

@@ -84,6 +84,21 @@ impl Default for FileBrowserAddonConfig {
     }
 }
 
+/// Default data file names downloaded from the rofimoji project when
+/// the user does not provide an explicit `data_files` list.
+pub const DEFAULT_EMOJI_FILES: &[&str] = &[
+    "emojis_smileys_emotion",
+    "emojis_people_body",
+    "emojis_animals_nature",
+    "emojis_food_drink",
+    "emojis_travel_places",
+    "emojis_activities",
+    "emojis_objects",
+    "emojis_symbols",
+    "emojis_flags",
+    "emojis_component",
+];
+
 /// Configuration for the emoji picker addon
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct EmojiAddonConfig {
@@ -95,6 +110,8 @@ pub struct EmojiAddonConfig {
     pub action: Option<String>,
     #[serde(default)]
     pub secondary_action: Option<String>,
+    #[serde(default)]
+    pub data_files: Option<Vec<String>>,
 }
 
 /// Configuration for a script filter addon
@@ -593,6 +610,19 @@ pub fn clear_icon_cache() -> Result<()> {
     Ok(())
 }
 
+/// Clear the cached emoji data files to force re-download.
+pub fn clear_emoji_cache() -> Result<()> {
+    let emoji_dir = format!(
+        "{}/raffi/emoji",
+        std::env::var("XDG_CACHE_HOME")
+            .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()))
+    );
+    if Path::new(&emoji_dir).exists() {
+        fs::remove_dir_all(&emoji_dir).context("Failed to remove emoji cache directory")?;
+    }
+    Ok(())
+}
+
 /// Read the icon map from the cache file or generate it if it doesn't exist.
 pub fn read_icon_map() -> Result<HashMap<String, String>> {
     let cache_path = format!(
@@ -688,6 +718,7 @@ pub fn run(args: Args) -> Result<()> {
 
     if args.refresh_cache {
         clear_icon_cache()?;
+        clear_emoji_cache()?;
     }
 
     let default_config_path = format!(
@@ -1563,6 +1594,9 @@ mod tests {
             trigger: "em"
             action: "insert"
             secondary_action: "copy"
+            data_files:
+              - emojis_smileys_emotion
+              - nerd_font
         shell:
           binary: sh
           description: "Shell"
@@ -1591,6 +1625,13 @@ mod tests {
         assert_eq!(
             parsed_config.addons.emoji.secondary_action,
             Some("copy".to_string())
+        );
+        assert_eq!(
+            parsed_config.addons.emoji.data_files,
+            Some(vec![
+                "emojis_smileys_emotion".to_string(),
+                "nerd_font".to_string()
+            ])
         );
     }
 
@@ -1621,5 +1662,6 @@ mod tests {
         assert!(parsed_config.addons.emoji.trigger.is_none());
         assert!(parsed_config.addons.emoji.action.is_none());
         assert!(parsed_config.addons.emoji.secondary_action.is_none());
+        assert!(parsed_config.addons.emoji.data_files.is_none());
     }
 }

@@ -812,2231 +812,232 @@ fn filter_snippets(snippets: &[TextSnippet], query: &str) -> Vec<usize> {
     scored.into_iter().map(|(i, _)| i).collect()
 }
 
-/// An emoji or nerd-font icon entry.
-#[derive(Debug, Clone, Copy)]
+/// An emoji or nerd-font icon entry loaded at runtime from CSV data files.
+#[derive(Debug, Clone)]
 struct EmojiEntry {
-    name: &'static str,
-    value: &'static str,
+    name: String,
+    value: String,
 }
 
 /// Maximum number of emoji results to render at once to keep the UI responsive.
 const EMOJI_DISPLAY_LIMIT: usize = 50;
 
-/// Built-in list of Unicode emojis and common Nerd Fonts v3 icons.
-static EMOJI_DATA: &[EmojiEntry] = &[
-        // ── Smileys & Emotion ──────────────────────────────────────────────────
-        EmojiEntry {
-            name: "grinning face",
-            value: "😀",
-        },
-        EmojiEntry {
-            name: "beaming face with smiling eyes",
-            value: "😁",
-        },
-        EmojiEntry {
-            name: "face with tears of joy",
-            value: "😂",
-        },
-        EmojiEntry {
-            name: "rolling on the floor laughing",
-            value: "🤣",
-        },
-        EmojiEntry {
-            name: "smiling face with open mouth",
-            value: "😃",
-        },
-        EmojiEntry {
-            name: "smiling face with open mouth and smiling eyes",
-            value: "😄",
-        },
-        EmojiEntry {
-            name: "grinning squinting face",
-            value: "😆",
-        },
-        EmojiEntry {
-            name: "smiling face with sweat",
-            value: "😅",
-        },
-        EmojiEntry {
-            name: "slightly smiling face",
-            value: "🙂",
-        },
-        EmojiEntry {
-            name: "upside-down face",
-            value: "🙃",
-        },
-        EmojiEntry {
-            name: "winking face",
-            value: "😉",
-        },
-        EmojiEntry {
-            name: "smiling face with halo",
-            value: "😇",
-        },
-        EmojiEntry {
-            name: "smiling face with heart-eyes",
-            value: "😍",
-        },
-        EmojiEntry {
-            name: "smiling face with hearts",
-            value: "🥰",
-        },
-        EmojiEntry {
-            name: "face blowing a kiss",
-            value: "😘",
-        },
-        EmojiEntry {
-            name: "star-struck",
-            value: "🤩",
-        },
-        EmojiEntry {
-            name: "partying face",
-            value: "🥳",
-        },
-        EmojiEntry {
-            name: "face with tongue",
-            value: "😛",
-        },
-        EmojiEntry {
-            name: "winking face with tongue",
-            value: "😜",
-        },
-        EmojiEntry {
-            name: "zany face",
-            value: "🤪",
-        },
-        EmojiEntry {
-            name: "nerd face",
-            value: "🤓",
-        },
-        EmojiEntry {
-            name: "smiling face with sunglasses",
-            value: "😎",
-        },
-        EmojiEntry {
-            name: "thinking face",
-            value: "🤔",
-        },
-        EmojiEntry {
-            name: "zipper-mouth face",
-            value: "🤐",
-        },
-        EmojiEntry {
-            name: "raised eyebrow",
-            value: "🤨",
-        },
-        EmojiEntry {
-            name: "neutral face",
-            value: "😐",
-        },
-        EmojiEntry {
-            name: "expressionless face",
-            value: "😑",
-        },
-        EmojiEntry {
-            name: "face without mouth",
-            value: "😶",
-        },
-        EmojiEntry {
-            name: "smirking face",
-            value: "😏",
-        },
-        EmojiEntry {
-            name: "unamused face",
-            value: "😒",
-        },
-        EmojiEntry {
-            name: "disappointed face",
-            value: "😞",
-        },
-        EmojiEntry {
-            name: "worried face",
-            value: "😟",
-        },
-        EmojiEntry {
-            name: "slightly frowning face",
-            value: "🙁",
-        },
-        EmojiEntry {
-            name: "crying face",
-            value: "😢",
-        },
-        EmojiEntry {
-            name: "loudly crying face",
-            value: "😭",
-        },
-        EmojiEntry {
-            name: "pouting face",
-            value: "😡",
-        },
-        EmojiEntry {
-            name: "angry face",
-            value: "😠",
-        },
-        EmojiEntry {
-            name: "exploding head",
-            value: "🤯",
-        },
-        EmojiEntry {
-            name: "flushed face",
-            value: "😳",
-        },
-        EmojiEntry {
-            name: "fearful face",
-            value: "😨",
-        },
-        EmojiEntry {
-            name: "anxious face with sweat",
-            value: "😰",
-        },
-        EmojiEntry {
-            name: "face screaming in fear",
-            value: "😱",
-        },
-        EmojiEntry {
-            name: "hushing face",
-            value: "🤫",
-        },
-        EmojiEntry {
-            name: "lying face",
-            value: "🤥",
-        },
-        EmojiEntry {
-            name: "sleeping face",
-            value: "😴",
-        },
-        EmojiEntry {
-            name: "drooling face",
-            value: "🤤",
-        },
-        EmojiEntry {
-            name: "nauseated face",
-            value: "🤢",
-        },
-        EmojiEntry {
-            name: "sneezing face",
-            value: "🤧",
-        },
-        EmojiEntry {
-            name: "face with medical mask",
-            value: "😷",
-        },
-        EmojiEntry {
-            name: "woozy face",
-            value: "🥴",
-        },
-        EmojiEntry {
-            name: "hot face",
-            value: "🥵",
-        },
-        EmojiEntry {
-            name: "cold face",
-            value: "🥶",
-        },
-        EmojiEntry {
-            name: "cowboy hat face",
-            value: "🤠",
-        },
-        EmojiEntry {
-            name: "smiling devil",
-            value: "😈",
-        },
-        EmojiEntry {
-            name: "skull",
-            value: "💀",
-        },
-        EmojiEntry {
-            name: "ghost",
-            value: "👻",
-        },
-        EmojiEntry {
-            name: "alien",
-            value: "👽",
-        },
-        EmojiEntry {
-            name: "robot",
-            value: "🤖",
-        },
-        EmojiEntry {
-            name: "pile of poo",
-            value: "💩",
-        },
-        // ── People & Body ──────────────────────────────────────────────────────
-        EmojiEntry {
-            name: "waving hand",
-            value: "👋",
-        },
-        EmojiEntry {
-            name: "raised hand",
-            value: "✋",
-        },
-        EmojiEntry {
-            name: "thumbs up",
-            value: "👍",
-        },
-        EmojiEntry {
-            name: "thumbs down",
-            value: "👎",
-        },
-        EmojiEntry {
-            name: "clapping hands",
-            value: "👏",
-        },
-        EmojiEntry {
-            name: "raising hands",
-            value: "🙌",
-        },
-        EmojiEntry {
-            name: "folded hands / pray",
-            value: "🙏",
-        },
-        EmojiEntry {
-            name: "handshake",
-            value: "🤝",
-        },
-        EmojiEntry {
-            name: "victory hand",
-            value: "✌️",
-        },
-        EmojiEntry {
-            name: "crossed fingers",
-            value: "🤞",
-        },
-        EmojiEntry {
-            name: "ok hand",
-            value: "👌",
-        },
-        EmojiEntry {
-            name: "pointing right",
-            value: "👉",
-        },
-        EmojiEntry {
-            name: "pointing left",
-            value: "👈",
-        },
-        EmojiEntry {
-            name: "pointing up",
-            value: "👆",
-        },
-        EmojiEntry {
-            name: "pointing down",
-            value: "👇",
-        },
-        EmojiEntry {
-            name: "raised fist",
-            value: "✊",
-        },
-        EmojiEntry {
-            name: "flexed biceps",
-            value: "💪",
-        },
-        EmojiEntry {
-            name: "eyes",
-            value: "👀",
-        },
-        EmojiEntry {
-            name: "tongue",
-            value: "👅",
-        },
-        EmojiEntry {
-            name: "ear",
-            value: "👂",
-        },
-        EmojiEntry {
-            name: "nose",
-            value: "👃",
-        },
-        EmojiEntry {
-            name: "brain",
-            value: "🧠",
-        },
-        EmojiEntry {
-            name: "person running",
-            value: "🏃",
-        },
-        EmojiEntry {
-            name: "person walking",
-            value: "🚶",
-        },
-        EmojiEntry {
-            name: "person dancing",
-            value: "💃",
-        },
-        // ── Animals & Nature ──────────────────────────────────────────────────
-        EmojiEntry {
-            name: "dog face",
-            value: "🐶",
-        },
-        EmojiEntry {
-            name: "cat face",
-            value: "🐱",
-        },
-        EmojiEntry {
-            name: "mouse face",
-            value: "🐭",
-        },
-        EmojiEntry {
-            name: "rabbit face",
-            value: "🐰",
-        },
-        EmojiEntry {
-            name: "fox face",
-            value: "🦊",
-        },
-        EmojiEntry {
-            name: "bear face",
-            value: "🐻",
-        },
-        EmojiEntry {
-            name: "panda face",
-            value: "🐼",
-        },
-        EmojiEntry {
-            name: "koala",
-            value: "🐨",
-        },
-        EmojiEntry {
-            name: "tiger face",
-            value: "🐯",
-        },
-        EmojiEntry {
-            name: "lion face",
-            value: "🦁",
-        },
-        EmojiEntry {
-            name: "cow face",
-            value: "🐮",
-        },
-        EmojiEntry {
-            name: "pig face",
-            value: "🐷",
-        },
-        EmojiEntry {
-            name: "frog face",
-            value: "🐸",
-        },
-        EmojiEntry {
-            name: "monkey face",
-            value: "🐵",
-        },
-        EmojiEntry {
-            name: "unicorn face",
-            value: "🦄",
-        },
-        EmojiEntry {
-            name: "horse face",
-            value: "🐴",
-        },
-        EmojiEntry {
-            name: "wolf face",
-            value: "🐺",
-        },
-        EmojiEntry {
-            name: "penguin",
-            value: "🐧",
-        },
-        EmojiEntry {
-            name: "bird",
-            value: "🐦",
-        },
-        EmojiEntry {
-            name: "baby chick",
-            value: "🐤",
-        },
-        EmojiEntry {
-            name: "owl",
-            value: "🦉",
-        },
-        EmojiEntry {
-            name: "eagle",
-            value: "🦅",
-        },
-        EmojiEntry {
-            name: "duck",
-            value: "🦆",
-        },
-        EmojiEntry {
-            name: "flamingo",
-            value: "🦩",
-        },
-        EmojiEntry {
-            name: "butterfly",
-            value: "🦋",
-        },
-        EmojiEntry {
-            name: "honeybee",
-            value: "🐝",
-        },
-        EmojiEntry {
-            name: "snail",
-            value: "🐌",
-        },
-        EmojiEntry {
-            name: "turtle",
-            value: "🐢",
-        },
-        EmojiEntry {
-            name: "snake",
-            value: "🐍",
-        },
-        EmojiEntry {
-            name: "dragon face",
-            value: "🐲",
-        },
-        EmojiEntry {
-            name: "whale",
-            value: "🐳",
-        },
-        EmojiEntry {
-            name: "dolphin",
-            value: "🐬",
-        },
-        EmojiEntry {
-            name: "shark",
-            value: "🦈",
-        },
-        EmojiEntry {
-            name: "octopus",
-            value: "🐙",
-        },
-        EmojiEntry {
-            name: "crab",
-            value: "🦀",
-        },
-        EmojiEntry {
-            name: "paw prints",
-            value: "🐾",
-        },
-        EmojiEntry {
-            name: "cherry blossom",
-            value: "🌸",
-        },
-        EmojiEntry {
-            name: "sunflower",
-            value: "🌻",
-        },
-        EmojiEntry {
-            name: "rose",
-            value: "🌹",
-        },
-        EmojiEntry {
-            name: "tulip",
-            value: "🌷",
-        },
-        EmojiEntry {
-            name: "seedling",
-            value: "🌱",
-        },
-        EmojiEntry {
-            name: "evergreen tree",
-            value: "🌲",
-        },
-        EmojiEntry {
-            name: "deciduous tree",
-            value: "🌳",
-        },
-        EmojiEntry {
-            name: "palm tree",
-            value: "🌴",
-        },
-        EmojiEntry {
-            name: "cactus",
-            value: "🌵",
-        },
-        EmojiEntry {
-            name: "four leaf clover",
-            value: "🍀",
-        },
-        EmojiEntry {
-            name: "mushroom",
-            value: "🍄",
-        },
-        EmojiEntry {
-            name: "globe showing europe-africa",
-            value: "🌍",
-        },
-        EmojiEntry {
-            name: "globe showing americas",
-            value: "🌎",
-        },
-        EmojiEntry {
-            name: "globe showing asia-australia",
-            value: "🌏",
-        },
-        EmojiEntry {
-            name: "rainbow",
-            value: "🌈",
-        },
-        EmojiEntry {
-            name: "sun",
-            value: "☀️",
-        },
-        EmojiEntry {
-            name: "full moon",
-            value: "🌕",
-        },
-        EmojiEntry {
-            name: "crescent moon",
-            value: "🌙",
-        },
-        EmojiEntry {
-            name: "snowflake",
-            value: "❄️",
-        },
-        EmojiEntry {
-            name: "lightning bolt",
-            value: "⚡",
-        },
-        EmojiEntry {
-            name: "fire",
-            value: "🔥",
-        },
-        EmojiEntry {
-            name: "water wave",
-            value: "🌊",
-        },
-        // ── Food & Drink ──────────────────────────────────────────────────────
-        EmojiEntry {
-            name: "red apple",
-            value: "🍎",
-        },
-        EmojiEntry {
-            name: "tangerine",
-            value: "🍊",
-        },
-        EmojiEntry {
-            name: "lemon",
-            value: "🍋",
-        },
-        EmojiEntry {
-            name: "grapes",
-            value: "🍇",
-        },
-        EmojiEntry {
-            name: "strawberry",
-            value: "🍓",
-        },
-        EmojiEntry {
-            name: "watermelon",
-            value: "🍉",
-        },
-        EmojiEntry {
-            name: "banana",
-            value: "🍌",
-        },
-        EmojiEntry {
-            name: "pineapple",
-            value: "🍍",
-        },
-        EmojiEntry {
-            name: "mango",
-            value: "🥭",
-        },
-        EmojiEntry {
-            name: "avocado",
-            value: "🥑",
-        },
-        EmojiEntry {
-            name: "tomato",
-            value: "🍅",
-        },
-        EmojiEntry {
-            name: "pizza",
-            value: "🍕",
-        },
-        EmojiEntry {
-            name: "hamburger",
-            value: "🍔",
-        },
-        EmojiEntry {
-            name: "french fries",
-            value: "🍟",
-        },
-        EmojiEntry {
-            name: "hot dog",
-            value: "🌭",
-        },
-        EmojiEntry {
-            name: "taco",
-            value: "🌮",
-        },
-        EmojiEntry {
-            name: "sushi",
-            value: "🍣",
-        },
-        EmojiEntry {
-            name: "bento box",
-            value: "🍱",
-        },
-        EmojiEntry {
-            name: "ramen noodles",
-            value: "🍜",
-        },
-        EmojiEntry {
-            name: "spaghetti",
-            value: "🍝",
-        },
-        EmojiEntry {
-            name: "birthday cake",
-            value: "🎂",
-        },
-        EmojiEntry {
-            name: "shortcake",
-            value: "🍰",
-        },
-        EmojiEntry {
-            name: "chocolate bar",
-            value: "🍫",
-        },
-        EmojiEntry {
-            name: "candy",
-            value: "🍬",
-        },
-        EmojiEntry {
-            name: "lollipop",
-            value: "🍭",
-        },
-        EmojiEntry {
-            name: "popcorn",
-            value: "🍿",
-        },
-        EmojiEntry {
-            name: "doughnut",
-            value: "🍩",
-        },
-        EmojiEntry {
-            name: "cookie",
-            value: "🍪",
-        },
-        EmojiEntry {
-            name: "hot beverage / coffee",
-            value: "☕",
-        },
-        EmojiEntry {
-            name: "teacup without handle",
-            value: "🍵",
-        },
-        EmojiEntry {
-            name: "beer mug",
-            value: "🍺",
-        },
-        EmojiEntry {
-            name: "clinking beer mugs",
-            value: "🍻",
-        },
-        EmojiEntry {
-            name: "wine glass",
-            value: "🍷",
-        },
-        EmojiEntry {
-            name: "tropical drink",
-            value: "🍹",
-        },
-        EmojiEntry {
-            name: "cocktail glass",
-            value: "🍸",
-        },
-        EmojiEntry {
-            name: "bottle with popping cork",
-            value: "🍾",
-        },
-        EmojiEntry {
-            name: "honey pot",
-            value: "🍯",
-        },
-        // ── Travel & Places ───────────────────────────────────────────────────
-        EmojiEntry {
-            name: "car",
-            value: "🚗",
-        },
-        EmojiEntry {
-            name: "taxi",
-            value: "🚕",
-        },
-        EmojiEntry {
-            name: "bus",
-            value: "🚌",
-        },
-        EmojiEntry {
-            name: "police car",
-            value: "🚓",
-        },
-        EmojiEntry {
-            name: "ambulance",
-            value: "🚑",
-        },
-        EmojiEntry {
-            name: "fire engine",
-            value: "🚒",
-        },
-        EmojiEntry {
-            name: "racing car",
-            value: "🏎️",
-        },
-        EmojiEntry {
-            name: "motorcycle",
-            value: "🏍️",
-        },
-        EmojiEntry {
-            name: "bicycle",
-            value: "🚲",
-        },
-        EmojiEntry {
-            name: "airplane",
-            value: "✈️",
-        },
-        EmojiEntry {
-            name: "rocket",
-            value: "🚀",
-        },
-        EmojiEntry {
-            name: "flying saucer",
-            value: "🛸",
-        },
-        EmojiEntry {
-            name: "ship",
-            value: "🚢",
-        },
-        EmojiEntry {
-            name: "speedboat",
-            value: "🚤",
-        },
-        EmojiEntry {
-            name: "locomotive",
-            value: "🚂",
-        },
-        EmojiEntry {
-            name: "metro",
-            value: "🚇",
-        },
-        EmojiEntry {
-            name: "station",
-            value: "🚉",
-        },
-        EmojiEntry {
-            name: "helicopter",
-            value: "🚁",
-        },
-        EmojiEntry {
-            name: "house",
-            value: "🏠",
-        },
-        EmojiEntry {
-            name: "office building",
-            value: "🏢",
-        },
-        EmojiEntry {
-            name: "hospital",
-            value: "🏥",
-        },
-        EmojiEntry {
-            name: "bank",
-            value: "🏦",
-        },
-        EmojiEntry {
-            name: "school",
-            value: "🏫",
-        },
-        EmojiEntry {
-            name: "european castle",
-            value: "🏰",
-        },
-        EmojiEntry {
-            name: "statue of liberty",
-            value: "🗽",
-        },
-        EmojiEntry {
-            name: "eiffel tower",
-            value: "🗼",
-        },
-        EmojiEntry {
-            name: "mount fuji",
-            value: "🗻",
-        },
-        EmojiEntry {
-            name: "volcano",
-            value: "🌋",
-        },
-        EmojiEntry {
-            name: "camping",
-            value: "🏕️",
-        },
-        EmojiEntry {
-            name: "beach with umbrella",
-            value: "🏖️",
-        },
-        EmojiEntry {
-            name: "desert island",
-            value: "🏝️",
-        },
-        // ── Activities ────────────────────────────────────────────────────────
-        EmojiEntry {
-            name: "soccer ball",
-            value: "⚽",
-        },
-        EmojiEntry {
-            name: "basketball",
-            value: "🏀",
-        },
-        EmojiEntry {
-            name: "football",
-            value: "🏈",
-        },
-        EmojiEntry {
-            name: "baseball",
-            value: "⚾",
-        },
-        EmojiEntry {
-            name: "tennis",
-            value: "🎾",
-        },
-        EmojiEntry {
-            name: "volleyball",
-            value: "🏐",
-        },
-        EmojiEntry {
-            name: "rugby football",
-            value: "🏉",
-        },
-        EmojiEntry {
-            name: "table tennis",
-            value: "🏓",
-        },
-        EmojiEntry {
-            name: "badminton",
-            value: "🏸",
-        },
-        EmojiEntry {
-            name: "trophy",
-            value: "🏆",
-        },
-        EmojiEntry {
-            name: "medal",
-            value: "🏅",
-        },
-        EmojiEntry {
-            name: "1st place medal",
-            value: "🥇",
-        },
-        EmojiEntry {
-            name: "dart",
-            value: "🎯",
-        },
-        EmojiEntry {
-            name: "game die",
-            value: "🎲",
-        },
-        EmojiEntry {
-            name: "chess pawn",
-            value: "♟️",
-        },
-        EmojiEntry {
-            name: "video game",
-            value: "🎮",
-        },
-        EmojiEntry {
-            name: "joystick",
-            value: "🕹️",
-        },
-        EmojiEntry {
-            name: "performing arts",
-            value: "🎭",
-        },
-        EmojiEntry {
-            name: "artist palette",
-            value: "🎨",
-        },
-        EmojiEntry {
-            name: "camera",
-            value: "📷",
-        },
-        EmojiEntry {
-            name: "movie camera",
-            value: "🎬",
-        },
-        EmojiEntry {
-            name: "microphone",
-            value: "🎤",
-        },
-        EmojiEntry {
-            name: "headphone",
-            value: "🎧",
-        },
-        EmojiEntry {
-            name: "musical notes",
-            value: "🎵",
-        },
-        EmojiEntry {
-            name: "multiple musical notes",
-            value: "🎶",
-        },
-        EmojiEntry {
-            name: "guitar",
-            value: "🎸",
-        },
-        EmojiEntry {
-            name: "musical keyboard",
-            value: "🎹",
-        },
-        EmojiEntry {
-            name: "trumpet",
-            value: "🎺",
-        },
-        EmojiEntry {
-            name: "violin",
-            value: "🎻",
-        },
-        EmojiEntry {
-            name: "drum",
-            value: "🥁",
-        },
-        // ── Objects ───────────────────────────────────────────────────────────
-        EmojiEntry {
-            name: "laptop computer",
-            value: "💻",
-        },
-        EmojiEntry {
-            name: "desktop computer",
-            value: "🖥️",
-        },
-        EmojiEntry {
-            name: "printer",
-            value: "🖨️",
-        },
-        EmojiEntry {
-            name: "keyboard",
-            value: "⌨️",
-        },
-        EmojiEntry {
-            name: "computer mouse",
-            value: "🖱️",
-        },
-        EmojiEntry {
-            name: "floppy disk",
-            value: "💾",
-        },
-        EmojiEntry {
-            name: "optical disk",
-            value: "💿",
-        },
-        EmojiEntry {
-            name: "dvd",
-            value: "📀",
-        },
-        EmojiEntry {
-            name: "mobile phone",
-            value: "📱",
-        },
-        EmojiEntry {
-            name: "telephone",
-            value: "☎️",
-        },
-        EmojiEntry {
-            name: "television",
-            value: "📺",
-        },
-        EmojiEntry {
-            name: "magnifying glass left",
-            value: "🔍",
-        },
-        EmojiEntry {
-            name: "magnifying glass right",
-            value: "🔎",
-        },
-        EmojiEntry {
-            name: "telescope",
-            value: "🔭",
-        },
-        EmojiEntry {
-            name: "satellite antenna",
-            value: "📡",
-        },
-        EmojiEntry {
-            name: "battery",
-            value: "🔋",
-        },
-        EmojiEntry {
-            name: "electric plug",
-            value: "🔌",
-        },
-        EmojiEntry {
-            name: "light bulb",
-            value: "💡",
-        },
-        EmojiEntry {
-            name: "flashlight",
-            value: "🔦",
-        },
-        EmojiEntry {
-            name: "candle",
-            value: "🕯️",
-        },
-        EmojiEntry {
-            name: "money bag",
-            value: "💰",
-        },
-        EmojiEntry {
-            name: "credit card",
-            value: "💳",
-        },
-        EmojiEntry {
-            name: "coin",
-            value: "🪙",
-        },
-        EmojiEntry {
-            name: "gem stone",
-            value: "💎",
-        },
-        EmojiEntry {
-            name: "wrench",
-            value: "🔧",
-        },
-        EmojiEntry {
-            name: "hammer",
-            value: "🔨",
-        },
-        EmojiEntry {
-            name: "nut and bolt",
-            value: "🔩",
-        },
-        EmojiEntry {
-            name: "key",
-            value: "🔑",
-        },
-        EmojiEntry {
-            name: "locked",
-            value: "🔒",
-        },
-        EmojiEntry {
-            name: "unlocked",
-            value: "🔓",
-        },
-        EmojiEntry {
-            name: "door",
-            value: "🚪",
-        },
-        EmojiEntry {
-            name: "package",
-            value: "📦",
-        },
-        EmojiEntry {
-            name: "open mailbox",
-            value: "📬",
-        },
-        EmojiEntry {
-            name: "pencil",
-            value: "✏️",
-        },
-        EmojiEntry {
-            name: "pen",
-            value: "🖊️",
-        },
-        EmojiEntry {
-            name: "memo / notebook with pen",
-            value: "📝",
-        },
-        EmojiEntry {
-            name: "open book",
-            value: "📖",
-        },
-        EmojiEntry {
-            name: "books",
-            value: "📚",
-        },
-        EmojiEntry {
-            name: "newspaper",
-            value: "📰",
-        },
-        EmojiEntry {
-            name: "bookmark",
-            value: "🔖",
-        },
-        EmojiEntry {
-            name: "label / tag",
-            value: "🏷️",
-        },
-        EmojiEntry {
-            name: "bar chart",
-            value: "📊",
-        },
-        EmojiEntry {
-            name: "chart increasing",
-            value: "📈",
-        },
-        EmojiEntry {
-            name: "chart decreasing",
-            value: "📉",
-        },
-        EmojiEntry {
-            name: "calendar",
-            value: "📅",
-        },
-        EmojiEntry {
-            name: "clipboard",
-            value: "📋",
-        },
-        EmojiEntry {
-            name: "pushpin",
-            value: "📌",
-        },
-        EmojiEntry {
-            name: "scissors",
-            value: "✂️",
-        },
-        EmojiEntry {
-            name: "paperclip",
-            value: "📎",
-        },
-        EmojiEntry {
-            name: "envelope",
-            value: "✉️",
-        },
-        EmojiEntry {
-            name: "inbox tray",
-            value: "📥",
-        },
-        EmojiEntry {
-            name: "outbox tray",
-            value: "📤",
-        },
-        EmojiEntry {
-            name: "wastebasket",
-            value: "🗑️",
-        },
-        EmojiEntry {
-            name: "hourglass done",
-            value: "⌛",
-        },
-        EmojiEntry {
-            name: "hourglass not done",
-            value: "⏳",
-        },
-        EmojiEntry {
-            name: "alarm clock",
-            value: "⏰",
-        },
-        EmojiEntry {
-            name: "stopwatch",
-            value: "⏱️",
-        },
-        EmojiEntry {
-            name: "timer clock",
-            value: "⏲️",
-        },
-        EmojiEntry {
-            name: "clock face",
-            value: "🕐",
-        },
-        EmojiEntry {
-            name: "thermometer",
-            value: "🌡️",
-        },
-        EmojiEntry {
-            name: "umbrella",
-            value: "☂️",
-        },
-        EmojiEntry {
-            name: "syringe",
-            value: "💉",
-        },
-        EmojiEntry {
-            name: "pill",
-            value: "💊",
-        },
-        EmojiEntry {
-            name: "test tube",
-            value: "🧪",
-        },
-        EmojiEntry {
-            name: "dna",
-            value: "🧬",
-        },
-        EmojiEntry {
-            name: "microscope",
-            value: "🔬",
-        },
-        EmojiEntry {
-            name: "safety pin",
-            value: "🧷",
-        },
-        EmojiEntry {
-            name: "broom",
-            value: "🧹",
-        },
-        EmojiEntry {
-            name: "bucket",
-            value: "🪣",
-        },
-        EmojiEntry {
-            name: "soap",
-            value: "🧼",
-        },
-        EmojiEntry {
-            name: "toilet",
-            value: "🚽",
-        },
-        EmojiEntry {
-            name: "bathtub",
-            value: "🛁",
-        },
-        EmojiEntry {
-            name: "shopping cart",
-            value: "🛒",
-        },
-        EmojiEntry {
-            name: "toolbox",
-            value: "🧰",
-        },
-        EmojiEntry {
-            name: "magnet",
-            value: "🧲",
-        },
-        EmojiEntry {
-            name: "chains",
-            value: "⛓️",
-        },
-        EmojiEntry {
-            name: "ladder",
-            value: "🪜",
-        },
-        EmojiEntry {
-            name: "chair",
-            value: "🪑",
-        },
-        EmojiEntry {
-            name: "bed",
-            value: "🛏️",
-        },
-        EmojiEntry {
-            name: "couch and lamp",
-            value: "🛋️",
-        },
-        EmojiEntry {
-            name: "mirror",
-            value: "🪞",
-        },
-        EmojiEntry {
-            name: "window",
-            value: "🪟",
-        },
-        EmojiEntry {
-            name: "teddy bear",
-            value: "🧸",
-        },
-        EmojiEntry {
-            name: "party popper",
-            value: "🎉",
-        },
-        EmojiEntry {
-            name: "confetti ball",
-            value: "🎊",
-        },
-        EmojiEntry {
-            name: "balloon",
-            value: "🎈",
-        },
-        EmojiEntry {
-            name: "gift",
-            value: "🎁",
-        },
-        EmojiEntry {
-            name: "ribbon",
-            value: "🎀",
-        },
-        EmojiEntry {
-            name: "ticket",
-            value: "🎫",
-        },
-        // ── Symbols ───────────────────────────────────────────────────────────
-        EmojiEntry {
-            name: "red heart",
-            value: "❤️",
-        },
-        EmojiEntry {
-            name: "orange heart",
-            value: "🧡",
-        },
-        EmojiEntry {
-            name: "yellow heart",
-            value: "💛",
-        },
-        EmojiEntry {
-            name: "green heart",
-            value: "💚",
-        },
-        EmojiEntry {
-            name: "blue heart",
-            value: "💙",
-        },
-        EmojiEntry {
-            name: "purple heart",
-            value: "💜",
-        },
-        EmojiEntry {
-            name: "black heart",
-            value: "🖤",
-        },
-        EmojiEntry {
-            name: "white heart",
-            value: "🤍",
-        },
-        EmojiEntry {
-            name: "brown heart",
-            value: "🤎",
-        },
-        EmojiEntry {
-            name: "broken heart",
-            value: "💔",
-        },
-        EmojiEntry {
-            name: "sparkling heart",
-            value: "💖",
-        },
-        EmojiEntry {
-            name: "growing heart",
-            value: "💗",
-        },
-        EmojiEntry {
-            name: "beating heart",
-            value: "💓",
-        },
-        EmojiEntry {
-            name: "revolving hearts",
-            value: "💞",
-        },
-        EmojiEntry {
-            name: "heart with arrow",
-            value: "💘",
-        },
-        EmojiEntry {
-            name: "heart exclamation",
-            value: "❣️",
-        },
-        EmojiEntry {
-            name: "check mark button",
-            value: "✅",
-        },
-        EmojiEntry {
-            name: "cross mark",
-            value: "❌",
-        },
-        EmojiEntry {
-            name: "warning",
-            value: "⚠️",
-        },
-        EmojiEntry {
-            name: "information",
-            value: "ℹ️",
-        },
-        EmojiEntry {
-            name: "question mark",
-            value: "❓",
-        },
-        EmojiEntry {
-            name: "exclamation mark",
-            value: "❗",
-        },
-        EmojiEntry {
-            name: "plus sign",
-            value: "➕",
-        },
-        EmojiEntry {
-            name: "minus sign",
-            value: "➖",
-        },
-        EmojiEntry {
-            name: "multiplication sign",
-            value: "✖️",
-        },
-        EmojiEntry {
-            name: "division sign",
-            value: "➗",
-        },
-        EmojiEntry {
-            name: "repeat button",
-            value: "🔁",
-        },
-        EmojiEntry {
-            name: "shuffle tracks button",
-            value: "🔀",
-        },
-        EmojiEntry {
-            name: "play button",
-            value: "▶️",
-        },
-        EmojiEntry {
-            name: "pause button",
-            value: "⏸️",
-        },
-        EmojiEntry {
-            name: "stop button",
-            value: "⏹️",
-        },
-        EmojiEntry {
-            name: "fast-forward button",
-            value: "⏩",
-        },
-        EmojiEntry {
-            name: "rewind button",
-            value: "⏪",
-        },
-        EmojiEntry {
-            name: "speaker high volume",
-            value: "🔊",
-        },
-        EmojiEntry {
-            name: "muted speaker",
-            value: "🔇",
-        },
-        EmojiEntry {
-            name: "bell",
-            value: "🔔",
-        },
-        EmojiEntry {
-            name: "no bell",
-            value: "🔕",
-        },
-        EmojiEntry {
-            name: "megaphone",
-            value: "📣",
-        },
-        EmojiEntry {
-            name: "loudspeaker",
-            value: "📢",
-        },
-        EmojiEntry {
-            name: "star",
-            value: "⭐",
-        },
-        EmojiEntry {
-            name: "glowing star",
-            value: "🌟",
-        },
-        EmojiEntry {
-            name: "sparkles",
-            value: "✨",
-        },
-        EmojiEntry {
-            name: "hundred points",
-            value: "💯",
-        },
-        EmojiEntry {
-            name: "recycle symbol",
-            value: "♻️",
-        },
-        EmojiEntry {
-            name: "peace symbol",
-            value: "☮️",
-        },
-        EmojiEntry {
-            name: "flag in hole / golf",
-            value: "⛳",
-        },
-        EmojiEntry {
-            name: "trophy cup",
-            value: "🏆",
-        },
-        EmojiEntry {
-            name: "no entry",
-            value: "⛔",
-        },
-        EmojiEntry {
-            name: "prohibited",
-            value: "🚫",
-        },
-        EmojiEntry {
-            name: "up arrow",
-            value: "⬆️",
-        },
-        EmojiEntry {
-            name: "down arrow",
-            value: "⬇️",
-        },
-        EmojiEntry {
-            name: "left arrow",
-            value: "⬅️",
-        },
-        EmojiEntry {
-            name: "right arrow",
-            value: "➡️",
-        },
-        EmojiEntry {
-            name: "right arrow curving left",
-            value: "↩️",
-        },
-        EmojiEntry {
-            name: "left arrow curving right",
-            value: "↪️",
-        },
-        EmojiEntry {
-            name: "shuffle / arrows counterclockwise",
-            value: "🔄",
-        },
-        EmojiEntry {
-            name: "clock",
-            value: "🕐",
-        },
-        EmojiEntry {
-            name: "money with wings",
-            value: "💸",
-        },
-        EmojiEntry {
-            name: "chart with upwards trend",
-            value: "📈",
-        },
-        EmojiEntry {
-            name: "new button",
-            value: "🆕",
-        },
-        EmojiEntry {
-            name: "free button",
-            value: "🆓",
-        },
-        EmojiEntry {
-            name: "up button",
-            value: "🆙",
-        },
-        EmojiEntry {
-            name: "ok button",
-            value: "🆗",
-        },
-        EmojiEntry {
-            name: "sos button",
-            value: "🆘",
-        },
-        EmojiEntry {
-            name: "id button",
-            value: "🆔",
-        },
-        EmojiEntry {
-            name: "atm sign",
-            value: "🏧",
-        },
-        EmojiEntry {
-            name: "keycap hash",
-            value: "#️⃣",
-        },
-        EmojiEntry {
-            name: "keycap asterisk",
-            value: "*️⃣",
-        },
-        EmojiEntry {
-            name: "copyright",
-            value: "©️",
-        },
-        EmojiEntry {
-            name: "registered",
-            value: "®️",
-        },
-        EmojiEntry {
-            name: "trade mark",
-            value: "™️",
-        },
-        // ── Nerd Fonts v3 ─────────────────────────────────────────────────────
-        // Powerline / separators
-        EmojiEntry {
-            name: "nf: branch (powerline)",
-            value: "\u{E0A0}",
-        },
-        EmojiEntry {
-            name: "nf: line number (powerline)",
-            value: "\u{E0A1}",
-        },
-        EmojiEntry {
-            name: "nf: read-only (powerline)",
-            value: "\u{E0A2}",
-        },
-        EmojiEntry {
-            name: "nf: chevron right solid (powerline)",
-            value: "\u{E0B0}",
-        },
-        EmojiEntry {
-            name: "nf: chevron right thin (powerline)",
-            value: "\u{E0B1}",
-        },
-        EmojiEntry {
-            name: "nf: chevron left solid (powerline)",
-            value: "\u{E0B2}",
-        },
-        EmojiEntry {
-            name: "nf: chevron left thin (powerline)",
-            value: "\u{E0B3}",
-        },
-        EmojiEntry {
-            name: "nf: rounded right solid (powerline)",
-            value: "\u{E0B4}",
-        },
-        EmojiEntry {
-            name: "nf: rounded right thin (powerline)",
-            value: "\u{E0B5}",
-        },
-        EmojiEntry {
-            name: "nf: rounded left solid (powerline)",
-            value: "\u{E0B6}",
-        },
-        EmojiEntry {
-            name: "nf: rounded left thin (powerline)",
-            value: "\u{E0B7}",
-        },
-        // Font Awesome (nf-fa)
-        EmojiEntry {
-            name: "nf-fa: home",
-            value: "\u{F015}",
-        },
-        EmojiEntry {
-            name: "nf-fa: search",
-            value: "\u{F002}",
-        },
-        EmojiEntry {
-            name: "nf-fa: heart",
-            value: "\u{F004}",
-        },
-        EmojiEntry {
-            name: "nf-fa: star",
-            value: "\u{F005}",
-        },
-        EmojiEntry {
-            name: "nf-fa: user",
-            value: "\u{F007}",
-        },
-        EmojiEntry {
-            name: "nf-fa: check",
-            value: "\u{F00C}",
-        },
-        EmojiEntry {
-            name: "nf-fa: times / close",
-            value: "\u{F00D}",
-        },
-        EmojiEntry {
-            name: "nf-fa: power off",
-            value: "\u{F011}",
-        },
-        EmojiEntry {
-            name: "nf-fa: cog / settings",
-            value: "\u{F013}",
-        },
-        EmojiEntry {
-            name: "nf-fa: trash",
-            value: "\u{F014}",
-        },
-        EmojiEntry {
-            name: "nf-fa: file",
-            value: "\u{F016}",
-        },
-        EmojiEntry {
-            name: "nf-fa: clock",
-            value: "\u{F017}",
-        },
-        EmojiEntry {
-            name: "nf-fa: download",
-            value: "\u{F019}",
-        },
-        EmojiEntry {
-            name: "nf-fa: refresh / sync",
-            value: "\u{F021}",
-        },
-        EmojiEntry {
-            name: "nf-fa: lock",
-            value: "\u{F023}",
-        },
-        EmojiEntry {
-            name: "nf-fa: tag",
-            value: "\u{F02B}",
-        },
-        EmojiEntry {
-            name: "nf-fa: bookmark",
-            value: "\u{F02E}",
-        },
-        EmojiEntry {
-            name: "nf-fa: print",
-            value: "\u{F02F}",
-        },
-        EmojiEntry {
-            name: "nf-fa: camera",
-            value: "\u{F030}",
-        },
-        EmojiEntry {
-            name: "nf-fa: video camera",
-            value: "\u{F03D}",
-        },
-        EmojiEntry {
-            name: "nf-fa: edit / pencil",
-            value: "\u{F040}",
-        },
-        EmojiEntry {
-            name: "nf-fa: map-marker / location pin",
-            value: "\u{F041}",
-        },
-        EmojiEntry {
-            name: "nf-fa: droplet / tint",
-            value: "\u{F043}",
-        },
-        EmojiEntry {
-            name: "nf-fa: external link",
-            value: "\u{F045}",
-        },
-        EmojiEntry {
-            name: "nf-fa: chevron left",
-            value: "\u{F053}",
-        },
-        EmojiEntry {
-            name: "nf-fa: chevron right",
-            value: "\u{F054}",
-        },
-        EmojiEntry {
-            name: "nf-fa: plus",
-            value: "\u{F067}",
-        },
-        EmojiEntry {
-            name: "nf-fa: minus",
-            value: "\u{F068}",
-        },
-        EmojiEntry {
-            name: "nf-fa: chevron up",
-            value: "\u{F077}",
-        },
-        EmojiEntry {
-            name: "nf-fa: chevron down",
-            value: "\u{F078}",
-        },
-        EmojiEntry {
-            name: "nf-fa: folder",
-            value: "\u{F07B}",
-        },
-        EmojiEntry {
-            name: "nf-fa: folder open",
-            value: "\u{F07C}",
-        },
-        EmojiEntry {
-            name: "nf-fa: music",
-            value: "\u{F001}",
-        },
-        EmojiEntry {
-            name: "nf-fa: film",
-            value: "\u{F008}",
-        },
-        EmojiEntry {
-            name: "nf-fa: unlocked",
-            value: "\u{F09C}",
-        },
-        EmojiEntry {
-            name: "nf-fa: github",
-            value: "\u{F09B}",
-        },
-        EmojiEntry {
-            name: "nf-fa: upload",
-            value: "\u{F093}",
-        },
-        EmojiEntry {
-            name: "nf-fa: hdd / disk",
-            value: "\u{F0A0}",
-        },
-        EmojiEntry {
-            name: "nf-fa: globe / world",
-            value: "\u{F0AC}",
-        },
-        EmojiEntry {
-            name: "nf-fa: wrench",
-            value: "\u{F0AD}",
-        },
-        EmojiEntry {
-            name: "nf-fa: tasks",
-            value: "\u{F0AE}",
-        },
-        EmojiEntry {
-            name: "nf-fa: copy",
-            value: "\u{F0C5}",
-        },
-        EmojiEntry {
-            name: "nf-fa: paste",
-            value: "\u{F0EA}",
-        },
-        EmojiEntry {
-            name: "nf-fa: lightbulb",
-            value: "\u{F0EB}",
-        },
-        EmojiEntry {
-            name: "nf-fa: bell",
-            value: "\u{F0F3}",
-        },
-        EmojiEntry {
-            name: "nf-fa: keyboard",
-            value: "\u{F11C}",
-        },
-        EmojiEntry {
-            name: "nf-fa: terminal",
-            value: "\u{F120}",
-        },
-        EmojiEntry {
-            name: "nf-fa: code fork / branch",
-            value: "\u{F126}",
-        },
-        EmojiEntry {
-            name: "nf-fa: code",
-            value: "\u{F121}",
-        },
-        EmojiEntry {
-            name: "nf-fa: laptop",
-            value: "\u{F109}",
-        },
-        EmojiEntry {
-            name: "nf-fa: apple",
-            value: "\u{F179}",
-        },
-        EmojiEntry {
-            name: "nf-fa: windows",
-            value: "\u{F17A}",
-        },
-        EmojiEntry {
-            name: "nf-fa: linux",
-            value: "\u{F17C}",
-        },
-        EmojiEntry {
-            name: "nf-fa: bug",
-            value: "\u{F188}",
-        },
-        EmojiEntry {
-            name: "nf-fa: google",
-            value: "\u{F1A0}",
-        },
-        EmojiEntry {
-            name: "nf-fa: git",
-            value: "\u{F1D3}",
-        },
-        EmojiEntry {
-            name: "nf-fa: database",
-            value: "\u{F1C0}",
-        },
-        EmojiEntry {
-            name: "nf-fa: file code",
-            value: "\u{F1C9}",
-        },
-        EmojiEntry {
-            name: "nf-fa: file archive / zip",
-            value: "\u{F1C6}",
-        },
-        EmojiEntry {
-            name: "nf-fa: file image",
-            value: "\u{F1C5}",
-        },
-        EmojiEntry {
-            name: "nf-fa: cube",
-            value: "\u{F1B2}",
-        },
-        EmojiEntry {
-            name: "nf-fa: trash can",
-            value: "\u{F1F8}",
-        },
-        EmojiEntry {
-            name: "nf-fa: history",
-            value: "\u{F1DA}",
-        },
-        EmojiEntry {
-            name: "nf-fa: send / paper plane",
-            value: "\u{F1D8}",
-        },
-        EmojiEntry {
-            name: "nf-fa: share / export",
-            value: "\u{F064}",
-        },
-        EmojiEntry {
-            name: "nf-fa: pin",
-            value: "\u{F08D}",
-        },
-        EmojiEntry {
-            name: "nf-fa: bolt / lightning",
-            value: "\u{F0E7}",
-        },
-        EmojiEntry {
-            name: "nf-fa: moon",
-            value: "\u{F186}",
-        },
-        EmojiEntry {
-            name: "nf-fa: sun",
-            value: "\u{F185}",
-        },
-        EmojiEntry {
-            name: "nf-fa: cloud",
-            value: "\u{F0C2}",
-        },
-        EmojiEntry {
-            name: "nf-fa: wifi",
-            value: "\u{F1EB}",
-        },
-        EmojiEntry {
-            name: "nf-fa: rss",
-            value: "\u{F09E}",
-        },
-        EmojiEntry {
-            name: "nf-fa: twitter",
-            value: "\u{F099}",
-        },
-        EmojiEntry {
-            name: "nf-fa: facebook",
-            value: "\u{F09A}",
-        },
-        EmojiEntry {
-            name: "nf-fa: instagram",
-            value: "\u{F16D}",
-        },
-        EmojiEntry {
-            name: "nf-fa: youtube",
-            value: "\u{F167}",
-        },
-        EmojiEntry {
-            name: "nf-fa: linkedin",
-            value: "\u{F0E1}",
-        },
-        // Devicons (nf-dev)
-        EmojiEntry {
-            name: "nf-dev: docker",
-            value: "\u{E650}",
-        },
-        EmojiEntry {
-            name: "nf-dev: git",
-            value: "\u{E625}",
-        },
-        EmojiEntry {
-            name: "nf-dev: nodejs",
-            value: "\u{E619}",
-        },
-        EmojiEntry {
-            name: "nf-dev: python",
-            value: "\u{E606}",
-        },
-        EmojiEntry {
-            name: "nf-dev: react",
-            value: "\u{E7BA}",
-        },
-        EmojiEntry {
-            name: "nf-dev: rust",
-            value: "\u{E7A8}",
-        },
-        EmojiEntry {
-            name: "nf-dev: go / golang",
-            value: "\u{E724}",
-        },
-        EmojiEntry {
-            name: "nf-dev: ruby",
-            value: "\u{E791}",
-        },
-        EmojiEntry {
-            name: "nf-dev: php",
-            value: "\u{E73D}",
-        },
-        EmojiEntry {
-            name: "nf-dev: java",
-            value: "\u{E738}",
-        },
-        EmojiEntry {
-            name: "nf-dev: javascript",
-            value: "\u{E74E}",
-        },
-        EmojiEntry {
-            name: "nf-dev: typescript",
-            value: "\u{E628}",
-        },
-        EmojiEntry {
-            name: "nf-dev: html5",
-            value: "\u{E736}",
-        },
-        EmojiEntry {
-            name: "nf-dev: css3",
-            value: "\u{E749}",
-        },
-        EmojiEntry {
-            name: "nf-dev: sass",
-            value: "\u{E74B}",
-        },
-        EmojiEntry {
-            name: "nf-dev: vim",
-            value: "\u{E62B}",
-        },
-        EmojiEntry {
-            name: "nf-dev: git branch",
-            value: "\u{E702}",
-        },
-        EmojiEntry {
-            name: "nf-dev: github badge",
-            value: "\u{E709}",
-        },
-        EmojiEntry {
-            name: "nf-dev: linux",
-            value: "\u{E712}",
-        },
-        EmojiEntry {
-            name: "nf-dev: arch linux",
-            value: "\u{E745}",
-        },
-        EmojiEntry {
-            name: "nf-dev: ubuntu",
-            value: "\u{E7AD}",
-        },
-        EmojiEntry {
-            name: "nf-dev: debian",
-            value: "\u{E77D}",
-        },
-        EmojiEntry {
-            name: "nf-dev: fedora",
-            value: "\u{E783}",
-        },
-        EmojiEntry {
-            name: "nf-dev: apple / mac os",
-            value: "\u{E711}",
-        },
-        EmojiEntry {
-            name: "nf-dev: windows",
-            value: "\u{E70F}",
-        },
-        EmojiEntry {
-            name: "nf-dev: terminal",
-            value: "\u{E795}",
-        },
-        EmojiEntry {
-            name: "nf-dev: vim neovim",
-            value: "\u{E7C5}",
-        },
-        // Codicons / VS Code (nf-cod)
-        EmojiEntry {
-            name: "nf-cod: terminal",
-            value: "\u{EA85}",
-        },
-        EmojiEntry {
-            name: "nf-cod: file",
-            value: "\u{EA7B}",
-        },
-        EmojiEntry {
-            name: "nf-cod: folder",
-            value: "\u{EA83}",
-        },
-        EmojiEntry {
-            name: "nf-cod: folder open",
-            value: "\u{EA84}",
-        },
-        EmojiEntry {
-            name: "nf-cod: search",
-            value: "\u{EA9E}",
-        },
-        EmojiEntry {
-            name: "nf-cod: git commit",
-            value: "\u{EA94}",
-        },
-        EmojiEntry {
-            name: "nf-cod: git merge",
-            value: "\u{EA97}",
-        },
-        EmojiEntry {
-            name: "nf-cod: git pull request",
-            value: "\u{EA9A}",
-        },
-        EmojiEntry {
-            name: "nf-cod: settings gear",
-            value: "\u{EAA1}",
-        },
-        EmojiEntry {
-            name: "nf-cod: bug",
-            value: "\u{EA87}",
-        },
-        EmojiEntry {
-            name: "nf-cod: check",
-            value: "\u{EA8B}",
-        },
-        EmojiEntry {
-            name: "nf-cod: close",
-            value: "\u{EA8E}",
-        },
-        EmojiEntry {
-            name: "nf-cod: warning",
-            value: "\u{EAB3}",
-        },
-        EmojiEntry {
-            name: "nf-cod: info",
-            value: "\u{EA99}",
-        },
-        EmojiEntry {
-            name: "nf-cod: rocket",
-            value: "\u{EA9C}",
-        },
-        EmojiEntry {
-            name: "nf-cod: cloud",
-            value: "\u{EA90}",
-        },
-        EmojiEntry {
-            name: "nf-cod: database",
-            value: "\u{EA92}",
-        },
-        EmojiEntry {
-            name: "nf-cod: extensions",
-            value: "\u{EA9F}",
-        },
-        EmojiEntry {
-            name: "nf-cod: lock",
-            value: "\u{EA96}",
-        },
-        EmojiEntry {
-            name: "nf-cod: eye",
-            value: "\u{EA70}",
-        },
-        EmojiEntry {
-            name: "nf-cod: edit",
-            value: "\u{EA73}",
-        },
-        EmojiEntry {
-            name: "nf-cod: trash",
-            value: "\u{EAAD}",
-        },
-        EmojiEntry {
-            name: "nf-cod: arrow up",
-            value: "\u{EA9B}",
-        },
-        EmojiEntry {
-            name: "nf-cod: arrow down",
-            value: "\u{EA88}",
-        },
-        EmojiEntry {
-            name: "nf-cod: refresh",
-            value: "\u{EA9D}",
-        },
-        EmojiEntry {
-            name: "nf-cod: copy",
-            value: "\u{EA91}",
-        },
-        EmojiEntry {
-            name: "nf-cod: link",
-            value: "\u{EA95}",
-        },
-        EmojiEntry {
-            name: "nf-cod: star full",
-            value: "\u{EAA4}",
-        },
-        EmojiEntry {
-            name: "nf-cod: heart",
-            value: "\u{EAA6}",
-        },
-        EmojiEntry {
-            name: "nf-cod: home",
-            value: "\u{EA98}",
-        },
-        EmojiEntry {
-            name: "nf-cod: person / user",
-            value: "\u{EAA0}",
-        },
-        EmojiEntry {
-            name: "nf-cod: tag",
-            value: "\u{EAAC}",
-        },
-        EmojiEntry {
-            name: "nf-cod: book",
-            value: "\u{EA86}",
-        },
+/// Base URL for downloading rofimoji CSV data files.
+const ROFIMOJI_DATA_URL: &str =
+    "https://raw.githubusercontent.com/fdw/rofimoji/main/src/picker/data";
+
+/// Small built-in fallback used when no cached files exist and download fails.
+static EMOJI_FALLBACK: &[(&str, &str)] = &[
+    ("😀", "grinning face"),
+    ("😂", "face with tears of joy"),
+    ("🥰", "smiling face with hearts"),
+    ("😍", "smiling face with heart-eyes"),
+    ("😎", "smiling face with sunglasses"),
+    ("🤔", "thinking face"),
+    ("😢", "crying face"),
+    ("😡", "pouting face"),
+    ("👍", "thumbs up"),
+    ("👎", "thumbs down"),
+    ("👋", "waving hand"),
+    ("🙏", "folded hands"),
+    ("👏", "clapping hands"),
+    ("💪", "flexed biceps"),
+    ("❤️", "red heart"),
+    ("🔥", "fire"),
+    ("⭐", "star"),
+    ("✨", "sparkles"),
+    ("🎉", "party popper"),
+    ("💯", "hundred points"),
+    ("✅", "check mark button"),
+    ("❌", "cross mark"),
+    ("⚠️", "warning"),
+    ("🚀", "rocket"),
+    ("💡", "light bulb"),
+    ("🔑", "key"),
+    ("🔒", "locked"),
+    ("📌", "pushpin"),
+    ("📎", "paperclip"),
+    ("📝", "memo"),
+    ("📅", "calendar"),
+    ("🕐", "one o'clock"),
+    ("🐛", "bug"),
+    ("🍕", "pizza"),
+    ("☕", "hot beverage"),
+    ("🏠", "house"),
+    ("🎵", "musical note"),
+    ("🔔", "bell"),
+    ("💬", "speech balloon"),
+    ("👀", "eyes"),
+    ("🤝", "handshake"),
+    ("🎯", "bullseye"),
+    ("🏆", "trophy"),
+    ("💎", "gem stone"),
+    ("🌍", "globe showing Europe-Africa"),
+    ("☀️", "sun"),
+    ("🌙", "crescent moon"),
+    ("⚡", "high voltage"),
+    ("🔧", "wrench"),
+    ("⚙️", "gear"),
 ];
 
-/// Fill `out` with indices into `EMOJI_DATA` that match `query`.
+/// Return the built-in fallback entries as owned `EmojiEntry` values.
+fn emoji_fallback_entries() -> Vec<EmojiEntry> {
+    EMOJI_FALLBACK
+        .iter()
+        .map(|&(v, n)| EmojiEntry {
+            value: v.to_string(),
+            name: n.to_string(),
+        })
+        .collect()
+}
+
+/// Return the XDG cache directory for emoji data files
+/// (`$XDG_CACHE_HOME/raffi/emoji/`).
+fn emoji_cache_dir() -> String {
+    format!(
+        "{}/raffi/emoji",
+        std::env::var("XDG_CACHE_HOME")
+            .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()))
+    )
+}
+
+/// Parse a single rofimoji-format CSV file into `EmojiEntry` values.
+///
+/// Each line has the format: `<character> <description> [<small>(tags)</small>]`
+/// The `<small>...</small>` tag block is stripped from the description.
+fn parse_emoji_csv(content: &str) -> Vec<EmojiEntry> {
+    content
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() {
+                return None;
+            }
+            let (value, rest) = line.split_once(' ')?;
+            // Strip optional <small>(...)</small> tag block
+            let name = if let Some(idx) = rest.find(" <small>") {
+                &rest[..idx]
+            } else {
+                rest
+            };
+            Some(EmojiEntry {
+                value: value.to_string(),
+                name: name.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// Resolve the configured data file names into a `Vec<String>`, falling back
+/// to `DEFAULT_EMOJI_FILES` when the user hasn't set `data_files`.
+fn resolve_emoji_file_names(config: &crate::EmojiAddonConfig) -> Vec<String> {
+    config
+        .data_files
+        .as_ref()
+        .cloned()
+        .unwrap_or_else(|| {
+            crate::DEFAULT_EMOJI_FILES
+                .iter()
+                .map(|s| s.to_string())
+                .collect()
+        })
+}
+
+/// Try to find a CSV file on disk — first in the raffi cache, then in
+/// well-known system locations where the rofimoji Python package installs
+/// its data files.  Returns the first path that exists, or `None`.
+fn find_emoji_file_on_disk(name: &str) -> Option<std::path::PathBuf> {
+    // 1. raffi cache
+    let cache = std::path::PathBuf::from(format!("{}/{name}.csv", emoji_cache_dir()));
+    if cache.exists() {
+        return Some(cache);
+    }
+    // 2. system rofimoji package (try common Python site-packages paths)
+    for prefix in &["/usr/lib", "/usr/local/lib"] {
+        if let Ok(entries) = fs::read_dir(prefix) {
+            for entry in entries.flatten() {
+                let dir_name = entry.file_name();
+                let dir_name = dir_name.to_string_lossy();
+                if dir_name.starts_with("python3") {
+                    let candidate = entry
+                        .path()
+                        .join("site-packages/picker/data")
+                        .join(format!("{name}.csv"));
+                    if candidate.exists() {
+                        return Some(candidate);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Load emoji data from local disk only (cache + system rofimoji package).
+/// Returns the parsed entries if any files were found, or an empty Vec if
+/// nothing is available on disk.  This never hits the network.
+fn load_emoji_data_from_disk(file_names: &[String]) -> Vec<EmojiEntry> {
+    let mut entries = Vec::new();
+    for name in file_names {
+        if let Some(path) = find_emoji_file_on_disk(name) {
+            match fs::read_to_string(&path) {
+                Ok(content) => entries.extend(parse_emoji_csv(&content)),
+                Err(e) => eprintln!("raffi: failed to read {}: {e}", path.display()),
+            }
+        }
+    }
+    entries
+}
+
+/// Download missing emoji CSV files from the rofimoji GitHub repository,
+/// save them to the raffi cache directory, and return all parsed entries.
+/// This is a blocking network call and should be run off the UI thread.
+fn download_and_load_emoji_data(file_names: Vec<String>) -> Vec<EmojiEntry> {
+    let dir = emoji_cache_dir();
+    let _ = fs::create_dir_all(&dir);
+
+    for name in &file_names {
+        let dest = std::path::PathBuf::from(format!("{dir}/{name}.csv"));
+        if !dest.exists() {
+            // Also skip if a system-level copy exists (no need to download)
+            if find_emoji_file_on_disk(name).is_some() {
+                continue;
+            }
+            let url = format!("{ROFIMOJI_DATA_URL}/{name}.csv");
+            if let Err(e) = download_to_file(&url, &dest) {
+                eprintln!("raffi: failed to download {url}: {e}");
+            }
+        }
+    }
+
+    // Now load everything from disk (cache + system)
+    load_emoji_data_from_disk(&file_names)
+}
+
+/// Download a URL to a local file using `ureq`.
+fn download_to_file(url: &str, dest: &std::path::Path) -> anyhow::Result<()> {
+    let config = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(15)))
+        .build();
+    let agent: ureq::Agent = config.into();
+    let mut body = agent.get(url).call()?.into_body().into_reader();
+    let mut file = std::fs::File::create(dest)?;
+    std::io::copy(&mut body, &mut file)?;
+    Ok(())
+}
+
+
+
+/// Fill `out` with indices into `data` that match `query`.
 /// When `query` is empty the first `EMOJI_DISPLAY_LIMIT` entries are returned.
 /// Results are capped at `EMOJI_DISPLAY_LIMIT` to keep the UI responsive.
-fn filter_emoji_into(query: &str, matcher: &SkimMatcherV2, out: &mut Vec<usize>) {
+fn filter_emoji_into(
+    data: &[EmojiEntry],
+    query: &str,
+    matcher: &SkimMatcherV2,
+    out: &mut Vec<usize>,
+) {
     out.clear();
-    let data = EMOJI_DATA;
     if query.is_empty() {
         out.extend(0..data.len().min(EMOJI_DISPLAY_LIMIT));
         return;
@@ -3044,20 +1045,11 @@ fn filter_emoji_into(query: &str, matcher: &SkimMatcherV2, out: &mut Vec<usize>)
     let mut scored: Vec<(usize, i64)> = data
         .iter()
         .enumerate()
-        .filter_map(|(i, e)| matcher.fuzzy_match(e.name, query).map(|score| (i, score)))
+        .filter_map(|(i, e)| matcher.fuzzy_match(&e.name, query).map(|score| (i, score)))
         .collect();
     scored.sort_by(|a, b| b.1.cmp(&a.1));
     scored.truncate(EMOJI_DISPLAY_LIMIT);
     out.extend(scored.iter().map(|(i, _)| *i));
-}
-
-/// Convenience wrapper used by tests (allocates a fresh Vec).
-#[cfg(test)]
-fn filter_emoji(query: &str) -> Vec<usize> {
-    let matcher = SkimMatcherV2::default();
-    let mut out = Vec::new();
-    filter_emoji_into(query, &matcher, &mut out);
-    out
 }
 
 /// Detect a typing tool (`wtype` or `ydotool`) in `$PATH` and spawn a shell
@@ -3287,6 +1279,8 @@ struct LauncherApp {
     show_hints: bool,
     // Emoji picker state
     emoji_active: bool,
+    emoji_data: Vec<EmojiEntry>,
+    emoji_data_loading: bool,
     emoji_filtered: Vec<usize>,
     emoji_action: Option<String>,
     emoji_secondary_action: Option<String>,
@@ -3325,6 +1319,7 @@ enum Message {
     HistoryNext,
     ToggleHints,
     EmojiSelected(usize),
+    EmojiDataLoaded(Vec<EmojiEntry>),
 }
 
 impl LauncherApp {
@@ -3417,6 +1412,8 @@ impl LauncherApp {
                 max_history,
                 show_hints: false,
                 emoji_active: false,
+                emoji_data: Vec::new(),
+                emoji_data_loading: false,
                 emoji_filtered: Vec::new(),
                 emoji_action: None,
                 emoji_secondary_action: None,
@@ -3766,11 +1763,35 @@ impl LauncherApp {
                         } else {
                             ""
                         };
+                        // Lazy-load emoji data on first activation
+                        if self.emoji_data.is_empty() && !self.emoji_data_loading {
+                            let file_names = resolve_emoji_file_names(&self.addons.emoji);
+                            // 1. Try loading from disk (cache + local rofimoji) — instant
+                            let disk_data = load_emoji_data_from_disk(&file_names);
+                            if !disk_data.is_empty() {
+                                self.emoji_data = disk_data;
+                            } else {
+                                // 2. No local files — use fallback now, download in background
+                                eprintln!("raffi: no local emoji data, using fallback while downloading...");
+                                self.emoji_data = emoji_fallback_entries();
+                                self.emoji_data_loading = true;
+                                let download_task = Task::perform(
+                                    async move { download_and_load_emoji_data(file_names) },
+                                    Message::EmojiDataLoaded,
+                                );
+                                tasks.push(download_task);
+                            }
+                        }
                         self.filtered_configs.clear();
                         self.emoji_active = true;
                         self.emoji_action = self.addons.emoji.action.clone();
                         self.emoji_secondary_action = self.addons.emoji.secondary_action.clone();
-                        filter_emoji_into(emoji_query, &self.emoji_matcher, &mut self.emoji_filtered);
+                        filter_emoji_into(
+                            &self.emoji_data,
+                            emoji_query,
+                            &self.emoji_matcher,
+                            &mut self.emoji_filtered,
+                        );
                     } else {
                         self.emoji_active = false;
                         self.emoji_filtered.clear();
@@ -4564,15 +2585,39 @@ impl LauncherApp {
                 self.show_hints = !self.show_hints;
                 Task::none()
             }
+            Message::EmojiDataLoaded(data) => {
+                self.emoji_data_loading = false;
+                if !data.is_empty() {
+                    self.emoji_data = data;
+                    // Re-filter with current query if emoji picker is still active
+                    if self.emoji_active {
+                        let emoji_trigger =
+                            self.addons.emoji.trigger.as_deref().unwrap_or("emoji");
+                        let trimmed = self.search_query.trim();
+                        let emoji_query = if trimmed.len() > emoji_trigger.len() {
+                            trimmed[emoji_trigger.len()..].trim_start()
+                        } else {
+                            ""
+                        };
+                        filter_emoji_into(
+                            &self.emoji_data,
+                            emoji_query,
+                            &self.emoji_matcher,
+                            &mut self.emoji_filtered,
+                        );
+                    }
+                }
+                Task::none()
+            }
             Message::EmojiSelected(idx) => {
                 if let Some(&emoji_idx) = self.emoji_filtered.get(idx) {
-                    if let Some(entry) = EMOJI_DATA.get(emoji_idx) {
+                    if let Some(entry) = self.emoji_data.get(emoji_idx) {
                         let action = if self.current_modifiers.control() {
                             self.emoji_secondary_action.as_deref().unwrap_or("insert")
                         } else {
                             self.emoji_action.as_deref().unwrap_or("copy")
                         };
-                        execute_action(action, entry.value);
+                        execute_action(action, &entry.value);
                     }
                 }
                 self.save_query_to_history();
@@ -4937,19 +2982,19 @@ impl LauncherApp {
         // Add emoji picker entries
         if self.emoji_active {
             for &emoji_idx in &self.emoji_filtered {
-                if let Some(entry) = EMOJI_DATA.get(emoji_idx) {
+                if let Some(entry) = self.emoji_data.get(emoji_idx) {
                     let is_selected = self.selected_index == special_item_idx;
 
                     let item_row = Row::new()
                         .spacing(16)
                         .align_y(iced::Alignment::Center)
                         .push(
-                            text(entry.value)
+                            text(entry.value.as_str())
                                 .size(fs.item + 4.0)
                                 .width(Length::Fixed(40.0)),
                         )
                         .push(
-                            text(entry.name)
+                            text(entry.name.as_str())
                                 .size(fs.item)
                                 .color(t.text_main)
                                 .width(Length::Fill),
@@ -6814,41 +4859,97 @@ mod tests {
         assert!(result.is_empty());
     }
 
+    // ── Emoji CSV parser tests ───────────────────────────────────────────
+
     #[test]
-    fn test_emoji_data_not_empty() {
-        assert!(!EMOJI_DATA.is_empty(), "EMOJI_DATA should contain entries");
+    fn test_parse_emoji_csv_basic() {
+        let csv = "😀 grinning face\n😂 face with tears of joy\n";
+        let entries = parse_emoji_csv(csv);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].value, "😀");
+        assert_eq!(entries[0].name, "grinning face");
+        assert_eq!(entries[1].value, "😂");
+        assert_eq!(entries[1].name, "face with tears of joy");
     }
 
     #[test]
-    fn test_emoji_data_has_emojis_and_nf_icons() {
-        let has_emoji = EMOJI_DATA.iter().any(|e| e.value == "😀");
-        let has_nf = EMOJI_DATA.iter().any(|e| e.name.starts_with("nf-"));
-        assert!(has_emoji, "EMOJI_DATA should contain standard emojis");
-        assert!(has_nf, "EMOJI_DATA should contain nerd font icons");
+    fn test_parse_emoji_csv_strips_small_tags() {
+        let csv = "😀 grinning face <small>(face, grin)</small>\n";
+        let entries = parse_emoji_csv(csv);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "grinning face");
     }
 
     #[test]
-    fn test_filter_emoji_empty_query_returns_capped() {
-        let all = filter_emoji("");
-        assert_eq!(all.len(), EMOJI_DISPLAY_LIMIT.min(EMOJI_DATA.len()));
+    fn test_parse_emoji_csv_nerd_font_format() {
+        // nerd_font.csv uses: <glyph> <name> (no tags)
+        let csv = "\u{EB99} cod-account\n\u{F015} fa-home\n";
+        let entries = parse_emoji_csv(csv);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name, "cod-account");
+        assert_eq!(entries[1].value, "\u{F015}");
+        assert_eq!(entries[1].name, "fa-home");
+    }
+
+    #[test]
+    fn test_parse_emoji_csv_empty_and_blank_lines() {
+        let csv = "\n   \n😀 grinning face\n\n";
+        let entries = parse_emoji_csv(csv);
+        assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn test_emoji_fallback_not_empty() {
+        let fallback = emoji_fallback_entries();
+        assert!(
+            !fallback.is_empty(),
+            "Fallback emoji list should not be empty"
+        );
+        assert!(fallback.len() >= 40, "Fallback should have ~50 entries");
+    }
+
+    // ── Emoji filter tests (using inline test data) ────────────────────
+
+    /// Helper: build a small test dataset for filter tests.
+    fn test_emoji_data() -> Vec<EmojiEntry> {
+        vec![
+            EmojiEntry { value: "😀".into(), name: "grinning face".into() },
+            EmojiEntry { value: "😂".into(), name: "face with tears of joy".into() },
+            EmojiEntry { value: "🐴".into(), name: "horse face".into() },
+            EmojiEntry { value: "🏠".into(), name: "house".into() },
+            EmojiEntry { value: "\u{F015}".into(), name: "nf-fa: home".into() },
+        ]
+    }
+
+    #[test]
+    fn test_filter_emoji_empty_query_returns_all() {
+        let data = test_emoji_data();
+        let matcher = SkimMatcherV2::default();
+        let mut out = Vec::new();
+        filter_emoji_into(&data, "", &matcher, &mut out);
+        assert_eq!(out.len(), data.len());
     }
 
     #[test]
     fn test_filter_emoji_matches_by_name() {
-        let results = filter_emoji("grinning");
-        assert!(!results.is_empty());
-        // All results should have "grinning" in the name
-        for idx in &results {
-            assert!(EMOJI_DATA[*idx].name.contains("grinning"));
+        let data = test_emoji_data();
+        let matcher = SkimMatcherV2::default();
+        let mut out = Vec::new();
+        filter_emoji_into(&data, "grinning", &matcher, &mut out);
+        assert!(!out.is_empty());
+        for &idx in &out {
+            assert!(data[idx].name.contains("grinning"));
         }
     }
 
     #[test]
     fn test_filter_emoji_fuzzy_matches() {
-        // "hrse" should fuzzy-match "horse face"
-        let results = filter_emoji("hrse");
-        assert!(!results.is_empty());
-        let names: Vec<&str> = results.iter().map(|&i| EMOJI_DATA[i].name).collect();
+        let data = test_emoji_data();
+        let matcher = SkimMatcherV2::default();
+        let mut out = Vec::new();
+        filter_emoji_into(&data, "hrse", &matcher, &mut out);
+        assert!(!out.is_empty());
+        let names: Vec<&str> = out.iter().map(|&i| data[i].name.as_str()).collect();
         assert!(
             names.iter().any(|n| n.contains("horse")),
             "Expected fuzzy match for 'hrse' to find 'horse face'"
@@ -6857,16 +4958,90 @@ mod tests {
 
     #[test]
     fn test_filter_emoji_nf_icons() {
-        let results = filter_emoji("nf-fa: home");
-        assert!(!results.is_empty());
-        let entry = EMOJI_DATA[results[0]];
-        assert_eq!(entry.name, "nf-fa: home");
-        assert_eq!(entry.value, "\u{F015}");
+        let data = test_emoji_data();
+        let matcher = SkimMatcherV2::default();
+        let mut out = Vec::new();
+        filter_emoji_into(&data, "nf-fa: home", &matcher, &mut out);
+        assert!(!out.is_empty());
+        assert_eq!(data[out[0]].name, "nf-fa: home");
+        assert_eq!(data[out[0]].value, "\u{F015}");
     }
 
     #[test]
     fn test_filter_emoji_no_match_returns_empty() {
-        let results = filter_emoji("zzzzzzzzzzzzzzzzz");
-        assert!(results.is_empty());
+        let data = test_emoji_data();
+        let matcher = SkimMatcherV2::default();
+        let mut out = Vec::new();
+        filter_emoji_into(&data, "zzzzzzzzzzzzzzzzz", &matcher, &mut out);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn test_filter_emoji_caps_results() {
+        // Build data larger than EMOJI_DISPLAY_LIMIT
+        let data: Vec<EmojiEntry> = (0..100)
+            .map(|i| EmojiEntry {
+                value: format!("e{i}"),
+                name: format!("entry number {i}"),
+            })
+            .collect();
+        let matcher = SkimMatcherV2::default();
+        let mut out = Vec::new();
+        filter_emoji_into(&data, "entry", &matcher, &mut out);
+        assert!(out.len() <= EMOJI_DISPLAY_LIMIT);
+    }
+
+    #[test]
+    fn test_find_emoji_file_on_disk_from_cache() {
+        // Write a temp file to the cache dir and verify find_emoji_file_on_disk finds it
+        let dir = emoji_cache_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        let test_name = "_test_find_disk_probe";
+        let path = format!("{dir}/{test_name}.csv");
+        std::fs::write(&path, "😀 test\n").unwrap();
+        let found = find_emoji_file_on_disk(test_name);
+        assert!(found.is_some(), "should find cached file");
+        assert_eq!(found.unwrap().to_str().unwrap(), path);
+        // Cleanup
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_load_emoji_data_from_disk_parses_cached_files() {
+        let dir = emoji_cache_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        let test_name = "_test_load_disk_probe";
+        let path = format!("{dir}/{test_name}.csv");
+        std::fs::write(&path, "😀 grinning\n🔥 fire\n").unwrap();
+        let entries = load_emoji_data_from_disk(&[test_name.to_string()]);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].value, "😀");
+        assert_eq!(entries[1].name, "fire");
+        // Cleanup
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_load_emoji_data_from_disk_missing_file_returns_empty() {
+        let entries = load_emoji_data_from_disk(&["_nonexistent_file_xyz".to_string()]);
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_resolve_emoji_file_names_default() {
+        let config = crate::EmojiAddonConfig::default();
+        let names = resolve_emoji_file_names(&config);
+        assert_eq!(names.len(), crate::DEFAULT_EMOJI_FILES.len());
+        assert_eq!(names[0], "emojis_smileys_emotion");
+    }
+
+    #[test]
+    fn test_resolve_emoji_file_names_custom() {
+        let config = crate::EmojiAddonConfig {
+            data_files: Some(vec!["nerd_font".to_string(), "gitmoji".to_string()]),
+            ..Default::default()
+        };
+        let names = resolve_emoji_file_names(&config);
+        assert_eq!(names, vec!["nerd_font", "gitmoji"]);
     }
 }
