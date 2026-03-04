@@ -25,15 +25,15 @@ Raffi is an application launcher that sits on top of Fuzzel or operates using it
   <Card title="Dual Interface Modes" icon="display">
     Choose between Fuzzel integration for a minimal Wayland-native experience or the built-in iced-based GUI with fuzzy search and theming.
   </Card>
-  
+
   <Card title="YAML Configuration" icon="file-code">
     Define applications, scripts, and commands in `~/.config/raffi/raffi.yaml` with support for arguments, icons, and conditional display.
   </Card>
-  
+
   <Card title="Native Interface Addons" icon="puzzle-piece">
     Built-in calculator, currency converter, file browser, web searches, text snippets, and script filters for extended functionality.
   </Card>
-  
+
   <Card title="Script Support" icon="terminal">
     Execute inline scripts with any interpreter (Bash, Python, Node.js) directly from the launcher with environment variable expansion.
   </Card>
@@ -101,7 +101,7 @@ Store and quickly insert reusable text snippets from inline config, YAML files, 
       description: Firefox browser with marionette enabled
     ```
   </details>
-  
+
   <details>
 <summary>Script Execution</summary>
 
@@ -118,7 +118,7 @@ Store and quickly insert reusable text snippets from inline config, YAML files, 
       icon: "script"
     ```
   </details>
-  
+
   <details>
 <summary>Conditional Workflows</summary>
 
@@ -131,7 +131,7 @@ Store and quickly insert reusable text snippets from inline config, YAML files, 
       ifenveq: [DESKTOP_SESSION, GNOME]
     ```
   </details>
-  
+
   <details>
 <summary>Window Manager Integration</summary>
 
@@ -140,7 +140,7 @@ Store and quickly insert reusable text snippets from inline config, YAML files, 
     ```ini
     # Sway
     bindsym $super+Space exec raffi -p | xargs swaymsg exec --
-    
+
     # Hyprland
     bind = $super, R, exec, (val=$(raffi -pI); echo $val | grep -q . && hyprctl dispatch exec "$val")
     ```
@@ -165,7 +165,7 @@ Store and quickly insert reusable text snippets from inline config, YAML files, 
   <Card title="Install Raffi" icon="download">
     Get started with installation via cargo, AUR, Homebrew, or build from source
   </Card>
-  
+
   <Card title="Quick Start" icon="rocket">
     Configure and launch your first application with Raffi
   </Card>
