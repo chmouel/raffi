@@ -3,11 +3,13 @@ title: Introduction
 description: A YAML-based application launcher for Wayland with fuzzy search and powerful addons
 ---
 
-import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import mainScreenshot from '../../assets/screenshots/main.png';
 
 Raffi is a flexible application launcher designed for Wayland environments that lets you define commands, scripts, and workflows in a simple YAML configuration file.
 
-![Raffi launcher screenshot](../../assets/screenshots/main.png)
+<Image src={mainScreenshot} alt="Raffi launcher screenshot" width={800} />
 
 ## What is Raffi?
 
@@ -21,23 +23,10 @@ Raffi is an application launcher that sits on top of Fuzzel or operates using it
 
 ## Key Features
 
-<CardGrid>
-  <Card title="Dual Interface Modes" icon="display">
-    Choose between Fuzzel integration for a minimal Wayland-native experience or the built-in iced-based GUI with fuzzy search and theming.
-  </Card>
-
-  <Card title="YAML Configuration" icon="file-code">
-    Define applications, scripts, and commands in `~/.config/raffi/raffi.yaml` with support for arguments, icons, and conditional display.
-  </Card>
-
-  <Card title="Native Interface Addons" icon="puzzle-piece">
-    Built-in calculator, currency converter, file browser, web searches, text snippets, and script filters for extended functionality.
-  </Card>
-
-  <Card title="Script Support" icon="terminal">
-    Execute inline scripts with any interpreter (Bash, Python, Node.js) directly from the launcher with environment variable expansion.
-  </Card>
-</CardGrid>
+- **Dual Interface Modes** — Choose between Fuzzel integration for a minimal Wayland-native experience or the built-in iced-based GUI with fuzzy search and theming.
+- **YAML Configuration** — Define applications, scripts, and commands in `~/.config/raffi/raffi.yaml` with support for arguments, icons, and conditional display.
+- **Native Interface Addons** — Built-in calculator, currency converter, file browser, web searches, text snippets, and script filters for extended functionality.
+- **Script Support** — Execute inline scripts with any interpreter (Bash, Python, Node.js) directly from the launcher with environment variable expansion.
 
 ## Native Interface Addons
 
@@ -161,12 +150,5 @@ Store and quickly insert reusable text snippets from inline config, YAML files, 
 
 ## Next Steps
 
-<CardGrid>
-  <Card title="Install Raffi" icon="download">
-    Get started with installation via cargo, AUR, Homebrew, or build from source
-  </Card>
-
-  <Card title="Quick Start" icon="rocket">
-    Configure and launch your first application with Raffi
-  </Card>
-</CardGrid>
+- [Install Raffi](/installation/) — Get started with installation via cargo, AUR, Homebrew, or build from source
+- [Quick Start](/quickstart/) — Configure and launch your first application with Raffi

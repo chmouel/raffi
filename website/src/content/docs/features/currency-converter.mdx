@@ -3,7 +3,9 @@ title: Currency Converter
 description: Real-time currency conversion with cached exchange rates
 ---
 
-import { Aside, Tabs, TabItem, Card, CardGrid, Steps } from '@astrojs/starlight/components';
+import { Aside, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import currencyScreenshot from '../../../assets/screenshots/currency-converter.png';
 
 The native interface includes a currency converter with real-time exchange rates from the Frankfurter API.
 
@@ -15,7 +17,7 @@ The currency converter is only available in **native mode**. It is not available
 
 Convert between currencies by typing an amount with a trigger character (default `$`) followed by target currency codes. Exchange rates are cached for one hour to minimize API requests.
 
-![Currency converter example](../../../assets/screenshots/currency-converter.png)
+<Image src={currencyScreenshot} alt="Currency converter example" width={800} />
 
 ## Usage
 
@@ -250,35 +252,12 @@ addons:
 
 ## Examples
 
-<CardGrid>
-  <Card title="Tourist">
-    ```text
-    $1000 to eur
-    # Planning trip to Europe
-    ```
-  </Card>
-  
-  <Card title="Shopping">
-    ```text
-    $99 usd to gbp
-    # Compare prices
-    ```
-  </Card>
-  
-  <Card title="Freelancer">
-    ```text
-    €500 to usd
-    # Invoice conversion
-    ```
-  </Card>
-  
-  <Card title="Investor">
-    ```text
-    $10000 to jpy
-    # Currency exchange
-    ```
-  </Card>
-</CardGrid>
+```text
+$1000 to eur     # Planning trip to Europe
+$99 usd to gbp   # Compare prices
+€500 to usd      # Invoice conversion
+$10000 to jpy    # Currency exchange
+```
 
 ## Troubleshooting
 

@@ -4,6 +4,8 @@ description: Built-in mathematical expression evaluator
 ---
 
 import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import calculatorScreenshot from '../../../assets/screenshots/calculator.png';
 
 The native interface includes a built-in calculator that evaluates mathematical expressions as you type.
 
@@ -115,7 +117,7 @@ exp(ln(10))
 3. The result appears automatically
 4. Press **Enter** to copy the result to clipboard
 
-![Calculator example](../../../assets/screenshots/calculator.png)
+<Image src={calculatorScreenshot} alt="Calculator example" width={800} />
 
 ### Keyboard Shortcuts
 

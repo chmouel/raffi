@@ -4,6 +4,9 @@ description: Dynamic results from external commands using Alfred JSON format
 ---
 
 import { Aside, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import scriptFilterTzScreenshot from '../../../assets/screenshots/script-filter-tz.png';
+import scriptFilterPrScreenshot from '../../../assets/screenshots/script-filter-pr.png';
 
 Script filters allow external commands to provide dynamic results in the launcher using a subset of the Alfred Script Filter JSON format.
 
@@ -15,7 +18,7 @@ Script filters are only available in **native mode**. They are not available whe
 
 Script filters execute external commands when a keyword is typed, displaying dynamic results based on the command's JSON output. This enables integration with APIs, databases, custom scripts, and more.
 
-![Script filter timezone converter example](../../../assets/screenshots/script-filter-tz.png)
+<Image src={scriptFilterTzScreenshot} alt="Script filter timezone converter example" width={800} />
 
 ## Configuration
 
@@ -255,7 +258,7 @@ tz New York
 
 ### GitHub Pull Requests
 
-![GitHub PR browser](../../../assets/screenshots/script-filter-pr.png)
+<Image src={scriptFilterPrScreenshot} alt="GitHub PR browser" width={800} />
 
 ```yaml raffi.yaml
 script_filters:
