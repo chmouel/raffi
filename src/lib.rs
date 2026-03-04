@@ -100,9 +100,9 @@ pub const DEFAULT_EMOJI_FILES: &[&str] = &[
 ];
 
 /// Configuration for the emoji picker addon
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct EmojiAddonConfig {
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub enabled: bool,
     #[serde(default)]
     pub trigger: Option<String>,
@@ -112,6 +112,18 @@ pub struct EmojiAddonConfig {
     pub secondary_action: Option<String>,
     #[serde(default)]
     pub data_files: Option<Vec<String>>,
+}
+
+impl Default for EmojiAddonConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            trigger: None,
+            action: None,
+            secondary_action: None,
+            data_files: None,
+        }
+    }
 }
 
 /// Configuration for a script filter addon
@@ -1636,7 +1648,7 @@ mod tests {
     }
 
     #[test]
-    fn test_emoji_addon_defaults_to_disabled() {
+    fn test_emoji_addon_defaults_to_enabled() {
         let yaml_config = r#"
         shell:
           binary: sh
@@ -1657,8 +1669,8 @@ mod tests {
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
-        // Emoji addon is disabled by default
-        assert!(!parsed_config.addons.emoji.enabled);
+        // Emoji addon is enabled by default
+        assert!(parsed_config.addons.emoji.enabled);
         assert!(parsed_config.addons.emoji.trigger.is_none());
         assert!(parsed_config.addons.emoji.action.is_none());
         assert!(parsed_config.addons.emoji.secondary_action.is_none());

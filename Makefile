@@ -2,7 +2,7 @@ CARGO := cargo
 
 all: build
 
-build: 
+build:
 	cargo build --release
 
 sanity: clippy test
