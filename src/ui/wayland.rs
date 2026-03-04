@@ -931,16 +931,12 @@ fn parse_emoji_csv(content: &str) -> Vec<EmojiEntry> {
 /// Resolve the configured data file names into a `Vec<String>`, falling back
 /// to `DEFAULT_EMOJI_FILES` when the user hasn't set `data_files`.
 fn resolve_emoji_file_names(config: &crate::EmojiAddonConfig) -> Vec<String> {
-    config
-        .data_files
-        .as_ref()
-        .cloned()
-        .unwrap_or_else(|| {
-            crate::DEFAULT_EMOJI_FILES
-                .iter()
-                .map(|s| s.to_string())
-                .collect()
-        })
+    config.data_files.as_ref().cloned().unwrap_or_else(|| {
+        crate::DEFAULT_EMOJI_FILES
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    })
 }
 
 /// Try to find a CSV file on disk — first in the raffi cache, then in
@@ -1025,8 +1021,6 @@ fn download_to_file(url: &str, dest: &std::path::Path) -> anyhow::Result<()> {
     std::io::copy(&mut body, &mut file)?;
     Ok(())
 }
-
-
 
 /// Fill `out` with indices into `data` that match `query`.
 /// When `query` is empty the first `EMOJI_DISPLAY_LIMIT` entries are returned.
@@ -2591,8 +2585,7 @@ impl LauncherApp {
                     self.emoji_data = data;
                     // Re-filter with current query if emoji picker is still active
                     if self.emoji_active {
-                        let emoji_trigger =
-                            self.addons.emoji.trigger.as_deref().unwrap_or("emoji");
+                        let emoji_trigger = self.addons.emoji.trigger.as_deref().unwrap_or("emoji");
                         let trimmed = self.search_query.trim();
                         let emoji_query = if trimmed.len() > emoji_trigger.len() {
                             trimmed[emoji_trigger.len()..].trim_start()
@@ -4913,11 +4906,26 @@ mod tests {
     /// Helper: build a small test dataset for filter tests.
     fn test_emoji_data() -> Vec<EmojiEntry> {
         vec![
-            EmojiEntry { value: "😀".into(), name: "grinning face".into() },
-            EmojiEntry { value: "😂".into(), name: "face with tears of joy".into() },
-            EmojiEntry { value: "🐴".into(), name: "horse face".into() },
-            EmojiEntry { value: "🏠".into(), name: "house".into() },
-            EmojiEntry { value: "\u{F015}".into(), name: "nf-fa: home".into() },
+            EmojiEntry {
+                value: "😀".into(),
+                name: "grinning face".into(),
+            },
+            EmojiEntry {
+                value: "😂".into(),
+                name: "face with tears of joy".into(),
+            },
+            EmojiEntry {
+                value: "🐴".into(),
+                name: "horse face".into(),
+            },
+            EmojiEntry {
+                value: "🏠".into(),
+                name: "house".into(),
+            },
+            EmojiEntry {
+                value: "\u{F015}".into(),
+                name: "nf-fa: home".into(),
+            },
         ]
     }
 

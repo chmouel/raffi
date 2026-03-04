@@ -157,7 +157,7 @@ The file browser is enabled by default and can be disabled or configured under `
 
 #### Emoji & Nerd Fonts Picker
 
-The native interface includes an emoji and icon picker. It is **disabled by default** and must be explicitly enabled. Type the configured keyword (default `emoji`) to open the picker, then continue typing to fuzzy-filter by name.
+The native interface includes an emoji and icon picker. It is **enabled by default**. Type the configured keyword (default `emoji`) to open the picker, then continue typing to fuzzy-filter by name.
 
 Emoji data is sourced from the [rofimoji](https://github.com/fdw/rofimoji) project. On first use the configured data files are automatically downloaded from GitHub and cached locally under `$XDG_CACHE_HOME/raffi/emoji/`. By default the 10 standard Unicode emoji categories are fetched (~1,900 entries). You can choose from over 350 available data files including Nerd Fonts, Font Awesome, gitmoji, kaomoji, and many more (see the full list at [rofimoji data](https://github.com/fdw/rofimoji/tree/main/src/picker/data)). A small built-in fallback set (~50 common emojis) is available when offline and no cached files exist.
 
@@ -347,7 +347,7 @@ addons:
     enabled: true
     show_hidden: false
   emoji:
-    enabled: false
+    enabled: true
     trigger: "emoji"
     data_files:
       - emojis_smileys_emotion
@@ -362,7 +362,7 @@ The `default_currency` field sets the source currency used when none is specifie
 The `currencies` field for the currency addon defines which currencies are available for conversion.
 You don't need to add a prefix for the calculator; simply typing a valid expression will show the result.
 
-The calculator, currency, and file browser addons are enabled by default. The emoji addon is **disabled by default** and must be explicitly enabled.
+The calculator, currency, file browser, and emoji addons are all enabled by default.
 
 #### Emoji & Nerd Fonts Picker Configuration
 
@@ -386,7 +386,7 @@ Field descriptions:
 
 | Field              | Required | Description                                                                                       |
 |--------------------|----------|---------------------------------------------------------------------------------------------------|
-| `enabled`          | no       | Whether the addon is active. **Defaults to `false`** (disabled).                                  |
+| `enabled`          | no       | Whether the addon is active. **Defaults to `true`** (enabled).                                    |
 | `trigger`          | no       | Keyword that activates the picker (default: `emoji`). Type this to open the list.                 |
 | `action`           | no       | Action on Enter. Use `"copy"` to copy to clipboard, `"insert"` to type into the focused app, or a shell command template with `{value}`. Defaults to `"copy"`. |
 | `secondary_action` | no       | Action on Ctrl+Enter. Accepts the same values as `action`. Defaults to `"insert"`.                |
