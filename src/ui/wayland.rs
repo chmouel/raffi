@@ -819,9 +819,11 @@ struct EmojiEntry {
     value: &'static str,
 }
 
+/// Maximum number of emoji results to render at once to keep the UI responsive.
+const EMOJI_DISPLAY_LIMIT: usize = 50;
+
 /// Built-in list of Unicode emojis and common Nerd Fonts v3 icons.
-static EMOJI_DATA: LazyLock<Vec<EmojiEntry>> = LazyLock::new(|| {
-    vec![
+static EMOJI_DATA: &[EmojiEntry] = &[
         // ── Smileys & Emotion ──────────────────────────────────────────────────
         EmojiEntry {
             name: "grinning face",
@@ -3027,22 +3029,35 @@ static EMOJI_DATA: LazyLock<Vec<EmojiEntry>> = LazyLock::new(|| {
             name: "nf-cod: book",
             value: "\u{EA86}",
         },
-    ]
-});
+];
 
-fn filter_emoji(query: &str) -> Vec<usize> {
-    let data = &*EMOJI_DATA;
+/// Fill `out` with indices into `EMOJI_DATA` that match `query`.
+/// When `query` is empty the first `EMOJI_DISPLAY_LIMIT` entries are returned.
+/// Results are capped at `EMOJI_DISPLAY_LIMIT` to keep the UI responsive.
+fn filter_emoji_into(query: &str, matcher: &SkimMatcherV2, out: &mut Vec<usize>) {
+    out.clear();
+    let data = EMOJI_DATA;
     if query.is_empty() {
-        return (0..data.len()).collect();
+        out.extend(0..data.len().min(EMOJI_DISPLAY_LIMIT));
+        return;
     }
-    let matcher = SkimMatcherV2::default();
     let mut scored: Vec<(usize, i64)> = data
         .iter()
         .enumerate()
         .filter_map(|(i, e)| matcher.fuzzy_match(e.name, query).map(|score| (i, score)))
         .collect();
     scored.sort_by(|a, b| b.1.cmp(&a.1));
-    scored.into_iter().map(|(i, _)| i).collect()
+    scored.truncate(EMOJI_DISPLAY_LIMIT);
+    out.extend(scored.iter().map(|(i, _)| *i));
+}
+
+/// Convenience wrapper used by tests (allocates a fresh Vec).
+#[cfg(test)]
+fn filter_emoji(query: &str) -> Vec<usize> {
+    let matcher = SkimMatcherV2::default();
+    let mut out = Vec::new();
+    filter_emoji_into(query, &matcher, &mut out);
+    out
 }
 
 /// Detect a typing tool (`wtype` or `ydotool`) in `$PATH` and spawn a shell
@@ -3275,6 +3290,7 @@ struct LauncherApp {
     emoji_filtered: Vec<usize>,
     emoji_action: Option<String>,
     emoji_secondary_action: Option<String>,
+    emoji_matcher: SkimMatcherV2,
 }
 
 #[derive(Debug, Clone)]
@@ -3404,6 +3420,7 @@ impl LauncherApp {
                 emoji_filtered: Vec::new(),
                 emoji_action: None,
                 emoji_secondary_action: None,
+                emoji_matcher: SkimMatcherV2::default(),
             },
             if initial_query.is_empty() {
                 focus(search_input_id)
@@ -3741,18 +3758,19 @@ impl LauncherApp {
                     let emoji_matched = self.addons.emoji.enabled
                         && !text_snippet_matched
                         && (trimmed == emoji_trigger
-                            || trimmed.starts_with(&format!("{} ", emoji_trigger)));
+                            || (trimmed.starts_with(emoji_trigger)
+                                && trimmed.as_bytes().get(emoji_trigger.len()) == Some(&b' ')));
                     if emoji_matched {
                         let emoji_query = if trimmed.len() > emoji_trigger.len() {
-                            trimmed[emoji_trigger.len()..].trim_start().to_string()
+                            trimmed[emoji_trigger.len()..].trim_start()
                         } else {
-                            String::new()
+                            ""
                         };
                         self.filtered_configs.clear();
                         self.emoji_active = true;
                         self.emoji_action = self.addons.emoji.action.clone();
                         self.emoji_secondary_action = self.addons.emoji.secondary_action.clone();
-                        self.emoji_filtered = filter_emoji(&emoji_query);
+                        filter_emoji_into(emoji_query, &self.emoji_matcher, &mut self.emoji_filtered);
                     } else {
                         self.emoji_active = false;
                         self.emoji_filtered.clear();
@@ -6798,23 +6816,21 @@ mod tests {
 
     #[test]
     fn test_emoji_data_not_empty() {
-        let data = &*EMOJI_DATA;
-        assert!(!data.is_empty(), "EMOJI_DATA should contain entries");
+        assert!(!EMOJI_DATA.is_empty(), "EMOJI_DATA should contain entries");
     }
 
     #[test]
     fn test_emoji_data_has_emojis_and_nf_icons() {
-        let data = &*EMOJI_DATA;
-        let has_emoji = data.iter().any(|e| e.value == "😀");
-        let has_nf = data.iter().any(|e| e.name.starts_with("nf-"));
+        let has_emoji = EMOJI_DATA.iter().any(|e| e.value == "😀");
+        let has_nf = EMOJI_DATA.iter().any(|e| e.name.starts_with("nf-"));
         assert!(has_emoji, "EMOJI_DATA should contain standard emojis");
         assert!(has_nf, "EMOJI_DATA should contain nerd font icons");
     }
 
     #[test]
-    fn test_filter_emoji_empty_query_returns_all() {
+    fn test_filter_emoji_empty_query_returns_capped() {
         let all = filter_emoji("");
-        assert_eq!(all.len(), EMOJI_DATA.len());
+        assert_eq!(all.len(), EMOJI_DISPLAY_LIMIT.min(EMOJI_DATA.len()));
     }
 
     #[test]
