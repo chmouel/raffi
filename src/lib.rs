@@ -84,6 +84,19 @@ impl Default for FileBrowserAddonConfig {
     }
 }
 
+/// Configuration for the emoji picker addon
+#[derive(Deserialize, Debug, Clone, Default)]
+pub struct EmojiAddonConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub trigger: Option<String>,
+    #[serde(default)]
+    pub action: Option<String>,
+    #[serde(default)]
+    pub secondary_action: Option<String>,
+}
+
 /// Configuration for a script filter addon
 #[derive(Deserialize, Debug, Clone)]
 pub struct ScriptFilterConfig {
@@ -145,6 +158,8 @@ pub struct AddonsConfig {
     pub calculator: CalculatorAddonConfig,
     #[serde(default)]
     pub file_browser: FileBrowserAddonConfig,
+    #[serde(default)]
+    pub emoji: EmojiAddonConfig,
     #[serde(default)]
     pub script_filters: Vec<ScriptFilterConfig>,
     #[serde(default)]
@@ -1537,5 +1552,74 @@ mod tests {
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert!(parsed_config.addons.text_snippets.is_empty());
+    }
+
+    #[test]
+    fn test_emoji_addon_config_parsing() {
+        let yaml_config = r#"
+        addons:
+          emoji:
+            enabled: true
+            trigger: "em"
+            action: "insert"
+            secondary_action: "copy"
+        shell:
+          binary: sh
+          description: "Shell"
+        "#;
+        let reader = Cursor::new(yaml_config);
+        let args = Args {
+            help: false,
+            version: false,
+            configfile: None,
+            print_only: false,
+            refresh_cache: false,
+            no_icons: true,
+            default_script_shell: None,
+            ui_type: None,
+            initial_query: None,
+            theme: None,
+        };
+        let parsed_config = read_config_from_reader(reader, &args).unwrap();
+
+        assert!(parsed_config.addons.emoji.enabled);
+        assert_eq!(parsed_config.addons.emoji.trigger, Some("em".to_string()));
+        assert_eq!(
+            parsed_config.addons.emoji.action,
+            Some("insert".to_string())
+        );
+        assert_eq!(
+            parsed_config.addons.emoji.secondary_action,
+            Some("copy".to_string())
+        );
+    }
+
+    #[test]
+    fn test_emoji_addon_defaults_to_disabled() {
+        let yaml_config = r#"
+        shell:
+          binary: sh
+          description: "Shell"
+        "#;
+        let reader = Cursor::new(yaml_config);
+        let args = Args {
+            help: false,
+            version: false,
+            configfile: None,
+            print_only: false,
+            refresh_cache: false,
+            no_icons: true,
+            default_script_shell: None,
+            ui_type: None,
+            initial_query: None,
+            theme: None,
+        };
+        let parsed_config = read_config_from_reader(reader, &args).unwrap();
+
+        // Emoji addon is disabled by default
+        assert!(!parsed_config.addons.emoji.enabled);
+        assert!(parsed_config.addons.emoji.trigger.is_none());
+        assert!(parsed_config.addons.emoji.action.is_none());
+        assert!(parsed_config.addons.emoji.secondary_action.is_none());
     }
 }
