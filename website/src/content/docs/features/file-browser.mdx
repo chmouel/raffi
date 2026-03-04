@@ -1,0 +1,346 @@
+---
+title: File Browser
+description: Navigate your filesystem with keyboard shortcuts
+---
+
+import { Aside, Tabs, TabItem, Card, CardGrid, Steps } from '@astrojs/starlight/components';
+
+The native interface includes a built-in file browser for quick filesystem navigation using keyboard shortcuts.
+
+<Aside type="note">
+The file browser is only available in **native mode**. It is not available when using Fuzzel mode.
+</Aside>
+
+## Overview
+
+Navigate your filesystem directly from the launcher with fuzzy filtering, hidden file support, and keyboard-driven actions.
+
+![File browser example](../../../assets/screenshots/file-browser.png)
+
+## Activation
+
+Start the file browser by typing one of these prefixes:
+
+<CardGrid>
+  <Card title="Root Directory" icon="folder">
+    Type `/` to browse from the root filesystem
+  </Card>
+  <Card title="Home Directory" icon="house">
+    Type `~` to browse from your home directory
+  </Card>
+</CardGrid>
+
+### Examples
+
+```text
+/                  # Browse root directory
+~                  # Browse home directory
+/home/user/        # Browse specific directory
+~/Documents/       # Browse Documents folder
+```
+
+## Navigation
+
+### Directory Structure
+
+- **Directories** are listed first in accent color
+- **Files** are listed after directories
+- Current path shows in the input field
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| **Enter** | Navigate into directory OR open file with `xdg-open` |
+| **Alt+Enter** | Copy file/directory path to clipboard |
+| **Tab** | Autocomplete selected entry into search bar |
+| **Ctrl+H** | Toggle hidden file visibility |
+| **Esc** | Exit file browser |
+| **↑/↓** | Navigate through results |
+
+## Fuzzy Filtering
+
+Text after the last `/` fuzzy-filters the current directory listing:
+
+<Tabs>
+<TabItem label="Basic Filter">
+```text
+/home/us
+# Filters /home/ by "us"
+# Matches: user, username, usr, etc.
+```
+</TabItem>
+<TabItem label="Deep Filter">
+```text
+~/Documents/proj
+# Filters ~/Documents/ by "proj"
+# Matches: projects, my-project, old_projects, etc.
+```
+</TabItem>
+<TabItem label="Extension Filter">
+```text
+~/Downloads/.pdf
+# Filters ~/Downloads/ by ".pdf"
+# Shows all PDF files
+```
+</TabItem>
+</Tabs>
+
+## Hidden Files
+
+Control visibility of hidden files (dotfiles):
+
+<Tabs>
+  <TabItem label="Toggle at Runtime">
+    Press **Ctrl+H** to toggle hidden file visibility while browsing
+  </TabItem>
+  
+  <TabItem label="Default Hidden">
+    ```yaml raffi.yaml
+    addons:
+      file_browser:
+        enabled: true
+        show_hidden: false
+    ```
+  </TabItem>
+  
+  <TabItem label="Default Visible">
+    ```yaml raffi.yaml
+    addons:
+      file_browser:
+        enabled: true
+        show_hidden: true
+    ```
+  </TabItem>
+</Tabs>
+
+<Aside type="note">
+Hidden files start with a dot (`.`), like `.bashrc`, `.config`, etc.
+</Aside>
+
+## Actions
+
+### Open File
+
+1. Navigate to file
+2. Press **Enter**
+3. File opens with `xdg-open` (system default application)
+
+```text Example
+~/Documents/report.pdf
+[Enter] → Opens PDF in default viewer
+```
+
+### Navigate Directory
+
+1. Navigate to directory
+2. Press **Enter**
+3. Directory contents are displayed
+
+```text Example
+~/Documents/
+[Enter] → Shows contents of Documents/
+```
+
+### Copy Path
+
+1. Navigate to file or directory
+2. Press **Alt+Enter**
+3. Full path copied to clipboard
+
+```text Example
+~/Documents/report.pdf
+[Alt+Enter] → Copies: /home/user/Documents/report.pdf
+```
+
+### Autocomplete
+
+1. Navigate to file or directory
+2. Press **Tab**
+3. Entry is autocompleted into search bar
+
+```text Example
+Current: /home/us
+Selected: user/
+[Tab] → Input becomes: /home/user/
+```
+
+## Configuration
+
+Configure the file browser in `raffi.yaml`:
+
+```yaml raffi.yaml
+addons:
+  file_browser:
+    enabled: true
+    show_hidden: false
+```
+
+### Configuration Options
+
+**`enabled`** `boolean` (default: `true`)
+
+Enable or disable the file browser addon
+
+
+**`show_hidden`** `boolean` (default: `false`)
+
+Show hidden files (dotfiles) by default. Can be toggled at runtime with Ctrl+H.
+
+
+### Disable File Browser
+
+```yaml raffi.yaml
+addons:
+  file_browser:
+    enabled: false
+```
+
+## Use Cases
+
+
+  <details>
+<summary>Quick File Access</summary>
+
+    ```text
+    ~/Downloads/
+    # Type: latest
+    # Find: latest-report.pdf
+    # [Enter] to open
+    ```
+  </details>
+
+  <details>
+<summary>Copy File Paths</summary>
+
+    ```text
+    ~/Projects/myapp/src/
+    # Navigate to: main.rs
+    # [Alt+Enter] to copy path
+    # Paste into terminal or IDE
+    ```
+  </details>
+
+  <details>
+<summary>Browse Config Files</summary>
+
+    ```text
+    ~/.config/
+    # [Ctrl+H] to show hidden files
+    # Navigate to: .bashrc, .vimrc, etc.
+    # [Enter] to edit
+    ```
+  </details>
+
+  <details>
+<summary>Project Navigation</summary>
+
+    ```text
+    ~/Projects/
+    # Filter: myapp
+    # [Enter] to navigate
+    # Filter: src
+    # [Tab] to autocomplete
+    ```
+  </details>
+
+
+## Visual Indicators
+
+<CardGrid>
+  <Card title="Directories" icon="folder">
+    Listed first in **accent color**
+  </Card>
+  <Card title="Files" icon="file">
+    Listed after directories in normal text
+  </Card>
+</CardGrid>
+
+## Requirements
+
+<Aside type="caution">
+The file browser requires `xdg-open` to open files (standard on most Linux distributions)
+</Aside>
+
+<Aside type="note">
+Clipboard operations require `wl-copy` (wl-clipboard) for Wayland
+</Aside>
+
+## Examples
+
+### Navigate to Documents
+
+<Steps>
+1. **Type Prefix**
+
+   Type `~` to start browsing home directory
+
+2. **Filter**
+
+   Type `Doc` to filter for Documents
+
+3. **Navigate**
+
+   Press **Enter** on Documents folder
+
+4. **Browse Files**
+
+   See all files in ~/Documents/
+
+</Steps>
+
+### Open Configuration File
+
+<Steps>
+1. **Go to Config**
+
+   Type `~/.config/`
+
+2. **Show Hidden**
+
+   Press **Ctrl+H** if needed
+
+3. **Filter**
+
+   Type filename to filter (e.g., `raf` for raffi)
+
+4. **Open**
+
+   Press **Enter** to open with default editor
+
+</Steps>
+
+### Copy Script Path
+
+<Steps>
+1. **Navigate**
+
+   Type `~/bin/` or `/usr/local/bin/`
+
+2. **Find Script**
+
+   Filter by name (e.g., `my-script`)
+
+3. **Copy Path**
+
+   Press **Alt+Enter** to copy full path
+
+4. **Use Path**
+
+   Paste into terminal, config, or documentation
+
+</Steps>
+
+## Tips
+
+<Aside type="tip">
+Directories are always listed first and highlighted in the accent color, making it easy to distinguish them from files.
+</Aside>
+
+<Aside type="tip">
+Use fuzzy filtering after the last `/` to quickly find files: `/home/user/doc` matches `/home/user/Documents/`
+</Aside>
+
+<Aside type="tip">
+Toggle hidden files with **Ctrl+H** without leaving the file browser.
+</Aside>

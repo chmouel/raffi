@@ -1,0 +1,396 @@
+---
+title: Script Filters
+description: Dynamic results from external commands using Alfred JSON format
+---
+
+import { Aside, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
+
+Script filters allow external commands to provide dynamic results in the launcher using a subset of the Alfred Script Filter JSON format.
+
+<Aside type="note">
+Script filters are only available in **native mode**. They are not available when using Fuzzel mode.
+</Aside>
+
+## Overview
+
+Script filters execute external commands when a keyword is typed, displaying dynamic results based on the command's JSON output. This enables integration with APIs, databases, custom scripts, and more.
+
+![Script filter timezone converter example](../../../assets/screenshots/script-filter-tz.png)
+
+## Configuration
+
+Configure script filters in your `raffi.yaml`:
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Timezones"
+      keyword: "tz"
+      command: "batz"
+      args: ["-j"]
+      icon: "clock"
+    
+    - name: "Bookmarks"
+      keyword: "bm"
+      command: "my-bookmark-script"
+      args: ["-j"]
+      action: "echo -n {value}|wl-copy"
+      secondary_action: "xdg-open {value}"
+```
+
+### Configuration Fields
+
+**`name`** `string` (required)
+
+Display name shown during loading
+
+
+**`keyword`** `string` (required)
+
+Text that activates the script filter
+
+
+**`command`** `string` (required)
+
+Executable to run
+
+
+**`args`** `array`
+
+Arguments passed before the query
+
+
+**`icon`** `string`
+
+Fallback icon name for results without their own icon
+
+
+**`action`** `string` (default: `copy`)
+
+Action on Enter. Options:
+  - `"copy"`: Copy to clipboard
+  - `"insert"`: Type into focused app via wtype/ydotool
+  - Command template with `{value}` placeholder (executed via `sh -c`)
+
+
+**`secondary_action`** `string`
+
+Action on Ctrl+Enter. Accepts same values as `action`. If omitted, Ctrl+Enter behaves same as Enter.
+
+
+## JSON Format
+
+Script filters must output JSON matching this structure (subset of [Alfred's format](https://www.alfredapp.com/help/workflows/inputs/script-filter/json/)):
+
+```json
+{
+  "items": [
+    {
+      "title": "New York",
+      "subtitle": "EST (UTC-5) — 14:30",
+      "arg": "America/New_York",
+      "icon": { "path": "/usr/share/icons/clock.png" }
+    },
+    {
+      "title": "London",
+      "subtitle": "GMT (UTC+0) — 19:30",
+      "arg": "Europe/London"
+    }
+  ]
+}
+```
+
+### JSON Fields
+
+**`title`** `string` (required)
+
+Main text displayed for the item
+
+
+**`subtitle`** `string`
+
+Secondary text shown below the title
+
+
+**`arg`** `string`
+
+Value copied to clipboard (falls back to title if omitted)
+
+
+**`icon.path`** `string`
+
+Absolute path to a PNG or SVG icon
+
+
+## How It Works
+
+<Steps>
+1. **Type Keyword**
+
+   User types the configured keyword (e.g., `tz`)
+
+2. **Execute Command**
+
+   Script is executed with remaining input as final argument:
+       ```bash
+       batz -j "New York"
+       ```
+
+3. **Parse JSON**
+
+   Raffi parses the JSON output from stdout
+
+4. **Display Results**
+
+   Items are displayed in the launcher
+
+5. **Handle Selection**
+
+   On Enter, the item's `arg` value (or `title`) is used with the configured action
+
+</Steps>
+
+## Actions
+
+### Default Action (Copy)
+
+By default, selecting an item copies its value to the clipboard:
+
+```yaml
+script_filters:
+  - name: "Timezones"
+    keyword: "tz"
+    command: "batz"
+    # Default action is "copy"
+```
+
+### Custom Actions
+
+Define custom actions using command templates:
+
+<Tabs>
+<TabItem label="Copy to Clipboard">
+```yaml
+action: "echo -n {value}|wl-copy"
+```
+</TabItem>
+<TabItem label="Open in Browser">
+```yaml
+action: "xdg-open {value}"
+```
+</TabItem>
+<TabItem label="Type into App">
+```yaml
+action: "insert"
+```
+</TabItem>
+<TabItem label="Custom Command">
+```yaml
+action: "my-command --input {value}"
+```
+</TabItem>
+</Tabs>
+
+### Primary and Secondary Actions
+
+```yaml raffi.yaml
+script_filters:
+  - name: "Bookmarks"
+    keyword: "bm"
+    command: "bookmark-script"
+    action: "echo -n {value}|wl-copy"  # Enter: Copy URL
+    secondary_action: "xdg-open {value}"  # Ctrl+Enter: Open URL
+```
+
+<Tabs>
+  <TabItem label="Primary (Enter)">
+    Copies bookmark URL to clipboard
+  </TabItem>
+  <TabItem label="Secondary (Ctrl+Enter)">
+    Opens bookmark URL in browser
+  </TabItem>
+</Tabs>
+
+## ANSI Color Support
+
+The `title` and `subtitle` fields support ANSI color codes for colored text:
+
+```json
+{
+  "items": [
+    {
+      "title": "\u001b[32mSuccess\u001b[0m",
+      "subtitle": "\u001b[90mCompleted at 14:30\u001b[0m"
+    }
+  ]
+}
+```
+
+<Aside type="tip">
+The [pr.py script from alfred-pr-workflow](https://gitlab.com/chmouel/alfred-pr-workflow) uses colors to display pull request states.
+</Aside>
+
+## Examples
+
+### Timezone Converter
+
+Using [batz](https://github.com/chmouel/batzconverter) time converter:
+
+```yaml raffi.yaml
+script_filters:
+  - name: "Timezones"
+    keyword: "tz"
+    command: "batz"
+    args: ["-j"]
+    icon: "clock"
+```
+
+Usage:
+
+```text
+tz New York
+# Shows current time in New York
+# Press Enter to copy timezone info
+```
+
+### GitHub Pull Requests
+
+![GitHub PR browser](../../../assets/screenshots/script-filter-pr.png)
+
+```yaml raffi.yaml
+script_filters:
+  - name: "Pull Requests"
+    keyword: "pr"
+    command: "gh-pr-script"
+    args: ["-j"]
+    icon: "github"
+    action: "xdg-open {value}"
+```
+
+Usage:
+
+```text
+pr my-project
+# Lists pull requests for my-project
+# Press Enter to open PR in browser
+```
+
+### Bookmark Manager
+
+```yaml raffi.yaml
+script_filters:
+  - name: "Bookmarks"
+    keyword: "bm"
+    command: "bookmark-manager"
+    args: ["--json"]
+    icon: "bookmark"
+    action: "echo -n {value}|wl-copy"
+    secondary_action: "xdg-open {value}"
+```
+
+Usage:
+
+```text
+bm documentation
+# Filters bookmarks by "documentation"
+# Enter: Copy URL
+# Ctrl+Enter: Open in browser
+```
+
+### Password Manager
+
+```yaml raffi.yaml
+script_filters:
+  - name: "Passwords"
+    keyword: "pw"
+    command: "pass-json"
+    icon: "lock"
+    action: "copy"
+```
+
+Usage:
+
+```text
+pw github
+# Shows password entries matching "github"
+# Press Enter to copy password
+```
+
+## Creating a Script Filter
+
+Here's a simple example script in Python:
+
+```python my-filter.py
+#!/usr/bin/env python3
+import json
+import sys
+
+query = sys.argv[1] if len(sys.argv) > 1 else ""
+
+items = [
+    {
+        "title": f"Result for: {query}",
+        "subtitle": "This is a subtitle",
+        "arg": f"https://example.com/search?q={query}",
+        "icon": {"path": "/usr/share/icons/search.png"}
+    }
+]
+
+print(json.dumps({"items": items}))
+```
+
+Make it executable and configure:
+
+```bash
+chmod +x my-filter.py
+```
+
+```yaml raffi.yaml
+script_filters:
+  - name: "My Filter"
+    keyword: "mf"
+    command: "./my-filter.py"
+    action: "xdg-open {value}"
+```
+
+## Keyboard Shortcuts
+
+- **Enter**: Execute primary action
+- **Ctrl+Enter**: Execute secondary action (if configured)
+- **Esc**: Cancel and return to normal mode
+- **↑/↓**: Navigate through results
+
+## Requirements
+
+<Aside type="caution">
+Your script must output valid JSON to stdout. Any errors should go to stderr.
+</Aside>
+
+<Aside type="note">
+Clipboard actions require `wl-copy`, `xclip`, or `xsel`
+</Aside>
+
+<Aside type="note">
+Insert/type actions require `wtype` or `ydotool`
+</Aside>
+
+## Tips
+
+<Aside type="tip">
+Test your script manually before adding to Raffi:
+```bash
+my-script -j "test query"
+```
+</Aside>
+
+<Aside type="tip">
+Use colors in output to highlight important information (ANSI codes are rendered)
+</Aside>
+
+<Aside type="tip">
+Cache expensive operations in your script to improve performance
+</Aside>
+
+<Aside type="tip">
+Set both `action` and `secondary_action` for maximum flexibility (e.g., copy vs. open)
+</Aside>

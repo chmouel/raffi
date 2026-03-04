@@ -1,0 +1,192 @@
+---
+title: UI Modes
+description: Choose between Fuzzel integration and native interface
+---
+
+import { Aside, Tabs, TabItem, Card, CardGrid } from '@astrojs/starlight/components';
+
+Raffi supports two distinct user interface modes, each designed for different use cases and preferences.
+
+## Overview
+
+Raffi can operate in two modes:
+
+<CardGrid>
+  <Card title="Fuzzel Mode" icon="terminal">
+    External launcher integration with Wayland environments
+  </Card>
+  <Card title="Native Mode" icon="window-maximize">
+    Built-in graphical interface with advanced features
+  </Card>
+</CardGrid>
+
+## Fuzzel Mode
+
+Fuzzel mode uses the external [Fuzzel](https://codeberg.org/dnkl/fuzzel) launcher and integrates naturally with Wayland environments.
+
+### Features
+
+- Lightweight and fast
+- Seamless Wayland integration
+- Uses system Fuzzel configuration
+- Minimal resource usage
+
+### Configuration
+
+Fuzzel appearance is configured through `~/.config/fuzzel/fuzzel.ini`:
+
+```ini fuzzel.ini
+dpi-aware=yes
+font=RobotoMonoNerdFont-Thin:size=16
+terminal=kitty
+width=50
+layer=overlay
+exit-on-keyboard-focus-loss=no
+inner-pad=15
+fields=filename,name
+
+[colors]
+background=282a36ff
+text=f8f8f2ff
+match=8be9fdff
+selection-match=8be9fdff
+selection=44475add
+selection-text=f8f8f2ff
+border=bd93f9ff
+```
+
+Refer to the [Fuzzel manual](https://man.archlinux.org/man/fuzzel.ini.5.en) for full configuration details.
+
+### Usage
+
+<Tabs>
+<TabItem label="Command Line">
+```bash
+raffi -u fuzzel
+```
+</TabItem>
+<TabItem label="Config File">
+```yaml
+general:
+  ui_type: fuzzel
+```
+</TabItem>
+</Tabs>
+
+### Building Fuzzel-Only Binary
+
+For a significantly smaller binary (1.1 MB vs 15 MB), you can build without the native UI:
+
+```bash
+cargo build --release --no-default-features
+```
+
+This removes the iced GUI dependency while maintaining full Fuzzel functionality.
+
+## Native Mode
+
+Native mode uses an internal iced-based graphical interface with fuzzy search, keyboard navigation, and theme support.
+
+### Features
+
+<CardGrid>
+  <Card title="Built-in Calculator" icon="calculator">
+    Evaluate mathematical expressions as you type
+  </Card>
+  <Card title="Currency Converter" icon="dollar-sign">
+    Convert between currencies with live exchange rates
+  </Card>
+  <Card title="File Browser" icon="folder-open">
+    Navigate filesystem with keyboard shortcuts
+  </Card>
+  <Card title="Script Filters" icon="code">
+    Dynamic results from external commands
+  </Card>
+  <Card title="Web Search" icon="search">
+    Quick searches with URL templates
+  </Card>
+  <Card title="Text Snippets" icon="clipboard">
+    Reusable text values with multiple sources
+  </Card>
+  <Card title="Theme Support" icon="palette">
+    Dark and light themes with color customization
+  </Card>
+  <Card title="Fuzzy Search" icon="filter">
+    Fast filtering across all entries
+  </Card>
+</CardGrid>
+
+### Usage
+
+<Tabs>
+<TabItem label="Command Line">
+```bash
+raffi -u native
+```
+</TabItem>
+<TabItem label="With Initial Query">
+```bash
+raffi -u native -i "firefox"
+```
+</TabItem>
+<TabItem label="Light Theme">
+```bash
+raffi -u native -t light
+```
+</TabItem>
+<TabItem label="Config File">
+```yaml
+general:
+  ui_type: native
+  theme: dark
+  font_size: 20
+  font_family: "Inter"
+  window_width: 900
+  window_height: 500
+```
+</TabItem>
+</Tabs>
+
+### Window Manager Integration
+
+<Tabs>
+  <TabItem label="Sway">
+    ```ini
+    set $menu raffi -p
+    set $super Mod4
+    bindsym $super+Space exec $menu | xargs swaymsg exec --
+    ```
+  </TabItem>
+  <TabItem label="Hyprland">
+    ```ini
+    $super = SUPER
+    bind = $super, R, exec, (val=$(raffi -pI); echo $val | grep -q . && hyprctl dispatch exec "$val")
+    ```
+  </TabItem>
+</Tabs>
+
+## Comparison
+
+| Feature | Fuzzel Mode | Native Mode |
+|---------|-------------|-------------|
+| **Size** | 1.1 MB (no-default-features) | 15 MB |
+| **Dependencies** | Requires Fuzzel | Self-contained |
+| **Calculator** | ❌ | ✅ |
+| **Currency Converter** | ❌ | ✅ |
+| **File Browser** | ❌ | ✅ |
+| **Script Filters** | ❌ | ✅ |
+| **Web Search** | ❌ | ✅ |
+| **Text Snippets** | ❌ | ✅ |
+| **Theme Support** | System Fuzzel config | Built-in dark/light |
+| **Configuration** | `fuzzel.ini` | `raffi.yaml` |
+
+## Automatic Selection
+
+If no UI type is specified, Raffi automatically chooses:
+
+1. **Fuzzel mode** if `fuzzel` binary is found in PATH
+2. **Native mode** as fallback (if built with `wayland` feature)
+
+<Aside type="note">
+The `wayland` feature must be enabled at compile time for native mode support.
+</Aside>

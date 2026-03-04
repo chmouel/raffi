@@ -1,0 +1,334 @@
+---
+title: Conditions
+description: Control entry visibility based on environment variables and binary existence
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Overview
+
+Raffi supports conditional visibility for launcher entries. Use conditions to:
+
+- Show entries only in specific desktop environments
+- Display entries only when certain binaries are installed
+- Conditionally show entries based on environment variables
+
+Only one condition is supported per entry.
+
+## Condition Types
+
+### ifenvset
+
+Shows the entry only if an environment variable is set (to any value).
+
+**`ifenvset`** `string`
+
+Environment variable name. Entry is shown only if this variable is set.
+
+
+#### Example: Wayland-Only Entry
+
+```yaml
+rbw-pass:
+  binary: rofi-rbw
+  args:
+    [
+      "--selector wofi --clipboarder wl-copy --action copy-password --typer xdotool",
+    ]
+  description: "Password Manager"
+  icon: password-manager
+  ifenvset: WAYLAND_DISPLAY
+```
+
+This entry appears only when `WAYLAND_DISPLAY` is set (i.e., in Wayland sessions).
+
+#### Example: Sway-Specific Entry
+
+```yaml
+cliphistory:
+  binary: clipman
+  args: ["pick", "-t", "wofi"]
+  description: "Clipboard history"
+  icon: accessories-clipboard
+  ifenvset: SWAYSOCK
+```
+
+### ifenvnotset
+
+Shows the entry only if an environment variable is **not** set.
+
+**`ifenvnotset`** `string`
+
+Environment variable name. Entry is shown only if this variable is not set.
+
+
+#### Example
+
+```yaml
+x11-only:
+  binary: xdotool
+  description: "X11 Tool"
+  ifenvnotset: WAYLAND_DISPLAY
+```
+
+### ifenveq
+
+Shows the entry only if an environment variable equals a specific value.
+
+**`ifenveq`** `array`
+
+Array with exactly two elements: `[VARIABLE_NAME, EXPECTED_VALUE]`.
+  
+  Entry is shown only if `$VARIABLE_NAME == EXPECTED_VALUE`.
+
+
+#### Example: GNOME-Only Entry
+
+```yaml
+keyboard-setting:
+  binary: gnome-control-center
+  args: [keyboard]
+  description: "Keyboard setting"
+  icon: preferences-desktop-keyboard-shortcuts
+  ifenveq: [DESKTOP_SESSION, GNOME]
+```
+
+#### Example: X11-Only Entry
+
+```yaml
+snap-window-around:
+  binary: wmctrl-resize-and-center
+  args: [rotate]
+  description: "Snap window around"
+  icon: wmaround
+  ifenveq: [XDG_SESSION_TYPE, x11]
+```
+
+#### Example: Desktop Environment Check
+
+```yaml
+gnome-shutdown:
+  binary: gnome-session-quit
+  args: [--power-off]
+  description: "Shutdown / Poweroff"
+  icon: gnome-shutdown
+  ifenveq: [DESKTOP_SESSION, GNOME]
+
+reboot:
+  binary: gnome-session-quit
+  args: [--reboot]
+  description: "Reboot"
+  icon: gnome-session-reboot
+  ifenveq: [DESKTOP_SESSION, GNOME]
+```
+
+### ifexist
+
+Shows the entry only if a specific binary or file exists.
+
+**`ifexist`** `string`
+
+Binary name or file path. Entry is shown only if:
+  - Binary exists in PATH (if name only)
+  - File exists (if absolute path)
+  
+  Supports path expansion (`~/` and `${VAR}`).
+
+
+#### Example: Binary Existence
+
+```yaml
+wally:
+  binary: jumpapp
+  args: ["-X", "wally"]
+  description: "Wally"
+  icon: wally
+  ifexist: wally
+```
+
+Shown only if `wally` is installed in PATH.
+
+#### Example: Multiple Entries for Same App
+
+```yaml
+evolution-mail:
+  binary: jumpapp
+  args: ["-t", "Evolution", "-X", "evolution"]
+  description: "Evolution Mail"
+  icon: evolution-mail
+  ifexist: evolution
+
+signal:
+  binary: jumpapp
+  args: ["-X", "signal", "signal-desktop"]
+  description: "Signal"
+  icon: signal-desktop
+  ifexist: signal-desktop
+```
+
+#### Example: File Path Check
+
+```yaml
+custom-app:
+  binary: ~/bin/myapp
+  description: "My Application"
+  icon: myapp
+  ifexist: ~/bin/myapp
+```
+
+## Combining with Other Fields
+
+Conditions work with all other entry fields:
+
+### Script with Condition
+
+```yaml
+my-script:
+  script: |
+    echo "Running on Wayland"
+    env | grep WAYLAND
+  description: "Wayland Info"
+  icon: "info"
+  ifenvset: WAYLAND_DISPLAY
+```
+
+### Disabled Entry with Condition
+
+```yaml
+optional-tool:
+  binary: special-tool
+  description: "Special Tool"
+  ifexist: special-tool
+  disabled: true
+```
+
+<Aside type="note">
+Even if the condition passes, a `disabled: true` entry will be hidden.
+</Aside>
+
+## Real-World Examples
+
+From the example configuration:
+
+### Environment-Specific System Commands
+
+```yaml
+# GNOME-specific shutdown
+gnome-shutdown:
+  binary: gnome-session-quit
+  args: [--power-off]
+  description: "Shutdown / Poweroff"
+  icon: gnome-shutdown
+  ifenveq: [DESKTOP_SESSION, GNOME]
+
+# Sway-specific shutdown
+shutdown:
+  binary: poweroff
+  description: "Shutdown / Poweroff"
+  icon: gnome-shutdown
+  ifenvset: SWAYSOCK
+```
+
+### Session Type Detection
+
+```yaml
+# X11-only entry
+red-hat-mail:
+  binary: xdo-focus-a-tab
+  args: ["chromium", "Red Hat Mail", "https://mail.google.com/a/redhat.com"]
+  description: "Red Hat GMail"
+  icon: gmail
+  ifenveq: [XDG_SESSION_TYPE, x11]
+
+# Wayland-only entry
+screenshot-clipboard:
+  binary: sway-screenshot
+  args: [selection-clipboard]
+  description: "Screenshot to clipboard"
+  icon: screenshoticon
+  ifenvset: SWAYSOCK
+```
+
+### Optional Tools
+
+```yaml
+emoji-picker:
+  binary: splatmoji
+  args: [copy]
+  description: "Emoji Picker"
+  icon: emoji
+  ifexist: splatmoji
+
+bpytop:
+  binary: kitty-ctrl
+  args: ["jump", "bpytop"]
+  description: "BpyTOP"
+  icon: bashtop
+  ifexist: bpytop
+
+start-kind:
+  binary: kitty-ctrl
+  args: ["jump", "-t", "Kind", "startkind"]
+  description: "Start Kind"
+  icon: kind-started
+  ifexist: kind
+```
+
+## Validation Logic
+
+Raffi evaluates conditions on startup:
+
+1. **ifenveq**: Checks if variable exists and equals expected value
+2. **ifenvset**: Checks if variable exists (any value)
+3. **ifenvnotset**: Checks if variable does not exist
+4. **ifexist**: Checks if binary is in PATH or file exists
+
+If any condition fails, the entry is hidden.
+
+### Automatic Binary Check
+
+Even without conditions, Raffi automatically hides entries if:
+
+- `binary` doesn't exist in PATH (for non-script entries)
+- Script interpreter doesn't exist in PATH (for script entries)
+
+```yaml
+# Automatically hidden if firefox is not installed
+firefox:
+  binary: firefox
+  description: "Firefox"
+  icon: firefox
+```
+
+## Limitations
+
+<Aside type="caution">
+Only one condition is supported per entry. Multiple conditions are not supported.
+</Aside>
+
+If you need multiple conditions, create separate entries:
+
+```yaml
+# Entry for GNOME on Wayland
+gnome-wayland-tool:
+  binary: my-tool
+  description: "Tool (GNOME)"
+  ifenveq: [DESKTOP_SESSION, GNOME]
+
+# Entry for KDE on Wayland
+kde-wayland-tool:
+  binary: my-tool
+  description: "Tool (KDE)"
+  ifenveq: [DESKTOP_SESSION, KDE]
+```
+
+Or use a script to check multiple conditions:
+
+```yaml
+conditional-tool:
+  script: |
+    if [[ "$DESKTOP_SESSION" == "GNOME" && -n "$WAYLAND_DISPLAY" ]]; then
+      my-tool
+    fi
+  description: "Conditional Tool"
+```

@@ -1,0 +1,267 @@
+---
+title: Icons
+description: Configure icon discovery, caching, and paths for Raffi entries
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Overview
+
+Raffi supports icons from system icon themes and custom icon files. Icons are automatically discovered from standard XDG directories, cached for performance, and can be specified by name or absolute path.
+
+## Icon Specification
+
+You can specify icons in two ways:
+
+### 1. Icon Names (from system themes)
+
+```yaml
+firefox:
+  binary: firefox
+  description: "Firefox"
+  icon: firefox
+```
+
+Raffi searches for icons in system directories and uses the icon name to look up the full path.
+
+### 2. Absolute Paths
+
+```yaml
+golang:
+  binary: goland
+  description: "Goland"
+  icon: /opt/goland/bin/goland.svg
+```
+
+Provide a direct path to a `.png` or `.svg` file.
+
+### 3. Path Expansion
+
+```yaml
+myapp:
+  binary: myapp
+  description: "My Application"
+  icon: ~/icons/myapp.png
+```
+
+Use `~/` for home directory or `${VAR}` for environment variables:
+
+```yaml
+custom:
+  binary: custom-app
+  icon: ${XDG_DATA_HOME}/icons/custom.svg
+  description: "Custom App"
+```
+
+## Icon Discovery
+
+Raffi discovers icons from standard XDG directories:
+
+- `$XDG_DATA_HOME/icons` (defaults to `~/.local/share/icons`)
+- `$XDG_DATA_DIRS/icons` (defaults to `/usr/local/share/icons:/usr/share/icons`)
+- `$XDG_DATA_HOME/pixmaps`
+- `$XDG_DATA_DIRS/pixmaps`
+
+### Supported Formats
+
+Raffi supports:
+
+- PNG images (`.png`)
+- SVG images (`.svg`)
+
+### Icon Size Preference
+
+Raffi renders icons at 48×48 pixels and prefers larger source icons for better quality:
+
+1. **Scalable icons** (from `scalable/` directories) are prioritized
+2. **48×48 or larger** icons are preferred over smaller sizes
+3. If multiple sizes exist, the **largest** icon is selected
+
+For example, given these icon paths:
+
+```
+/usr/share/icons/Papirus/16x16/apps/firefox.png
+/usr/share/icons/Papirus/48x48/apps/firefox.png
+/usr/share/icons/Papirus/scalable/apps/firefox.svg
+```
+
+Raffi selects the scalable SVG for best quality.
+
+## Icon Caching
+
+Icon paths are cached to improve startup performance.
+
+### Cache Location
+
+```
+$XDG_CACHE_HOME/raffi/icon.cache
+```
+
+Defaults to `~/.cache/raffi/icon.cache` if `XDG_CACHE_HOME` is not set.
+
+### Cache Format
+
+The cache is a JSON file mapping icon names to absolute paths:
+
+```json
+{
+  "firefox": "/usr/share/icons/Papirus/scalable/apps/firefox.svg",
+  "terminal": "/usr/share/icons/Papirus/48x48/apps/terminal.png",
+  "chromium": "/usr/share/icons/hicolor/scalable/apps/chromium.svg"
+}
+```
+
+### Refreshing the Cache
+
+The cache is automatically generated on first run. To regenerate it:
+
+```bash
+raffi --refresh-cache
+```
+
+Or use the short flag:
+
+```bash
+raffi -r
+```
+
+<Aside type="note">
+Refresh the cache after:
+- Installing a new icon theme
+- Adding custom icons to XDG directories
+- Changing icon theme settings
+</Aside>
+
+## Disabling Icons
+
+Icons can be disabled for faster startup:
+
+### Via Command Line
+
+```bash
+raffi --disable-icons
+```
+
+Or:
+
+```bash
+raffi -I
+```
+
+### Via Configuration
+
+```yaml
+general:
+  no_icons: true
+```
+
+<Aside type="note">
+Command-line flags override configuration file settings.
+</Aside>
+
+## Examples
+
+### Mixed Icon Specifications
+
+```yaml
+# System icon by name
+firefox:
+  binary: firefox
+  description: "Firefox"
+  icon: firefox
+
+# Absolute path
+golang:
+  binary: goland
+  description: "Goland"
+  icon: /opt/goland/bin/goland.svg
+
+# Home directory expansion
+myapp:
+  binary: myapp
+  description: "My Application"
+  icon: ~/icons/myapp.png
+
+# Environment variable expansion
+custom:
+  binary: custom-app
+  description: "Custom App"
+  icon: ${XDG_DATA_HOME}/icons/custom.svg
+
+# No icon
+terminal:
+  binary: kitty
+  description: "Terminal"
+```
+
+### Real-World Examples
+
+From the example configuration:
+
+```yaml
+wally:
+  binary: jumpapp
+  args: ["-X", "wally"]
+  description: "Wally"
+  icon: wally
+  ifexist: wally
+
+evolution-mail:
+  binary: jumpapp
+  args: ["-t", "Evolution", "-X", "evolution"]
+  description: "Evolution Mail"
+  icon: evolution-mail
+  ifexist: evolution
+
+signal:
+  binary: jumpapp
+  args: ["-X", "signal", "signal-desktop"]
+  description: "Signal"
+  icon: signal-desktop
+  ifexist: signal-desktop
+
+golang:
+  binary: jumpapp
+  args: ["-c", "jetbrains-goland", "goland"]
+  description: "Goland"
+  icon: /opt/goland/bin/goland.svg
+```
+
+## Troubleshooting
+
+### Icon Not Found
+
+If an icon isn't displaying:
+
+1. **Check icon name**: Verify the icon exists in your theme:
+
+   ```bash
+   find /usr/share/icons -name "firefox.*"
+   ```
+
+2. **Refresh cache**: Icon cache may be outdated:
+
+   ```bash
+   raffi --refresh-cache
+   ```
+
+3. **Use absolute path**: Bypass icon discovery:
+
+   ```yaml
+   myapp:
+     icon: /usr/share/icons/hicolor/48x48/apps/myapp.png
+   ```
+
+### Custom Icon Directories
+
+To use icons from custom directories, add them to XDG environment variables:
+
+```bash
+export XDG_DATA_DIRS="$HOME/.local/share:/usr/local/share:/usr/share"
+```
+
+Then refresh the cache:
+
+```bash
+raffi --refresh-cache
+```

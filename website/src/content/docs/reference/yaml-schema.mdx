@@ -1,0 +1,433 @@
+---
+title: YAML Configuration Schema
+description: Complete reference for raffi.yaml configuration structure
+---
+
+Raffi uses a YAML configuration file to define launcher entries and settings. The default location is `~/.config/raffi/raffi.yaml`.
+
+## Top-Level Structure
+
+The configuration file consists of three main sections:
+
+```yaml
+general:
+  # General settings and UI configuration
+
+addons:
+  # Addon configurations (currency, calculator, etc.)
+
+# Entry definitions (each key becomes an entry)
+entry_name:
+  binary: command
+  description: "Display name"
+  # ... other entry fields
+```
+
+## General Section
+
+Persistent defaults for UI and behavior. All fields are optional and can be overridden by command-line flags.
+
+**`general.ui_type`** `string` (default: `fuzzel`)
+
+Default UI backend to use.
+  
+  Valid values: `fuzzel`, `native`
+  
+  ```yaml
+  general:
+    ui_type: native
+  ```
+
+
+**`general.default_script_shell`** `string` (default: `bash`)
+
+Default interpreter for script entries.
+  
+  Used when an entry has a `script` field but no explicit `binary` field.
+  
+  ```yaml
+  general:
+    default_script_shell: /bin/zsh
+  ```
+
+
+**`general.no_icons`** `boolean` (default: `false`)
+
+Disable icon loading globally.
+  
+  ```yaml
+  general:
+    no_icons: true
+  ```
+
+
+**`general.theme`** `string` (default: `dark`)
+
+Color theme for native UI.
+  
+  Valid values: `dark`, `light`
+  
+  ```yaml
+  general:
+    theme: light
+  ```
+
+
+**`general.max_history`** `number` (default: `10`)
+
+Maximum number of search query history entries to keep.
+  
+  Set to `0` to disable history. Navigate history with Alt+P (previous) and Alt+N (next) in native mode.
+  
+  ```yaml
+  general:
+    max_history: 20
+  ```
+
+
+**`general.font_size`** `number` (default: `20`)
+
+Base font size in pixels for native UI.
+  
+  Other UI elements scale proportionally:
+
+- Input text: 1.2× base size (24px by default)
+- Item text: 1.0× base size (20px by default)
+- Subtitle text: 0.7× base size (14px by default)
+- Hint text: 0.6× base size (12px by default)
+  
+  ```yaml
+  general:
+    font_size: 16
+  ```
+
+
+**`general.font_family`** `string` (default: `system sans-serif`)
+
+Font family name for native UI.
+  
+  ```yaml
+  general:
+    font_family: "Inter"
+  ```
+
+
+**`general.window_width`** `number` (default: `800`)
+
+Window width in pixels for native UI.
+  
+  ```yaml
+  general:
+    window_width: 900
+  ```
+
+
+**`general.window_height`** `number` (default: `600`)
+
+Window height in pixels for native UI.
+  
+  ```yaml
+  general:
+    window_height: 500
+  ```
+
+
+**`general.padding`** `number` (default: `20`)
+
+Outer window padding in pixels for native UI.
+  
+  By default, scales automatically with `font_size`. Set explicitly to override.
+  
+  ```yaml
+  general:
+    padding: 30
+  ```
+
+
+**`general.theme_colors`** `object`
+
+Custom color overrides for the native UI theme.
+  
+  Each field accepts a hex color string: `#RGB`, `#RRGGBB`, or `#RRGGBBAA`. Only specified colors are overridden; others use the base theme defaults.
+  
+  Available color keys:
+
+- `bg_base` - Main background color
+- `bg_input` - Input field background
+- `accent` - Accent color (selected items, borders)
+- `accent_hover` - Hover state for accented elements
+- `text_main` - Primary text color
+- `text_muted` - Secondary/muted text color
+- `selection_bg` - Selected item background
+- `border` - Border color
+  
+  ```yaml
+  general:
+    theme: dark
+    theme_colors:
+      bg_base: "#1e1e2e"
+      bg_input: "#313244"
+      accent: "#cba6f7"
+      accent_hover: "#89b4fa"
+      text_main: "#cdd6f4"
+      text_muted: "#6c7086"
+      selection_bg: "#45475a"
+      border: "#585b70"
+  ```
+
+
+## Entry Fields
+
+Each top-level key (except `general` and `addons`) defines a launcher entry.
+
+**`binary`** `string` (required)
+
+The executable command to run.
+  
+  If the binary is not found in `$PATH`, the entry is automatically hidden. Supports tilde (`~/`) and environment variable (`${VAR}`) expansion.
+  
+  ```yaml
+  firefox:
+    binary: firefox
+    description: "Firefox Browser"
+  ```
+
+
+**`description`** `string`
+
+Display name shown in the launcher.
+  
+  If omitted, the entry key or binary name is used.
+  
+  ```yaml
+  firefox:
+    binary: firefox
+    description: "Firefox Browser"
+  ```
+
+
+**`args`** `array[string]`
+
+Command-line arguments to pass to the binary.
+  
+  Supports tilde and environment variable expansion.
+  
+  ```yaml
+  firefox:
+    binary: firefox
+    args: ["--marionette", "--private-window"]
+    description: "Firefox Private"
+  ```
+
+
+**`icon`** `string`
+
+Icon name or absolute path to an icon file.
+  
+  Icon names are resolved from system icon directories (`$XDG_DATA_DIRS/icons`, `$XDG_DATA_DIRS/pixmaps`). Prefers larger icons (48×48+) as Raffi renders at 48×48. Supports PNG and SVG formats.
+  
+  Supports tilde and environment variable expansion for paths.
+  
+  ```yaml
+  firefox:
+    binary: firefox
+    icon: firefox
+    description: "Firefox"
+  
+  custom_app:
+    binary: ~/bin/myapp
+    icon: ~/icons/myapp.png
+    description: "My App"
+  ```
+
+
+**`script`** `string`
+
+Inline script content to execute.
+  
+  When present, the `binary` field specifies the interpreter (defaults to `bash` or the value of `--default-script-shell`). The `args` field can provide arguments to the interpreter.
+  
+  Script expansion (`~/` and `${VAR}`) is **not** performed on the script content itself.
+  
+  ```yaml
+  hello_script:
+    script: |
+      echo "Hello, world!"
+      date
+    description: "Hello Script"
+  
+  python_script:
+    binary: python3
+    script: |
+      import datetime
+      print(f"Current time: {datetime.datetime.now()}")
+    description: "Python Time"
+  ```
+
+
+**`disabled`** `boolean` (default: `false`)
+
+Hide this entry from the launcher.
+  
+  ```yaml
+  experimental_feature:
+    binary: experimental
+    description: "Experimental Feature"
+    disabled: true
+  ```
+
+
+### Conditional Display
+
+Entries can be conditionally shown based on environment variables or file existence. Only one condition is evaluated per entry.
+
+**`ifenveq`** `array[string]`
+
+Show entry only if an environment variable equals a specific value.
+  
+  Must be an array with exactly two elements: `[VARIABLE_NAME, expected_value]`
+  
+  ```yaml
+  gnome_settings:
+    binary: gnome-control-center
+    description: "Settings"
+    ifenveq: [DESKTOP_SESSION, GNOME]
+  ```
+
+
+**`ifenvset`** `string`
+
+Show entry only if the specified environment variable is set (to any value).
+  
+  ```yaml
+  wayland_tool:
+    binary: some-wayland-tool
+    description: "Wayland Tool"
+    ifenvset: WAYLAND_DISPLAY
+  ```
+
+
+**`ifenvnotset`** `string`
+
+Show entry only if the specified environment variable is **not** set.
+  
+  ```yaml
+  x11_only:
+    binary: some-x11-tool
+    description: "X11 Tool"
+    ifenvnotset: WAYLAND_DISPLAY
+  ```
+
+
+**`ifexist`** `string`
+
+Show entry only if the specified binary or file exists.
+  
+  For binaries, searches in `$PATH`. For absolute paths, checks file existence. Supports tilde and environment variable expansion.
+  
+  ```yaml
+  spotify:
+    binary: spotify
+    description: "Spotify"
+    ifexist: spotify
+  
+  local_tool:
+    binary: ~/bin/mytool
+    description: "My Tool"
+    ifexist: ~/bin/mytool
+  ```
+
+
+## Addons Section
+
+The `addons` section configures built-in addons for the native UI. See [Addon Configuration](/reference/addon-configuration) for detailed documentation.
+
+```yaml
+addons:
+  currency:
+    enabled: true
+  calculator:
+    enabled: true
+  file_browser:
+    enabled: true
+  script_filters: []
+  web_searches: []
+  text_snippets: []
+```
+
+## Path Expansion
+
+Most configuration fields (except `script`) support path and variable expansion:
+
+- `~/` expands to `$HOME`
+- `${VAR}` expands to the value of environment variable `VAR` (empty string if unset)
+
+```yaml
+myapp:
+  binary: ${HOME}/bin/myapp
+  args: ["${XDG_DATA_HOME}/files", "~/Documents"]
+  icon: ~/icons/myapp.png
+  ifexist: ~/bin/myapp
+```
+
+## Complete Example
+
+```yaml
+general:
+  ui_type: native
+  theme: dark
+  font_size: 20
+  font_family: "Inter"
+  window_width: 800
+  window_height: 600
+  max_history: 10
+  default_script_shell: bash
+  theme_colors:
+    accent: "#cba6f7"
+
+addons:
+  currency:
+    enabled: true
+    trigger: "$"
+    default_currency: USD
+  calculator:
+    enabled: true
+  file_browser:
+    enabled: true
+    show_hidden: false
+  web_searches:
+    - name: "Google"
+      keyword: "g"
+      url: "https://google.com/search?q={query}"
+      icon: "google"
+
+firefox:
+  binary: firefox
+  args: ["--marionette"]
+  icon: firefox
+  description: "Firefox Browser"
+
+thunder:
+  binary: thunar
+  args: ["~/Downloads/"]
+  description: "File Manager"
+
+hello_script:
+  script: |
+    echo "Hello, world!"
+    date
+  description: "Hello Script"
+  icon: "script"
+
+gnome_settings:
+  binary: gnome-control-center
+  description: "System Settings"
+  icon: preferences-system
+  ifenveq: [DESKTOP_SESSION, GNOME]
+
+suspend:
+  binary: systemctl
+  args: [suspend]
+  description: "Suspend/Sleep"
+  icon: system-suspend
+```

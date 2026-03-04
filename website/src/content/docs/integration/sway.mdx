@@ -1,0 +1,74 @@
+---
+title: Sway Integration
+description: Configure Raffi as your application launcher in Sway
+---
+
+# Sway Integration
+
+Raffi integrates seamlessly with the Sway window manager, allowing you to launch applications with a simple keybinding.
+
+## Configuration
+
+Add the following configuration to your Sway config file (typically `~/.config/sway/config`):
+
+```ini
+set $menu raffi -p
+set $super Mod4
+bindsym $super+Space exec $menu | xargs swaymsg exec --
+```
+
+## How It Works
+
+- `raffi -p` runs Raffi in print-only mode, which outputs the selected command instead of executing it directly
+- The output is piped to `xargs swaymsg exec --` to execute the command via Sway's IPC interface
+- `$super+Space` binds the launcher to Super (Windows/Command key) + Space
+
+## Customization
+
+### Using a Different Keybinding
+
+You can change the keybinding to any combination you prefer:
+
+```ini
+# Use Super+D instead
+bindsym $super+d exec $menu | xargs swaymsg exec --
+
+# Use Alt+Space
+bindsym Mod1+Space exec $menu | xargs swaymsg exec --
+```
+
+### Additional Raffi Options
+
+You can pass additional flags to Raffi in the `$menu` variable:
+
+```ini
+# Disable icons for faster startup
+set $menu raffi -p -I
+
+# Use a custom config file
+set $menu raffi -p -c ~/.config/raffi/custom.yaml
+
+# Use the native UI instead of Fuzzel
+set $menu raffi -p -u native
+```
+
+## Testing
+
+After adding the configuration:
+
+1. Reload your Sway config: `swaymsg reload`
+2. Press `Super+Space` to launch Raffi
+3. Select an application and press Enter to launch it
+
+## Troubleshooting
+
+### Launcher doesn't appear
+
+- Ensure Raffi is installed and in your `$PATH`
+- If using Fuzzel mode (default), verify Fuzzel is installed
+- Check Sway logs: `journalctl --user -u sway`
+
+### Applications don't launch
+
+- Test the command manually: `raffi -p | xargs swaymsg exec --`
+- Verify `swaymsg` is working: `swaymsg -t get_version`

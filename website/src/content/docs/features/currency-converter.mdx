@@ -1,0 +1,318 @@
+---
+title: Currency Converter
+description: Real-time currency conversion with cached exchange rates
+---
+
+import { Aside, Tabs, TabItem, Card, CardGrid, Steps } from '@astrojs/starlight/components';
+
+The native interface includes a currency converter with real-time exchange rates from the Frankfurter API.
+
+<Aside type="note">
+The currency converter is only available in **native mode**. It is not available when using Fuzzel mode.
+</Aside>
+
+## Overview
+
+Convert between currencies by typing an amount with a trigger character (default `$`) followed by target currency codes. Exchange rates are cached for one hour to minimize API requests.
+
+![Currency converter example](../../../assets/screenshots/currency-converter.png)
+
+## Usage
+
+### Basic Syntax
+
+```text
+<trigger><amount> to <currency>
+<trigger><amount><source> to <target>
+```
+
+### Examples
+
+<Tabs>
+<TabItem label="Default Currency">
+```text
+$10 to eur
+# Converts 10 USD to EUR
+```
+</TabItem>
+<TabItem label="Explicit Source">
+```text
+$50 gbp to usd
+# Converts 50 GBP to USD
+```
+</TabItem>
+<TabItem label="No Spaces">
+```text
+$100eur to jpy
+# Converts 100 EUR to JPY
+```
+</TabItem>
+<TabItem label="Custom Trigger">
+```text
+€10 to usd
+# With trigger set to €
+```
+</TabItem>
+</Tabs>
+
+## Configuration
+
+Configure the currency converter in your `raffi.yaml`:
+
+```yaml raffi.yaml
+addons:
+  currency:
+    enabled: true
+    trigger: "$"
+    default_currency: USD
+    currencies:
+      - USD
+      - EUR
+      - GBP
+      - JPY
+      - CAD
+      - AUD
+```
+
+### Configuration Options
+
+**`enabled`** `boolean` (default: `true`)
+
+Enable or disable the currency converter addon
+
+
+**`trigger`** `string` (default: `$`)
+
+Character that activates currency conversion. Common options: `$`, `€`, `£`, `¥`
+
+
+**`default_currency`** `string` (default: `USD`)
+
+Source currency when none is specified (e.g., `$10 to EUR` assumes USD)
+
+
+**`currencies`** `array`
+
+List of currency codes available for conversion. If omitted, all currencies from Frankfurter API are available.
+
+
+### Custom Trigger
+
+<Tabs>
+  <TabItem label="Dollar ($)">
+    ```yaml
+    addons:
+      currency:
+        trigger: "$"
+        default_currency: USD
+    ```
+
+    Usage: `$100 to eur`
+  </TabItem>
+  
+  <TabItem label="Euro (€)">
+    ```yaml
+    addons:
+      currency:
+        trigger: "€"
+        default_currency: EUR
+    ```
+
+    Usage: `€100 to usd`
+  </TabItem>
+  
+  <TabItem label="Pound (£)">
+    ```yaml
+    addons:
+      currency:
+        trigger: "£"
+        default_currency: GBP
+    ```
+
+    Usage: `£100 to eur`
+  </TabItem>
+</Tabs>
+
+### Supported Currencies
+
+You can specify which currencies are available:
+
+```yaml raffi.yaml
+addons:
+  currency:
+    enabled: true
+    currencies:
+      - USD  # US Dollar
+      - EUR  # Euro
+      - GBP  # British Pound
+      - JPY  # Japanese Yen
+      - CAD  # Canadian Dollar
+      - AUD  # Australian Dollar
+      - CHF  # Swiss Franc
+      - CNY  # Chinese Yuan
+      - INR  # Indian Rupee
+      - BRL  # Brazilian Real
+```
+
+<Aside type="tip">
+Leave the `currencies` field empty to allow conversion between all currencies supported by the Frankfurter API.
+</Aside>
+
+## Exchange Rate API
+
+Raffi uses the [Frankfurter API](https://www.frankfurter.app/) for exchange rates:
+
+- Free and open-source
+- No API key required
+- Updated daily with European Central Bank rates
+- Rates are cached for 1 hour locally
+
+### Cache Behavior
+
+<Steps>
+1. **First Request**
+
+   Fetches live rates from Frankfurter API
+
+2. **Subsequent Requests**
+
+   Uses cached rates (valid for 1 hour)
+
+3. **After 1 Hour**
+
+   Automatically fetches fresh rates on next conversion
+
+</Steps>
+
+## Conversion Patterns
+
+
+  <details>
+<summary>Implicit Source Currency</summary>
+
+    When you don't specify a source currency, the `default_currency` is used:
+
+    ```text
+    $10 to eur      # 10 USD → EUR
+    $50 to gbp      # 50 USD → GBP
+    $100 to jpy     # 100 USD → JPY
+    ```
+  </details>
+
+  <details>
+<summary>Explicit Source Currency</summary>
+
+    Specify both source and target currencies:
+
+    ```text
+    $10 usd to eur  # 10 USD → EUR
+    $50 gbp to usd  # 50 GBP → USD
+    $100 eur to jpy # 100 EUR → JPY
+    ```
+  </details>
+
+  <details>
+<summary>Compact Format</summary>
+
+    No spaces between amount and currency:
+
+    ```text
+    $100eur to jpy  # 100 EUR → JPY
+    $50gbp to usd   # 50 GBP → USD
+    ```
+  </details>
+
+
+## Keyboard Shortcuts
+
+- **Enter**: Copy conversion result to clipboard
+- **Esc**: Clear input and return to normal mode
+
+## Disable Currency Converter
+
+To disable the currency converter:
+
+```yaml raffi.yaml
+addons:
+  currency:
+    enabled: false
+```
+
+## Requirements
+
+<Aside type="caution">
+  Internet connection required for fetching exchange rates (cached for 1 hour)
+</Aside>
+
+<Aside type="note">
+  The converter requires `wl-copy` to copy results to clipboard
+</Aside>
+
+## Examples
+
+<CardGrid>
+  <Card title="Tourist">
+    ```text
+    $1000 to eur
+    # Planning trip to Europe
+    ```
+  </Card>
+  
+  <Card title="Shopping">
+    ```text
+    $99 usd to gbp
+    # Compare prices
+    ```
+  </Card>
+  
+  <Card title="Freelancer">
+    ```text
+    €500 to usd
+    # Invoice conversion
+    ```
+  </Card>
+  
+  <Card title="Investor">
+    ```text
+    $10000 to jpy
+    # Currency exchange
+    ```
+  </Card>
+</CardGrid>
+
+## Troubleshooting
+
+
+  <details>
+<summary>No conversion results</summary>
+
+    1. Check internet connection
+    2. Verify currency codes are correct (3-letter ISO codes)
+    3. Ensure `enabled: true` in config
+    4. Check that Frankfurter API is accessible
+  </details>
+
+  <details>
+<summary>Wrong default currency</summary>
+
+    Set `default_currency` in your config:
+
+    ```yaml
+    addons:
+      currency:
+        default_currency: EUR  # Change from USD to EUR
+    ```
+  </details>
+
+  <details>
+<summary>Trigger not working</summary>
+
+    Make sure your trigger character doesn't conflict with other features:
+
+    ```yaml
+    addons:
+      currency:
+        trigger: "$"  # Or try "€", "£", etc.
+    ```
+  </details>
+

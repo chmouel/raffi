@@ -1,0 +1,161 @@
+---
+title: Fuzzel Configuration
+description: Customize Fuzzel's appearance for Raffi
+---
+
+# Fuzzel Configuration
+
+Raffi uses Fuzzel as its default interface. You can customize Fuzzel's appearance and behavior through its configuration file.
+
+## Configuration File
+
+Fuzzel is configured via `~/.config/fuzzel/fuzzel.ini`.
+
+For complete configuration options, refer to the [Fuzzel manual](https://man.archlinux.org/man/fuzzel.ini.5.en).
+
+## Example Configuration
+
+Here's a complete example configuration optimized for Raffi:
+
+```ini
+dpi-aware=yes
+font=RobotoMonoNerdFont-Thin:size=16
+terminal=kitty
+width=50
+layer=overlay
+exit-on-keyboard-focus-loss=no
+inner-pad=15
+fields=filename,name
+
+[colors]
+background=282a36ff
+text=f8f8f2ff
+match=8be9fdff
+selection-match=8be9fdff
+selection=44475add
+selection-text=f8f8f2ff
+border=bd93f9ff
+```
+
+## Configuration Options
+
+### General Settings
+
+| Option | Description | Example |
+|--------|-------------|----------|
+| `dpi-aware` | Scale UI based on DPI | `yes` or `no` |
+| `font` | Font family and size | `RobotoMonoNerdFont-Thin:size=16` |
+| `terminal` | Terminal emulator for terminal apps | `kitty`, `alacritty`, `foot` |
+| `width` | Launcher width as percentage of screen | `50` (for 50%) |
+| `layer` | Wayland layer to display on | `overlay`, `top`, `normal` |
+| `exit-on-keyboard-focus-loss` | Close when focus is lost | `yes` or `no` |
+| `inner-pad` | Internal padding in pixels | `15` |
+| `fields` | Search fields for matching | `filename,name` |
+
+### Color Settings
+
+Colors are defined in the `[colors]` section using 8-digit hex values (RRGGBBAA):
+
+| Option | Description |
+|--------|-------------|
+| `background` | Main background color |
+| `text` | Default text color |
+| `match` | Color for matched search characters |
+| `selection` | Background color of selected item |
+| `selection-text` | Text color of selected item |
+| `selection-match` | Color for matched characters in selection |
+| `border` | Window border color |
+
+## Color Schemes
+
+### Dracula Theme
+
+The example above uses the Dracula color scheme:
+
+```ini
+[colors]
+background=282a36ff
+text=f8f8f2ff
+match=8be9fdff
+selection-match=8be9fdff
+selection=44475add
+selection-text=f8f8f2ff
+border=bd93f9ff
+```
+
+### Catppuccin Mocha
+
+```ini
+[colors]
+background=1e1e2eff
+text=cdd6f4ff
+match=89b4faff
+selection=45475aff
+selection-text=cdd6f4ff
+selection-match=89dcebff
+border=b4befeff
+```
+
+### Nord
+
+```ini
+[colors]
+background=2e3440ff
+text=eceff4ff
+match=88c0d0ff
+selection=434c5eff
+selection-text=eceff4ff
+selection-match=8fbcbbff
+border=5e81acff
+```
+
+### Gruvbox Dark
+
+```ini
+[colors]
+background=282828ff
+text=ebdbb2ff
+match=fabd2fff
+selection=3c3836ff
+selection-text=fbf1c7ff
+selection-match=fe8019ff
+border=d65d0eff
+```
+
+## Tips
+
+### Performance
+
+- Set `exit-on-keyboard-focus-loss=no` to prevent accidental closes
+- Use a monospace font for better alignment of application names
+- Lower `inner-pad` values reduce visual clutter
+
+### Visual Consistency
+
+- Match Fuzzel colors to your terminal or system theme
+- Use Nerd Fonts for icon support in application names
+- Set `layer=overlay` to ensure Fuzzel appears above all windows
+
+### Search Behavior
+
+- `fields=filename,name` searches both the executable name and description
+- Add `fields=filename,name,comment` to also search desktop file comments
+
+## Installation
+
+If you don't have Fuzzel installed:
+
+```bash
+# Arch Linux
+sudo pacman -S fuzzel
+
+# Ubuntu/Debian (may need to add repository)
+sudo apt install fuzzel
+
+# Fedora
+sudo dnf install fuzzel
+```
+
+## Alternative: Native UI
+
+If you prefer not to use Fuzzel, Raffi includes a built-in native interface. See the [UI modes guide](/features/ui-modes) for details on using `--ui-type native`.

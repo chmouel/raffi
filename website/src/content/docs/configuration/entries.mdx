@@ -1,0 +1,235 @@
+---
+title: Launcher Entries
+description: Define applications, commands, and scripts in your Raffi launcher
+---
+
+## Overview
+
+Entries are the core of Raffi's configuration. Each entry represents an application, command, or script that appears in the launcher. Entries are defined as top-level keys in your configuration file.
+
+## Entry Structure
+
+Each entry is identified by a unique key and contains configuration fields:
+
+```yaml
+firefox:
+  binary: firefox
+  args: [--marionette]
+  icon: firefox
+  description: Firefox browser with marionette enabled
+```
+
+## Configuration Fields
+
+**`binary`** `string` (required)
+
+Executable name or path. Can be:
+  - Binary name in PATH: `firefox`, `kitty`
+  - Absolute path: `/usr/bin/firefox`
+  - Path with expansion: `~/bin/myapp`, `${HOME}/bin/tool`
+  
+  If the binary doesn't exist in PATH, the entry is automatically hidden.
+  
+  For scripts, this field specifies the interpreter (defaults to `bash` if omitted).
+
+
+**`description`** `string`
+
+Label shown in the launcher.
+  
+  If `binary` is not specified, `description` is used as the binary name.
+
+
+**`args`** `array`
+
+Command-line arguments passed to the binary.
+  
+  Supports path expansion (`~/` and `${VAR}`).
+
+
+**`icon`** `string`
+
+Icon name or absolute path:
+  - Icon name from system theme: `firefox`, `terminal`
+  - Absolute path: `/opt/goland/bin/goland.svg`
+  - Path with expansion: `~/icons/myapp.png`
+  
+  See [Icons](/configuration/icons) for details on icon discovery and caching.
+
+
+**`script`** `string`
+
+Inline script content. When present, the entry executes this script instead of launching `binary` directly.
+  
+  See [Scripts](/configuration/scripts) for details.
+
+
+**`disabled`** `boolean` (default: `false`)
+
+When `true`, hides the entry from the launcher.
+
+
+## Examples
+
+### Basic Application
+
+```yaml
+firefox:
+  binary: firefox
+  description: "Firefox"
+  icon: firefox
+```
+
+### Application with Arguments
+
+```yaml
+thunar:
+  binary: thunar
+  args: ["~/Downloads/"]
+  description: "Thunar"
+```
+
+### Custom Binary Path
+
+```yaml
+golang:
+  binary: goland
+  description: "Goland"
+  icon: /opt/goland/bin/goland.svg
+```
+
+### Path Expansion
+
+```yaml
+myapp:
+  binary: ${HOME}/bin/myapp
+  args: ["${XDG_DATA_HOME}/files", "~/Documents"]
+  icon: ~/icons/myapp.png
+  description: "My Application"
+```
+
+### Entry with Conditional Display
+
+```yaml
+rbw-pass:
+  binary: rofi-rbw
+  args:
+    [
+      "--selector wofi --clipboarder wl-copy --action copy-password --typer xdotool",
+    ]
+  description: "Password Manager"
+  icon: password-manager
+  ifenvset: WAYLAND_DISPLAY
+```
+
+See [Conditions](/configuration/conditions) for conditional visibility options.
+
+### System Commands
+
+```yaml
+suspend:
+  binary: systemctl
+  args: [suspend]
+  description: "Suspend/Sleep or Hibernate"
+  icon: system-suspend-hibernate
+
+reboot:
+  binary: systemctl
+  args: [reboot]
+  description: "Reboot / Restart"
+  icon: gnome-session-reboot
+```
+
+### Disabled Entry
+
+```yaml
+google-meet:
+  binary: google-chrome
+  args:
+    [
+      "--profile-directory=Default",
+      "--app-id=kjgfgldnnfoeklkmfkjfagphfepbbdan",
+    ]
+  description: "Google Meet"
+  icon: "google-meet"
+  disabled: true
+```
+
+## Entry Validation
+
+Raffi automatically validates entries on startup. An entry is hidden if:
+
+1. `disabled` is set to `true`
+2. The `binary` (or interpreter for scripts) doesn't exist in PATH
+3. Conditional checks fail (see [Conditions](/configuration/conditions))
+
+### Binary Discovery
+
+Raffi searches for binaries in directories listed in the `PATH` environment variable. If a binary path is:
+
+- Relative (e.g., `firefox`) - Raffi searches PATH
+- Absolute (e.g., `/usr/bin/firefox`) - Raffi checks if the file exists
+- Expanded (e.g., `~/bin/myapp`) - Raffi expands the path, then checks existence
+
+## Entry Organization
+
+Entries can be organized in any order in your configuration file. Raffi displays them alphabetically by description in the launcher.
+
+```yaml
+# Browsers
+firefox:
+  binary: firefox
+  description: "Firefox"
+  icon: firefox
+
+chrome:
+  binary: chromium
+  description: "Chromium"
+  icon: chromium
+
+# System tools
+suspend:
+  binary: systemctl
+  args: [suspend]
+  description: "Suspend/Sleep"
+  icon: system-suspend-hibernate
+
+reboot:
+  binary: systemctl
+  args: [reboot]
+  description: "Reboot"
+  icon: gnome-session-reboot
+```
+
+## Common Patterns
+
+### Jump or Raise Applications
+
+```yaml
+wally:
+  binary: jumpapp
+  args: ["-X", "wally"]
+  description: "Wally"
+  icon: wally
+  ifexist: wally
+```
+
+### SSH Connections
+
+```yaml
+ssh-pi:
+  binary: kitty-ctrl
+  args: ["jump", "-t", "PI", "ssh", "pi"]
+  description: "PI"
+  icon: raspberry
+```
+
+### Desktop Applications with Custom Profiles
+
+```yaml
+chrome-work:
+  binary: chromium
+  args: ["--profile-directory=Work"]
+  description: "Chromium (Work Profile)"
+  icon: chromium
+```
