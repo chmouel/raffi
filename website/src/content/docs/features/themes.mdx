@@ -3,7 +3,9 @@ title: Themes
 description: Dark and light themes with custom color palettes
 ---
 
-import { Aside, Tabs, TabItem, Card, CardGrid } from '@astrojs/starlight/components';
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import lightThemeScreenshot from '../../../assets/screenshots/light-theme.png';
 
 The native interface supports dark and light themes with full color customization.
 
@@ -15,14 +17,8 @@ Themes are only available in **native mode**. Fuzzel mode uses system Fuzzel con
 
 Raffi comes with two built-in themes:
 
-<CardGrid>
-  <Card title="Dark Theme" icon="moon">
-    Dracula-inspired dark palette (default)
-  </Card>
-  <Card title="Light Theme" icon="sun">
-    Rose Pine Dawn light palette
-  </Card>
-</CardGrid>
+- **Dark Theme** — Dracula-inspired dark palette (default)
+- **Light Theme** — Rose Pine Dawn light palette
 
 ## Selecting a Theme
 
@@ -66,7 +62,7 @@ general:
       theme: light
     ```
 
-    ![Light theme example](../../../assets/screenshots/light-theme.png)
+    <Image src={lightThemeScreenshot} alt="Light theme example" width={800} />
   </TabItem>
 </Tabs>
 

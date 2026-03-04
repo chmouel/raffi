@@ -3,7 +3,9 @@ title: File Browser
 description: Navigate your filesystem with keyboard shortcuts
 ---
 
-import { Aside, Tabs, TabItem, Card, CardGrid, Steps } from '@astrojs/starlight/components';
+import { Aside, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import fileBrowserScreenshot from '../../../assets/screenshots/file-browser.png';
 
 The native interface includes a built-in file browser for quick filesystem navigation using keyboard shortcuts.
 
@@ -15,20 +17,14 @@ The file browser is only available in **native mode**. It is not available when 
 
 Navigate your filesystem directly from the launcher with fuzzy filtering, hidden file support, and keyboard-driven actions.
 
-![File browser example](../../../assets/screenshots/file-browser.png)
+<Image src={fileBrowserScreenshot} alt="File browser example" width={800} />
 
 ## Activation
 
 Start the file browser by typing one of these prefixes:
 
-<CardGrid>
-  <Card title="Root Directory" icon="folder">
-    Type `/` to browse from the root filesystem
-  </Card>
-  <Card title="Home Directory" icon="house">
-    Type `~` to browse from your home directory
-  </Card>
-</CardGrid>
+- Type `/` to browse from the root filesystem
+- Type `~` to browse from your home directory
 
 ### Examples
 
@@ -247,14 +243,8 @@ addons:
 
 ## Visual Indicators
 
-<CardGrid>
-  <Card title="Directories" icon="folder">
-    Listed first in **accent color**
-  </Card>
-  <Card title="Files" icon="file">
-    Listed after directories in normal text
-  </Card>
-</CardGrid>
+- **Directories** — Listed first in accent color
+- **Files** — Listed after directories in normal text
 
 ## Requirements
 
