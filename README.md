@@ -155,6 +155,14 @@ The native interface includes a built-in file browser. Typing `/` browses the ro
 
 The file browser is enabled by default and can be disabled or configured under `addons.file_browser` ([see below](#addon-configuration)).
 
+#### Emoji & Nerd Fonts Picker
+
+The native interface includes a built-in emoji and icon picker. It is **disabled by default** and must be explicitly enabled. Type the configured keyword (default `emoji`) to open the picker, then continue typing to fuzzy-filter by name. The picker includes a large selection of Unicode emojis (smileys, people, animals, food, travel, objects, symbols, and more) as well as common Nerd Fonts v3 icons (Font Awesome, Devicons, Codicons, and Powerline symbols).
+
+Pressing Enter copies the selected character to the clipboard. Ctrl+Enter types it into the focused application via `wtype` or `ydotool`. Both actions can be customised with `action` and `secondary_action` fields.
+
+[See below for how to configure this](#emoji--nerd-fonts-picker-configuration)
+
 ## Configuration
 
 ### Fuzzel Configuration
@@ -320,7 +328,7 @@ myapp:
 
 ### Addon Configuration
 
-The native interface includes optional addons for calculations, currency conversion, file browsing, script filters, text snippets, and web searches.
+The native interface includes optional addons for calculations, currency conversion, file browsing, emoji picking, script filters, text snippets, and web searches.
 
 ```yaml
 addons:
@@ -334,6 +342,9 @@ addons:
   file_browser:
     enabled: true
     show_hidden: false
+  emoji:
+    enabled: false
+    trigger: "emoji"
 ```
 
 The `enabled` field controls whether the addon is active.
@@ -343,7 +354,31 @@ The `default_currency` field sets the source currency used when none is specifie
 The `currencies` field for the currency addon defines which currencies are available for conversion.
 You don't need to add a prefix for the calculator; simply typing a valid expression will show the result.
 
-All three addons are enabled by default.
+The calculator, currency, and file browser addons are enabled by default. The emoji addon is **disabled by default** and must be explicitly enabled.
+
+#### Emoji & Nerd Fonts Picker Configuration
+
+The emoji picker is configured under `addons.emoji`:
+
+```yaml
+addons:
+  emoji:
+    enabled: true
+    trigger: "emoji"
+    action: "copy"
+    secondary_action: "insert"
+```
+
+Field descriptions:
+
+| Field              | Required | Description                                                                                       |
+|--------------------|----------|---------------------------------------------------------------------------------------------------|
+| `enabled`          | no       | Whether the addon is active. **Defaults to `false`** (disabled).                                  |
+| `trigger`          | no       | Keyword that activates the picker (default: `emoji`). Type this to open the list.                 |
+| `action`           | no       | Action on Enter. Use `"copy"` to copy to clipboard, `"insert"` to type into the focused app, or a shell command template with `{value}`. Defaults to `"copy"`. |
+| `secondary_action` | no       | Action on Ctrl+Enter. Accepts the same values as `action`. Defaults to `"insert"`.                |
+
+Type the trigger keyword (e.g., `emoji`) to list all available emojis and Nerd Fonts icons. Continue typing after the keyword to fuzzy-filter by name (e.g., `emoji heart` to find heart-related entries). The picker includes Unicode emojis as well as Nerd Fonts v3 icons (Font Awesome, Devicons, Codicons, and Powerline symbols).
 
 #### Script Filters Configuration
 
