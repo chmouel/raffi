@@ -11,14 +11,20 @@ Raffi supports two distinct user interface modes, each designed for different us
 
 Raffi can operate in two modes:
 
-<CardGrid>
-  <Card title="Fuzzel Mode" icon="terminal">
-    External launcher integration with Wayland environments
-  </Card>
-  <Card title="Native Mode" icon="window-maximize">
-    Built-in graphical interface with advanced features
-  </Card>
-</CardGrid>
+<div class="nav-cards">
+  <CardGrid>
+    <a href="#fuzzel-mode">
+      <Card title="Fuzzel Mode" icon="rocket">
+        External launcher integration with Wayland environments
+      </Card>
+    </a>
+    <a href="#native-mode">
+      <Card title="Native Mode" icon="laptop">
+        Built-in graphical interface with advanced features
+      </Card>
+    </a>
+  </CardGrid>
+</div>
 
 ## Fuzzel Mode
 
@@ -89,32 +95,90 @@ Native mode uses an internal iced-based graphical interface with fuzzy search, k
 
 ### Features
 
-<CardGrid>
-  <Card title="Built-in Calculator" icon="calculator">
-    Evaluate mathematical expressions as you type
-  </Card>
-  <Card title="Currency Converter" icon="dollar-sign">
-    Convert between currencies with live exchange rates
-  </Card>
-  <Card title="File Browser" icon="folder-open">
-    Navigate filesystem with keyboard shortcuts
-  </Card>
-  <Card title="Script Filters" icon="code">
-    Dynamic results from external commands
-  </Card>
-  <Card title="Web Search" icon="search">
-    Quick searches with URL templates
-  </Card>
-  <Card title="Text Snippets" icon="clipboard">
-    Reusable text values with multiple sources
-  </Card>
-  <Card title="Theme Support" icon="palette">
-    Dark and light themes with color customization
-  </Card>
-  <Card title="Fuzzy Search" icon="filter">
-    Fast filtering across all entries
-  </Card>
-</CardGrid>
+<div class="nav-cards">
+  <CardGrid>
+    <a href="/features/calculator/">
+      <Card title="Built-in Calculator" icon="puzzle">
+        Evaluate mathematical expressions as you type
+      </Card>
+    </a>
+    <a href="/features/currency-converter/">
+      <Card title="Currency Converter" icon="patreon">
+        Convert between currencies with live exchange rates
+      </Card>
+    </a>
+    <a href="/features/file-browser/">
+      <Card title="File Browser" icon="document">
+        Navigate filesystem with keyboard shortcuts
+      </Card>
+    </a>
+    <a href="/features/script-filters/">
+      <Card title="Script Filters" icon="pencil">
+        Dynamic results from external commands
+      </Card>
+    </a>
+    <a href="/features/web-search/">
+      <Card title="Web Search" icon="magnifier">
+        Quick searches with URL templates
+      </Card>
+    </a>
+    <a href="/features/text-snippets/">
+      <Card title="Text Snippets" icon="pen">
+        Reusable text values with multiple sources
+      </Card>
+    </a>
+    <a href="/features/themes/">
+      <Card title="Theme Support" icon="moon">
+        Dark and light themes with color customization
+      </Card>
+    </a>
+    <a href="/features/ui-modes/">
+      <Card title="Fuzzy Search" icon="star">
+        Fast filtering across all entries
+      </Card>
+    </a>
+  </CardGrid>
+</div>
+
+<style>
+{`
+  .nav-cards a {
+    text-decoration: none !important;
+    color: inherit;
+    display: flex;
+    height: 100%;
+  }
+  .nav-cards a article {
+    flex: 1;
+    transition: all 0.2s ease-in-out;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    border: 1px solid var(--sl-color-gray-5);
+    background-color: var(--sl-color-black);
+  }
+  .nav-cards a article .title {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+    font-size: 1.2rem;
+  }
+  .nav-cards a article .title .icon {
+    font-size: 2.5rem !important; /* Huge icons */
+    color: var(--sl-color-purple); 
+    background: var(--sl-color-purple-low);
+    padding: 0.5rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--sl-color-purple);
+  }
+  .nav-cards a:hover article {
+    border-color: var(--sl-color-text-accent);
+    background-color: var(--sl-color-gray-6);
+  }
+`}
+</style>
 
 ### Usage
 

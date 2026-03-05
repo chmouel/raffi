@@ -76,23 +76,80 @@ addons:
 
 ## Configuration Sections
 
-<CardGrid>
-  <Card title="General Settings" icon="gear">
-    UI type, theme, fonts, and window settings
-  </Card>
-  <Card title="Entries" icon="rocket">
-    Define launcher entries with binaries, scripts, and arguments
-  </Card>
-  <Card title="Icons" icon="image">
-    Icon caching, discovery, and path configuration
-  </Card>
-  <Card title="Scripts" icon="code">
-    Inline scripts with bash, python, or custom interpreters
-  </Card>
-  <Card title="Conditions" icon="filter">
-    Conditional visibility based on environment or binary existence
-  </Card>
-</CardGrid>
+<div class="nav-cards">
+  <CardGrid>
+    <a href="/configuration/general-settings/">
+      <Card title="General Settings" icon="setting">
+        UI type, theme, fonts, and window settings
+      </Card>
+    </a>
+    <a href="/configuration/entries/">
+      <Card title="Entries" icon="rocket">
+        Define launcher entries with binaries, scripts, and arguments
+      </Card>
+    </a>
+    <a href="/configuration/icons/">
+      <Card title="Icons" icon="star">
+        Icon caching, discovery, and path configuration
+      </Card>
+    </a>
+    <a href="/configuration/scripts/">
+      <Card title="Scripts" icon="pencil">
+        Inline scripts with bash, python, or custom interpreters
+      </Card>
+    </a>
+    <a href="/configuration/conditions/">
+      <Card title="Conditions" icon="magnifier">
+        Conditional visibility based on environment or binary existence
+      </Card>
+    </a>
+    <a href="/reference/addon-configuration/">
+      <Card title="Addons" icon="puzzle">
+        Optional features like script filters, web searches, and text snippets
+      </Card>
+    </a>
+  </CardGrid>
+</div>
+
+<style>
+{`
+  .nav-cards a {
+    text-decoration: none !important;
+    color: inherit;
+    display: flex;
+    height: 100%;
+  }
+  .nav-cards a article {
+    flex: 1;
+    transition: all 0.2s ease-in-out;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    border: 1px solid var(--sl-color-gray-5);
+    background-color: var(--sl-color-black);
+  }
+  .nav-cards a article .title {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+    font-size: 1.2rem;
+  }
+  .nav-cards a article .title .icon {
+    font-size: 2.5rem !important; /* Huge icons */
+    color: var(--sl-color-purple); 
+    background: var(--sl-color-purple-low);
+    padding: 0.5rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--sl-color-purple);
+  }
+  .nav-cards a:hover article {
+    border-color: var(--sl-color-text-accent);
+    background-color: var(--sl-color-gray-6);
+  }
+`}
+</style>
 
 ## Path Expansion
 
