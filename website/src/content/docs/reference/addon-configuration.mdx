@@ -3,6 +3,8 @@ title: Addon Configuration
 description: Configuration reference for built-in addons (currency, calculator, file browser, script filters, web searches, text snippets)
 ---
 
+import { Aside } from '@astrojs/starlight/components';
+
 The native UI includes several built-in addons that can be configured under the `addons` section of `raffi.yaml`. All addons are enabled by default.
 
 ## Currency Converter
@@ -258,6 +260,10 @@ Action to perform on Enter.
 - `insert` - Type into focused app via `wtype`/`ydotool`
   
   Any other string is executed as a shell command via `sh -c`, with `{value}` replaced by the selected value.
+
+  <Aside type="caution">
+  When `{value}` is populated from external script filter output, it may contain shell metacharacters. Ensure the script filter output is trusted, or sanitize `{value}` within the action command to avoid unintended shell expansion.
+  </Aside>
   
   ```yaml
   addons:

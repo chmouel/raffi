@@ -7,13 +7,11 @@ import { Aside } from '@astrojs/starlight/components';
 
 ## Overview
 
-Raffi supports icons from system icon themes and custom icon files. Icons are automatically discovered from standard XDG directories, cached for performance, and can be specified by name or absolute path.
+Raffi supports icons from system icon themes. Icons are automatically discovered from standard XDG directories, cached for performance, and must be specified by name from the icon cache.
 
 ## Icon Specification
 
-You can specify icons in two ways:
-
-### 1. Icon Names (from system themes)
+Icons are specified by their name as indexed in the icon cache:
 
 ```yaml
 firefox:
@@ -22,36 +20,7 @@ firefox:
   icon: firefox
 ```
 
-Raffi searches for icons in system directories and uses the icon name to look up the full path.
-
-### 2. Absolute Paths
-
-```yaml
-golang:
-  binary: goland
-  description: "Goland"
-  icon: /opt/goland/bin/goland.svg
-```
-
-Provide a direct path to a `.png` or `.svg` file.
-
-### 3. Path Expansion
-
-```yaml
-myapp:
-  binary: myapp
-  description: "My Application"
-  icon: ~/icons/myapp.png
-```
-
-Use `~/` for home directory or `${VAR}` for environment variables:
-
-```yaml
-custom:
-  binary: custom-app
-  icon: ${XDG_DATA_HOME}/icons/custom.svg
-  description: "Custom App"
-```
+Raffi looks up the icon name in its icon cache to resolve the full path to the icon file.
 
 ## Icon Discovery
 
@@ -139,7 +108,7 @@ Icons can be disabled for faster startup:
 ### Via Command Line
 
 ```bash
-raffi --disable-icons
+raffi --no-icons
 ```
 
 Or:
@@ -161,7 +130,7 @@ Command-line flags override configuration file settings.
 
 ## Examples
 
-### Mixed Icon Specifications
+### Icon Specification Examples
 
 ```yaml
 # System icon by name
@@ -170,28 +139,17 @@ firefox:
   description: "Firefox"
   icon: firefox
 
-# Absolute path
-golang:
-  binary: goland
-  description: "Goland"
-  icon: /opt/goland/bin/goland.svg
-
-# Home directory expansion
-myapp:
-  binary: myapp
-  description: "My Application"
-  icon: ~/icons/myapp.png
-
-# Environment variable expansion
-custom:
-  binary: custom-app
-  description: "Custom App"
-  icon: ${XDG_DATA_HOME}/icons/custom.svg
-
-# No icon
+# Another icon by name
 terminal:
   binary: kitty
   description: "Terminal"
+  icon: terminal
+
+# No icon
+suspend:
+  binary: systemctl
+  args: [suspend]
+  description: "Suspend/Sleep"
 ```
 
 ### Real-World Examples
@@ -224,7 +182,7 @@ golang:
   binary: jumpapp
   args: ["-c", "jetbrains-goland", "goland"]
   description: "Goland"
-  icon: /opt/goland/bin/goland.svg
+  icon: goland
 ```
 
 ## Troubleshooting
@@ -245,11 +203,10 @@ If an icon isn't displaying:
    raffi --refresh-cache
    ```
 
-3. **Use absolute path**: Bypass icon discovery:
+3. **Check the cache**: Inspect the icon cache to see which names are available:
 
-   ```yaml
-   myapp:
-     icon: /usr/share/icons/hicolor/48x48/apps/myapp.png
+   ```bash
+   cat ~/.cache/raffi/icon.cache | python3 -m json.tool | grep -i myapp
    ```
 
 ### Custom Icon Directories

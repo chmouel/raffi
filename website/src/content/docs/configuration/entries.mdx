@@ -21,15 +21,17 @@ firefox:
 
 ## Configuration Fields
 
-**`binary`** `string` (required)
+**`binary`** `string` (optional)
 
-Executable name or path. Can be:
-  - Binary name in PATH: `firefox`, `kitty`
-  - Absolute path: `/usr/bin/firefox`
-  - Path with expansion: `~/bin/myapp`, `${HOME}/bin/tool`
-  
-  If the binary doesn't exist in PATH, the entry is automatically hidden.
-  
+Executable name searched in `$PATH`. For example:
+  - `firefox`
+  - `kitty`
+
+  If the binary isn't found in PATH, the entry is automatically hidden.
+  Absolute or shell-expanded paths such as `/usr/bin/firefox` or `~/bin/myapp` are not validated against the filesystem and will be treated as missing.
+
+  If omitted, `description` is used as the binary name.
+
   For scripts, this field specifies the interpreter (defaults to `bash` if omitted).
 
 
@@ -49,10 +51,7 @@ Command-line arguments passed to the binary.
 
 **`icon`** `string`
 
-Icon name or absolute path:
-  - Icon name from system theme: `firefox`, `terminal`
-  - Absolute path: `/opt/goland/bin/goland.svg`
-  - Path with expansion: `~/icons/myapp.png`
+Icon name resolved from the icon cache or system theme. Use the icon name as it appears in the icon theme (e.g., `firefox`, `terminal`).
   
   See [Icons](/configuration/icons) for details on icon discovery and caching.
 
@@ -87,25 +86,6 @@ thunar:
   binary: thunar
   args: ["~/Downloads/"]
   description: "Thunar"
-```
-
-### Custom Binary Path
-
-```yaml
-golang:
-  binary: goland
-  description: "Goland"
-  icon: /opt/goland/bin/goland.svg
-```
-
-### Path Expansion
-
-```yaml
-myapp:
-  binary: ${HOME}/bin/myapp
-  args: ["${XDG_DATA_HOME}/files", "~/Documents"]
-  icon: ~/icons/myapp.png
-  description: "My Application"
 ```
 
 ### Entry with Conditional Display
@@ -165,11 +145,7 @@ Raffi automatically validates entries on startup. An entry is hidden if:
 
 ### Binary Discovery
 
-Raffi searches for binaries in directories listed in the `PATH` environment variable. If a binary path is:
-
-- Relative (e.g., `firefox`) - Raffi searches PATH
-- Absolute (e.g., `/usr/bin/firefox`) - Raffi checks if the file exists
-- Expanded (e.g., `~/bin/myapp`) - Raffi expands the path, then checks existence
+Raffi searches for binaries in directories listed in the `PATH` environment variable. Only binary names (not absolute or expanded paths) are resolved via PATH lookup. If a binary can't be found in PATH, the entry is automatically hidden.
 
 ## Entry Organization
 

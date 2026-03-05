@@ -13,7 +13,7 @@ Raffi supports conditional visibility for launcher entries. Use conditions to:
 - Display entries only when certain binaries are installed
 - Conditionally show entries based on environment variables
 
-Only one condition is supported per entry.
+You can specify multiple conditions per entry; all specified conditions must be met (logical AND) for the entry to be shown.
 
 ## Condition Types
 
@@ -124,15 +124,15 @@ reboot:
 
 ### ifexist
 
-Shows the entry only if a specific binary or file exists.
+Shows the entry only if a specific binary exists in PATH.
 
 **`ifexist`** `string`
 
-Binary name or file path. Entry is shown only if:
-  - Binary exists in PATH (if name only)
-  - File exists (if absolute path)
-  
-  Supports path expansion (`~/` and `${VAR}`).
+Binary name to search in `$PATH`. Entry is shown only if the binary is found in PATH.
+
+<Aside type="note">
+`ifexist` performs a PATH lookup only. Absolute paths and shell-expanded paths (e.g., `~/bin/myapp`) are not supported and will be treated as missing.
+</Aside>
 
 
 #### Example: Binary Existence
@@ -164,16 +164,6 @@ signal:
   description: "Signal"
   icon: signal-desktop
   ifexist: signal-desktop
-```
-
-#### Example: File Path Check
-
-```yaml
-custom-app:
-  binary: ~/bin/myapp
-  description: "My Application"
-  icon: myapp
-  ifexist: ~/bin/myapp
 ```
 
 ## Combining with Other Fields
@@ -276,12 +266,12 @@ start-kind:
 
 ## Validation Logic
 
-Raffi evaluates conditions on startup:
+Raffi evaluates conditions on startup. All specified conditions must pass (logical AND) for the entry to be shown:
 
 1. **ifenveq**: Checks if variable exists and equals expected value
 2. **ifenvset**: Checks if variable exists (any value)
 3. **ifenvnotset**: Checks if variable does not exist
-4. **ifexist**: Checks if binary is in PATH or file exists
+4. **ifexist**: Checks if binary is in PATH
 
 If any condition fails, the entry is hidden.
 
@@ -300,35 +290,31 @@ firefox:
   icon: firefox
 ```
 
-## Limitations
+## Combining Multiple Conditions
 
-<Aside type="caution">
-Only one condition is supported per entry. Multiple conditions are not supported.
-</Aside>
-
-If you need multiple conditions, create separate entries:
+Multiple condition fields can be combined on a single entry. All conditions are evaluated together using logical AND — the entry is shown only if every condition passes:
 
 ```yaml
-# Entry for GNOME on Wayland
+# Shown only on GNOME + Wayland
 gnome-wayland-tool:
+  binary: my-tool
+  description: "Tool (GNOME on Wayland)"
+  ifenveq: [DESKTOP_SESSION, GNOME]
+  ifenvset: WAYLAND_DISPLAY
+```
+
+If you need OR logic (show if any one of multiple conditions holds), create separate entries:
+
+```yaml
+# Entry for GNOME
+gnome-tool:
   binary: my-tool
   description: "Tool (GNOME)"
   ifenveq: [DESKTOP_SESSION, GNOME]
 
-# Entry for KDE on Wayland
-kde-wayland-tool:
+# Entry for KDE
+kde-tool:
   binary: my-tool
   description: "Tool (KDE)"
   ifenveq: [DESKTOP_SESSION, KDE]
-```
-
-Or use a script to check multiple conditions:
-
-```yaml
-conditional-tool:
-  script: |
-    if [[ "$DESKTOP_SESSION" == "GNOME" && -n "$WAYLAND_DISPLAY" ]]; then
-      my-tool
-    fi
-  description: "Conditional Tool"
 ```
