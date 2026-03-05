@@ -14,49 +14,48 @@ This guide will help you configure and launch your first application with Raffi.
 
    Raffi looks for its configuration at `~/.config/raffi/raffi.yaml`. Create the directory:
 
-       ```bash
-       mkdir -p ~/.config/raffi
-       ```
+   ```bash
+   mkdir -p ~/.config/raffi
+   ```
 
 2. **Create a basic configuration file**
 
    Create `~/.config/raffi/raffi.yaml` with a simple entry:
 
-       ```yaml
-       version: 1
-       launchers:
-         firefox:
-           binary: firefox
-           icon: firefox
-           description: Firefox Web Browser
+   ```yaml
+   version: 1
+   launchers:
+     firefox:
+       binary: firefox
+       icon: firefox
+       description: Firefox Web Browser
 
-         terminal:
-           binary: kitty
-           icon: kitty
-           description: Kitty Terminal
+     terminal:
+       binary: kitty
+       icon: kitty
+       description: Kitty Terminal
 
-         file_manager:
-           binary: nautilus
-           icon: folder
-           description: File Manager
-
-```
-
-       <Aside type="note">
-         Entries are only shown if the binary exists in your PATH. Replace the binary names with applications you have installed.
-       </Aside>
+     file_manager:
+       binary: nautilus
+       icon: folder
+       description: File Manager
+   ```
 
 3. **Test your configuration**
 
    Run Raffi in print-only mode to verify the configuration:
 
-       ```bash
-       raffi -p
-       ```
+   ```bash
+   raffi -p
+   ```
 
-       This will display your configured entries without executing them.
+   This will display your configured entries without executing them.
 
 </Steps>
+
+<Aside type="note">
+  Entries are only shown if the binary exists in your PATH. Replace the binary names with applications you have installed.
+</Aside>
 
 ## Step 2: Choose Your Interface
 
