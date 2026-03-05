@@ -215,6 +215,19 @@ pub struct ThemeColorsConfig {
     pub border: Option<String>,
 }
 
+/// Sort mode for launcher entries when no search query is active
+#[derive(Deserialize, JsonSchema, Debug, Clone, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SortMode {
+    /// Sort by launch count (most frequently used first)
+    Frequency,
+    /// Sort by last-used time (most recently used first)
+    Recency,
+    /// Combined score: 40% frequency + 60% recency
+    #[default]
+    Hybrid,
+}
+
 /// General configuration for persistent defaults
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 pub struct GeneralConfig {
@@ -240,6 +253,8 @@ pub struct GeneralConfig {
     pub window_height: Option<f32>,
     #[serde(default)]
     pub padding: Option<f32>,
+    #[serde(default)]
+    pub sort_mode: SortMode,
 }
 
 /// Complete parsed configuration
@@ -967,6 +982,7 @@ pub fn run(args: Args) -> Result<()> {
         font_family: general.font_family.clone(),
         window_width: general.window_width.unwrap_or(800.0),
         window_height: general.window_height.unwrap_or(600.0),
+        sort_mode: general.sort_mode.clone(),
     };
 
     // Get the appropriate UI implementation

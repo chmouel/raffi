@@ -3,7 +3,8 @@ use super::state::LauncherApp;
 use super::theme::ThemeColors;
 use crate::ui::FontSizes;
 use crate::{
-    AddonsConfig, ScriptFilterConfig, TextSnippet, TextSnippetSourceConfig, WebSearchConfig,
+    AddonsConfig, ScriptFilterConfig, SortMode, TextSnippet, TextSnippetSourceConfig,
+    WebSearchConfig,
 };
 use std::sync::{Arc, Mutex};
 
@@ -17,6 +18,7 @@ fn test_app(addons: AddonsConfig) -> LauncherApp {
         ThemeColors::from_mode_with_overrides(&crate::ThemeMode::Dark, None),
         10,
         FontSizes::default_sizes(),
+        SortMode::Hybrid,
     );
     app
 }
@@ -174,4 +176,99 @@ fn test_font_sizes_from_base() {
     assert_eq!(fs.item_padding, 6.0);
     assert_eq!(fs.outer_padding, 10.0);
     assert_eq!(fs.scroll_top_padding, 4.0);
+}
+
+#[test]
+fn test_mru_sort_key_frequency() {
+    use super::support::{mru_sort_key, MruEntry};
+    use std::collections::HashMap;
+
+    let mut mru = HashMap::new();
+    mru.insert(
+        "A".to_string(),
+        MruEntry {
+            count: 10,
+            last_used: 100,
+        },
+    );
+    mru.insert(
+        "B".to_string(),
+        MruEntry {
+            count: 5,
+            last_used: 200,
+        },
+    );
+
+    let key_a = mru_sort_key("A", &mru, &SortMode::Frequency, 10, 100, 200);
+    let key_b = mru_sort_key("B", &mru, &SortMode::Frequency, 10, 100, 200);
+    assert!(key_a > key_b, "A (count=10) should sort before B (count=5)");
+}
+
+#[test]
+fn test_mru_sort_key_recency() {
+    use super::support::{mru_sort_key, MruEntry};
+    use std::collections::HashMap;
+
+    let mut mru = HashMap::new();
+    mru.insert(
+        "A".to_string(),
+        MruEntry {
+            count: 10,
+            last_used: 100,
+        },
+    );
+    mru.insert(
+        "B".to_string(),
+        MruEntry {
+            count: 5,
+            last_used: 200,
+        },
+    );
+
+    let key_a = mru_sort_key("A", &mru, &SortMode::Recency, 10, 100, 200);
+    let key_b = mru_sort_key("B", &mru, &SortMode::Recency, 10, 100, 200);
+    assert!(key_b > key_a, "B (ts=200) should sort before A (ts=100)");
+}
+
+#[test]
+fn test_mru_sort_key_hybrid() {
+    use super::support::{mru_sort_key, MruEntry};
+    use std::collections::HashMap;
+
+    let mut mru = HashMap::new();
+    // A: high frequency, old timestamp
+    mru.insert(
+        "A".to_string(),
+        MruEntry {
+            count: 10,
+            last_used: 100,
+        },
+    );
+    // B: low frequency, recent timestamp
+    mru.insert(
+        "B".to_string(),
+        MruEntry {
+            count: 1,
+            last_used: 200,
+        },
+    );
+
+    let key_a = mru_sort_key("A", &mru, &SortMode::Hybrid, 10, 100, 200);
+    let key_b = mru_sort_key("B", &mru, &SortMode::Hybrid, 10, 100, 200);
+    // B: 0.4*(1/10) + 0.6*(100/100) = 0.04 + 0.6 = 0.64
+    // A: 0.4*(10/10) + 0.6*(0/100) = 0.4 + 0.0 = 0.4
+    assert!(
+        key_b > key_a,
+        "B (recent) should beat A (frequent) in hybrid"
+    );
+}
+
+#[test]
+fn test_mru_sort_key_unknown_entry() {
+    use super::support::{mru_sort_key, MruEntry};
+    use std::collections::HashMap;
+
+    let mru: HashMap<String, MruEntry> = HashMap::new();
+    let key = mru_sort_key("Unknown", &mru, &SortMode::Hybrid, 10, 100, 200);
+    assert_eq!(key, 0);
 }

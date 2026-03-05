@@ -6,7 +6,13 @@ use fuzzy_matcher::FuzzyMatcher;
 
 use super::state::CalculatorResult;
 use crate::ui::{get_history_cache_path, get_mru_cache_path};
-use crate::RaffiConfig;
+use crate::{RaffiConfig, SortMode};
+
+#[derive(Debug, Clone)]
+pub(super) struct MruEntry {
+    pub count: u32,
+    pub last_used: u64,
+}
 
 pub(super) fn try_evaluate_math(query: &str) -> Option<CalculatorResult> {
     let trimmed = query.trim();
@@ -85,16 +91,40 @@ pub(super) fn fuzzy_match_configs(configs: &[RaffiConfig], query: &str) -> Vec<u
     matches.into_iter().map(|(idx, _)| idx).collect()
 }
 
-pub(super) fn load_mru_map() -> HashMap<String, u32> {
+pub(super) fn load_mru_map() -> HashMap<String, MruEntry> {
     if let Ok(path) = get_mru_cache_path() {
         if let Ok(content) = fs::read_to_string(path) {
             let mut map = HashMap::new();
             for line in content.lines() {
-                let mut parts = line.splitn(2, '|');
-                if let (Some(desc), Some(count_str)) = (parts.next(), parts.next()) {
-                    if let Ok(count) = count_str.parse::<u32>() {
-                        map.insert(desc.to_string(), count);
+                let parts: Vec<&str> = line.splitn(3, '|').collect();
+                match parts.len() {
+                    3 => {
+                        // New format: desc|count|timestamp
+                        if let (Ok(count), Ok(ts)) =
+                            (parts[1].parse::<u32>(), parts[2].parse::<u64>())
+                        {
+                            map.insert(
+                                parts[0].to_string(),
+                                MruEntry {
+                                    count,
+                                    last_used: ts,
+                                },
+                            );
+                        }
                     }
+                    2 => {
+                        // Old format: desc|count (auto-migrate, ts=0)
+                        if let Ok(count) = parts[1].parse::<u32>() {
+                            map.insert(
+                                parts[0].to_string(),
+                                MruEntry {
+                                    count,
+                                    last_used: 0,
+                                },
+                            );
+                        }
+                    }
+                    _ => {}
                 }
             }
             return map;
@@ -103,17 +133,52 @@ pub(super) fn load_mru_map() -> HashMap<String, u32> {
     HashMap::new()
 }
 
-pub(super) fn save_mru_map(map: &HashMap<String, u32>) {
+pub(super) fn save_mru_map(map: &HashMap<String, MruEntry>) {
     if let Ok(path) = get_mru_cache_path() {
         let mut entries: Vec<_> = map.iter().collect();
-        entries.sort_by(|a, b| b.1.cmp(a.1));
+        entries.sort_by(|a, b| b.1.count.cmp(&a.1.count));
         let content = entries
             .iter()
-            .map(|(desc, count)| format!("{}|{}", desc, count))
+            .map(|(desc, entry)| format!("{}|{}|{}", desc, entry.count, entry.last_used))
             .collect::<Vec<_>>()
             .join("\n");
         if let Err(error) = fs::write(&path, content) {
             eprintln!("Warning: Failed to save MRU cache to {:?}: {}", path, error);
+        }
+    }
+}
+
+/// Compute a sort key for a config entry based on the active sort mode.
+/// Returns a value where higher = should appear first (use `Reverse` when sorting).
+pub(super) fn mru_sort_key(
+    description: &str,
+    mru_map: &HashMap<String, MruEntry>,
+    sort_mode: &SortMode,
+    max_count: u32,
+    min_ts: u64,
+    max_ts: u64,
+) -> u64 {
+    let entry = match mru_map.get(description) {
+        Some(e) => e,
+        None => return 0,
+    };
+    match sort_mode {
+        SortMode::Frequency => u64::from(entry.count),
+        SortMode::Recency => entry.last_used,
+        SortMode::Hybrid => {
+            let freq_norm = if max_count > 0 {
+                f64::from(entry.count) / f64::from(max_count)
+            } else {
+                0.0
+            };
+            let recency_norm = if max_ts > min_ts {
+                (entry.last_used.saturating_sub(min_ts)) as f64 / (max_ts - min_ts) as f64
+            } else {
+                0.0
+            };
+            let score = 0.4 * freq_norm + 0.6 * recency_norm;
+            // Scale to u64 for integer-based sorting (multiply by 1_000_000 for precision)
+            (score * 1_000_000.0) as u64
         }
     }
 }

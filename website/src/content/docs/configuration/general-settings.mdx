@@ -59,6 +59,16 @@ Maximum number of search query history entries.
   Set to `0` to disable history. Navigate history with Alt+P (previous) and Alt+N (next) in native mode.
 
 
+**`sort_mode`** `string` (default: `hybrid`)
+
+Controls how launcher entries are sorted when no search query is active. Valid options:
+  - `frequency` - Sort by launch count (most frequently used first)
+  - `recency` - Sort by last-used time (most recently used first)
+  - `hybrid` - Combined score: 40% frequency + 60% recency (default)
+
+  The MRU cache at `~/.cache/raffi/mru.cache` stores both launch counts and timestamps. Existing caches using the old format are migrated automatically on next use.
+
+
 ## Font and Typography
 
 **`font_size`** `number` (default: `20`)

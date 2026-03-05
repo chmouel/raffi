@@ -28,10 +28,11 @@ use super::state::{
     SharedSelection, TextSnippetState, ViewState, WebSearchActiveState, WebSearchState,
 };
 use super::support::{
-    fuzzy_match_configs, load_history, load_mru_map, save_history, save_mru_map, try_evaluate_math,
+    fuzzy_match_configs, load_history, load_mru_map, mru_sort_key, save_history, save_mru_map,
+    try_evaluate_math, MruEntry,
 };
 use crate::ui::FontSizes;
-use crate::{read_icon_map, AddonsConfig, RaffiConfig};
+use crate::{read_icon_map, AddonsConfig, RaffiConfig, SortMode};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum QueryMode {
@@ -145,6 +146,7 @@ impl LauncherApp {
         theme: super::theme::ThemeColors,
         max_history: u32,
         font_sizes: FontSizes,
+        sort_mode: SortMode,
     ) -> (Self, Task<Message>) {
         let icon_map = if no_icons {
             HashMap::new()
@@ -153,12 +155,30 @@ impl LauncherApp {
         };
 
         let mru_map = load_mru_map();
+
+        // Pre-compute aggregate stats for hybrid sorting
+        let max_count = mru_map.values().map(|e| e.count).max().unwrap_or(0);
+        let min_ts = mru_map
+            .values()
+            .map(|e| e.last_used)
+            .filter(|&t| t > 0)
+            .min()
+            .unwrap_or(0);
+        let max_ts = mru_map.values().map(|e| e.last_used).max().unwrap_or(0);
+
         configs.sort_by_key(|config| {
             let description = config
                 .description
                 .as_deref()
                 .unwrap_or_else(|| config.binary.as_deref().unwrap_or(""));
-            std::cmp::Reverse(mru_map.get(description).copied().unwrap_or(0))
+            std::cmp::Reverse(mru_sort_key(
+                description,
+                &mru_map,
+                &sort_mode,
+                max_count,
+                min_ts,
+                max_ts,
+            ))
         });
 
         let initial_query = initial_query.unwrap_or_default();
@@ -801,8 +821,15 @@ impl LauncherApp {
             if let Ok(mut selected) = self.selected_item.lock() {
                 *selected = Some(description.clone());
             }
-            let count = self.mru_map.entry(description).or_insert(0);
-            *count += 1;
+            let entry = self.mru_map.entry(description).or_insert(MruEntry {
+                count: 0,
+                last_used: 0,
+            });
+            entry.count += 1;
+            entry.last_used = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
             save_mru_map(&self.mru_map);
             self.save_query_to_history();
         }

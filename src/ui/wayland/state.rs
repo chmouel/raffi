@@ -201,7 +201,7 @@ pub(super) struct LauncherApp {
     pub selected_index: usize,
     pub selected_item: SharedSelection,
     pub icon_map: HashMap<String, String>,
-    pub mru_map: HashMap<String, u32>,
+    pub mru_map: HashMap<String, super::support::MruEntry>,
     pub addons: AddonsConfig,
     pub calculator_result: Option<CalculatorResult>,
     pub currency: CurrencyState,

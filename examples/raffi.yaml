@@ -14,6 +14,7 @@ version: 1
 #   window_width: 800        # Window width in pixels (default: 800)
 #   window_height: 600       # Window height in pixels (default: 600)
 #   padding: 20              # Outer window padding in pixels (default: 20, scales with font_size)
+#   sort_mode: hybrid        # Sort mode for entries: frequency, recency, or hybrid (default: hybrid)
 #   theme_colors:            # Override individual colours (hex: #RGB, #RRGGBB, or #RRGGBBAA)
 #     bg_base: "#1e1e2e"
 #     bg_input: "#313244"
