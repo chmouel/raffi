@@ -1,0 +1,559 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ConfigSchema",
+  "description": "Public schema representation of the v1 config format, used for JSON Schema generation.",
+  "type": "object",
+  "required": [
+    "version"
+  ],
+  "properties": {
+    "addons": {
+      "description": "Addon configurations (script filters, web searches, etc.)",
+      "allOf": [
+        {
+          "$ref": "#/definitions/AddonsConfig"
+        }
+      ]
+    },
+    "general": {
+      "description": "General settings (UI, theme, font, etc.)",
+      "allOf": [
+        {
+          "$ref": "#/definitions/GeneralConfig"
+        }
+      ]
+    },
+    "launchers": {
+      "description": "Launcher entries keyed by name",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/RaffiConfig"
+      }
+    },
+    "version": {
+      "description": "Config format version (currently 1)",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    }
+  },
+  "definitions": {
+    "AddonsConfig": {
+      "description": "Container for all addon configurations",
+      "type": "object",
+      "properties": {
+        "calculator": {
+          "$ref": "#/definitions/CalculatorAddonConfig"
+        },
+        "currency": {
+          "$ref": "#/definitions/CurrencyAddonConfig"
+        },
+        "emoji": {
+          "$ref": "#/definitions/EmojiAddonConfig"
+        },
+        "file_browser": {
+          "$ref": "#/definitions/FileBrowserAddonConfig"
+        },
+        "script_filters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ScriptFilterConfig"
+          }
+        },
+        "text_snippets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TextSnippetSourceConfig"
+          }
+        },
+        "web_searches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WebSearchConfig"
+          }
+        }
+      }
+    },
+    "CalculatorAddonConfig": {
+      "description": "Configuration for the calculator addon",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        }
+      }
+    },
+    "CurrencyAddonConfig": {
+      "description": "Configuration for the currency addon",
+      "type": "object",
+      "properties": {
+        "currencies": {
+          "default": null,
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "default_currency": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "trigger": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "EmojiAddonConfig": {
+      "description": "Configuration for the emoji picker addon",
+      "type": "object",
+      "properties": {
+        "action": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "data_files": {
+          "default": null,
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "secondary_action": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trigger": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "FileBrowserAddonConfig": {
+      "description": "Configuration for the file browser addon",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "show_hidden": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "GeneralConfig": {
+      "description": "General configuration for persistent defaults",
+      "type": "object",
+      "properties": {
+        "default_script_shell": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "font_family": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "font_size": {
+          "default": null,
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "max_history": {
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "no_icons": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "padding": {
+          "default": null,
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "theme": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "theme_colors": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThemeColorsConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ui_type": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "window_height": {
+          "default": null,
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "window_width": {
+          "default": null,
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        }
+      }
+    },
+    "RaffiConfig": {
+      "description": "Represents the configuration for each Raffi entry.",
+      "type": "object",
+      "properties": {
+        "args": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "binary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "disabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "icon": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ifenveq": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "ifenvnotset": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ifenvset": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ifexist": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "script": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ScriptFilterConfig": {
+      "description": "Configuration for a script filter addon",
+      "type": "object",
+      "required": [
+        "command",
+        "keyword",
+        "name"
+      ],
+      "properties": {
+        "action": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "args": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "command": {
+          "type": "string"
+        },
+        "icon": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "keyword": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "secondary_action": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "TextSnippet": {
+      "description": "A single text snippet entry",
+      "type": "object",
+      "required": [
+        "name",
+        "value"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "TextSnippetSourceConfig": {
+      "description": "Configuration for a text snippet source",
+      "type": "object",
+      "required": [
+        "keyword",
+        "name"
+      ],
+      "properties": {
+        "action": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "args": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "command": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "directory": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "file": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "icon": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "keyword": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "secondary_action": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "snippets": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/TextSnippet"
+          }
+        }
+      }
+    },
+    "ThemeColorsConfig": {
+      "description": "Per-colour overrides for the native UI theme.",
+      "type": "object",
+      "properties": {
+        "accent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "accent_hover": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bg_base": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bg_input": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "border": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selection_bg": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text_main": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text_muted": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "WebSearchConfig": {
+      "description": "Configuration for a web search addon",
+      "type": "object",
+      "required": [
+        "keyword",
+        "name",
+        "url"
+      ],
+      "properties": {
+        "icon": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "keyword": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

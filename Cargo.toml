@@ -32,3 +32,4 @@ iced = { version = "0.14", features = [
 meval = { version = "0.2", optional = true }
 ureq = { version = "3", features = ["json"], optional = true }
 regex = { version = "1.10", optional = true }
+schemars = { version = "0.8", features = ["derive"] }

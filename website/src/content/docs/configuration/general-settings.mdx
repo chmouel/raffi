@@ -22,7 +22,7 @@ All fields in the `general` section are optional.
 UI backend selection. Valid options:
   - `fuzzel` - Uses external Fuzzel launcher (default)
   - `native` - Uses built-in iced-based GUI
-  
+
   Equivalent to `-u` or `--ui-type` flag.
 
 
@@ -31,14 +31,14 @@ UI backend selection. Valid options:
 Color theme for the native interface. Valid options:
   - `dark` - Dracula-inspired palette (default)
   - `light` - Rose Pine Dawn palette
-  
+
   Equivalent to `-t` or `--theme` flag. Only applies to native UI.
 
 
 **`no_icons`** `boolean` (default: `false`)
 
 Disables icon loading for faster startup.
-  
+
   Equivalent to `-I` or `--no-icons` flag.
 
 
@@ -48,14 +48,14 @@ Default interpreter for inline scripts. Common values:
   - `bash` (default)
   - `/bin/zsh`
   - `python3`
-  
+
   Equivalent to `--default-script-shell` flag.
 
 
 **`max_history`** `number` (default: `10`)
 
 Maximum number of search query history entries.
-  
+
   Set to `0` to disable history. Navigate history with Alt+P (previous) and Alt+N (next) in native mode.
 
 
@@ -73,7 +73,7 @@ Base font size in pixels. Other UI elements scale proportionally:
 **`font_family`** `string`
 
 Font family name (e.g., `"Inter"`, `"Fira Sans"`, `"Roboto"`).
-  
+
   When omitted, the system default sans-serif font is used.
 
 
@@ -92,7 +92,7 @@ Launcher window height in pixels (native mode only).
 **`padding`** `number` (default: `20`)
 
 Outer window padding in pixels.
-  
+
   When not set, padding scales automatically with `font_size`.
 
 

@@ -14,10 +14,11 @@ Raffi supports icons from system icon themes. Icons are automatically discovered
 Specify icons by their theme name:
 
 ```yaml
-firefox:
-  binary: firefox
-  description: "Firefox"
-  icon: firefox
+launchers:
+  firefox:
+    binary: firefox
+    description: "Firefox"
+    icon: firefox
 ```
 
 Raffi searches for icons in system icon directories and uses the icon name to look up the full path.
@@ -134,15 +135,16 @@ Command-line flags override configuration file settings.
 
 ```yaml
 # System icon by name
-firefox:
-  binary: firefox
-  description: "Firefox"
-  icon: firefox
+launchers:
+  firefox:
+    binary: firefox
+    description: "Firefox"
+    icon: firefox
 
-# No icon specified
-terminal:
-  binary: kitty
-  description: "Terminal"
+  # No icon specified
+  terminal:
+    binary: kitty
+    description: "Terminal"
 ```
 
 ### Real-World Examples
@@ -150,32 +152,33 @@ terminal:
 From the example configuration:
 
 ```yaml
-wally:
-  binary: jumpapp
-  args: ["-X", "wally"]
-  description: "Wally"
-  icon: wally
-  ifexist: wally
+launchers:
+  wally:
+    binary: jumpapp
+    args: ["-X", "wally"]
+    description: "Wally"
+    icon: wally
+    ifexist: wally
 
-evolution-mail:
-  binary: jumpapp
-  args: ["-t", "Evolution", "-X", "evolution"]
-  description: "Evolution Mail"
-  icon: evolution-mail
-  ifexist: evolution
+  evolution-mail:
+    binary: jumpapp
+    args: ["-t", "Evolution", "-X", "evolution"]
+    description: "Evolution Mail"
+    icon: evolution-mail
+    ifexist: evolution
 
-signal:
-  binary: jumpapp
-  args: ["-X", "signal", "signal-desktop"]
-  description: "Signal"
-  icon: signal-desktop
-  ifexist: signal-desktop
+  signal:
+    binary: jumpapp
+    args: ["-X", "signal", "signal-desktop"]
+    description: "Signal"
+    icon: signal-desktop
+    ifexist: signal-desktop
 
-golang:
-  binary: jumpapp
-  args: ["-c", "jetbrains-goland", "goland"]
-  description: "Goland"
-  icon: goland
+  golang:
+    binary: jumpapp
+    args: ["-c", "jetbrains-goland", "goland"]
+    description: "Goland"
+    icon: goland
 ```
 
 ## Troubleshooting

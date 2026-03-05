@@ -67,7 +67,7 @@ Snippets can come from four different sources:
   }
   .nav-cards a article .title .icon {
     font-size: 2.5rem !important; /* Huge icons */
-    color: var(--sl-color-purple); 
+    color: var(--sl-color-purple);
     background: var(--sl-color-purple-low);
     padding: 0.5rem;
     border-radius: 0.5rem;
@@ -159,9 +159,9 @@ The snippet file (`~/.config/raffi/snippets.yaml`):
     Date: [DATE]
     Attendees: [NAMES]
     Topics:
-    - 
+    -
     Action Items:
-    - 
+    -
 ```
 
 <Aside type="note">
@@ -256,7 +256,7 @@ Configure how snippets are used when selected:
     ```
     Copies snippet to clipboard using `wl-copy`, `xclip`, or `xsel`
   </TabItem>
-  
+
   <TabItem label="Insert/Type">
     ```yaml
     action: "insert"
@@ -388,7 +388,7 @@ text_snippets:
           fn main() {
               println!("Hello, world!");
           }
-      
+
       - name: "Python Main"
         value: |
           if __name__ == "__main__":
@@ -557,20 +557,20 @@ addons:
           value: "user@example.com"
         - name: "Work"
           value: "user@company.com"
-    
+
     # Templates from file
     - name: "Templates"
       keyword: "tpl"
       icon: "document"
       file: "~/.config/raffi/templates.yaml"
       action: "insert"
-    
+
     # Dynamic dates from command
     - name: "Dates"
       keyword: "date"
       command: "date-snippets"
       icon: "calendar"
-    
+
     # Code snippets from directory
     - name: "Code Snippets"
       keyword: "code"

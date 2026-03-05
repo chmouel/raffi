@@ -22,9 +22,9 @@ Print version information and exit.
 **`-c, --configfile`** `string` (default: `~/.config/raffi/raffi.yaml`)
 
 Path to the YAML configuration file.
-  
+
   Supports tilde expansion (`~/`) and environment variable expansion (`${VAR}`).
-  
+
   ```bash
   raffi -c ~/custom/config.yaml
   raffi --configfile ~/custom/config.yaml
@@ -36,12 +36,12 @@ Path to the YAML configuration file.
 **`-u, --ui-type`** `string` (default: `fuzzel`)
 
 Select the user interface backend.
-  
+
   Valid values:
 
 - `fuzzel` - Uses the external Fuzzel launcher (requires Fuzzel to be installed)
 - `native` - Uses the built-in iced-based graphical interface (requires build with `wayland` feature)
-  
+
   ```bash
   raffi -u native
   ```
@@ -50,9 +50,9 @@ Select the user interface backend.
 **`-I, --no-icons`** `boolean` (default: `false`)
 
 Disable icon loading for faster startup.
-  
+
   When enabled, no icons will be displayed in the launcher interface. This can significantly speed up startup time, especially on first launch.
-  
+
   ```bash
   raffi -I
   ```
@@ -61,9 +61,9 @@ Disable icon loading for faster startup.
 **`-i, --initial-query`** `string`
 
 Pre-fill the search field with an initial query.
-  
+
   Only works in native UI mode. Useful for launching Raffi with a specific search term already entered.
-  
+
   ```bash
   raffi -u native -i firefox
   ```
@@ -72,14 +72,14 @@ Pre-fill the search field with an initial query.
 **`-t, --theme`** `string` (default: `dark`)
 
 Select the color theme for the native UI.
-  
+
   Valid values:
 
 - `dark` - Dracula-inspired dark theme (default)
 - `light` - Rose Pine Dawn light theme
-  
+
   Only affects native UI mode.
-  
+
   ```bash
   raffi -u native -t light
   ```
@@ -90,14 +90,14 @@ Select the color theme for the native UI.
 **`-p, --print-only`** `boolean` (default: `false`)
 
 Print the command to stdout instead of executing it.
-  
+
   Useful for debugging or integrating with window managers that execute commands separately.
-  
+
   ```bash
   raffi -p
   # Output: firefox --marionette
   ```
-  
+
   Example with Sway:
 
   ```bash
@@ -108,9 +108,9 @@ Print the command to stdout instead of executing it.
 **`-P, --default-script-shell`** `string` (default: `bash`)
 
 Set the default shell interpreter for script entries.
-  
+
   Used when a configuration entry has a `script` field but no explicit `binary` field. Common values include `bash`, `zsh`, `sh`, `python3`, etc.
-  
+
   ```bash
   raffi --default-script-shell zsh
   ```
@@ -121,13 +121,13 @@ Set the default shell interpreter for script entries.
 **`-r, --refresh-cache`** `boolean` (default: `false`)
 
 Refresh the cached icon paths.
-  
+
   Raffi caches icon locations from system directories to speed up subsequent launches. Use this flag to force regeneration of the cache, for example after installing new icon themes.
-  
+
   ```bash
   raffi -r
   ```
-  
+
   Cache location: `$XDG_CACHE_HOME/raffi/icon.cache` (defaults to `~/.cache/raffi/icon.cache`)
 
 

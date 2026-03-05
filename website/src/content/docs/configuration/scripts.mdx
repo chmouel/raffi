@@ -19,14 +19,14 @@ Raffi entries can execute inline scripts instead of launching binaries directly.
 **`script`** `string` (required)
 
 Inline script content. Can be a single line or multi-line string.
-  
+
   The script is executed using the interpreter specified in `binary` (or the default script shell).
 
 
 **`binary`** `string`
 
 Script interpreter. Defaults to `bash` (or the value set via `--default-script-shell` or `general.default_script_shell`).
-  
+
   Common values:
 
 - `bash` (default)
@@ -39,7 +39,7 @@ Script interpreter. Defaults to `bash` (or the value set via `--default-script-s
 **`args`** `array`
 
 Arguments passed to the script (not the interpreter).
-  
+
   These are available as `$1`, `$2`, etc. in shell scripts or `sys.argv` in Python.
 
 
@@ -48,35 +48,38 @@ Arguments passed to the script (not the interpreter).
 ### Single-Line Script
 
 ```yaml
-hello_script:
-  script: "echo 'Hello, World!'"
-  description: "Hello Script"
-  icon: "script"
+launchers:
+  hello_script:
+    script: "echo 'Hello, World!'"
+    description: "Hello Script"
+    icon: "script"
 ```
 
 ### Multi-Line Script
 
 ```yaml
-hello_script:
-  script: |
-    echo "hello world and show me your env"
-    env
-  description: "Hello Script"
-  icon: "script"
+launchers:
+  hello_script:
+    script: |
+      echo "hello world and show me your env"
+      env
+    description: "Hello Script"
+    icon: "script"
 ```
 
 ### Script with Arguments
 
 ```yaml
-backup_script:
-  script: |
-    SOURCE=$1
-    DEST=$2
-    rsync -av "$SOURCE" "$DEST"
-    notify-send "Backup complete" "$SOURCE → $DEST"
-  args: ["~/Documents", "~/Backups"]
-  description: "Backup Documents"
-  icon: "backup"
+launchers:
+  backup_script:
+    script: |
+      SOURCE=$1
+      DEST=$2
+      rsync -av "$SOURCE" "$DEST"
+      notify-send "Backup complete" "$SOURCE → $DEST"
+    args: ["~/Documents", "~/Backups"]
+    description: "Backup Documents"
+    icon: "backup"
 ```
 
 ## Python Scripts
@@ -84,33 +87,35 @@ backup_script:
 ### Basic Python Script
 
 ```yaml
-hello_python:
-  binary: python3
-  script: |
-    import os
-    print("hello world and show me your env")
-    print(os.environ)
-  description: "Hello Python script"
-  icon: "python"
+launchers:
+  hello_python:
+    binary: python3
+    script: |
+      import os
+      print("hello world and show me your env")
+      print(os.environ)
+    description: "Hello Python script"
+    icon: "python"
 ```
 
 ### Python Script with Arguments
 
 ```yaml
-process_data:
-  binary: python3
-  script: |
-    import sys
-    import json
-    
-    input_file = sys.argv[1]
-    with open(input_file) as f:
-        data = json.load(f)
-    
-    print(f"Processed {len(data)} records")
-  args: ["~/data/input.json"]
-  description: "Process Data"
-  icon: "python"
+launchers:
+  process_data:
+    binary: python3
+    script: |
+      import sys
+      import json
+
+      input_file = sys.argv[1]
+      with open(input_file) as f:
+          data = json.load(f)
+
+      print(f"Processed {len(data)} records")
+    args: ["~/data/input.json"]
+    description: "Process Data"
+    icon: "python"
 ```
 
 ## Custom Interpreters
@@ -118,37 +123,40 @@ process_data:
 ### Ruby Script
 
 ```yaml
-ruby_script:
-  binary: ruby
-  script: |
-    puts "Hello from Ruby!"
-    puts "Ruby version: #{RUBY_VERSION}"
-  description: "Ruby Hello"
-  icon: "ruby"
+launchers:
+  ruby_script:
+    binary: ruby
+    script: |
+      puts "Hello from Ruby!"
+      puts "Ruby version: #{RUBY_VERSION}"
+    description: "Ruby Hello"
+    icon: "ruby"
 ```
 
 ### Perl Script
 
 ```yaml
-perl_script:
-  binary: perl
-  script: |
-    print "Hello from Perl!\n";
-    print "Perl version: $^V\n";
-  description: "Perl Hello"
-  icon: "perl"
+launchers:
+  perl_script:
+    binary: perl
+    script: |
+      print "Hello from Perl!\n";
+      print "Perl version: $^V\n";
+    description: "Perl Hello"
+    icon: "perl"
 ```
 
 ### Zsh Script
 
 ```yaml
-zsh_script:
-  binary: /bin/zsh
-  script: |
-    echo "Hello from Zsh!"
-    echo "Zsh version: $ZSH_VERSION"
-  description: "Zsh Hello"
-  icon: "terminal"
+launchers:
+  zsh_script:
+    binary: /bin/zsh
+    script: |
+      echo "Hello from Zsh!"
+      echo "Zsh version: $ZSH_VERSION"
+    description: "Zsh Hello"
+    icon: "terminal"
 ```
 
 ## Default Script Shell
@@ -158,12 +166,15 @@ Set a default interpreter for all scripts:
 ### Via Configuration
 
 ```yaml
+version: 1
+
 general:
   default_script_shell: /bin/zsh
 
-my_script:
-  script: "echo 'This runs with zsh'"
-  description: "My Script"
+launchers:
+  my_script:
+    script: "echo 'This runs with zsh'"
+    description: "My Script"
 ```
 
 ### Via Command Line
@@ -205,38 +216,41 @@ env
 ### Password Generator
 
 ```yaml
-passgen:
-  binary: kitty-ctrl
-  args: ["jump", "-t", "GeneratePassword", "genpasswd"]
-  description: "Password Generator"
-  icon: password
+launchers:
+  passgen:
+    binary: kitty-ctrl
+    args: ["jump", "-t", "GeneratePassword", "genpasswd"]
+    description: "Password Generator"
+    icon: password
 ```
 
 ### System Monitoring
 
 ```yaml
-bpytop:
-  binary: kitty-ctrl
-  args: ["jump", "bpytop"]
-  description: "BpyTOP"
-  icon: bashtop
-  ifexist: bpytop
+launchers:
+  bpytop:
+    binary: kitty-ctrl
+    args: ["jump", "bpytop"]
+    description: "BpyTOP"
+    icon: bashtop
+    ifexist: bpytop
 ```
 
 ### Custom Window Management
 
 ```yaml
-center-window:
-  binary: wmctrl-resize-and-center
-  description: "Center window"
-  icon: wmsnap
+launchers:
+  center-window:
+    binary: wmctrl-resize-and-center
+    description: "Center window"
+    icon: wmsnap
 
-snap-window-around:
-  binary: wmctrl-resize-and-center
-  args: [rotate]
-  description: "Snap window around"
-  icon: wmaround
-  ifenveq: [XDG_SESSION_TYPE, x11]
+  snap-window-around:
+    binary: wmctrl-resize-and-center
+    args: [rotate]
+    description: "Snap window around"
+    icon: wmaround
+    ifenveq: [XDG_SESSION_TYPE, x11]
 ```
 
 ## Path Expansion in Scripts
@@ -248,23 +262,25 @@ Path expansion (`~/` and `${VAR}`) is **not** applied to script content.
 If you need path expansion in scripts, do it explicitly:
 
 ```yaml
-backup:
-  script: |
-    HOME=$HOME
-    SOURCE="$HOME/Documents"
-    DEST="$HOME/Backups"
-    rsync -av "$SOURCE" "$DEST"
-  description: "Backup"
+launchers:
+  backup:
+    script: |
+      HOME=$HOME
+      SOURCE="$HOME/Documents"
+      DEST="$HOME/Backups"
+      rsync -av "$SOURCE" "$DEST"
+    description: "Backup"
 ```
 
 Or use arguments with expansion:
 
 ```yaml
-backup:
-  script: |
-    rsync -av "$1" "$2"
-  args: ["~/Documents", "~/Backups"]
-  description: "Backup"
+launchers:
+  backup:
+    script: |
+      rsync -av "$1" "$2"
+    args: ["~/Documents", "~/Backups"]
+    description: "Backup"
 ```
 
 ## Validation

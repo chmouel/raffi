@@ -9,13 +9,14 @@ use std::{
 
 use anyhow::{Context, Result};
 use gumdrop::Options;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_yaml::Value;
 
 pub mod ui;
 
 /// Represents the configuration for each Raffi entry.
-#[derive(Deserialize, Debug, PartialEq, Clone, Default)]
+#[derive(Deserialize, JsonSchema, Debug, PartialEq, Clone, Default)]
 pub struct RaffiConfig {
     pub binary: Option<String>,
     pub args: Option<Vec<String>>,
@@ -30,7 +31,7 @@ pub struct RaffiConfig {
 }
 
 /// Configuration for the currency addon
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
 pub struct CurrencyAddonConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -54,7 +55,7 @@ impl Default for CurrencyAddonConfig {
 }
 
 /// Configuration for the calculator addon
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
 pub struct CalculatorAddonConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -67,7 +68,7 @@ impl Default for CalculatorAddonConfig {
 }
 
 /// Configuration for the file browser addon
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
 pub struct FileBrowserAddonConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -100,7 +101,7 @@ pub const DEFAULT_EMOJI_FILES: &[&str] = &[
 ];
 
 /// Configuration for the emoji picker addon
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
 pub struct EmojiAddonConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -127,7 +128,7 @@ impl Default for EmojiAddonConfig {
 }
 
 /// Configuration for a script filter addon
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
 pub struct ScriptFilterConfig {
     pub name: String,
     pub command: String,
@@ -140,7 +141,7 @@ pub struct ScriptFilterConfig {
 }
 
 /// Configuration for a web search addon
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
 pub struct WebSearchConfig {
     pub name: String,
     pub keyword: String,
@@ -149,14 +150,14 @@ pub struct WebSearchConfig {
 }
 
 /// A single text snippet entry
-#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, JsonSchema, Debug, Clone, PartialEq)]
 pub struct TextSnippet {
     pub name: String,
     pub value: String,
 }
 
 /// Configuration for a text snippet source
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
 pub struct TextSnippetSourceConfig {
     pub name: String,
     pub keyword: String,
@@ -179,7 +180,7 @@ pub struct TextSnippetSourceConfig {
 }
 
 /// Container for all addon configurations
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 pub struct AddonsConfig {
     #[serde(default)]
     pub currency: CurrencyAddonConfig,
@@ -202,7 +203,7 @@ fn default_true() -> bool {
 }
 
 /// Per-colour overrides for the native UI theme.
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 pub struct ThemeColorsConfig {
     pub bg_base: Option<String>,
     pub bg_input: Option<String>,
@@ -215,7 +216,7 @@ pub struct ThemeColorsConfig {
 }
 
 /// General configuration for persistent defaults
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 pub struct GeneralConfig {
     #[serde(default)]
     pub ui_type: Option<String>,
@@ -248,15 +249,34 @@ pub struct ParsedConfig {
     pub entries: Vec<RaffiConfig>,
 }
 
-/// Represents the top-level configuration structure.
+/// Represents the top-level configuration structure (v1 format).
 #[derive(Deserialize)]
 struct Config {
+    #[serde(default)]
+    #[allow(dead_code)]
+    version: u32,
     #[serde(default)]
     general: GeneralConfig,
     #[serde(default)]
     addons: AddonsConfig,
-    #[serde(flatten)]
-    entries: HashMap<String, Value>,
+    #[serde(default)]
+    launchers: HashMap<String, Value>,
+}
+
+/// Public schema representation of the v1 config format, used for JSON Schema generation.
+#[derive(JsonSchema)]
+pub struct ConfigSchema {
+    /// Config format version (currently 1)
+    pub version: u32,
+    /// General settings (UI, theme, font, etc.)
+    #[serde(default)]
+    pub general: GeneralConfig,
+    /// Addon configurations (script filters, web searches, etc.)
+    #[serde(default)]
+    pub addons: AddonsConfig,
+    /// Launcher entries keyed by name
+    #[serde(default)]
+    pub launchers: HashMap<String, RaffiConfig>,
 }
 
 /// UI type selection
@@ -342,6 +362,8 @@ pub struct Args {
     pub initial_query: Option<String>,
     #[options(help = "theme: dark, light (default: dark)", short = "t")]
     pub theme: Option<String>,
+    #[options(help = "print JSON Schema for the config format to stdout")]
+    pub schema: bool,
 }
 
 /// A trait for checking environment variables.
@@ -483,17 +505,126 @@ pub(crate) fn expand_config_value(s: &str) -> String {
     expand_env_vars(&expand_tilde(s))
 }
 
-/// Read the configuration file and return a ParsedConfig.
-pub fn read_config(filename: &str, args: &Args) -> Result<ParsedConfig> {
-    let file = File::open(filename).context(format!("cannot open config file {filename}"))?;
-    read_config_from_reader(file, args)
+/// Migrate a v0 config (launcher entries as top-level keys) to v1 format
+/// (entries under a `launchers` key with an explicit `version` field).
+/// Returns `Ok(true)` if migration was performed, `Ok(false)` if already v1+.
+pub fn migrate_config_v0_to_v1(config_path: &str, raw: &mut Value) -> Result<bool> {
+    let mapping = match raw.as_mapping_mut() {
+        Some(m) => m,
+        None => return Ok(false),
+    };
+
+    // If version key exists, no migration needed
+    if mapping.contains_key(Value::String("version".to_string())) {
+        return Ok(false);
+    }
+
+    let reserved = ["general", "addons", "version"];
+    let mut launchers = serde_yaml::Mapping::new();
+    let mut keys_to_move = Vec::new();
+
+    for (key, _) in mapping.iter() {
+        if let Some(k) = key.as_str() {
+            if !reserved.contains(&k) {
+                keys_to_move.push(Value::String(k.to_string()));
+            }
+        }
+    }
+
+    for key in &keys_to_move {
+        if let Some(val) = mapping.remove(key) {
+            launchers.insert(key.clone(), val);
+        }
+    }
+
+    mapping.insert(
+        Value::String("version".to_string()),
+        Value::Number(serde_yaml::Number::from(1u64)),
+    );
+    mapping.insert(
+        Value::String("launchers".to_string()),
+        Value::Mapping(launchers),
+    );
+
+    // Back up original file
+    let backup_path = format!("{config_path}.bak");
+    fs::copy(config_path, &backup_path)
+        .context(format!("Failed to create backup at {backup_path}"))?;
+
+    // Write migrated config
+    let migrated_yaml =
+        serde_yaml::to_string(&raw).context("Failed to serialize migrated config")?;
+    fs::write(config_path, &migrated_yaml)
+        .context(format!("Failed to write migrated config to {config_path}"))?;
+
+    eprintln!("Config migrated to v1 format. Backup saved as {backup_path}");
+    Ok(true)
 }
 
+/// Read the configuration file and return a ParsedConfig.
+pub fn read_config(filename: &str, args: &Args) -> Result<ParsedConfig> {
+    let contents =
+        fs::read_to_string(filename).context(format!("cannot open config file {filename}"))?;
+    let mut raw: Value = serde_yaml::from_str(&contents).context("cannot parse config as YAML")?;
+
+    migrate_config_v0_to_v1(filename, &mut raw)?;
+
+    let config: Config = serde_yaml::from_value(raw).context("cannot parse config")?;
+
+    process_config(config, args)
+}
+
+/// Read config from a reader, accepting both v0 (flat) and v1 (launchers) formats.
+/// Used primarily for tests where no file path is available for migration.
 pub fn read_config_from_reader<R: Read>(reader: R, args: &Args) -> Result<ParsedConfig> {
-    let config: Config = serde_yaml::from_reader(reader).context("cannot parse config")?;
+    let mut contents = String::new();
+    let mut reader = reader;
+    reader
+        .read_to_string(&mut contents)
+        .context("cannot read config")?;
+    let mut raw: Value = serde_yaml::from_str(&contents).context("cannot parse config")?;
+
+    // For reader-based configs, do an in-memory migration (no file write)
+    if let Some(mapping) = raw.as_mapping_mut() {
+        if !mapping.contains_key(Value::String("version".to_string())) {
+            let reserved = ["general", "addons", "version"];
+            let mut launchers = serde_yaml::Mapping::new();
+            let mut keys_to_move = Vec::new();
+
+            for (key, _) in mapping.iter() {
+                if let Some(k) = key.as_str() {
+                    if !reserved.contains(&k) {
+                        keys_to_move.push(Value::String(k.to_string()));
+                    }
+                }
+            }
+
+            for key in &keys_to_move {
+                if let Some(val) = mapping.remove(key) {
+                    launchers.insert(key.clone(), val);
+                }
+            }
+
+            mapping.insert(
+                Value::String("version".to_string()),
+                Value::Number(serde_yaml::Number::from(1u64)),
+            );
+            mapping.insert(
+                Value::String("launchers".to_string()),
+                Value::Mapping(launchers),
+            );
+        }
+    }
+
+    let config: Config = serde_yaml::from_value(raw).context("cannot parse config")?;
+    process_config(config, args)
+}
+
+/// Common config processing logic shared by read_config and read_config_from_reader.
+fn process_config(config: Config, args: &Args) -> Result<ParsedConfig> {
     let mut rafficonfigs = Vec::new();
 
-    for value in config.entries.values() {
+    for value in config.launchers.values() {
         if value.is_mapping() {
             let mut mc: RaffiConfig = serde_yaml::from_value(value.clone())
                 .context("cannot parse config entry".to_string())?;
@@ -722,9 +853,20 @@ pub fn execute_web_search_url(url_template: &str, query: &str) -> Result<()> {
     Ok(())
 }
 
+/// Generate the JSON Schema for the raffi config format.
+fn generate_schema() -> String {
+    let schema = schemars::schema_for!(ConfigSchema);
+    serde_json::to_string_pretty(&schema).expect("Failed to serialize JSON Schema")
+}
+
 pub fn run(args: Args) -> Result<()> {
     if args.version {
         println!("raffi version 0.1.0");
+        return Ok(());
+    }
+
+    if args.schema {
+        println!("{}", generate_schema());
         return Ok(());
     }
 
@@ -738,6 +880,18 @@ pub fn run(args: Args) -> Result<()> {
         std::env::var("HOME").unwrap_or_default()
     );
     let configfile = args.configfile.as_deref().unwrap_or(&default_config_path);
+
+    // Write schema file if it doesn't exist yet
+    let config_dir = Path::new(configfile).parent().unwrap_or(Path::new("."));
+    let schema_path = config_dir.join("raffi-schema.json");
+    if !schema_path.exists() {
+        if let Err(e) = fs::write(&schema_path, generate_schema()) {
+            eprintln!(
+                "Warning: could not write schema file {}: {e}",
+                schema_path.display()
+            );
+        }
+    }
 
     let parsed_config = read_config(configfile, &args).context("Failed to read config")?;
 
@@ -872,6 +1026,7 @@ mod tests {
             ui_type: None,
             initial_query: None,
             theme: None,
+            schema: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.entries.len(), 2);
@@ -923,6 +1078,7 @@ mod tests {
             ui_type: None,
             initial_query: None,
             theme: None,
+            schema: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -987,6 +1143,7 @@ mod tests {
             ui_type: None,
             initial_query: None,
             theme: None,
+            schema: false,
         };
         let env_provider = MockEnvProvider {
             vars: {
@@ -1039,6 +1196,7 @@ mod tests {
             ui_type: None,
             initial_query: None,
             theme: None,
+            schema: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1088,6 +1246,7 @@ mod tests {
             ui_type: None,
             initial_query: None,
             theme: None,
+            schema: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1157,17 +1316,19 @@ mod tests {
     fn test_config_expands_env_vars_in_fields() {
         let home = std::env::var("HOME").unwrap();
         let yaml_config = r#"
-        myapp:
-          binary: "${HOME}/bin/myapp"
-          description: "My App"
-          args: ["${HOME}/Downloads/file.txt", "--verbose"]
-          icon: "${HOME}/icons/myapp.png"
-          ifexist: "${HOME}/bin/myapp"
+        version: 1
+        launchers:
+          myapp:
+            binary: "${HOME}/bin/myapp"
+            description: "My App"
+            args: ["${HOME}/Downloads/file.txt", "--verbose"]
+            icon: "${HOME}/icons/myapp.png"
+            ifexist: "${HOME}/bin/myapp"
         "#;
         let reader = Cursor::new(yaml_config);
         let config: super::Config = serde_yaml::from_reader(reader).expect("cannot parse config");
         let mut rafficonfigs = Vec::new();
-        for value in config.entries.values() {
+        for value in config.launchers.values() {
             if value.is_mapping() {
                 let mut mc: RaffiConfig = serde_yaml::from_value(value.clone()).unwrap();
                 mc.binary = mc.binary.map(|s| expand_config_value(&s));
@@ -1198,18 +1359,20 @@ mod tests {
     fn test_config_expands_tilde_in_fields() {
         let home = std::env::var("HOME").unwrap();
         let yaml_config = r#"
-        myapp:
-          binary: "~/bin/myapp"
-          description: "My App"
-          args: ["~/Downloads/file.txt", "--verbose"]
-          icon: "~/icons/myapp.png"
-          ifexist: "~/bin/myapp"
+        version: 1
+        launchers:
+          myapp:
+            binary: "~/bin/myapp"
+            description: "My App"
+            args: ["~/Downloads/file.txt", "--verbose"]
+            icon: "~/icons/myapp.png"
+            ifexist: "~/bin/myapp"
         "#;
         let reader = Cursor::new(yaml_config);
         // Parse and expand manually to avoid is_valid_config filtering out non-existent paths
         let config: super::Config = serde_yaml::from_reader(reader).expect("cannot parse config");
         let mut rafficonfigs = Vec::new();
-        for value in config.entries.values() {
+        for value in config.launchers.values() {
             if value.is_mapping() {
                 let mut mc: RaffiConfig = serde_yaml::from_value(value.clone()).unwrap();
                 mc.binary = mc.binary.map(|s| expand_tilde(&s));
@@ -1259,6 +1422,7 @@ mod tests {
             ui_type: None,
             initial_query: None,
             theme: None,
+            schema: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1290,6 +1454,7 @@ mod tests {
             ui_type: None,
             initial_query: None,
             theme: None,
+            schema: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1320,6 +1485,7 @@ mod tests {
             ui_type: None,
             initial_query: None,
             theme: None,
+            schema: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1353,6 +1519,7 @@ mod tests {
             ui_type: None,
             initial_query: None,
             theme: None,
+            schema: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.general.font_size, Some(16.0));
@@ -1382,6 +1549,7 @@ mod tests {
             ui_type: None,
             initial_query: None,
             theme: None,
+            schema: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.general.theme, Some("light".to_string()));
@@ -1437,6 +1605,7 @@ mod tests {
             ui_type: None,
             initial_query: None,
             theme: None,
+            schema: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1491,6 +1660,7 @@ mod tests {
             ui_type: None,
             initial_query: None,
             theme: None,
+            schema: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1555,6 +1725,7 @@ mod tests {
             ui_type: None,
             initial_query: None,
             theme: None,
+            schema: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1592,6 +1763,7 @@ mod tests {
             ui_type: None,
             initial_query: None,
             theme: None,
+            schema: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert!(parsed_config.addons.text_snippets.is_empty());
@@ -1625,6 +1797,7 @@ mod tests {
             ui_type: None,
             initial_query: None,
             theme: None,
+            schema: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1666,6 +1839,7 @@ mod tests {
             ui_type: None,
             initial_query: None,
             theme: None,
+            schema: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1675,5 +1849,175 @@ mod tests {
         assert!(parsed_config.addons.emoji.action.is_none());
         assert!(parsed_config.addons.emoji.secondary_action.is_none());
         assert!(parsed_config.addons.emoji.data_files.is_none());
+    }
+
+    #[test]
+    fn test_v0_config_migrated_in_memory() {
+        // v0 format: launcher entries at top level (no version field)
+        let yaml_config = r#"
+        general:
+          no_icons: true
+        addons:
+          calculator:
+            enabled: false
+        shell:
+          binary: sh
+          description: "Shell"
+        firefox:
+          binary: firefox
+          description: "Firefox"
+        "#;
+        let reader = Cursor::new(yaml_config);
+        let args = Args {
+            help: false,
+            version: false,
+            configfile: None,
+            print_only: false,
+            refresh_cache: false,
+            no_icons: true,
+            default_script_shell: None,
+            ui_type: None,
+            initial_query: None,
+            theme: None,
+            schema: false,
+        };
+        let parsed_config = read_config_from_reader(reader, &args).unwrap();
+
+        // general and addons should be preserved
+        assert_eq!(parsed_config.general.no_icons, Some(true));
+        assert!(!parsed_config.addons.calculator.enabled);
+
+        // launcher entries should be found
+        assert_eq!(parsed_config.entries.len(), 2);
+    }
+
+    #[test]
+    fn test_v1_config_passes_through() {
+        // v1 format: entries under launchers key
+        let yaml_config = r#"
+        version: 1
+        general:
+          no_icons: true
+        launchers:
+          shell:
+            binary: sh
+            description: "Shell"
+          firefox:
+            binary: firefox
+            description: "Firefox"
+        "#;
+        let reader = Cursor::new(yaml_config);
+        let args = Args {
+            help: false,
+            version: false,
+            configfile: None,
+            print_only: false,
+            refresh_cache: false,
+            no_icons: true,
+            default_script_shell: None,
+            ui_type: None,
+            initial_query: None,
+            theme: None,
+            schema: false,
+        };
+        let parsed_config = read_config_from_reader(reader, &args).unwrap();
+
+        assert_eq!(parsed_config.general.no_icons, Some(true));
+        assert_eq!(parsed_config.entries.len(), 2);
+    }
+
+    #[test]
+    fn test_migrate_v0_to_v1_moves_keys() {
+        let yaml_str = r#"
+        general:
+          no_icons: true
+        addons:
+          calculator:
+            enabled: false
+        shell:
+          binary: sh
+          description: "Shell"
+        firefox:
+          binary: firefox
+          description: "Firefox"
+        "#;
+        let mut raw: Value = serde_yaml::from_str(yaml_str).unwrap();
+
+        // Create a temp file for migration
+        let dir = std::env::temp_dir();
+        let config_path = dir.join("test_migrate_v0.yaml");
+        fs::write(&config_path, yaml_str).unwrap();
+
+        let migrated = migrate_config_v0_to_v1(config_path.to_str().unwrap(), &mut raw).unwrap();
+        assert!(migrated);
+
+        // Check structure after migration
+        let mapping = raw.as_mapping().unwrap();
+        assert!(mapping.contains_key(&Value::String("version".to_string())));
+        assert!(mapping.contains_key(&Value::String("launchers".to_string())));
+        assert!(mapping.contains_key(&Value::String("general".to_string())));
+        assert!(mapping.contains_key(&Value::String("addons".to_string())));
+
+        // shell and firefox should NOT be top-level anymore
+        assert!(!mapping.contains_key(&Value::String("shell".to_string())));
+        assert!(!mapping.contains_key(&Value::String("firefox".to_string())));
+
+        // They should be inside launchers
+        let launchers = mapping
+            .get(&Value::String("launchers".to_string()))
+            .unwrap()
+            .as_mapping()
+            .unwrap();
+        assert!(launchers.contains_key(&Value::String("shell".to_string())));
+        assert!(launchers.contains_key(&Value::String("firefox".to_string())));
+
+        // Backup should exist
+        let backup_path = format!("{}.bak", config_path.to_str().unwrap());
+        assert!(Path::new(&backup_path).exists());
+
+        // Cleanup
+        let _ = fs::remove_file(&config_path);
+        let _ = fs::remove_file(&backup_path);
+    }
+
+    #[test]
+    fn test_migrate_v1_is_noop() {
+        let yaml_str = r#"
+        version: 1
+        launchers:
+          shell:
+            binary: sh
+        "#;
+        let mut raw: Value = serde_yaml::from_str(yaml_str).unwrap();
+
+        let dir = std::env::temp_dir();
+        let config_path = dir.join("test_migrate_v1_noop.yaml");
+        fs::write(&config_path, yaml_str).unwrap();
+
+        let migrated = migrate_config_v0_to_v1(config_path.to_str().unwrap(), &mut raw).unwrap();
+        assert!(!migrated);
+
+        // No backup should be created
+        let backup_path = format!("{}.bak", config_path.to_str().unwrap());
+        assert!(!Path::new(&backup_path).exists());
+
+        // Cleanup
+        let _ = fs::remove_file(&config_path);
+    }
+
+    #[test]
+    fn test_schema_generation() {
+        let schema = generate_schema();
+        let parsed: serde_json::Value = serde_json::from_str(&schema).unwrap();
+
+        // Should be a valid JSON Schema
+        assert_eq!(parsed["type"], "object");
+
+        // Should have our top-level properties
+        let props = parsed["properties"].as_object().unwrap();
+        assert!(props.contains_key("version"));
+        assert!(props.contains_key("general"));
+        assert!(props.contains_key("addons"));
+        assert!(props.contains_key("launchers"));
     }
 }

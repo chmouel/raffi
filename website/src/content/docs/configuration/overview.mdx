@@ -30,16 +30,19 @@ The configuration file is a YAML file with three main sections:
 ### Minimal Example
 
 ```yaml
-firefox:
-  binary: firefox
-  args: [--marionette]
-  icon: firefox
-  description: Firefox browser with marionette enabled
+launchers:
+  firefox:
+    binary: firefox
+    args: [--marionette]
+    icon: firefox
+    description: Firefox browser with marionette enabled
 ```
 
 ### Complete Structure
 
 ```yaml
+version: 1
+
 # General settings (optional)
 general:
   ui_type: native
@@ -49,16 +52,17 @@ general:
   window_height: 600
 
 # Launcher entries
-firefox:
-  binary: firefox
-  description: "Firefox"
-  icon: firefox
-  args: ["--marionette"]
+launchers:
+  firefox:
+    binary: firefox
+    description: "Firefox"
+    icon: firefox
+    args: ["--marionette"]
 
-terminal:
-  binary: kitty
-  description: "Terminal"
-  icon: terminal
+  terminal:
+    binary: kitty
+    description: "Terminal"
+    icon: terminal
 
 # Addons (optional)
 addons:
@@ -67,7 +71,7 @@ addons:
       keyword: "tz"
       command: "batz"
       args: ["-j"]
-  
+
   web_searches:
     - name: "Google"
       keyword: "g"
@@ -138,7 +142,7 @@ addons:
   }
   .nav-cards a article .title .icon {
     font-size: 2.5rem !important; /* Huge icons */
-    color: var(--sl-color-purple); 
+    color: var(--sl-color-purple);
     background: var(--sl-color-purple-low);
     padding: 0.5rem;
     border-radius: 0.5rem;
@@ -160,11 +164,12 @@ Most configuration fields support path expansion:
 - Unset variables expand to empty strings
 
 ```yaml
-myapp:
-  binary: ${HOME}/bin/myapp
-  args: ["${XDG_DATA_HOME}/files", "~/Documents"]
-  icon: ~/icons/myapp.png
-  ifexist: ~/bin/myapp
+launchers:
+  myapp:
+    binary: ${HOME}/bin/myapp
+    args: ["${XDG_DATA_HOME}/files", "~/Documents"]
+    icon: ~/icons/myapp.png
+    ifexist: ~/bin/myapp
 ```
 
 <Aside type="note">

@@ -23,21 +23,24 @@ This guide will help you configure and launch your first application with Raffi.
    Create `~/.config/raffi/raffi.yaml` with a simple entry:
 
        ```yaml
-       firefox:
-         binary: firefox
-         icon: firefox
-         description: Firefox Web Browser
+       version: 1
+       launchers:
+         firefox:
+           binary: firefox
+           icon: firefox
+           description: Firefox Web Browser
 
-       terminal:
-         binary: kitty
-         icon: kitty
-         description: Kitty Terminal
+         terminal:
+           binary: kitty
+           icon: kitty
+           description: Kitty Terminal
 
-       file_manager:
-         binary: nautilus
-         icon: folder
-         description: File Manager
-       ```
+         file_manager:
+           binary: nautilus
+           icon: folder
+           description: File Manager
+
+```
 
        <Aside type="note">
          Entries are only shown if the binary exists in your PATH. Replace the binary names with applications you have installed.
@@ -64,9 +67,9 @@ Raffi supports two interface modes:
     Fuzzel mode uses the external Fuzzel launcher for a minimal, Wayland-native experience.
 
     ### Install Fuzzel
-    
+
     First, ensure Fuzzel is installed:
-    
+
     <Tabs>
 <TabItem label="Arch Linux">
 ```bash
@@ -88,23 +91,23 @@ Raffi supports two interface modes:
 ```
 </TabItem>
 </Tabs>
-    
+
     ### Launch with Fuzzel
-    
+
     ```bash
     raffi
     ```
-    
+
     Or explicitly specify Fuzzel mode:
-    
+
     ```bash
     raffi -u fuzzel
     ```
-    
+
     ### Configure Fuzzel Appearance
-    
+
     Customize Fuzzel's look in `~/.config/fuzzel/fuzzel.ini`:
-    
+
     ```ini
     dpi-aware=yes
     font=RobotoMonoNerdFont-Thin:size=16
@@ -113,7 +116,7 @@ Raffi supports two interface modes:
     layer=overlay
     exit-on-keyboard-focus-loss=no
     inner-pad=15
-    
+
     [colors]
     background=282a36ff
     text=f8f8f2ff
@@ -122,30 +125,30 @@ Raffi supports two interface modes:
     border=bd93f9ff
     ```
   </TabItem>
-  
+
   <TabItem label="Native Mode">
     Native mode uses Raffi's built-in iced-based GUI with additional features like calculator, file browser, and more.
 
     ### Launch Native Interface
-    
+
     ```bash
     raffi -u native
     ```
-    
+
     ### Choose a Theme
-    
+
     ```bash
     # Dark theme (default, Dracula-inspired)
     raffi -u native -t dark
-    
+
     # Light theme (Rose Pine Dawn)
     raffi -u native -t light
     ```
-    
+
     ### Set as Default
-    
+
     To always use native mode, add this to your config:
-    
+
     ```yaml
     general:
       ui_type: native
@@ -153,7 +156,8 @@ Raffi supports two interface modes:
       font_size: 20
       window_width: 800
       window_height: 600
-    ```
+
+```
   </TabItem>
 </Tabs>
 
@@ -164,37 +168,40 @@ Raffi can execute inline scripts with any interpreter:
 <Tabs>
 <TabItem label="Bash Script">
 ```yaml
-hello_script:
-  script: |
-    echo "Hello from Bash!"
-    notify-send "Raffi" "Script executed successfully"
-  description: "Hello Script"
-  icon: "script"
+launchers:
+  hello_script:
+    script: |
+      echo "Hello from Bash!"
+      notify-send "Raffi" "Script executed successfully"
+    description: "Hello Script"
+    icon: "script"
 ```
 </TabItem>
 <TabItem label="Python Script">
 ```yaml
-check_disk:
-  binary: python3
-  script: |
-    import shutil
-    usage = shutil.disk_usage("/")
-    percent = (usage.used / usage.total) * 100
-    print(f"Disk usage: {percent:.1f}%")
-  description: "Check Disk Usage"
-  icon: "drive-harddisk"
+launchers:
+  check_disk:
+    binary: python3
+    script: |
+      import shutil
+      usage = shutil.disk_usage("/")
+      percent = (usage.used / usage.total) * 100
+      print(f"Disk usage: {percent:.1f}%")
+    description: "Check Disk Usage"
+    icon: "drive-harddisk"
 ```
 </TabItem>
 <TabItem label="Node.js Script">
 ```yaml
-node_example:
-  binary: node
-  script: |
-    const os = require('os');
-    console.log(`Hostname: ${os.hostname()}`);
-    console.log(`Platform: ${os.platform()}`);
-  description: "System Info (Node)"
-  icon: "nodejs"
+launchers:
+  node_example:
+    binary: node
+    script: |
+      const os = require('os');
+      console.log(`Hostname: ${os.hostname()}`);
+      console.log(`Platform: ${os.platform()}`);
+    description: "System Info (Node)"
+    icon: "nodejs"
 ```
 </TabItem>
 </Tabs>
@@ -212,16 +219,16 @@ Integrate Raffi with your Wayland compositor:
     set $super Mod4
     bindsym $super+Space exec $menu | xargs swaymsg exec --
     ```
-    
+
     Reload Sway config:
-    
+
     ```bash
     swaymsg reload
     ```
-    
+
     Now press `Super+Space` to launch Raffi!
   </TabItem>
-  
+
   <TabItem label="Hyprland">
     Add to `~/.config/hypr/hyprland.conf`:
 
@@ -229,19 +236,19 @@ Integrate Raffi with your Wayland compositor:
     $super = SUPER
     bind = $super, R, exec, (val=$(raffi -pI); echo $val | grep -q . && hyprctl dispatch exec "$val")
     ```
-    
+
     Reload Hyprland config or restart Hyprland, then press `Super+R` to launch Raffi.
   </TabItem>
-  
+
   <TabItem label="Other Compositors">
     For other Wayland compositors, bind a key to execute:
 
     ```bash
     raffi -p | xargs swaymsg exec --
     ```
-    
+
     Or for direct execution:
-    
+
     ```bash
     raffi
     ```
@@ -286,7 +293,8 @@ $10eur to jpy
       trigger: "$"
       default_currency: USD
       currencies: ["USD", "EUR", "GBP", "JPY", "CAD"]
-  ```
+
+```
 </details>
 
 ### File Browser
@@ -315,12 +323,12 @@ addons:
       keyword: "g"
       url: "https://google.com/search?q={query}"
       icon: "google"
-    
+
     - name: "GitHub"
       keyword: "gh"
       url: "https://github.com/search?q={query}"
       icon: "github"
-    
+
     - name: "Wikipedia"
       keyword: "wiki"
       url: "https://en.wikipedia.org/wiki/{query}"
@@ -342,79 +350,87 @@ wiki rust programming
 <summary>Launch applications with custom arguments</summary>
 
     ```yaml
-    firefox_private:
-      binary: firefox
-      args: [--private-window]
-      icon: firefox
-      description: Firefox Private Window
+    launchers:
+      firefox_private:
+        binary: firefox
+        args: [--private-window]
+        icon: firefox
+        description: Firefox Private Window
 
-    code_workspace:
-      binary: code
-      args: [~/projects/myapp]
-      icon: vscode
-      description: Open MyApp in VS Code
-    ```
+      code_workspace:
+        binary: code
+        args: [~/projects/myapp]
+        icon: vscode
+        description: Open MyApp in VS Code
+
+```
   </details>
-  
+
   <details>
 <summary>Conditional entries (show only when available)</summary>
 
     ```yaml
-    gnome_tweaks:
-      binary: gnome-tweaks
-      description: GNOME Tweaks
-      icon: gnome-tweak-tool
-      ifenveq: [DESKTOP_SESSION, GNOME]
+    launchers:
+      gnome_tweaks:
+        binary: gnome-tweaks
+        description: GNOME Tweaks
+        icon: gnome-tweak-tool
+        ifenveq: [DESKTOP_SESSION, GNOME]
 
-    wayland_only_app:
-      binary: my-wayland-app
-      description: Wayland App
-      icon: wayland
-      ifenvset: WAYLAND_DISPLAY
-    
-    docker_compose:
-      binary: docker-compose
-      description: Docker Compose
-      icon: docker
-      ifexist: docker-compose
-    ```
+      wayland_only_app:
+        binary: my-wayland-app
+        description: Wayland App
+        icon: wayland
+        ifenvset: WAYLAND_DISPLAY
+
+      docker_compose:
+        binary: docker-compose
+        description: Docker Compose
+        icon: docker
+        ifexist: docker-compose
+
+```
   </details>
-  
+
   <details>
 <summary>Path expansion and environment variables</summary>
 
     ```yaml
-    custom_script:
-      binary: ${HOME}/bin/my-script
-      args: ["${XDG_DATA_HOME}/files", "~/Documents"]
-      icon: ~/icons/custom.png
-      description: My Custom Script
-      ifexist: ~/bin/my-script
-    ```
+    launchers:
+      custom_script:
+        binary: ${HOME}/bin/my-script
+        args: ["${XDG_DATA_HOME}/files", "~/Documents"]
+        icon: ~/icons/custom.png
+        description: My Custom Script
+        ifexist: ~/bin/my-script
+
+```
   </details>
-  
+
   <details>
 <summary>System actions</summary>
 
     ```yaml
-    lock_screen:
-      binary: swaylock
-      args: [-f, -c, "000000"]
-      icon: system-lock-screen
-      description: Lock Screen
+    launchers:
+      lock_screen:
+        binary: swaylock
+        args: [-f, -c, "000000"]
+        icon: system-lock-screen
+        description: Lock Screen
 
-    suspend:
-      binary: systemctl
-      args: [suspend]
-      icon: system-suspend
-      description: Suspend to RAM
-    
-    poweroff:
-      binary: systemctl
-      args: [poweroff]
-      icon: system-shutdown
-      description: Power Off
-    ```
+      suspend:
+        binary: systemctl
+        args: [suspend]
+        icon: system-suspend
+        description: Suspend to RAM
+
+      poweroff:
+        binary: systemctl
+        args: [poweroff]
+        icon: system-shutdown
+        description: Power Off
+
+```
   </details>
 
 
@@ -507,7 +523,7 @@ raffi --default-script-shell /bin/zsh
   }
   .nav-cards a article .title .icon {
     font-size: 2.5rem !important; /* Huge icons */
-    color: var(--sl-color-purple); 
+    color: var(--sl-color-purple);
     background: var(--sl-color-purple-low);
     padding: 0.5rem;
     border-radius: 0.5rem;

@@ -5,18 +5,19 @@ description: Define applications, commands, and scripts in your Raffi launcher
 
 ## Overview
 
-Entries are the core of Raffi's configuration. Each entry represents an application, command, or script that appears in the launcher. Entries are defined as top-level keys in your configuration file.
+Entries are the core of Raffi's configuration. Each entry represents an application, command, or script that appears in the launcher. Entries are defined under the `launchers` key in your configuration file.
 
 ## Entry Structure
 
 Each entry is identified by a unique key and contains configuration fields:
 
 ```yaml
-firefox:
-  binary: firefox
-  args: [--marionette]
-  icon: firefox
-  description: Firefox browser with marionette enabled
+launchers:
+  firefox:
+    binary: firefox
+    args: [--marionette]
+    icon: firefox
+    description: Firefox browser with marionette enabled
 ```
 
 ## Configuration Fields
@@ -33,14 +34,14 @@ Executable name looked up in PATH. Examples: `firefox`, `kitty`.
 **`description`** `string`
 
 Label shown in the launcher.
-  
+
   If `binary` is not specified, `description` is used as the binary name.
 
 
 **`args`** `array`
 
 Command-line arguments passed to the binary.
-  
+
   Supports path expansion (`~/` and `${VAR}`).
 
 
@@ -54,7 +55,7 @@ Icon name from system theme (e.g., `firefox`, `terminal`).
 **`script`** `string`
 
 Inline script content. When present, the entry executes this script instead of launching `binary` directly.
-  
+
   See [Scripts](/configuration/scripts) for details.
 
 
@@ -68,42 +69,46 @@ When `true`, hides the entry from the launcher.
 ### Basic Application
 
 ```yaml
-firefox:
-  binary: firefox
-  description: "Firefox"
-  icon: firefox
+launchers:
+  firefox:
+    binary: firefox
+    description: "Firefox"
+    icon: firefox
 ```
 
 ### Application with Arguments
 
 ```yaml
-thunar:
-  binary: thunar
-  args: ["~/Downloads/"]
-  description: "Thunar"
+launchers:
+  thunar:
+    binary: thunar
+    args: ["~/Downloads/"]
+    description: "Thunar"
 ```
 
 ### Application with Icon
 
 ```yaml
-golang:
-  binary: goland
-  description: "Goland"
-  icon: goland
+launchers:
+  golang:
+    binary: goland
+    description: "Goland"
+    icon: goland
 ```
 
 ### Entry with Conditional Display
 
 ```yaml
-rbw-pass:
-  binary: rofi-rbw
-  args:
-    [
-      "--selector wofi --clipboarder wl-copy --action copy-password --typer xdotool",
-    ]
-  description: "Password Manager"
-  icon: password-manager
-  ifenvset: WAYLAND_DISPLAY
+launchers:
+  rbw-pass:
+    binary: rofi-rbw
+    args:
+      [
+        "--selector wofi --clipboarder wl-copy --action copy-password --typer xdotool",
+      ]
+    description: "Password Manager"
+    icon: password-manager
+    ifenvset: WAYLAND_DISPLAY
 ```
 
 See [Conditions](/configuration/conditions) for conditional visibility options.
@@ -111,32 +116,34 @@ See [Conditions](/configuration/conditions) for conditional visibility options.
 ### System Commands
 
 ```yaml
-suspend:
-  binary: systemctl
-  args: [suspend]
-  description: "Suspend/Sleep or Hibernate"
-  icon: system-suspend-hibernate
+launchers:
+  suspend:
+    binary: systemctl
+    args: [suspend]
+    description: "Suspend/Sleep or Hibernate"
+    icon: system-suspend-hibernate
 
-reboot:
-  binary: systemctl
-  args: [reboot]
-  description: "Reboot / Restart"
-  icon: gnome-session-reboot
+  reboot:
+    binary: systemctl
+    args: [reboot]
+    description: "Reboot / Restart"
+    icon: gnome-session-reboot
 ```
 
 ### Disabled Entry
 
 ```yaml
-google-meet:
-  binary: google-chrome
-  args:
-    [
-      "--profile-directory=Default",
-      "--app-id=kjgfgldnnfoeklkmfkjfagphfepbbdan",
-    ]
-  description: "Google Meet"
-  icon: "google-meet"
-  disabled: true
+launchers:
+  google-meet:
+    binary: google-chrome
+    args:
+      [
+        "--profile-directory=Default",
+        "--app-id=kjgfgldnnfoeklkmfkjfagphfepbbdan",
+      ]
+    description: "Google Meet"
+    icon: "google-meet"
+    disabled: true
 ```
 
 ## Entry Validation
@@ -161,28 +168,29 @@ Entries can be organized in any order in your configuration file. Raffi displays
 
 ```yaml
 # Browsers
-firefox:
-  binary: firefox
-  description: "Firefox"
-  icon: firefox
+launchers:
+  firefox:
+    binary: firefox
+    description: "Firefox"
+    icon: firefox
 
-chrome:
-  binary: chromium
-  description: "Chromium"
-  icon: chromium
+  chrome:
+    binary: chromium
+    description: "Chromium"
+    icon: chromium
 
-# System tools
-suspend:
-  binary: systemctl
-  args: [suspend]
-  description: "Suspend/Sleep"
-  icon: system-suspend-hibernate
+  # System tools
+  suspend:
+    binary: systemctl
+    args: [suspend]
+    description: "Suspend/Sleep"
+    icon: system-suspend-hibernate
 
-reboot:
-  binary: systemctl
-  args: [reboot]
-  description: "Reboot"
-  icon: gnome-session-reboot
+  reboot:
+    binary: systemctl
+    args: [reboot]
+    description: "Reboot"
+    icon: gnome-session-reboot
 ```
 
 ## Common Patterns
@@ -190,30 +198,33 @@ reboot:
 ### Jump or Raise Applications
 
 ```yaml
-wally:
-  binary: jumpapp
-  args: ["-X", "wally"]
-  description: "Wally"
-  icon: wally
-  ifexist: wally
+launchers:
+  wally:
+    binary: jumpapp
+    args: ["-X", "wally"]
+    description: "Wally"
+    icon: wally
+    ifexist: wally
 ```
 
 ### SSH Connections
 
 ```yaml
-ssh-pi:
-  binary: kitty-ctrl
-  args: ["jump", "-t", "PI", "ssh", "pi"]
-  description: "PI"
-  icon: raspberry
+launchers:
+  ssh-pi:
+    binary: kitty-ctrl
+    args: ["jump", "-t", "PI", "ssh", "pi"]
+    description: "PI"
+    icon: raspberry
 ```
 
 ### Desktop Applications with Custom Profiles
 
 ```yaml
-chrome-work:
-  binary: chromium
-  args: ["--profile-directory=Work"]
-  description: "Chromium (Work Profile)"
-  icon: chromium
+launchers:
+  chrome-work:
+    binary: chromium
+    args: ["--profile-directory=Work"]
+    description: "Chromium (Work Profile)"
+    icon: chromium
 ```
