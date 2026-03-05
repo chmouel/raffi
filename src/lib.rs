@@ -1953,23 +1953,23 @@ mod tests {
 
         // Check structure after migration
         let mapping = raw.as_mapping().unwrap();
-        assert!(mapping.contains_key(&Value::String("version".to_string())));
-        assert!(mapping.contains_key(&Value::String("launchers".to_string())));
-        assert!(mapping.contains_key(&Value::String("general".to_string())));
-        assert!(mapping.contains_key(&Value::String("addons".to_string())));
+        assert!(mapping.contains_key(Value::String("version".to_string())));
+        assert!(mapping.contains_key(Value::String("launchers".to_string())));
+        assert!(mapping.contains_key(Value::String("general".to_string())));
+        assert!(mapping.contains_key(Value::String("addons".to_string())));
 
         // shell and firefox should NOT be top-level anymore
-        assert!(!mapping.contains_key(&Value::String("shell".to_string())));
-        assert!(!mapping.contains_key(&Value::String("firefox".to_string())));
+        assert!(!mapping.contains_key(Value::String("shell".to_string())));
+        assert!(!mapping.contains_key(Value::String("firefox".to_string())));
 
         // They should be inside launchers
         let launchers = mapping
-            .get(&Value::String("launchers".to_string()))
+            .get(Value::String("launchers".to_string()))
             .unwrap()
             .as_mapping()
             .unwrap();
-        assert!(launchers.contains_key(&Value::String("shell".to_string())));
-        assert!(launchers.contains_key(&Value::String("firefox".to_string())));
+        assert!(launchers.contains_key(Value::String("shell".to_string())));
+        assert!(launchers.contains_key(Value::String("firefox".to_string())));
 
         // Backup should exist
         let backup_path = format!("{}.bak", config_path.to_str().unwrap());
