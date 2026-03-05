@@ -315,34 +315,78 @@ You can add any search engine that accepts a query parameter:
 
 ## Use Cases
 
-<CardGrid>
-  <Card title="Quick Research" icon="magnifying-glass">
-    ```text
-    wiki quantum computing
-    ```
-  </Card>
-  
-  <Card title="Code Search" icon="code">
-    ```text
-    gh iced-rs
-    so rust async error
-    ```
-  </Card>
-  
-  <Card title="Package Lookup" icon="box">
-    ```text
-    crate serde
-    npm express
-    ```
-  </Card>
-  
-  <Card title="Documentation" icon="book">
-    ```text
-    mdn fetch api
-    rdoc hashmap
-    ```
-  </Card>
-</CardGrid>
+<div class="nav-cards">
+  <CardGrid>
+    <Card title="Quick Research" icon="magnifier">
+      ```text
+      wiki quantum computing
+      ```
+    </Card>
+    
+    <Card title="Code Search" icon="pencil">
+      ```text
+      gh iced-rs
+      so rust async error
+      ```
+    </Card>
+    
+    <Card title="Package Lookup" icon="puzzle">
+      ```text
+      crate serde
+      npm express
+      ```
+    </Card>
+    
+    <Card title="Documentation" icon="document">
+      ```text
+      mdn fetch api
+      rdoc hashmap
+      ```
+    </Card>
+  </CardGrid>
+</div>
+
+<style>
+{`
+  .nav-cards a {
+    text-decoration: none !important;
+    color: inherit;
+    display: flex;
+    height: 100%;
+  }
+  .nav-cards article {
+    flex: 1;
+    transition: all 0.2s ease-in-out;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    border: 1px solid var(--sl-color-gray-5);
+    background-color: var(--sl-color-black);
+  }
+  .nav-cards a article {
+    cursor: pointer;
+  }
+  .nav-cards article .title {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+    font-size: 1.2rem;
+  }
+  .nav-cards article .title .icon {
+    font-size: 2.5rem !important; /* Huge icons */
+    color: var(--sl-color-purple); 
+    background: var(--sl-color-purple-low);
+    padding: 0.5rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--sl-color-purple);
+  }
+  .nav-cards article:hover, .nav-cards a:hover article {
+    border-color: var(--sl-color-text-accent);
+    background-color: var(--sl-color-gray-6);
+  }
+`}
+</style>
 
 ## Keyboard Shortcuts
 
