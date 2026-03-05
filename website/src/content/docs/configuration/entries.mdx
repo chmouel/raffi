@@ -21,15 +21,12 @@ firefox:
 
 ## Configuration Fields
 
-**`binary`** `string` (required)
+**`binary`** `string` (optional)
 
-Executable name or path. Can be:
-  - Binary name in PATH: `firefox`, `kitty`
-  - Absolute path: `/usr/bin/firefox`
-  - Path with expansion: `~/bin/myapp`, `${HOME}/bin/tool`
-  
+Executable name looked up in PATH. Examples: `firefox`, `kitty`.
+
   If the binary doesn't exist in PATH, the entry is automatically hidden.
-  
+
   For scripts, this field specifies the interpreter (defaults to `bash` if omitted).
 
 
@@ -49,12 +46,9 @@ Command-line arguments passed to the binary.
 
 **`icon`** `string`
 
-Icon name or absolute path:
-  - Icon name from system theme: `firefox`, `terminal`
-  - Absolute path: `/opt/goland/bin/goland.svg`
-  - Path with expansion: `~/icons/myapp.png`
-  
-  See [Icons](/configuration/icons) for details on icon discovery and caching.
+Icon name from system theme (e.g., `firefox`, `terminal`).
+
+  Raffi looks up the icon by name from system icon directories. See [Icons](/configuration/icons) for details on icon discovery and caching.
 
 
 **`script`** `string`
@@ -89,23 +83,13 @@ thunar:
   description: "Thunar"
 ```
 
-### Custom Binary Path
+### Application with Icon
 
 ```yaml
 golang:
   binary: goland
   description: "Goland"
-  icon: /opt/goland/bin/goland.svg
-```
-
-### Path Expansion
-
-```yaml
-myapp:
-  binary: ${HOME}/bin/myapp
-  args: ["${XDG_DATA_HOME}/files", "~/Documents"]
-  icon: ~/icons/myapp.png
-  description: "My Application"
+  icon: goland
 ```
 
 ### Entry with Conditional Display

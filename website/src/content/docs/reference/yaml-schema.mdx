@@ -180,11 +180,11 @@ Custom color overrides for the native UI theme.
 
 Each top-level key (except `general` and `addons`) defines a launcher entry.
 
-**`binary`** `string` (required)
+**`binary`** `string` (optional)
 
 The executable command to run.
-  
-  If the binary is not found in `$PATH`, the entry is automatically hidden. Supports tilde (`~/`) and environment variable (`${VAR}`) expansion.
+
+  If the binary is not found in `$PATH`, the entry is automatically hidden.
   
   ```yaml
   firefox:
@@ -222,22 +222,13 @@ Command-line arguments to pass to the binary.
 
 **`icon`** `string`
 
-Icon name or absolute path to an icon file.
-  
-  Icon names are resolved from system icon directories (`$XDG_DATA_DIRS/icons`, `$XDG_DATA_DIRS/pixmaps`). Prefers larger icons (48×48+) as Raffi renders at 48×48. Supports PNG and SVG formats.
-  
-  Supports tilde and environment variable expansion for paths.
-  
+Icon name resolved from system icon directories (`$XDG_DATA_DIRS/icons`, `$XDG_DATA_DIRS/pixmaps`). Prefers larger icons (48×48+) as Raffi renders at 48×48. Supports PNG and SVG formats.
+
   ```yaml
   firefox:
     binary: firefox
     icon: firefox
     description: "Firefox"
-  
-  custom_app:
-    binary: ~/bin/myapp
-    icon: ~/icons/myapp.png
-    description: "My App"
   ```
 
 
@@ -279,7 +270,7 @@ Hide this entry from the launcher.
 
 ### Conditional Display
 
-Entries can be conditionally shown based on environment variables or file existence. Only one condition is evaluated per entry.
+Entries can be conditionally shown based on environment variables or file existence. Multiple conditions can be specified per entry — when present, they are AND-ed together (all must pass).
 
 **`ifenveq`** `array[string]`
 
@@ -321,9 +312,7 @@ Show entry only if the specified environment variable is **not** set.
 
 **`ifexist`** `string`
 
-Show entry only if the specified binary or file exists.
-  
-  For binaries, searches in `$PATH`. For absolute paths, checks file existence. Supports tilde and environment variable expansion.
+Show entry only if the specified binary exists in `$PATH`.
   
   ```yaml
   spotify:
@@ -331,10 +320,6 @@ Show entry only if the specified binary or file exists.
     description: "Spotify"
     ifexist: spotify
   
-  local_tool:
-    binary: ~/bin/mytool
-    description: "My Tool"
-    ifexist: ~/bin/mytool
   ```
 
 
