@@ -108,6 +108,7 @@ pub trait UI {
 }
 
 pub fn get_ui(ui_type: UIType) -> Box<dyn UI> {
+    crate::debug_log!("ui: backend selected: {ui_type:?}");
     match ui_type {
         UIType::Fuzzel => Box::new(FuzzelUI),
         #[cfg(feature = "wayland")]

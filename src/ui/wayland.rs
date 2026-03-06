@@ -45,6 +45,15 @@ fn run_wayland_ui(
     addons: &AddonsConfig,
     settings: &UISettings,
 ) -> Result<String> {
+    crate::debug_log!(
+        "wayland: starting UI: {}x{} theme={:?} sort_mode={:?} no_icons={} max_history={}",
+        settings.window_width,
+        settings.window_height,
+        settings.theme,
+        settings.sort_mode,
+        settings.no_icons,
+        settings.max_history
+    );
     let theme_colors =
         ThemeColors::from_mode_with_overrides(&settings.theme, settings.theme_colors.as_ref());
     let iced_theme = match settings.theme {

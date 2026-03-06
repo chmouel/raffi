@@ -135,6 +135,7 @@ pub(super) fn route_query(trimmed: &str, addons: &AddonsConfig) -> QueryMode {
     QueryMode::Standard
 }
 
+
 impl LauncherApp {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
@@ -148,6 +149,11 @@ impl LauncherApp {
         font_sizes: FontSizes,
         sort_mode: SortMode,
     ) -> (Self, Task<Message>) {
+        crate::debug_log!(
+            "LauncherApp::new: configs={} no_icons={} sort_mode={sort_mode:?} initial_query={initial_query:?}",
+            configs.len(),
+            no_icons
+        );
         let icon_map = if no_icons {
             HashMap::new()
         } else {
@@ -300,7 +306,9 @@ impl LauncherApp {
         let trimmed = query.trim();
         let mut tasks = Vec::new();
 
-        match route_query(trimmed, &self.addons) {
+        let qmode = route_query(trimmed, &self.addons);
+        crate::debug_log!("route_query: query={trimmed:?} -> {qmode:?}");
+        match qmode {
             QueryMode::FileBrowser { expanded, filter } => {
                 self.handle_file_browser_query(&expanded, &filter);
                 self.filtered_configs.clear();

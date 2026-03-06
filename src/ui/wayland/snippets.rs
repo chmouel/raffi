@@ -26,6 +26,7 @@ pub(super) fn execute_text_snippet_command(
 ) -> Task<Message> {
     Task::perform(
         async move {
+            crate::debug_log!("snippets: executing command={command:?} args={args:?}");
             let output = Command::new(&command)
                 .args(&args)
                 .stdin(Stdio::null())
@@ -36,14 +37,20 @@ pub(super) fn execute_text_snippet_command(
                 Ok(output) if output.status.success() => {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     match serde_json::from_str::<SnippetCommandResponse>(&stdout) {
-                        Ok(response) => Ok(response
-                            .items
-                            .into_iter()
-                            .map(|item| TextSnippet {
-                                name: item.title,
-                                value: item.arg.unwrap_or_default(),
-                            })
-                            .collect()),
+                        Ok(response) => {
+                            crate::debug_log!(
+                                "snippets: got {} items from {command:?}",
+                                response.items.len()
+                            );
+                            Ok(response
+                                .items
+                                .into_iter()
+                                .map(|item| TextSnippet {
+                                    name: item.title,
+                                    value: item.arg.unwrap_or_default(),
+                                })
+                                .collect())
+                        }
                         Err(error) => Err(format!("Invalid JSON: {}", error)),
                     }
                 }
@@ -71,7 +78,9 @@ pub(super) fn filter_snippets(snippets: &[TextSnippet], query: &str) -> Vec<usiz
         })
         .collect();
     scored.sort_by(|a, b| b.1.cmp(&a.1));
-    scored.into_iter().map(|(index, _)| index).collect()
+    let result: Vec<usize> = scored.into_iter().map(|(index, _)| index).collect();
+    crate::debug_log!("snippets: filter query={query:?} results={}", result.len());
+    result
 }
 
 #[cfg(test)]

@@ -150,15 +150,25 @@ pub(super) fn load_emoji_data_from_disk(file_names: &[String]) -> Vec<EmojiEntry
     for name in file_names {
         if let Some(path) = find_emoji_file_on_disk(name) {
             match fs::read_to_string(&path) {
-                Ok(content) => entries.extend(parse_emoji_csv(&content)),
+                Ok(content) => {
+                    let before = entries.len();
+                    entries.extend(parse_emoji_csv(&content));
+                    crate::debug_log!(
+                        "emoji: loaded {} entries from {}",
+                        entries.len() - before,
+                        path.display()
+                    );
+                }
                 Err(error) => eprintln!("raffi: failed to read {}: {error}", path.display()),
             }
         }
     }
+    crate::debug_log!("emoji: total {} entries from disk", entries.len());
     entries
 }
 
 pub(super) fn download_and_load_emoji_data(file_names: Vec<String>) -> Vec<EmojiEntry> {
+    crate::debug_log!("emoji: downloading data for files: {file_names:?}");
     let dir = emoji_cache_dir();
     let _ = fs::create_dir_all(&dir);
 

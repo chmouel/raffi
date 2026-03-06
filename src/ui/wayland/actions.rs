@@ -75,6 +75,7 @@ pub(super) fn spawn_copy(value: &str) -> bool {
 /// - `copy`: copy to clipboard via the first available clipboard tool
 /// - other: execute as `sh -c` after replacing `{value}` in the command string
 pub(super) fn execute_action(action: &str, value: &str) {
+    crate::debug_log!("action: action={action:?} value={value:?}");
     match action {
         "insert" => {
             spawn_insert(value);
@@ -84,6 +85,7 @@ pub(super) fn execute_action(action: &str, value: &str) {
         }
         _ => {
             let command = action.replace("{value}", value);
+            crate::debug_log!("action: executing shell command={command:?}");
             let _ = Command::new("sh")
                 .arg("-c")
                 .arg(&command)

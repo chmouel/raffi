@@ -88,7 +88,9 @@ pub(super) fn fuzzy_match_configs(configs: &[RaffiConfig], query: &str) -> Vec<u
         .collect();
 
     matches.sort_by(|a, b| b.1.cmp(&a.1));
-    matches.into_iter().map(|(idx, _)| idx).collect()
+    let result: Vec<usize> = matches.into_iter().map(|(idx, _)| idx).collect();
+    crate::debug_log!("fuzzy_match: query={query:?} results={}", result.len());
+    result
 }
 
 pub(super) fn load_mru_map() -> HashMap<String, MruEntry> {
@@ -127,6 +129,7 @@ pub(super) fn load_mru_map() -> HashMap<String, MruEntry> {
                     _ => {}
                 }
             }
+            crate::debug_log!("mru: loaded {} entries", map.len());
             return map;
         }
     }
@@ -134,6 +137,7 @@ pub(super) fn load_mru_map() -> HashMap<String, MruEntry> {
 }
 
 pub(super) fn save_mru_map(map: &HashMap<String, MruEntry>) {
+    crate::debug_log!("mru: saving {} entries", map.len());
     if let Ok(path) = get_mru_cache_path() {
         let mut entries: Vec<_> = map.iter().collect();
         entries.sort_by(|a, b| b.1.count.cmp(&a.1.count));
@@ -198,6 +202,7 @@ pub(super) fn load_history(max_history: u32) -> Vec<String> {
                 let excess = entries.len() - max_history as usize;
                 entries.drain(..excess);
             }
+            crate::debug_log!("history: loaded {} entries", entries.len());
             return entries;
         }
     }

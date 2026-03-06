@@ -32,6 +32,9 @@ pub(super) fn execute_script_filter(
 ) -> Task<Message> {
     Task::perform(
         async move {
+            crate::debug_log!(
+                "script_filter: executing command={command:?} args={args:?} query={query:?}"
+            );
             let output = Command::new(&command)
                 .args(&args)
                 .arg(&query)
@@ -43,9 +46,18 @@ pub(super) fn execute_script_filter(
                 Ok(output) if output.status.success() => {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     match parse_script_filter_output(&stdout, default_icon) {
-                        Ok(result) => Ok(result),
+                        Ok(result) => {
+                            crate::debug_log!(
+                                "script_filter: got {} items from {command:?}",
+                                result.items.len()
+                            );
+                            Ok(result)
+                        }
                         Err(error) => {
                             eprintln!("Script filter: invalid JSON from {}: {}", command, error);
+                            crate::debug_log!(
+                                "script_filter: invalid JSON from {command:?}: {error}"
+                            );
                             Err(error)
                         }
                     }
@@ -55,10 +67,15 @@ pub(super) fn execute_script_filter(
                         "Script filter: {} exited with status {}",
                         command, output.status
                     );
+                    crate::debug_log!(
+                        "script_filter: {command:?} exited with status {}",
+                        output.status
+                    );
                     Err(format!("Script exited with status {}", output.status))
                 }
                 Err(error) => {
                     eprintln!("Script filter: failed to execute {}: {}", command, error);
+                    crate::debug_log!("script_filter: failed to execute {command:?}: {error}");
                     Err(format!("Failed to execute: {}", error))
                 }
             }

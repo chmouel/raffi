@@ -13,6 +13,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_yaml::Value;
 
+pub mod debug;
 pub mod ui;
 
 /// Represents the configuration for each Raffi entry.
@@ -379,6 +380,8 @@ pub struct Args {
     pub theme: Option<String>,
     #[options(help = "print JSON Schema for the config format to stdout")]
     pub schema: bool,
+    #[options(help = "write debug log to FILE")]
+    pub debug_file: Option<String>,
 }
 
 /// A trait for checking environment variables.
@@ -875,6 +878,11 @@ fn generate_schema() -> String {
 }
 
 pub fn run(args: Args) -> Result<()> {
+    if let Some(ref path) = args.debug_file {
+        debug::init(path);
+        debug_log!("raffi starting, debug log: {path}");
+    }
+
     if args.version {
         println!("raffi version 0.1.0");
         return Ok(());
@@ -895,6 +903,7 @@ pub fn run(args: Args) -> Result<()> {
         std::env::var("HOME").unwrap_or_default()
     );
     let configfile = args.configfile.as_deref().unwrap_or(&default_config_path);
+    debug_log!("config: using file {configfile}");
 
     // Write schema file if it doesn't exist yet
     let config_dir = Path::new(configfile).parent().unwrap_or(Path::new("."));
@@ -909,6 +918,7 @@ pub fn run(args: Args) -> Result<()> {
     }
 
     let parsed_config = read_config(configfile, &args).context("Failed to read config")?;
+    debug_log!("config: loaded {} entries", parsed_config.entries.len());
 
     if parsed_config.entries.is_empty() {
         eprintln!("No valid configurations found in {configfile}");
@@ -935,6 +945,7 @@ pub fn run(args: Args) -> Result<()> {
     } else {
         ThemeMode::Dark
     };
+    debug_log!("config: theme={theme:?}");
 
     // Determine UI type
     let ui_type = if let Some(ui_type_str) = ui_type_str {
@@ -955,6 +966,8 @@ pub fn run(args: Args) -> Result<()> {
             ));
         }
     };
+
+    debug_log!("config: ui_type={ui_type:?}");
 
     // Determine max history size
     let max_history = general.max_history.unwrap_or(10);
@@ -985,6 +998,15 @@ pub fn run(args: Args) -> Result<()> {
         sort_mode: general.sort_mode.clone(),
     };
 
+    debug_log!(
+        "ui: settings: no_icons={} window={}x{} max_history={} sort_mode={:?}",
+        ui_settings.no_icons,
+        ui_settings.window_width,
+        ui_settings.window_height,
+        ui_settings.max_history,
+        ui_settings.sort_mode
+    );
+
     // Get the appropriate UI implementation
     let ui = ui::get_ui(ui_type);
     let chosen = ui
@@ -992,6 +1014,7 @@ pub fn run(args: Args) -> Result<()> {
         .context("Failed to show UI")?;
 
     let chosen_name = chosen.trim();
+    debug_log!("ui: chosen={chosen_name:?}");
     if chosen_name.is_empty() {
         std::process::exit(0);
     }
@@ -1010,6 +1033,12 @@ pub fn run(args: Args) -> Result<()> {
         // Not used for binary commands
         ""
     };
+    debug_log!(
+        "exec: binary={:?} script={} args={:?}",
+        mc.binary,
+        mc.script.is_some(),
+        mc.args
+    );
     execute_chosen_command(mc, &args, interpreter).context("Failed to execute command")?;
 
     Ok(())
@@ -1043,6 +1072,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.entries.len(), 2);
@@ -1095,6 +1125,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1160,6 +1191,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            debug_file: None,
         };
         let env_provider = MockEnvProvider {
             vars: {
@@ -1213,6 +1245,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1263,6 +1296,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1439,6 +1473,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1471,6 +1506,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1502,6 +1538,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1536,6 +1573,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.general.font_size, Some(16.0));
@@ -1566,6 +1604,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.general.theme, Some("light".to_string()));
@@ -1622,6 +1661,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1677,6 +1717,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1742,6 +1783,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1780,6 +1822,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert!(parsed_config.addons.text_snippets.is_empty());
@@ -1814,6 +1857,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1856,6 +1900,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1896,6 +1941,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -1935,6 +1981,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 

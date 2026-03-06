@@ -176,6 +176,12 @@ pub(super) fn fetch_exchange_rate(request: CurrencyConversionRequest) -> Task<Me
 }
 
 fn fetch_rate_blocking(request: &CurrencyConversionRequest) -> Result<CurrencyResult, String> {
+    crate::debug_log!(
+        "currency: fetch rate {} {} -> {}",
+        request.amount,
+        request.from_currency,
+        request.to_currency
+    );
     let url = format!(
         "https://api.frankfurter.dev/v1/latest?base={}&symbols={}",
         request.from_currency, request.to_currency
@@ -200,6 +206,10 @@ fn fetch_rate_blocking(request: &CurrencyConversionRequest) -> Result<CurrencyRe
         .copied()
         .ok_or_else(|| "Rate not found".to_string())?;
 
+    crate::debug_log!(
+        "currency: rate={rate} converted={}",
+        request.amount * rate
+    );
     Ok(CurrencyResult {
         request: request.clone(),
         converted_amount: request.amount * rate,
@@ -218,6 +228,12 @@ pub(super) fn fetch_multi_exchange_rates(request: MultiCurrencyRequest) -> Task<
 fn fetch_multi_rates_blocking(
     request: &MultiCurrencyRequest,
 ) -> Result<MultiCurrencyResult, String> {
+    crate::debug_log!(
+        "currency: fetch multi rates {} {} -> {:?}",
+        request.amount,
+        request.from_currency,
+        request.to_currencies
+    );
     let symbols = request.to_currencies.join(",");
     let url = format!(
         "https://api.frankfurter.dev/v1/latest?base={}&symbols={}",

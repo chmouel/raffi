@@ -319,6 +319,59 @@ pw github
 # Press Enter to copy password
 ```
 
+### Web Search with Autocomplete
+
+The [`scripts/search/search.py`](https://github.com/chmouel/raffi/blob/main/scripts/search/search.py) script in the repository provides live DuckDuckGo autocomplete suggestions while opening results in any configured search engine.
+
+Install it first:
+
+```bash
+mkdir -p ~/.config/raffi/scripts/search
+cp scripts/search/search.py ~/.config/raffi/scripts/search/search.py
+chmod +x ~/.config/raffi/scripts/search/search.py
+```
+
+Then configure one entry per engine:
+
+```yaml raffi.yaml
+script_filters:
+  - name: "Search DuckDuckGo"
+    keyword: "ddg"
+    command: "python3"
+    args: ["~/.config/raffi/scripts/search/search.py", "duckduckgo"]
+    icon: "web-browser"
+    action: "xdg-open {value}"
+    secondary_action: "copy"
+
+  - name: "Search Google"
+    keyword: "sg"
+    command: "python3"
+    args: ["~/.config/raffi/scripts/search/search.py", "google"]
+    icon: "google"
+    action: "xdg-open {value}"
+    secondary_action: "copy"
+```
+
+Supported engines: `google`, `duckduckgo`, `bing`, `brave`.
+
+Usage:
+
+```text
+ddg rust async
+# First item: raw query "rust async" → opens DuckDuckGo search
+# Remaining items: DDG autocomplete suggestions
+# Enter: open in browser
+# Ctrl+Enter: copy URL to clipboard
+```
+
+<Aside type="note">
+Suggestions are fetched from the DuckDuckGo autocomplete API (no API key required). On timeout or network error the script falls back to showing the raw query only.
+</Aside>
+
+<Aside type="tip">
+This is different from the `web_searches` addon, which opens a URL directly without autocomplete. Use `web_searches` for instant access to a URL, and this script filter when you want live suggestions.
+</Aside>
+
 ## Creating a Script Filter
 
 Here's a simple example script in Python:
