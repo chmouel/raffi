@@ -386,6 +386,38 @@ addons:
     #   action: "copy"
     #   secondary_action: "xdg-open {value}"
 
+    # Web search with DuckDuckGo autocomplete suggestions.
+    # Copy scripts/search/search.py to ~/.config/raffi/scripts/search/search.py and make it executable.
+    # See scripts/search/README.md for full setup instructions.
+    # - name: "Search DuckDuckGo"
+    #   keyword: "ddg"
+    #   command: "python3"
+    #   args: ["~/.config/raffi/scripts/search/search.py", "duckduckgo"]
+    #   icon: "web-browser"
+    #   action: "xdg-open {value}"
+    #   secondary_action: "copy"
+    # - name: "Search Google"
+    #   keyword: "sg"
+    #   command: "python3"
+    #   args: ["~/.config/raffi/scripts/search/search.py", "google"]
+    #   icon: "google"
+    #   action: "xdg-open {value}"
+    #   secondary_action: "copy"
+    # - name: "Search Bing"
+    #   keyword: "sb"
+    #   command: "python3"
+    #   args: ["~/.config/raffi/scripts/search/search.py", "bing"]
+    #   icon: "web-browser"
+    #   action: "xdg-open {value}"
+    #   secondary_action: "copy"
+    # - name: "Search Brave"
+    #   keyword: "sbr"
+    #   command: "python3"
+    #   args: ["~/.config/raffi/scripts/search/search.py", "brave"]
+    #   icon: "web-browser"
+    #   action: "xdg-open {value}"
+    #   secondary_action: "copy"
+
   # text_snippets:
   #   - name: "Emails"
   #     keyword: "em"
