@@ -1,5 +1,5 @@
 use super::app::{route_query, QueryMode};
-use super::state::LauncherApp;
+use super::state::{FallbackAction, LauncherApp};
 use super::theme::ThemeColors;
 use crate::ui::FontSizes;
 use crate::{
@@ -20,6 +20,22 @@ fn test_app(addons: AddonsConfig) -> LauncherApp {
         FontSizes::default_sizes(),
         SortMode::Hybrid,
         Vec::new(),
+    );
+    app
+}
+
+fn test_app_with_fallbacks(addons: AddonsConfig, fallback_paths: Vec<String>) -> LauncherApp {
+    let (app, _) = LauncherApp::new(
+        Vec::new(),
+        addons,
+        true,
+        Arc::new(Mutex::new(None)),
+        None,
+        ThemeColors::from_mode_with_overrides(&crate::ThemeMode::Dark, None),
+        10,
+        FontSizes::default_sizes(),
+        SortMode::Hybrid,
+        fallback_paths,
     );
     app
 }
@@ -276,4 +292,74 @@ fn test_mru_sort_key_unknown_entry() {
     let mru: HashMap<String, MruEntry> = HashMap::new();
     let key = mru_sort_key("Unknown", &mru, &SortMode::Hybrid, 10, 100, 200);
     assert_eq!(key, 0);
+}
+
+#[test]
+fn test_resolve_fallbacks_web_search() {
+    let mut addons = AddonsConfig::default();
+    addons.web_searches.push(WebSearchConfig {
+        name: "Google".into(),
+        keyword: "g".into(),
+        url: "https://google.com/search?q={query}".into(),
+        icon: None,
+    });
+
+    let app = test_app_with_fallbacks(addons, vec!["addons.web_searches.Google".into()]);
+
+    assert_eq!(app.fallbacks.len(), 1);
+    assert_eq!(app.fallbacks[0].name, "Google");
+    assert!(matches!(
+        app.fallbacks[0].action,
+        FallbackAction::WebSearch { .. }
+    ));
+}
+
+#[test]
+fn test_resolve_fallbacks_unknown_path_ignored() {
+    let addons = AddonsConfig::default();
+    let app = test_app_with_fallbacks(addons, vec!["addons.web_searches.NonExistent".into()]);
+    assert!(app.fallbacks.is_empty());
+}
+
+#[test]
+fn test_resolve_fallbacks_script_filter() {
+    let mut addons = AddonsConfig::default();
+    addons.script_filters.push(ScriptFilterConfig {
+        name: "Brave".into(),
+        command: "brave-search".into(),
+        keyword: "brave".into(),
+        icon: None,
+        args: vec!["--json".into()],
+        action: Some("open".into()),
+        secondary_action: None,
+        env: std::collections::HashMap::new(),
+        min_query_length: None,
+    });
+
+    let app = test_app_with_fallbacks(addons, vec!["addons.script_filters.Brave".into()]);
+
+    assert_eq!(app.fallbacks.len(), 1);
+    assert_eq!(app.fallbacks[0].name, "Brave");
+    assert!(matches!(
+        app.fallbacks[0].action,
+        FallbackAction::ScriptFilter {
+            ref command,
+            ref action,
+            ..
+        } if command == "brave-search" && action.as_deref() == Some("open")
+    ));
+}
+
+#[test]
+fn test_resolve_fallbacks_empty_when_no_paths() {
+    let mut addons = AddonsConfig::default();
+    addons.web_searches.push(WebSearchConfig {
+        name: "Google".into(),
+        keyword: "g".into(),
+        url: "https://google.com/search?q={query}".into(),
+        icon: None,
+    });
+
+    let app = test_app(addons);
+    assert!(app.fallbacks.is_empty());
 }

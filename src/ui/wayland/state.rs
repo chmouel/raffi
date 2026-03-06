@@ -198,8 +198,18 @@ impl EmojiState {
 
 #[derive(Debug, Clone)]
 pub(super) enum FallbackAction {
-    WebSearch { url_template: String },
-    ScriptFilter { keyword: String },
+    WebSearch {
+        url_template: String,
+    },
+    ScriptFilter {
+        #[allow(dead_code)]
+        keyword: String,
+        command: String,
+        args: Vec<String>,
+        action: Option<String>,
+        #[allow(dead_code)]
+        secondary_action: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]

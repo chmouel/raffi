@@ -957,7 +957,7 @@ pub fn run(args: Args) -> Result<()> {
         ui_type_str
             .parse::<UIType>()
             .map_err(|e| anyhow::anyhow!(e))?
-    } else if find_binary("fuzzel") {
+    } else if find_binary("fuzzel") && general.fallbacks.is_empty() {
         UIType::Fuzzel
     } else {
         #[cfg(feature = "wayland")]
@@ -971,6 +971,10 @@ pub fn run(args: Args) -> Result<()> {
             ));
         }
     };
+
+    if ui_type == UIType::Fuzzel && !general.fallbacks.is_empty() {
+        eprintln!("Warning: fallbacks are configured but ui_type is fuzzel — fallbacks require the native UI. Set ui_type: native to use fallbacks.");
+    }
 
     debug_log!("config: ui_type={ui_type:?}");
 

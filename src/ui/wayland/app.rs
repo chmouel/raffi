@@ -19,7 +19,7 @@ use super::emoji::{
     download_and_load_emoji_data, emoji_fallback_entries, filter_emoji_into,
     load_emoji_data_from_disk, resolve_emoji_file_names,
 };
-use super::script_filters::execute_script_filter;
+use super::script_filters::{execute_script_filter, parse_script_filter_output};
 use super::snippets::{execute_text_snippet_command, filter_snippets};
 use super::state::{
     CachedRate, CurrencyConversion, CurrencyConversionRequest, CurrencyResult, CurrencyState,
@@ -1308,6 +1308,10 @@ impl LauncherApp {
                             icon: sf.icon.clone(),
                             action: FallbackAction::ScriptFilter {
                                 keyword: sf.keyword.clone(),
+                                command: sf.command.clone(),
+                                args: sf.args.clone(),
+                                action: sf.action.clone(),
+                                secondary_action: sf.secondary_action.clone(),
                             },
                         });
                     } else {
@@ -1337,10 +1341,33 @@ impl LauncherApp {
                     self.save_query_to_history();
                     return iced::exit();
                 }
-                FallbackAction::ScriptFilter { keyword } => {
-                    let new_query = format!("{} {}", keyword, query);
-                    self.search_query = new_query.clone();
-                    return Task::done(Message::SearchChanged(new_query));
+                FallbackAction::ScriptFilter {
+                    command,
+                    args,
+                    action,
+                    ..
+                } => {
+                    if !query.is_empty() {
+                        let output = std::process::Command::new(command)
+                            .args(args)
+                            .stdin(std::process::Stdio::null())
+                            .stderr(std::process::Stdio::null())
+                            .arg(&query)
+                            .output();
+                        if let Ok(output) = output {
+                            let stdout = String::from_utf8_lossy(&output.stdout);
+                            if let Ok(result) = parse_script_filter_output(&stdout, None) {
+                                if let Some(first) = result.items.first() {
+                                    let value =
+                                        first.arg.as_deref().unwrap_or(first.title.as_str());
+                                    let act = action.as_deref().unwrap_or("copy");
+                                    execute_action(act, value);
+                                }
+                            }
+                        }
+                    }
+                    self.save_query_to_history();
+                    return iced::exit();
                 }
             }
         }

@@ -11,7 +11,7 @@ struct ScriptFilterResponse {
     items: Vec<ScriptFilterItem>,
 }
 
-fn parse_script_filter_output(
+pub(super) fn parse_script_filter_output(
     stdout: &str,
     default_icon: Option<String>,
 ) -> Result<ScriptFilterResult, String> {
