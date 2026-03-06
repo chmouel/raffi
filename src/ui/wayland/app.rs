@@ -532,9 +532,17 @@ impl LauncherApp {
                 if query.len() < min {
                     self.script_filter.results = None;
                     self.script_filter.loading = false;
+                    let remaining = min - query.len();
+                    self.script_filter.help_message = Some(format!(
+                        "Type at least {} more char{} to trigger {}",
+                        remaining,
+                        if remaining == 1 { "" } else { "s" },
+                        config.name
+                    ));
                     return;
                 }
             }
+            self.script_filter.help_message = None;
             self.filtered_configs.clear();
             self.script_filter.generation = self.script_filter.generation.wrapping_add(1);
             self.script_filter.loading = true;

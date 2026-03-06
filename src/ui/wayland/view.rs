@@ -44,7 +44,9 @@ impl LauncherApp {
 
         let mut items_column = Column::new().spacing(6);
 
-        let has_script_filter = self.script_filter.results.is_some() || self.script_filter.loading;
+        let has_script_filter = self.script_filter.results.is_some()
+            || self.script_filter.loading
+            || self.script_filter.help_message.is_some();
         let has_text_snippet = self.text_snippets.active || self.text_snippets.loading;
         let has_emoji = self.emoji.active;
         let has_file_browser = self.file_browser.active;
@@ -103,6 +105,46 @@ impl LauncherApp {
                 });
 
             items_column = items_column.push(loading_button);
+            special_item_idx += 1;
+        } else if let Some(help_msg) = &self.script_filter.help_message {
+            let help_row = Row::new()
+                .spacing(16)
+                .align_y(iced::Alignment::Center)
+                .push(text(help_msg.clone()).size(fs.item).color(t.text_muted));
+
+            let is_selected = self.selected_index == special_item_idx;
+            let help_button = button(help_row)
+                .padding(fs.item_padding)
+                .width(Length::Fill)
+                .style(move |_theme, _status| {
+                    let base_style = button::Style {
+                        text_color: t.text_muted,
+                        border: iced::Border {
+                            radius: 8.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    };
+
+                    if is_selected {
+                        button::Style {
+                            background: Some(iced::Background::Color(t.selection_bg)),
+                            border: iced::Border {
+                                color: t.accent,
+                                width: 1.0,
+                                radius: 8.0.into(),
+                            },
+                            ..base_style
+                        }
+                    } else {
+                        button::Style {
+                            background: None,
+                            ..base_style
+                        }
+                    }
+                });
+
+            items_column = items_column.push(help_button);
             special_item_idx += 1;
         } else if let Some(sf_result) = &self.script_filter.results {
             for item in &sf_result.items {

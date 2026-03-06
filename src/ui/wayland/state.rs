@@ -64,6 +64,7 @@ pub(super) struct ScriptFilterState {
     pub generation: u64,
     pub action: Option<String>,
     pub secondary_action: Option<String>,
+    pub help_message: Option<String>,
 }
 
 impl ScriptFilterState {
@@ -73,6 +74,7 @@ impl ScriptFilterState {
         self.loading_name = None;
         self.action = None;
         self.secondary_action = None;
+        self.help_message = None;
     }
 }
 
