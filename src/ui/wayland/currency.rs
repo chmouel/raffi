@@ -206,10 +206,7 @@ fn fetch_rate_blocking(request: &CurrencyConversionRequest) -> Result<CurrencyRe
         .copied()
         .ok_or_else(|| "Rate not found".to_string())?;
 
-    crate::debug_log!(
-        "currency: rate={rate} converted={}",
-        request.amount * rate
-    );
+    crate::debug_log!("currency: rate={rate} converted={}", request.amount * rate);
     Ok(CurrencyResult {
         request: request.clone(),
         converted_amount: request.amount * rate,

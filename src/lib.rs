@@ -139,6 +139,9 @@ pub struct ScriptFilterConfig {
     pub args: Vec<String>,
     pub action: Option<String>,
     pub secondary_action: Option<String>,
+    #[serde(default)]
+    pub env: std::collections::HashMap<String, String>,
+    pub min_query_length: Option<usize>,
 }
 
 /// Configuration for a web search addon

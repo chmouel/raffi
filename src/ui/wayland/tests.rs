@@ -34,6 +34,8 @@ fn test_route_query_file_browser_precedence() {
         args: Vec::new(),
         action: None,
         secondary_action: None,
+        env: std::collections::HashMap::new(),
+        min_query_length: None,
     });
 
     assert!(matches!(
@@ -53,6 +55,8 @@ fn test_route_query_prefers_script_filter_over_text_snippet() {
         args: Vec::new(),
         action: None,
         secondary_action: None,
+        env: std::collections::HashMap::new(),
+        min_query_length: None,
     });
     addons.text_snippets.push(TextSnippetSourceConfig {
         name: "GitHub".into(),

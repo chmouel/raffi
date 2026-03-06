@@ -374,6 +374,9 @@ addons:
       command: "batz"
       args: ["-j"]
       icon: "clock"
+      min_query_length: 2      # only execute after 2 chars typed after keyword
+      env:
+        TZ_FORMAT: "short"     # environment variables passed to the script process
     # action/secondary_action accept two special keywords:
     #   "copy"   — copy to clipboard via wl-copy (default for Enter)
     #   "insert" — type into focused app via wtype/ydotool

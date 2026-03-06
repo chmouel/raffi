@@ -135,7 +135,6 @@ pub(super) fn route_query(trimmed: &str, addons: &AddonsConfig) -> QueryMode {
     QueryMode::Standard
 }
 
-
 impl LauncherApp {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
@@ -529,6 +528,13 @@ impl LauncherApp {
         tasks: &mut Vec<Task<Message>>,
     ) {
         if let Some(config) = self.addons.script_filters.get(config_index) {
+            if let Some(min) = config.min_query_length {
+                if query.len() < min {
+                    self.script_filter.results = None;
+                    self.script_filter.loading = false;
+                    return;
+                }
+            }
             self.filtered_configs.clear();
             self.script_filter.generation = self.script_filter.generation.wrapping_add(1);
             self.script_filter.loading = true;
@@ -539,6 +545,7 @@ impl LauncherApp {
             tasks.push(execute_script_filter(
                 config.command.clone(),
                 config.args.clone(),
+                config.env.clone(),
                 query,
                 self.script_filter.generation,
                 config.icon.clone(),

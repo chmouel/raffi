@@ -26,6 +26,7 @@ fn parse_script_filter_output(
 pub(super) fn execute_script_filter(
     command: String,
     args: Vec<String>,
+    env: std::collections::HashMap<String, String>,
     query: String,
     generation: u64,
     default_icon: Option<String>,
@@ -37,6 +38,7 @@ pub(super) fn execute_script_filter(
             );
             let output = Command::new(&command)
                 .args(&args)
+                .envs(&env)
                 .arg(&query)
                 .stdin(Stdio::null())
                 .stderr(Stdio::null())

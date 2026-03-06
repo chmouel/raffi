@@ -22,7 +22,6 @@ Enable or disable the currency converter addon.
 
 ```
 
-
 **`addons.currency.trigger`** `string` (default: `$`)
 
 Character that activates currency conversion.
@@ -35,7 +34,6 @@ Character that activates currency conversion.
       trigger: "€"
 
 ```
-
 
 **`addons.currency.default_currency`** `string` (default: `USD`)
 
@@ -50,7 +48,6 @@ Source currency used when none is specified in the query.
 
 ```
 
-
 **`addons.currency.currencies`** `array[string]`
 
 List of available currencies for conversion.
@@ -63,7 +60,6 @@ List of available currencies for conversion.
       currencies: ["EUR", "USD", "GBP", "JPY", "CHF"]
 
 ```
-
 
 ### Usage Examples
 
@@ -110,7 +106,6 @@ Enable or disable the calculator addon.
 
 ```
 
-
 ### Supported Operations
 
 - Basic arithmetic: `+`, `-`, `*`, `/`, `%`, `^`
@@ -146,7 +141,6 @@ Enable or disable the file browser addon.
 
 ```
 
-
 **`addons.file_browser.show_hidden`** `boolean` (default: `false`)
 
 Show hidden files by default.
@@ -159,7 +153,6 @@ Show hidden files by default.
       show_hidden: true
 
 ```
-
 
 ### Usage
 
@@ -194,7 +187,6 @@ List of script filter configurations.
 
   Each entry defines a keyword-triggered dynamic source.
 
-
 ### Script Filter Fields
 
 **`name`** `string` (required)
@@ -208,7 +200,6 @@ Display name shown during loading.
 
 ```
 
-
 **`keyword`** `string` (required)
 
 Text that activates the script filter.
@@ -219,7 +210,6 @@ Text that activates the script filter.
       - keyword: "tz"
 
 ```
-
 
 **`command`** `string` (required)
 
@@ -234,7 +224,6 @@ Executable to run.
 
 ```
 
-
 **`args`** `array[string]` (default: `[]`)
 
 Arguments passed to the command before the user's query.
@@ -247,7 +236,6 @@ Arguments passed to the command before the user's query.
 
 ```
 
-
 **`icon`** `string`
 
 Fallback icon name for results without their own icon.
@@ -258,7 +246,6 @@ Fallback icon name for results without their own icon.
       - icon: "clock"
 
 ```
-
 
 **`action`** `string` (default: `copy`)
 
@@ -295,6 +282,33 @@ Action to perform on Ctrl+Enter.
 
 ```
 
+**`env`** `object` (default: `{}`)
+
+Environment variables passed to the script process.
+
+  ```yaml
+  addons:
+    script_filters:
+      - command: "my-script"
+        env:
+          API_KEY: "secret"
+          TZ_FORMAT: "short"
+
+```
+
+**`min_query_length`** `integer`
+
+Minimum number of characters required after the keyword before the script executes.
+
+  When the query is shorter than this value, results are cleared and the script is not run. Useful for scripts that are slow or expensive with short queries.
+
+  ```yaml
+  addons:
+    script_filters:
+      - command: "my-script"
+        min_query_length: 2   # only execute after 2 chars typed
+
+```
 
 ### JSON Output Format
 
@@ -360,7 +374,6 @@ Quick web searches via URL templates. Type a keyword followed by your query to o
 
 List of web search configurations.
 
-
 ### Web Search Fields
 
 **`name`** `string` (required)
@@ -374,7 +387,6 @@ Display name shown in the search row (e.g., "Search Google for...").
 
 ```
 
-
 **`keyword`** `string` (required)
 
 Text that activates the web search.
@@ -385,7 +397,6 @@ Text that activates the web search.
       - keyword: "g"
 
 ```
-
 
 **`url`** `string` (required)
 
@@ -400,7 +411,6 @@ URL template with `{query}` placeholder.
 
 ```
 
-
 **`icon`** `string`
 
 Icon name from your icon cache.
@@ -411,7 +421,6 @@ Icon name from your icon cache.
       - icon: "google"
 
 ```
-
 
 ### Example: Common Search Engines
 
@@ -457,7 +466,6 @@ Reusable text values that can be searched and copied/typed. Snippets can come fr
 
 List of text snippet source configurations.
 
-
 ### Text Snippet Fields
 
 **`name`** `string` (required)
@@ -471,7 +479,6 @@ Display name shown during loading (for command sources).
 
 ```
 
-
 **`keyword`** `string` (required)
 
 Text that activates this snippet source.
@@ -483,7 +490,6 @@ Text that activates this snippet source.
 
 ```
 
-
 **`icon`** `string`
 
 Icon name displayed next to each snippet.
@@ -494,7 +500,6 @@ Icon name displayed next to each snippet.
       - icon: "mail"
 
 ```
-
 
 **`snippets`** `array[object]`
 
@@ -540,7 +545,6 @@ Path to a YAML file containing snippets.
 
 ```
 
-
 **`command`** `string`
 
 Executable that outputs Alfred Script Filter JSON.
@@ -553,7 +557,6 @@ Executable that outputs Alfred Script Filter JSON.
       - command: "my-snippet-gen"
 
 ```
-
 
 **`directory`** `string`
 
@@ -576,7 +579,6 @@ Path to a directory of `.snippet` files.
 
 ```
 
-
 **`args`** `array[string]` (default: `[]`)
 
 Arguments passed to the command.
@@ -588,7 +590,6 @@ Arguments passed to the command.
         args: ["-j", "--verbose"]
 
 ```
-
 
 **`action`** `string` (default: `copy`)
 
@@ -624,7 +625,6 @@ Action to perform on Ctrl+Enter.
         secondary_action: "copy"  # Ctrl+Enter: Copy
 
 ```
-
 
 **Note:** Exactly one of `snippets`, `file`, `command`, or `directory` should be specified per entry.
 
@@ -718,6 +718,9 @@ addons:
       command: "batz"
       args: ["-j"]
       icon: "clock"
+      min_query_length: 2
+      env:
+        TZ_FORMAT: "short"
 
     - name: "Bookmarks"
       keyword: "bm"
