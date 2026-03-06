@@ -69,6 +69,33 @@ Controls how launcher entries are sorted when no search query is active. Valid o
   The MRU cache at `~/.cache/raffi/mru.cache` stores both launch counts and timestamps. Existing caches using the old format are migrated automatically on next use.
 
 
+## Fallbacks
+
+**`fallbacks`** `list of strings` (default: `[]`)
+
+Addon entries that appear at the bottom of the launcher list when you type a non-empty query. This is useful for search-type addons (web searches, script filters) so they are always accessible without remembering their keywords.
+
+Each entry is a dot-separated path: `addons.<type>."<name>"` where `<type>` is `web_searches` or `script_filters`, and `<name>` matches the addon's `name` field.
+
+Behavior:
+  - Only shown when the search query is **non-empty**
+  - **Not shown** when already in an addon mode (script filter, web search, file browser, etc.)
+  - **Web search** fallbacks open the URL with the current query and exit
+  - **Script filter** fallbacks switch the input to that filter's keyword mode
+
+```yaml
+general:
+  fallbacks:
+    - addons.web_searches."Google"
+    - addons.web_searches."DuckDuckGo"
+    - addons.script_filters."Search Google"
+```
+
+<Aside type="tip">
+Fallbacks work best with search-type addons. The referenced addon must be defined in your `addons` section.
+</Aside>
+
+
 ## Font and Typography
 
 **`font_size`** `number` (default: `20`)

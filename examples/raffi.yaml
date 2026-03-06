@@ -15,6 +15,10 @@ version: 1
 #   window_height: 600       # Window height in pixels (default: 600)
 #   padding: 20              # Outer window padding in pixels (default: 20, scales with font_size)
 #   sort_mode: hybrid        # Sort mode for entries: frequency, recency, or hybrid (default: hybrid)
+#   fallbacks:               # Addons shown at the bottom of results when typing a query
+#     - addons.web_searches."Google"           # Opens Google search with the current query
+#     - addons.web_searches."DuckDuckGo"       # Opens DuckDuckGo search with the current query
+#     - addons.script_filters."Search Google"  # Switches to the script filter mode
 #   theme_colors:            # Override individual colours (hex: #RGB, #RRGGBB, or #RRGGBBAA)
 #     bg_base: "#1e1e2e"
 #     bg_input: "#313244"
@@ -374,9 +378,9 @@ addons:
       command: "batz"
       args: ["-j"]
       icon: "clock"
-      min_query_length: 2      # only execute after 2 chars typed after keyword
+      min_query_length: 2 # only execute after 2 chars typed after keyword
       env:
-        TZ_FORMAT: "short"     # environment variables passed to the script process
+        TZ_FORMAT: "short" # environment variables passed to the script process
     # action/secondary_action accept two special keywords:
     #   "copy"   — copy to clipboard via wl-copy (default for Enter)
     #   "insert" — type into focused app via wtype/ydotool

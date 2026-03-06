@@ -259,6 +259,8 @@ pub struct GeneralConfig {
     pub padding: Option<f32>,
     #[serde(default)]
     pub sort_mode: SortMode,
+    #[serde(default)]
+    pub fallbacks: Vec<String>,
 }
 
 /// Complete parsed configuration
@@ -999,6 +1001,7 @@ pub fn run(args: Args) -> Result<()> {
         window_width: general.window_width.unwrap_or(800.0),
         window_height: general.window_height.unwrap_or(600.0),
         sort_mode: general.sort_mode.clone(),
+        fallbacks: general.fallbacks.clone(),
     };
 
     debug_log!(

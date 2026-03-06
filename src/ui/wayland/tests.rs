@@ -19,6 +19,7 @@ fn test_app(addons: AddonsConfig) -> LauncherApp {
         10,
         FontSizes::default_sizes(),
         SortMode::Hybrid,
+        Vec::new(),
     );
     app
 }

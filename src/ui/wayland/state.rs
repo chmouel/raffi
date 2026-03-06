@@ -196,6 +196,19 @@ impl EmojiState {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(super) enum FallbackAction {
+    WebSearch { url_template: String },
+    ScriptFilter { keyword: String },
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ResolvedFallback {
+    pub name: String,
+    pub icon: Option<String>,
+    pub action: FallbackAction,
+}
+
 pub(super) struct LauncherApp {
     pub configs: Vec<crate::RaffiConfig>,
     pub filtered_configs: Vec<usize>,
@@ -214,4 +227,5 @@ pub(super) struct LauncherApp {
     pub view: ViewState,
     pub history: HistoryState,
     pub emoji: EmojiState,
+    pub fallbacks: Vec<ResolvedFallback>,
 }

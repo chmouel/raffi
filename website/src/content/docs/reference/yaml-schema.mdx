@@ -157,6 +157,21 @@ Outer window padding in pixels for native UI.
 ```
 
 
+**`general.fallbacks`** `list of strings` (default: `[]`)
+
+Addon entries shown at the bottom of the launcher list when typing a non-empty query. Useful for search-type addons (web searches, script filters).
+
+  Format: `addons.<type>."<name>"` where `<type>` is `web_searches` or `script_filters`.
+
+  ```yaml
+  general:
+    fallbacks:
+      - addons.web_searches."Google"
+      - addons.script_filters."Search DuckDuckGo"
+
+```
+
+
 **`general.theme_colors`** `object`
 
 Custom color overrides for the native UI theme.

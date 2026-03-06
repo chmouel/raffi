@@ -23,9 +23,10 @@ use super::script_filters::execute_script_filter;
 use super::snippets::{execute_text_snippet_command, filter_snippets};
 use super::state::{
     CachedRate, CurrencyConversion, CurrencyConversionRequest, CurrencyResult, CurrencyState,
-    EmojiEntry, EmojiState, FileBrowserState, HistoryState, LauncherApp, Message,
-    MultiCurrencyRequest, MultiCurrencyResult, ScriptFilterResult, ScriptFilterState,
-    SharedSelection, TextSnippetState, ViewState, WebSearchActiveState, WebSearchState,
+    EmojiEntry, EmojiState, FallbackAction, FileBrowserState, HistoryState, LauncherApp, Message,
+    MultiCurrencyRequest, MultiCurrencyResult, ResolvedFallback, ScriptFilterResult,
+    ScriptFilterState, SharedSelection, TextSnippetState, ViewState, WebSearchActiveState,
+    WebSearchState,
 };
 use super::support::{
     fuzzy_match_configs, load_history, load_mru_map, mru_sort_key, save_history, save_mru_map,
@@ -147,6 +148,7 @@ impl LauncherApp {
         max_history: u32,
         font_sizes: FontSizes,
         sort_mode: SortMode,
+        fallback_paths: Vec<String>,
     ) -> (Self, Task<Message>) {
         crate::debug_log!(
             "LauncherApp::new: configs={} no_icons={} sort_mode={sort_mode:?} initial_query={initial_query:?}",
@@ -191,6 +193,8 @@ impl LauncherApp {
 
         let file_browser_show_hidden = addons.file_browser.show_hidden.unwrap_or(false);
 
+        let fallbacks = Self::resolve_fallbacks(&fallback_paths, &addons);
+
         (
             LauncherApp {
                 filtered_configs: (0..configs.len()).collect(),
@@ -221,6 +225,7 @@ impl LauncherApp {
                     ..Default::default()
                 },
                 emoji: EmojiState::default(),
+                fallbacks,
             },
             if initial_query.is_empty() {
                 focus(search_input_id)
@@ -276,6 +281,7 @@ impl LauncherApp {
             }
             Message::EmojiDataLoaded(data) => self.handle_emoji_data_loaded(data),
             Message::EmojiSelected(index) => self.handle_emoji_selected(index),
+            Message::FallbackSelected(index) => self.handle_fallback_selected(index),
         }
     }
 
@@ -835,8 +841,9 @@ impl LauncherApp {
         }
 
         let config_index = index.saturating_sub(current_index);
-        if let Some(&config_index) = self.filtered_configs.get(config_index) {
-            let config = &self.configs[config_index];
+        if config_index < self.filtered_configs.len() {
+            let real_config_index = self.filtered_configs[config_index];
+            let config = &self.configs[real_config_index];
             let description = config
                 .description
                 .clone()
@@ -855,6 +862,13 @@ impl LauncherApp {
                 .unwrap_or(0);
             save_mru_map(&self.mru_map);
             self.save_query_to_history();
+            return iced::exit();
+        }
+        current_index += self.filtered_configs.len();
+
+        let fallback_index = index.saturating_sub(current_index);
+        if fallback_index < self.fallback_count() {
+            return self.update(Message::FallbackSelected(fallback_index));
         }
 
         iced::exit()
@@ -1240,7 +1254,97 @@ impl LauncherApp {
         if self.calculator_result.is_some() {
             offset += 1;
         }
-        self.filtered_configs.len() + offset
+        self.filtered_configs.len() + offset + self.fallback_count()
+    }
+
+    fn is_in_addon_mode(&self) -> bool {
+        self.script_filter.results.is_some()
+            || self.script_filter.loading
+            || self.text_snippets.active
+            || self.text_snippets.loading
+            || self.emoji.active
+            || self.file_browser.active
+            || self.web_search.active.is_some()
+    }
+
+    pub(super) fn fallback_count(&self) -> usize {
+        if !self.search_query.trim().is_empty() && !self.is_in_addon_mode() {
+            self.fallbacks.len()
+        } else {
+            0
+        }
+    }
+
+    fn resolve_fallbacks(paths: &[String], addons: &AddonsConfig) -> Vec<ResolvedFallback> {
+        let mut resolved = Vec::new();
+        for path in paths {
+            let parts: Vec<&str> = path.splitn(3, '.').collect();
+            if parts.len() != 3 || parts[0] != "addons" {
+                crate::debug_log!("fallback: invalid path '{path}', expected addons.<type>.<name>");
+                eprintln!("Warning: invalid fallback path '{path}'");
+                continue;
+            }
+            let addon_type = parts[1];
+            let name = parts[2].trim_matches('"');
+            match addon_type {
+                "web_searches" => {
+                    if let Some(ws) = addons.web_searches.iter().find(|w| w.name == name) {
+                        resolved.push(ResolvedFallback {
+                            name: ws.name.clone(),
+                            icon: ws.icon.clone(),
+                            action: FallbackAction::WebSearch {
+                                url_template: ws.url.clone(),
+                            },
+                        });
+                    } else {
+                        crate::debug_log!("fallback: web search '{name}' not found");
+                        eprintln!("Warning: fallback web search '{name}' not found in addons");
+                    }
+                }
+                "script_filters" => {
+                    if let Some(sf) = addons.script_filters.iter().find(|s| s.name == name) {
+                        resolved.push(ResolvedFallback {
+                            name: sf.name.clone(),
+                            icon: sf.icon.clone(),
+                            action: FallbackAction::ScriptFilter {
+                                keyword: sf.keyword.clone(),
+                            },
+                        });
+                    } else {
+                        crate::debug_log!("fallback: script filter '{name}' not found");
+                        eprintln!("Warning: fallback script filter '{name}' not found in addons");
+                    }
+                }
+                _ => {
+                    crate::debug_log!(
+                        "fallback: unsupported addon type '{addon_type}', expected web_searches or script_filters"
+                    );
+                    eprintln!("Warning: unsupported fallback addon type '{addon_type}'");
+                }
+            }
+        }
+        resolved
+    }
+
+    fn handle_fallback_selected(&mut self, index: usize) -> Task<Message> {
+        if let Some(fallback) = self.fallbacks.get(index).cloned() {
+            let query = self.search_query.trim().to_string();
+            match &fallback.action {
+                FallbackAction::WebSearch { url_template } => {
+                    if !query.is_empty() {
+                        let _ = crate::execute_web_search_url(url_template, &query);
+                    }
+                    self.save_query_to_history();
+                    return iced::exit();
+                }
+                FallbackAction::ScriptFilter { keyword } => {
+                    let new_query = format!("{} {}", keyword, query);
+                    self.search_query = new_query.clone();
+                    return Task::done(Message::SearchChanged(new_query));
+                }
+            }
+        }
+        Task::none()
     }
 
     pub(super) fn save_query_to_history(&mut self) {

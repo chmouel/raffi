@@ -79,6 +79,7 @@ pub struct UISettings {
     pub window_width: f32,
     pub window_height: f32,
     pub sort_mode: SortMode,
+    pub fallbacks: Vec<String>,
 }
 
 impl Default for UISettings {
@@ -94,6 +95,7 @@ impl Default for UISettings {
             window_width: 800.0,
             window_height: 600.0,
             sort_mode: SortMode::default(),
+            fallbacks: Vec::new(),
         }
     }
 }

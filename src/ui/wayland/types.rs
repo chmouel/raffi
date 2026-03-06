@@ -152,4 +152,5 @@ pub(crate) enum Message {
     ToggleHints,
     EmojiSelected(usize),
     EmojiDataLoaded(Vec<EmojiEntry>),
+    FallbackSelected(usize),
 }

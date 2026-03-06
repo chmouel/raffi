@@ -76,6 +76,7 @@ fn run_wayland_ui(
     let window_width = settings.window_width;
     let window_height = settings.window_height;
     let sort_mode = settings.sort_mode.clone();
+    let fallbacks = settings.fallbacks.clone();
 
     let window_settings = window::Settings {
         size: iced::Size::new(window_width, window_height),
@@ -106,6 +107,7 @@ fn run_wayland_ui(
                 max_history,
                 font_sizes,
                 sort_mode.clone(),
+                fallbacks.clone(),
             )
         },
         LauncherApp::update,
