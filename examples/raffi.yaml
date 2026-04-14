@@ -1,6 +1,10 @@
 # yaml-language-server: $schema=raffi-schema.json
 version: 1
 
+# Raffi can auto-detect installed desktop applications when your config does not
+# contain any valid launchers yet, but keeping explicit entries here gives you
+# stable names, icons, and arguments across systems.
+
 # General settings (all fields optional, CLI flags override these)
 # general:
 #   ui_type: native          # UI backend: fuzzel or native
