@@ -1,9 +1,9 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::Write as _,
     fs::{self, File},
     io::{Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
     process::Command,
 };
 
@@ -367,11 +367,11 @@ pub struct Args {
     pub help: bool,
     #[options(help = "print version")]
     pub version: bool,
-    #[options(help = "config file location")]
+    #[options(help = "config file location", short = "c")]
     pub configfile: Option<String>,
-    #[options(help = "print command to stdout, do not run it")]
+    #[options(help = "print command to stdout, do not run it", short = "p")]
     pub print_only: bool,
-    #[options(help = "refresh cache")]
+    #[options(help = "refresh cache", short = "r")]
     pub refresh_cache: bool,
     #[options(help = "do not show icons", short = "I")]
     pub no_icons: bool,
@@ -735,10 +735,249 @@ fn is_valid_config(
 
 /// Check if a binary exists in the PATH.
 fn find_binary(binary: &str) -> bool {
+    if binary.contains('/') {
+        return Path::new(binary).exists();
+    }
+
     std::env::var("PATH")
         .unwrap_or_default()
         .split(':')
         .any(|path| Path::new(&format!("{path}/{binary}")).exists())
+}
+
+fn xdg_data_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+
+    if let Ok(data_home) = std::env::var("XDG_DATA_HOME") {
+        dirs.push(PathBuf::from(data_home));
+    } else if let Ok(home) = std::env::var("HOME") {
+        dirs.push(PathBuf::from(home).join(".local/share"));
+    }
+
+    let system_dirs = std::env::var("XDG_DATA_DIRS")
+        .unwrap_or_else(|_| "/usr/local/share:/usr/share".to_string());
+    dirs.extend(std::env::split_paths(&system_dirs));
+
+    dirs
+}
+
+fn desktop_entry_dirs() -> Vec<PathBuf> {
+    xdg_data_dirs()
+        .into_iter()
+        .map(|dir| dir.join("applications"))
+        .collect()
+}
+
+fn parse_bool(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "true" | "1" | "yes"
+    )
+}
+
+fn parse_desktop_entry_keys(contents: &str) -> HashMap<String, String> {
+    let mut in_desktop_entry = false;
+    let mut keys = HashMap::new();
+
+    for line in contents.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            if trimmed == "[Desktop Entry]" {
+                in_desktop_entry = true;
+                continue;
+            }
+
+            if in_desktop_entry {
+                break;
+            }
+
+            continue;
+        }
+
+        if !in_desktop_entry {
+            continue;
+        }
+
+        if let Some((key, value)) = trimmed.split_once('=') {
+            keys.insert(key.trim().to_string(), value.trim().to_string());
+        }
+    }
+
+    keys
+}
+
+fn split_desktop_exec(exec: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut chars = exec.chars().peekable();
+    let mut in_single = false;
+    let mut in_double = false;
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => {
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                }
+            }
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            c if c.is_whitespace() && !in_single && !in_double => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+
+    tokens
+}
+
+fn strip_desktop_exec_field_codes(token: &str) -> String {
+    let mut cleaned = String::with_capacity(token.len());
+    let mut chars = token.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '%' {
+            match chars.peek().copied() {
+                Some('%') => {
+                    cleaned.push('%');
+                    chars.next();
+                }
+                Some(code) if "fFuUdDnNickvm".contains(code) => {
+                    chars.next();
+                }
+                _ => cleaned.push(ch),
+            }
+        } else {
+            cleaned.push(ch);
+        }
+    }
+
+    cleaned.trim().to_string()
+}
+
+fn parse_desktop_exec(exec: &str) -> Option<(String, Vec<String>)> {
+    let mut tokens = split_desktop_exec(exec)
+        .into_iter()
+        .map(|token| strip_desktop_exec_field_codes(&token))
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+
+    if tokens.is_empty() {
+        return None;
+    }
+
+    let binary = tokens.remove(0);
+    Some((binary, tokens))
+}
+
+fn parse_desktop_entry_file(
+    path: &Path,
+    binary_checker: &impl BinaryChecker,
+) -> Option<RaffiConfig> {
+    let contents = fs::read_to_string(path).ok()?;
+    let keys = parse_desktop_entry_keys(&contents);
+
+    if keys.get("Type").map(String::as_str) != Some("Application") {
+        return None;
+    }
+    if keys.get("Hidden").is_some_and(|value| parse_bool(value))
+        || keys.get("NoDisplay").is_some_and(|value| parse_bool(value))
+        || keys.get("Terminal").is_some_and(|value| parse_bool(value))
+    {
+        return None;
+    }
+
+    let exec = keys.get("Exec")?;
+    let name = keys.get("Name")?;
+    let (binary, args) = parse_desktop_exec(exec)?;
+
+    if let Some(try_exec) = keys.get("TryExec") {
+        if !binary_checker.exists(try_exec) {
+            return None;
+        }
+    }
+    if !binary_checker.exists(&binary) {
+        return None;
+    }
+
+    Some(RaffiConfig {
+        binary: Some(binary),
+        args: (!args.is_empty()).then_some(args),
+        icon: keys.get("Icon").cloned(),
+        description: Some(name.clone()),
+        ..Default::default()
+    })
+}
+
+fn detect_desktop_entries_from_dirs(
+    dirs: &[PathBuf],
+    binary_checker: &impl BinaryChecker,
+) -> Vec<RaffiConfig> {
+    let mut seen = HashSet::new();
+    let mut entries = Vec::new();
+
+    for dir in dirs {
+        if !dir.exists() {
+            continue;
+        }
+
+        for entry in walkdir::WalkDir::new(dir)
+            .follow_links(true)
+            .into_iter()
+            .filter_map(Result::ok)
+        {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            if entry.path().extension().and_then(|ext| ext.to_str()) != Some("desktop") {
+                continue;
+            }
+
+            let Some(config) = parse_desktop_entry_file(entry.path(), binary_checker) else {
+                continue;
+            };
+
+            let key = format!(
+                "{}\u{1f}{}\u{1f}{}",
+                config.description.as_deref().unwrap_or_default(),
+                config.binary.as_deref().unwrap_or_default(),
+                config.args.as_deref().unwrap_or(&[]).join("\u{1f}")
+            );
+            if seen.insert(key) {
+                entries.push(config);
+            }
+        }
+    }
+
+    entries.sort_by(|left, right| {
+        left.description
+            .as_deref()
+            .unwrap_or_default()
+            .cmp(right.description.as_deref().unwrap_or_default())
+    });
+    entries
+}
+
+fn detect_desktop_entries(binary_checker: &impl BinaryChecker) -> Vec<RaffiConfig> {
+    detect_desktop_entries_from_dirs(&desktop_entry_dirs(), binary_checker)
+}
+
+fn no_valid_config_message(configfile: &str) -> String {
+    format!(
+        "No valid launchers found.\nChecked: {configfile}\nExpected a YAML config using `version: 1` and a `launchers:` section.\nYou can copy `examples/raffi.yaml` as a starting point, or install desktop applications so Raffi can auto-detect them."
+    )
 }
 
 /// Save the icon map to a cache file.
@@ -909,11 +1148,12 @@ pub fn run(args: Args) -> Result<()> {
     );
     let configfile = args.configfile.as_deref().unwrap_or(&default_config_path);
     debug_log!("config: using file {configfile}");
+    let config_exists = Path::new(configfile).exists();
 
     // Write schema file if it doesn't exist yet
     let config_dir = Path::new(configfile).parent().unwrap_or(Path::new("."));
     let schema_path = config_dir.join("raffi-schema.json");
-    if !schema_path.exists() {
+    if !schema_path.exists() && fs::create_dir_all(config_dir).is_ok() {
         if let Err(e) = fs::write(&schema_path, generate_schema()) {
             eprintln!(
                 "Warning: could not write schema file {}: {e}",
@@ -922,12 +1162,29 @@ pub fn run(args: Args) -> Result<()> {
         }
     }
 
-    let parsed_config = read_config(configfile, &args).context("Failed to read config")?;
+    let mut parsed_config = if config_exists {
+        read_config(configfile, &args).context("Failed to read config")?
+    } else {
+        ParsedConfig {
+            general: GeneralConfig::default(),
+            addons: AddonsConfig::default(),
+            entries: Vec::new(),
+        }
+    };
     debug_log!("config: loaded {} entries", parsed_config.entries.len());
 
     if parsed_config.entries.is_empty() {
-        eprintln!("No valid configurations found in {configfile}");
-        std::process::exit(1);
+        let detected_entries = detect_desktop_entries(&DefaultBinaryChecker);
+        if detected_entries.is_empty() {
+            eprintln!("{}", no_valid_config_message(configfile));
+            std::process::exit(1);
+        }
+
+        eprintln!(
+            "No valid launchers found in {configfile}; using {} auto-detected desktop applications.",
+            detected_entries.len()
+        );
+        parsed_config.entries = detected_entries;
     }
 
     // Merge general config: CLI flags override config values
@@ -1058,6 +1315,17 @@ pub fn run(args: Args) -> Result<()> {
 mod tests {
     use super::*;
     use std::io::Cursor;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_test_dir(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("raffi-{name}-{unique}"));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
 
     #[test]
     fn test_read_config_from_reader() {
@@ -2092,5 +2360,94 @@ mod tests {
         assert!(props.contains_key("general"));
         assert!(props.contains_key("addons"));
         assert!(props.contains_key("launchers"));
+    }
+
+    #[test]
+    fn test_find_binary_accepts_paths() {
+        let dir = temp_test_dir("find-binary");
+        let binary = dir.join("custom-tool");
+        fs::write(&binary, "#!/bin/sh\n").unwrap();
+
+        assert!(find_binary(binary.to_str().unwrap()));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_parse_desktop_exec_strips_field_codes() {
+        let (binary, args) = parse_desktop_exec(
+            r#"/usr/bin/env BAMF_DESKTOP_FILE_HINT=%k /usr/bin/firefox --new-window %U"#,
+        )
+        .unwrap();
+
+        assert_eq!(binary, "/usr/bin/env");
+        assert_eq!(
+            args,
+            vec![
+                "BAMF_DESKTOP_FILE_HINT=".to_string(),
+                "/usr/bin/firefox".to_string(),
+                "--new-window".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_detect_desktop_entries_from_dirs() {
+        let dir = temp_test_dir("desktop-detect");
+        let apps_dir = dir.join("applications");
+        fs::create_dir_all(&apps_dir).unwrap();
+
+        fs::write(
+            apps_dir.join("firefox.desktop"),
+            r#"[Desktop Entry]
+Type=Application
+Name=Firefox
+Exec=firefox %U
+Icon=firefox
+"#,
+        )
+        .unwrap();
+        fs::write(
+            apps_dir.join("hidden.desktop"),
+            r#"[Desktop Entry]
+Type=Application
+Name=Hidden App
+Exec=hidden-app
+Hidden=true
+"#,
+        )
+        .unwrap();
+        fs::write(
+            apps_dir.join("missing-tryexec.desktop"),
+            r#"[Desktop Entry]
+Type=Application
+Name=Missing TryExec
+Exec=missing-app
+TryExec=missing-app
+"#,
+        )
+        .unwrap();
+        fs::write(
+            apps_dir.join("terminal.desktop"),
+            r#"[Desktop Entry]
+Type=Application
+Name=Terminal App
+Exec=terminal-app
+Terminal=true
+"#,
+        )
+        .unwrap();
+
+        let checker = MockBinaryChecker {
+            binaries: vec!["firefox".to_string()],
+        };
+        let detected = detect_desktop_entries_from_dirs(&[apps_dir], &checker);
+
+        assert_eq!(detected.len(), 1);
+        assert_eq!(detected[0].description.as_deref(), Some("Firefox"));
+        assert_eq!(detected[0].binary.as_deref(), Some("firefox"));
+        assert!(detected[0].args.as_deref().unwrap_or(&[]).is_empty());
+
+        let _ = fs::remove_dir_all(dir);
     }
 }

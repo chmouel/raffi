@@ -83,7 +83,7 @@ This reduces the binary from roughly 15 MB to around 1.1 MB by removing the iced
 
 ## Usage
 
-Running `raffi` launches configured entries through the selected interface. The chosen item is executed according to the configuration.
+Running `raffi` launches configured entries through the selected interface. If your config does not define any valid launchers yet, Raffi falls back to auto-detected desktop applications from your system's `.desktop` files.
 
 See the full CLI reference: <https://chmouel.github.io/raffi/reference/cli-options/>
 
@@ -122,12 +122,17 @@ See: [UI modes](https://chmouel.github.io/raffi/features/ui-modes/) · [Themes](
 Configuration is stored in `$HOME/.config/raffi/raffi.yaml`. Basic example:
 
 ```yaml
-firefox:
-  binary: firefox
-  args: [--marionette]
-  icon: firefox
-  description: Firefox browser with marionette enabled
+version: 1
+
+launchers:
+  firefox:
+    binary: firefox
+    args: [--marionette]
+    icon: firefox
+    description: Firefox browser with marionette enabled
 ```
+
+If you do not create a config yet, Raffi can still show installed desktop applications by scanning XDG application entries.
 
 For full configuration reference see the docs:
 
