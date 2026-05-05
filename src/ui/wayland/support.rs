@@ -87,7 +87,7 @@ pub(super) fn fuzzy_match_configs(configs: &[RaffiConfig], query: &str) -> Vec<u
         })
         .collect();
 
-    matches.sort_by(|a, b| b.1.cmp(&a.1));
+    matches.sort_by_key(|b| std::cmp::Reverse(b.1));
     let result: Vec<usize> = matches.into_iter().map(|(idx, _)| idx).collect();
     crate::debug_log!("fuzzy_match: query={query:?} results={}", result.len());
     result
@@ -140,7 +140,7 @@ pub(super) fn save_mru_map(map: &HashMap<String, MruEntry>) {
     crate::debug_log!("mru: saving {} entries", map.len());
     if let Ok(path) = get_mru_cache_path() {
         let mut entries: Vec<_> = map.iter().collect();
-        entries.sort_by(|a, b| b.1.count.cmp(&a.1.count));
+        entries.sort_by_key(|b| std::cmp::Reverse(b.1.count));
         let content = entries
             .iter()
             .map(|(desc, entry)| format!("{}|{}|{}", desc, entry.count, entry.last_used))

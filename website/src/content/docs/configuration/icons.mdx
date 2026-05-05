@@ -8,6 +8,7 @@ import { Aside } from '@astrojs/starlight/components';
 ## Overview
 
 Raffi supports icons from system icon themes. Icons are automatically discovered from standard XDG directories and cached for performance.
+When an entry does not resolve an icon directly, Raffi now tries to infer one from installed `.desktop` files and finally falls back to a bundled generic icon.
 
 ## Icon Specification
 
@@ -22,6 +23,8 @@ launchers:
 ```
 
 Raffi searches for icons in system icon directories and uses the icon name to look up the full path.
+
+If `icon` is omitted, Raffi first tries likely launcher candidates such as the configured binary name and non-option arguments. This helps wrapper launchers still pick up a matching system icon.
 
 ## Icon Discovery
 
@@ -56,6 +59,17 @@ For example, given these icon paths:
 ```
 
 Raffi selects the scalable SVG for best quality.
+
+## Automatic Fallbacks
+
+When a launcher icon is missing, Raffi resolves icons in this order:
+
+1. Explicit icon path or theme icon name from the launcher config
+2. Binary name or other likely launcher arguments
+3. Matching `Icon=` metadata from installed XDG `.desktop` files
+4. Bundled generic fallback icon
+
+This means entries without an `icon:` field should still display a reasonable system icon when Raffi can infer one.
 
 ## Icon Caching
 
@@ -200,6 +214,7 @@ If an icon isn't displaying:
    ```
 
 3. **Add to XDG directories**: Place your icon in a standard XDG icon directory so it can be found by name.
+4. **Check desktop metadata**: For wrapper commands, ensure the target application has a valid `.desktop` file with an `Icon=` entry.
 
 ### Custom Icon Directories
 

@@ -974,6 +974,241 @@ fn detect_desktop_entries(binary_checker: &impl BinaryChecker) -> Vec<RaffiConfi
     detect_desktop_entries_from_dirs(&desktop_entry_dirs(), binary_checker)
 }
 
+const DEFAULT_ICON_PATH: &str = "assets/default_icon.svg";
+const DEFAULT_ICON_BYTES: &[u8] = include_bytes!("../assets/default_icon.svg");
+const GENERIC_ICON_NAMES: &[&str] = &[
+    "application-x-executable",
+    "application-default-icon",
+    "application-x-desktop",
+];
+
+fn icon_cache_dir() -> PathBuf {
+    PathBuf::from(
+        std::env::var("XDG_CACHE_HOME")
+            .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default())),
+    )
+    .join("raffi")
+}
+
+fn is_supported_icon_extension(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|ext| ext.to_str()),
+        Some("png" | "svg")
+    )
+}
+
+fn is_icon_file(path: &Path) -> bool {
+    path.is_file() && is_supported_icon_extension(path)
+}
+
+fn push_icon_candidate(candidates: &mut Vec<String>, seen: &mut HashSet<String>, candidate: &str) {
+    let trimmed = candidate.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+
+    let owned = trimmed.to_string();
+    if seen.insert(owned.clone()) {
+        candidates.push(owned);
+    }
+
+    let Some(file_name) = Path::new(trimmed)
+        .file_name()
+        .and_then(|name| name.to_str())
+    else {
+        return;
+    };
+    if file_name == trimmed {
+        return;
+    }
+
+    let basename = file_name.to_string();
+    if seen.insert(basename.clone()) {
+        candidates.push(basename);
+    }
+}
+
+fn launcher_icon_candidates(config: &RaffiConfig) -> Vec<String> {
+    let mut candidates = Vec::new();
+    let mut seen = HashSet::new();
+
+    if let Some(icon) = config.icon.as_deref() {
+        push_icon_candidate(&mut candidates, &mut seen, icon);
+    }
+    if let Some(binary) = config.binary.as_deref() {
+        push_icon_candidate(&mut candidates, &mut seen, binary);
+    }
+    if let Some(args) = config.args.as_deref() {
+        for arg in args {
+            if arg.starts_with('-') || arg.contains("://") {
+                continue;
+            }
+            push_icon_candidate(&mut candidates, &mut seen, arg);
+        }
+    }
+
+    candidates
+}
+
+fn is_exec_wrapper_binary(candidate: &str) -> bool {
+    matches!(
+        Path::new(candidate)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(candidate),
+        "env" | "sh" | "bash" | "dash" | "zsh"
+    )
+}
+
+fn desktop_exec_icon_candidates(exec: &str, binary_checker: &impl BinaryChecker) -> Vec<String> {
+    let mut candidates = Vec::new();
+    let mut seen = HashSet::new();
+
+    for token in split_desktop_exec(exec)
+        .into_iter()
+        .map(|token| strip_desktop_exec_field_codes(&token))
+        .filter(|token| !token.is_empty())
+    {
+        if token.starts_with('-') || token.contains('=') || is_exec_wrapper_binary(&token) {
+            continue;
+        }
+        if !binary_checker.exists(&token) {
+            continue;
+        }
+        push_icon_candidate(&mut candidates, &mut seen, &token);
+    }
+
+    candidates
+}
+
+fn desktop_entry_icon_map_from_dirs(
+    dirs: &[PathBuf],
+    binary_checker: &impl BinaryChecker,
+) -> HashMap<String, String> {
+    let mut icon_map = HashMap::new();
+
+    for dir in dirs {
+        if !dir.exists() {
+            continue;
+        }
+
+        for entry in walkdir::WalkDir::new(dir)
+            .max_depth(2)
+            .follow_links(true)
+            .into_iter()
+            .filter_map(Result::ok)
+        {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            if entry.path().extension().and_then(|ext| ext.to_str()) != Some("desktop") {
+                continue;
+            }
+
+            let Ok(contents) = fs::read_to_string(entry.path()) else {
+                continue;
+            };
+            let keys = parse_desktop_entry_keys(&contents);
+
+            if keys.get("Type").map(String::as_str) != Some("Application") {
+                continue;
+            }
+            if keys.get("Hidden").is_some_and(|value| parse_bool(value))
+                || keys.get("NoDisplay").is_some_and(|value| parse_bool(value))
+                || keys.get("Terminal").is_some_and(|value| parse_bool(value))
+            {
+                continue;
+            }
+
+            let Some(icon) = keys.get("Icon").cloned() else {
+                continue;
+            };
+
+            let mut candidates = keys
+                .get("Exec")
+                .map(|exec| desktop_exec_icon_candidates(exec, binary_checker))
+                .unwrap_or_default();
+
+            if let Some(try_exec) = keys.get("TryExec") {
+                if binary_checker.exists(try_exec) && !is_exec_wrapper_binary(try_exec) {
+                    let mut try_exec_seen = candidates.iter().cloned().collect::<HashSet<_>>();
+                    push_icon_candidate(&mut candidates, &mut try_exec_seen, try_exec);
+                }
+            }
+
+            for candidate in candidates {
+                icon_map.entry(candidate).or_insert_with(|| icon.clone());
+            }
+        }
+    }
+
+    icon_map
+}
+
+pub(crate) fn read_desktop_icon_map() -> HashMap<String, String> {
+    desktop_entry_icon_map_from_dirs(&desktop_entry_dirs(), &DefaultBinaryChecker)
+}
+
+fn resolve_icon_reference(icon: &str, icon_map: &HashMap<String, String>) -> Option<String> {
+    let expanded = expand_config_value(icon);
+    if is_icon_file(Path::new(&expanded)) {
+        return Some(expanded);
+    }
+
+    icon_map.get(icon).cloned().or_else(|| {
+        Path::new(icon)
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .and_then(|stem| icon_map.get(stem).cloned())
+    })
+}
+
+fn bundled_default_icon_path() -> Option<String> {
+    let cache_dir = icon_cache_dir();
+    fs::create_dir_all(&cache_dir).ok()?;
+
+    let path = cache_dir.join(Path::new(DEFAULT_ICON_PATH).file_name().unwrap_or_default());
+    let needs_write = fs::read(&path)
+        .map(|contents| contents != DEFAULT_ICON_BYTES)
+        .unwrap_or(true);
+    if needs_write {
+        fs::write(&path, DEFAULT_ICON_BYTES).ok()?;
+    }
+
+    Some(path.to_string_lossy().into_owned())
+}
+
+pub(crate) fn default_icon_path(icon_map: &HashMap<String, String>) -> Option<String> {
+    GENERIC_ICON_NAMES
+        .iter()
+        .find_map(|icon| icon_map.get(*icon).cloned())
+        .or_else(bundled_default_icon_path)
+}
+
+pub(crate) fn resolve_launcher_icon_path(
+    config: &RaffiConfig,
+    icon_map: &HashMap<String, String>,
+    desktop_icon_map: &HashMap<String, String>,
+) -> Option<String> {
+    let candidates = launcher_icon_candidates(config);
+
+    for candidate in &candidates {
+        if let Some(path) = resolve_icon_reference(candidate, icon_map) {
+            return Some(path);
+        }
+    }
+
+    for candidate in &candidates {
+        if let Some(icon) = desktop_icon_map.get(candidate) {
+            if let Some(path) = resolve_icon_reference(icon, icon_map) {
+                return Some(path);
+            }
+        }
+    }
+
+    default_icon_path(icon_map)
+}
+
 fn no_valid_config_message(configfile: &str) -> String {
     format!(
         "No valid launchers found.\nChecked: {configfile}\nExpected a YAML config using `version: 1` and a `launchers:` section.\nYou can copy `examples/raffi.yaml` as a starting point, or install desktop applications so Raffi can auto-detect them."
@@ -982,15 +1217,10 @@ fn no_valid_config_message(configfile: &str) -> String {
 
 /// Save the icon map to a cache file.
 fn save_to_cache_file(map: &HashMap<String, String>) -> Result<()> {
-    let cache_dir = format!(
-        "{}/raffi",
-        std::env::var("XDG_CACHE_HOME")
-            .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()))
-    );
-
+    let cache_dir = icon_cache_dir();
     fs::create_dir_all(&cache_dir).context("Failed to create cache directory")?;
 
-    let cache_file_path = format!("{cache_dir}/icon.cache");
+    let cache_file_path = cache_dir.join("icon.cache");
     let mut cache_file = File::create(&cache_file_path).context("Failed to create cache file")?;
     cache_file
         .write_all(
@@ -1004,11 +1234,7 @@ fn save_to_cache_file(map: &HashMap<String, String>) -> Result<()> {
 
 /// Clear the icon cache file to force regeneration.
 pub fn clear_icon_cache() -> Result<()> {
-    let cache_path = format!(
-        "{}/raffi/icon.cache",
-        std::env::var("XDG_CACHE_HOME")
-            .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()))
-    );
+    let cache_path = icon_cache_dir().join("icon.cache");
     if Path::new(&cache_path).exists() {
         fs::remove_file(&cache_path).context("Failed to remove icon cache file")?;
     }
@@ -1017,11 +1243,7 @@ pub fn clear_icon_cache() -> Result<()> {
 
 /// Clear the cached emoji data files to force re-download.
 pub fn clear_emoji_cache() -> Result<()> {
-    let emoji_dir = format!(
-        "{}/raffi/emoji",
-        std::env::var("XDG_CACHE_HOME")
-            .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()))
-    );
+    let emoji_dir = icon_cache_dir().join("emoji");
     if Path::new(&emoji_dir).exists() {
         fs::remove_dir_all(&emoji_dir).context("Failed to remove emoji cache directory")?;
     }
@@ -1030,11 +1252,7 @@ pub fn clear_emoji_cache() -> Result<()> {
 
 /// Read the icon map from the cache file or generate it if it doesn't exist.
 pub fn read_icon_map() -> Result<HashMap<String, String>> {
-    let cache_path = format!(
-        "{}/raffi/icon.cache",
-        std::env::var("XDG_CACHE_HOME")
-            .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()))
-    );
+    let cache_path = icon_cache_dir().join("icon.cache");
 
     if !Path::new(&cache_path).exists() {
         let icon_map = get_icon_map()?;
@@ -2449,5 +2667,131 @@ Terminal=true
         assert!(detected[0].args.as_deref().unwrap_or(&[]).is_empty());
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_desktop_entry_icon_map_from_dirs_uses_real_exec_binary() {
+        let dir = temp_test_dir("desktop-icon-map");
+        let apps_dir = dir.join("applications");
+        fs::create_dir_all(&apps_dir).unwrap();
+
+        fs::write(
+            apps_dir.join("firefox.desktop"),
+            r#"[Desktop Entry]
+Type=Application
+Name=Firefox
+Exec=/usr/bin/env BAMF_DESKTOP_FILE_HINT=%k /usr/bin/firefox --new-window %U
+Icon=firefox
+"#,
+        )
+        .unwrap();
+
+        let checker = MockBinaryChecker {
+            binaries: vec![
+                "/usr/bin/env".to_string(),
+                "/usr/bin/firefox".to_string(),
+                "firefox".to_string(),
+            ],
+        };
+        let icon_map = desktop_entry_icon_map_from_dirs(&[apps_dir], &checker);
+
+        assert_eq!(
+            icon_map.get("/usr/bin/firefox"),
+            Some(&"firefox".to_string())
+        );
+        assert_eq!(icon_map.get("firefox"), Some(&"firefox".to_string()));
+        assert!(!icon_map.contains_key("/usr/bin/env"));
+        assert!(!icon_map.contains_key("env"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_resolve_launcher_icon_path_uses_launcher_args_for_lookup() {
+        let config = RaffiConfig {
+            binary: Some("jumpapp".to_string()),
+            args: Some(vec!["-X".to_string(), "firefox".to_string()]),
+            description: Some("Firefox".to_string()),
+            ..Default::default()
+        };
+        let icon_map = HashMap::from([("firefox".to_string(), "/icons/firefox.svg".to_string())]);
+
+        let resolved = resolve_launcher_icon_path(&config, &icon_map, &HashMap::new());
+
+        assert_eq!(resolved.as_deref(), Some("/icons/firefox.svg"));
+    }
+
+    #[test]
+    fn test_resolve_launcher_icon_path_uses_desktop_icon_map() {
+        let config = RaffiConfig {
+            binary: Some("custom-launcher".to_string()),
+            description: Some("Firefox".to_string()),
+            ..Default::default()
+        };
+        let icon_map = HashMap::from([("firefox".to_string(), "/icons/firefox.svg".to_string())]);
+        let desktop_icon_map =
+            HashMap::from([("custom-launcher".to_string(), "firefox".to_string())]);
+
+        let resolved = resolve_launcher_icon_path(&config, &icon_map, &desktop_icon_map);
+
+        assert_eq!(resolved.as_deref(), Some("/icons/firefox.svg"));
+    }
+
+    #[test]
+    fn test_resolve_icon_reference_ignores_non_icon_files() {
+        let dir = temp_test_dir("resolve-icon-reference");
+        let binary_path = dir.join("firefox");
+        fs::write(&binary_path, "#!/bin/sh\n").unwrap();
+
+        let icon_map = HashMap::from([("firefox".to_string(), "/icons/firefox.svg".to_string())]);
+        let resolved = resolve_icon_reference(binary_path.to_str().unwrap(), &icon_map);
+
+        assert_eq!(resolved.as_deref(), Some("/icons/firefox.svg"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_resolve_icon_reference_ignores_directories() {
+        let dir = temp_test_dir("resolve-icon-directory");
+        let resolved = resolve_icon_reference(dir.to_str().unwrap(), &HashMap::new());
+
+        assert!(resolved.is_none());
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_default_icon_path_materializes_bundled_icon_without_repo_cwd() {
+        let cache_root = temp_test_dir("default-icon-cache");
+        let cwd = temp_test_dir("default-icon-cwd");
+        let previous_cache_home = std::env::var_os("XDG_CACHE_HOME");
+        let previous_cwd = std::env::current_dir().unwrap();
+
+        std::env::set_var("XDG_CACHE_HOME", &cache_root);
+        std::env::set_current_dir(&cwd).unwrap();
+
+        let result = (|| {
+            let resolved = default_icon_path(&HashMap::new()).unwrap();
+            let resolved_path = PathBuf::from(&resolved);
+
+            assert!(resolved_path.exists());
+            assert_eq!(
+                resolved_path.file_name().and_then(|name| name.to_str()),
+                Some("default_icon.svg")
+            );
+            assert_eq!(fs::read(&resolved_path).unwrap(), DEFAULT_ICON_BYTES);
+        })();
+
+        std::env::set_current_dir(previous_cwd).unwrap();
+        match previous_cache_home {
+            Some(value) => std::env::set_var("XDG_CACHE_HOME", value),
+            None => std::env::remove_var("XDG_CACHE_HOME"),
+        }
+
+        let _ = fs::remove_dir_all(cache_root);
+        let _ = fs::remove_dir_all(cwd);
+
+        result
     }
 }

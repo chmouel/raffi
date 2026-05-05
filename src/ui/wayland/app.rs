@@ -33,7 +33,10 @@ use super::support::{
     try_evaluate_math, MruEntry,
 };
 use crate::ui::FontSizes;
-use crate::{read_icon_map, AddonsConfig, RaffiConfig, SortMode};
+use crate::{
+    read_desktop_icon_map, read_icon_map, resolve_launcher_icon_path, AddonsConfig, RaffiConfig,
+    SortMode,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum QueryMode {
@@ -160,6 +163,11 @@ impl LauncherApp {
         } else {
             read_icon_map().unwrap_or_default()
         };
+        let desktop_icon_map = if no_icons {
+            HashMap::new()
+        } else {
+            read_desktop_icon_map()
+        };
 
         let mru_map = load_mru_map();
 
@@ -188,6 +196,15 @@ impl LauncherApp {
             ))
         });
 
+        let launcher_icon_paths = if no_icons {
+            vec![None; configs.len()]
+        } else {
+            configs
+                .iter()
+                .map(|config| resolve_launcher_icon_path(config, &icon_map, &desktop_icon_map))
+                .collect()
+        };
+
         let initial_query = initial_query.unwrap_or_default();
         let search_input_id = super::state::TextInputId::unique();
 
@@ -203,6 +220,7 @@ impl LauncherApp {
                 selected_index: 0,
                 selected_item,
                 icon_map,
+                launcher_icon_paths,
                 mru_map,
                 addons,
                 calculator_result: None,
@@ -519,7 +537,7 @@ impl LauncherApp {
                         .map(|score| (index, score))
                 })
                 .collect();
-            scored.sort_by(|a, b| b.1.cmp(&a.1));
+            scored.sort_by_key(|b| std::cmp::Reverse(b.1));
             self.file_browser.entries = scored
                 .into_iter()
                 .map(|(index, _)| self.file_browser.all_entries[index].clone())

@@ -221,7 +221,7 @@ pub(super) fn filter_emoji_into(
                 .map(|score| (index, score))
         })
         .collect();
-    scored.sort_by(|a, b| b.1.cmp(&a.1));
+    scored.sort_by_key(|b| std::cmp::Reverse(b.1));
     scored.truncate(EMOJI_DISPLAY_LIMIT);
     out.extend(scored.iter().map(|(index, _)| *index));
 }

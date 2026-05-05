@@ -47,6 +47,8 @@ launchers:
     args: ["~/Downloads/"]
     binary: thunar
     description: "Thunar"
+    # icon is optional here; Raffi will try to infer a system icon and then
+    # fall back to a generic one if nothing matches.
 
   rbw-pass:
     args:
