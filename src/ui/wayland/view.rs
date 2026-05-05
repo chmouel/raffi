@@ -1056,27 +1056,8 @@ impl LauncherApp {
                     .clone()
                     .unwrap_or_else(|| config.binary.clone().unwrap_or_default());
 
-                let mut icon_path = if !self.icon_map.is_empty() {
-                    let icon_name = config
-                        .icon
-                        .as_ref()
-                        .or(config.binary.as_ref())
-                        .cloned()
-                        .unwrap_or_default();
-                    self.icon_map.get(&icon_name).cloned()
-                } else {
-                    None
-                };
-
-                if icon_path.is_none() {
-                    let default_path = "assets/default_icon.svg";
-                    if Path::new(default_path).exists() {
-                        icon_path = Some(default_path.to_string());
-                    }
-                }
-
                 let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
-                if let Some(icon_path_str) = icon_path {
+                if let Some(icon_path_str) = self.launcher_icon_paths[config_idx].clone() {
                     let icon_path = PathBuf::from(&icon_path_str);
                     if icon_path.exists() {
                         let is_svg = icon_path

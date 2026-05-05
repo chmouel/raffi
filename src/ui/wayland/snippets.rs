@@ -77,7 +77,7 @@ pub(super) fn filter_snippets(snippets: &[TextSnippet], query: &str) -> Vec<usiz
                 .map(|score| (index, score))
         })
         .collect();
-    scored.sort_by(|a, b| b.1.cmp(&a.1));
+    scored.sort_by_key(|b| std::cmp::Reverse(b.1));
     let result: Vec<usize> = scored.into_iter().map(|(index, _)| index).collect();
     crate::debug_log!("snippets: filter query={query:?} results={}", result.len());
     result
