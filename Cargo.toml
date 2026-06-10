@@ -31,5 +31,5 @@ iced = { version = "0.14", features = [
 ], optional = true }
 meval = { version = "0.2", optional = true }
 ureq = { version = "3", features = ["json"], optional = true }
-regex = { version = "1.10", optional = true }
+regex = { version = "1.12", optional = true }
 schemars = { version = "1.2", features = ["derive"] }
