@@ -188,9 +188,10 @@ This project is released under the MIT Licence.
 
 ## Author
 
-Chmouel Boudjnah
+[![Sponsor](https://img.shields.io/badge/Sponsor-❤️-ff69b4?style=for-the-badge&logo=github)](https://github.com/sponsors/chmouel)
 
-- GitHub: [https://github.com/chmouel](https://github.com/chmouel)
-- Fediverse: [https://fosstodon.org/@chmouel](https://fosstodon.org/@chmouel)
-- Twitter: [https://twitter.com/chmouel](https://twitter.com/chmouel)
-- Blog: [https://blog.chmouel.com](https://blog.chmouel.com)
+### Chmouel Boudjnah
+
+- Fediverse - [@chmouel@chmouel.com](https://fosstodon.org/@chmouel)
+- Twitter - [@chmouel](https://twitter.com/chmouel)
+- Blog  - [https://blog.chmouel.com](https://blog.chmouel.com)
