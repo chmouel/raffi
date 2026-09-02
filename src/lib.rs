@@ -1806,15 +1806,15 @@ mod tests {
     #[test]
     fn test_print_only_binary_shadowed_by_shell_function_runs_external_program() {
         let dir = temp_test_dir("function-collision");
-        write_argv_printer(&dir, "raffi-fake-app");
+        write_argv_printer(&dir, "raffifakeapp");
 
-        let config = binary_config(Some("raffi-fake-app"), Some(vec!["one"]));
+        let config = binary_config(Some("raffifakeapp"), Some(vec!["one"]));
         let formatted = format_print_only_command(&config, "").unwrap();
 
         let output = Command::new("/bin/sh")
             .arg("-c")
             .arg(format!(
-                "raffi-fake-app() {{ printf 'FUNCTION\\n'; }}\n{formatted}"
+                "raffifakeapp() {{ printf 'FUNCTION\\n'; }}\n{formatted}"
             ))
             .env("PATH", shadowed_path(&dir))
             .output()
