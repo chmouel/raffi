@@ -11,14 +11,14 @@ Add the following to your Hyprland configuration file (typically `~/.config/hypr
 
 ```ini
 $super = SUPER
-bind = $super, R, exec, (val=$(raffi -pI); echo $val | grep -q . && hyprctl dispatch exec "$val")
+bind = $super, R, exec, (val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val")
 ```
 
 ## How It Works
 
 - `raffi -pI` runs Raffi in print-only mode with icons disabled for faster startup
 - The selected command is stored in the `$val` variable
-- `grep -q .` checks if the output is non-empty (user didn't cancel)
+- `[ -n "$val" ]` checks that the output is non-empty (the user did not cancel)
 - `hyprctl dispatch exec` launches the selected application through Hyprland's IPC
 - The keybinding is `Super+R`
 
@@ -30,13 +30,13 @@ You can bind Raffi to any key combination:
 
 ```ini
 # Use Super+Space
-bind = $super, Space, exec, (val=$(raffi -pI); echo $val | grep -q . && hyprctl dispatch exec "$val")
+bind = $super, Space, exec, (val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val")
 
 # Use Super+D (like dmenu/rofi)
-bind = $super, D, exec, (val=$(raffi -pI); echo $val | grep -q . && hyprctl dispatch exec "$val")
+bind = $super, D, exec, (val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val")
 
 # Use Alt+Space
-bind = ALT, Space, exec, (val=$(raffi -pI); echo $val | grep -q . && hyprctl dispatch exec "$val")
+bind = ALT, Space, exec, (val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val")
 ```
 
 ### Enable Icons
@@ -44,7 +44,7 @@ bind = ALT, Space, exec, (val=$(raffi -pI); echo $val | grep -q . && hyprctl dis
 If you prefer to use icons (slightly slower startup):
 
 ```ini
-bind = $super, R, exec, (val=$(raffi -p); echo $val | grep -q . && hyprctl dispatch exec "$val")
+bind = $super, R, exec, (val=$(raffi -p); [ -n "$val" ] && hyprctl dispatch exec "$val")
 ```
 
 ### Use Native UI
@@ -52,7 +52,7 @@ bind = $super, R, exec, (val=$(raffi -p); echo $val | grep -q . && hyprctl dispa
 To use Raffi's built-in native interface instead of Fuzzel:
 
 ```ini
-bind = $super, R, exec, (val=$(raffi -p -u native); echo $val | grep -q . && hyprctl dispatch exec "$val")
+bind = $super, R, exec, (val=$(raffi -p -u native); [ -n "$val" ] && hyprctl dispatch exec "$val")
 ```
 
 ### Use Custom Config
@@ -60,7 +60,7 @@ bind = $super, R, exec, (val=$(raffi -p -u native); echo $val | grep -q . && hyp
 Specify a custom configuration file:
 
 ```ini
-bind = $super, R, exec, (val=$(raffi -pI -c ~/.config/raffi/custom.yaml); echo $val | grep -q . && hyprctl dispatch exec "$val")
+bind = $super, R, exec, (val=$(raffi -pI -c ~/.config/raffi/custom.yaml); [ -n "$val" ] && hyprctl dispatch exec "$val")
 ```
 
 ## Testing
@@ -81,9 +81,9 @@ After adding the configuration:
 
 ### Applications launch multiple times or don't launch
 
-- The `grep -q .` check prevents execution when you cancel the launcher
+- The `[ -n "$val" ]` check prevents execution when you cancel the launcher
 - Ensure you're using the full command including the conditional check
-- Test manually: `val=$(raffi -pI); echo $val | grep -q . && hyprctl dispatch exec "$val"`
+- Test manually: `val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val"`
 
 ### Command line appears in launcher
 

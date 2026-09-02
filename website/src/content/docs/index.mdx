@@ -128,10 +128,10 @@ Store and quickly insert reusable text snippets from inline config, YAML files, 
 
     ```ini
     # Sway
-    bindsym $super+Space exec raffi -p | xargs swaymsg exec --
+    bindsym $super+Space exec cmd=$(raffi -p) && [ -n "$cmd" ] && swaymsg exec -- "$cmd"
 
     # Hyprland
-    bind = $super, R, exec, (val=$(raffi -pI); echo $val | grep -q . && hyprctl dispatch exec "$val")
+    bind = $super, R, exec, (val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val")
     ```
   </details>
 

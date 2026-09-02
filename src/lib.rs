@@ -1268,23 +1268,75 @@ pub fn read_icon_map() -> Result<HashMap<String, String>> {
     serde_json::from_str(&contents).context("Failed to deserialize cache file")
 }
 
+/// Quote a string for safe use as a single POSIX shell word.
+/// Already-safe tokens are left as-is so the output stays readable.
+fn shell_quote(value: &str) -> String {
+    let is_safe = !value.is_empty()
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_./:=@%+-".contains(&b));
+    if is_safe {
+        return value.to_string();
+    }
+    format!("'{}'", value.replace('\'', r"'\''"))
+}
+
+/// Render a word that appears in command position.
+///
+/// The exec path uses `Command::new`, which always runs an external program, while a shell would
+/// first resolve the name as an alias, function, reserved word or builtin. Bare names are therefore
+/// routed through `env`, which performs the same `PATH` lookup, so that a launcher named `echo` or
+/// `source` behaves the same whether Raffi runs it or a shell does.
+fn format_command_word(value: &str) -> String {
+    if value.contains('/') {
+        // A path is never resolved as an alias, function, reserved word or builtin.
+        return shell_quote(value);
+    }
+    if value.contains('=') {
+        // `env` would read this as an environment assignment. Quoting is enough on its own here,
+        // because no alias, function name, reserved word or builtin can contain '='.
+        return format!("'{}'", value.replace('\'', r"'\''"));
+    }
+    format!("env -- {}", shell_quote(value))
+}
+
+/// Format the command that would be run as a shell-ready, quoted command line.
+///
+/// The output is meant to be evaluated by a shell (`sh -c "$cmd"`, `swaymsg exec -- "$cmd"`,
+/// `hyprctl dispatch exec "$cmd"`), not to be word-split by `xargs`. Script entries are rendered as
+/// `<interpreter> -c '<script>' [<interpreter> <args>...]`, mirroring how [`execute_chosen_command`]
+/// spawns them; a multi-line script therefore stays multi-line inside its quotes.
+fn format_print_only_command(mc: &RaffiConfig, interpreter: &str) -> Result<String> {
+    let mut parts = Vec::new();
+
+    if let Some(script) = &mc.script {
+        parts.push(format_command_word(interpreter));
+        parts.push("-c".to_string());
+        parts.push(shell_quote(script));
+        if let Some(args) = &mc.args {
+            // Passed as $0 by the exec path, so the script can reference $1..$n.
+            parts.push(shell_quote(interpreter));
+            parts.extend(args.iter().map(|arg| shell_quote(arg)));
+        }
+    } else {
+        let binary = mc.binary.as_deref().context("Binary not found")?;
+        parts.push(format_command_word(binary));
+        parts.extend(
+            mc.args
+                .as_deref()
+                .unwrap_or(&[])
+                .iter()
+                .map(|arg| shell_quote(arg)),
+        );
+    }
+
+    Ok(parts.join(" "))
+}
+
 /// Execute the chosen command or script.
 pub fn execute_chosen_command(mc: &RaffiConfig, args: &Args, interpreter: &str) -> Result<()> {
-    // make interepreter with mc.binary and mc.args on the same line
-    let interpreter_with_args = mc.args.as_ref().map_or(interpreter.to_string(), |args| {
-        format!("{} {}", interpreter, args.join(" "))
-    });
-
     if args.print_only {
-        if let Some(script) = &mc.script {
-            println!("#!/usr/bin/env -S {interpreter_with_args}\n{script}");
-        } else {
-            println!(
-                "{} {}",
-                mc.binary.as_deref().context("Binary not found")?,
-                mc.args.as_deref().unwrap_or(&[]).join(" ")
-            );
-        }
+        println!("{}", format_print_only_command(mc, interpreter)?);
         return Ok(());
     }
     if let Some(script) = &mc.script {
@@ -1533,6 +1585,7 @@ pub fn run(args: Args) -> Result<()> {
 mod tests {
     use super::*;
     use std::io::Cursor;
+    use std::os::unix::fs::PermissionsExt;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_test_dir(name: &str) -> PathBuf {
@@ -1543,6 +1596,257 @@ mod tests {
         let path = std::env::temp_dir().join(format!("raffi-{name}-{unique}"));
         fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    fn script_config(script: &str, args: Option<Vec<&str>>) -> RaffiConfig {
+        RaffiConfig {
+            script: Some(script.to_string()),
+            args: args.map(|args| args.iter().map(|arg| arg.to_string()).collect()),
+            ..Default::default()
+        }
+    }
+
+    fn binary_config(binary: Option<&str>, args: Option<Vec<&str>>) -> RaffiConfig {
+        RaffiConfig {
+            binary: binary.map(str::to_string),
+            args: args.map(|args| args.iter().map(|arg| arg.to_string()).collect()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_print_only_script_without_args_has_no_dollar_zero() {
+        let config = script_config("echo hello", None);
+        assert_eq!(
+            format_print_only_command(&config, "bash").unwrap(),
+            "env -- bash -c 'echo hello'"
+        );
+    }
+
+    #[test]
+    fn test_print_only_script_with_empty_args_keeps_dollar_zero() {
+        // Matches the exec path: Some(vec![]) still pushes the interpreter as $0.
+        let config = script_config("echo hello", Some(vec![]));
+        assert_eq!(
+            format_print_only_command(&config, "bash").unwrap(),
+            "env -- bash -c 'echo hello' bash"
+        );
+    }
+
+    #[test]
+    fn test_print_only_script_quotes_args() {
+        let config = script_config("echo \"$1\"", Some(vec!["foo", "bar baz"]));
+        assert_eq!(
+            format_print_only_command(&config, "bash").unwrap(),
+            "env -- bash -c 'echo \"$1\"' bash foo 'bar baz'"
+        );
+    }
+
+    #[test]
+    fn test_print_only_script_escapes_single_quotes() {
+        let config = script_config("echo 'hi there'", None);
+        assert_eq!(
+            format_print_only_command(&config, "bash").unwrap(),
+            r#"env -- bash -c 'echo '\''hi there'\'''"#
+        );
+    }
+
+    #[test]
+    fn test_print_only_script_preserves_newlines() {
+        let config = script_config("echo one\necho two", None);
+        assert_eq!(
+            format_print_only_command(&config, "sh").unwrap(),
+            "env -- sh -c 'echo one\necho two'"
+        );
+    }
+
+    #[test]
+    fn test_print_only_binary_with_safe_args_is_unquoted() {
+        let config = binary_config(
+            Some("/usr/bin/firefox"),
+            Some(vec!["--new-window", "--width=100"]),
+        );
+        assert_eq!(
+            format_print_only_command(&config, "").unwrap(),
+            "/usr/bin/firefox --new-window --width=100"
+        );
+    }
+
+    #[test]
+    fn test_print_only_binary_quotes_unsafe_args() {
+        let config = binary_config(Some("kitty"), Some(vec!["hello world", "; rm -rf /tmp/x"]));
+        assert_eq!(
+            format_print_only_command(&config, "").unwrap(),
+            "env -- kitty 'hello world' '; rm -rf /tmp/x'"
+        );
+    }
+
+    #[test]
+    fn test_print_only_formats_command_position_words() {
+        // Bare names are routed through env so a PATH lookup happens, as Command::new does.
+        assert_eq!(format_command_word("firefox"), "env -- firefox");
+        assert_eq!(format_command_word("source"), "env -- source");
+        // Paths cannot be resolved as an alias, function, reserved word or builtin.
+        assert_eq!(format_command_word("/usr/bin/firefox"), "/usr/bin/firefox");
+        assert_eq!(format_command_word("./my app"), "'./my app'");
+        // env would read this as an environment assignment, so quoting is used instead.
+        assert_eq!(format_command_word("FOO=bar"), "'FOO=bar'");
+        // Only command position is affected; arguments may safely contain '='.
+        assert_eq!(shell_quote("--width=100"), "--width=100");
+    }
+
+    #[test]
+    fn test_print_only_missing_binary_errors() {
+        let config = binary_config(None, None);
+        assert!(format_print_only_command(&config, "").is_err());
+    }
+
+    #[test]
+    fn test_print_only_script_round_trips_through_shell() {
+        let config = script_config(
+            "printf '%s|%s|%s' \"$0\" \"$1\" \"$2\"",
+            Some(vec!["first arg", "it's second"]),
+        );
+        let formatted = format_print_only_command(&config, "sh").unwrap();
+
+        let output = Command::new("sh")
+            .arg("-c")
+            .arg(&formatted)
+            .output()
+            .expect("failed to run formatted command");
+
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "sh|first arg|it's second"
+        );
+    }
+
+    #[test]
+    fn test_print_only_binary_round_trips_through_shell() {
+        let config = binary_config(Some("printf"), Some(vec!["%s|%s", "hello world", "a'b"]));
+        let formatted = format_print_only_command(&config, "").unwrap();
+
+        let output = Command::new("sh")
+            .arg("-c")
+            .arg(&formatted)
+            .output()
+            .expect("failed to run formatted command");
+
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "hello world|a'b");
+    }
+
+    /// Put `dir` ahead of the standard directories so its executables shadow the real ones.
+    fn shadowed_path(dir: &Path) -> String {
+        format!("{}:/usr/bin:/bin", dir.display())
+    }
+
+    /// Write an executable that prints each argument it receives on its own line.
+    fn write_argv_printer(dir: &Path, name: &str) {
+        let path = dir.join(name);
+        fs::write(
+            &path,
+            "#!/bin/sh\nprintf 'EXTERNAL\\n'\nfor a in \"$@\"; do printf '[%s]\\n' \"$a\"; done\n",
+        )
+        .unwrap();
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms).unwrap();
+    }
+
+    /// A `binary` that collides with a shell builtin must still run the external program, the way
+    /// `Command::new` does, and its arguments must never be evaluated as shell syntax.
+    #[test]
+    fn test_print_only_binary_shadowing_builtin_runs_external_program() {
+        let dir = temp_test_dir("builtin-collision");
+        write_argv_printer(&dir, "printf");
+
+        let config = binary_config(Some("printf"), Some(vec!["$(id -u)", "a b; echo pwned"]));
+        let formatted = format_print_only_command(&config, "").unwrap();
+
+        let output = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&formatted)
+            .env("PATH", shadowed_path(&dir))
+            .output()
+            .expect("failed to run formatted command");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        assert_eq!(stdout, "EXTERNAL\n[$(id -u)]\n[a b; echo pwned]\n");
+        assert!(!stdout.contains("pwned\n[") && !stdout.ends_with("pwned\n"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// `source` is a builtin in Bash but not in every shell, which is why the rule cannot rely on a
+    /// list of builtin names.
+    #[test]
+    fn test_print_only_binary_shadowing_shell_specific_builtin_runs_external_program() {
+        let dir = temp_test_dir("source-collision");
+        write_argv_printer(&dir, "source");
+
+        let config = binary_config(Some("source"), Some(vec!["/etc/hostname"]));
+        let formatted = format_print_only_command(&config, "").unwrap();
+
+        let output = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&formatted)
+            .env("PATH", shadowed_path(&dir))
+            .output()
+            .expect("failed to run formatted command");
+
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "EXTERNAL\n[/etc/hostname]\n"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A shell function defined in the evaluating shell must not take over from the real program.
+    #[test]
+    fn test_print_only_binary_shadowed_by_shell_function_runs_external_program() {
+        let dir = temp_test_dir("function-collision");
+        write_argv_printer(&dir, "raffifakeapp");
+
+        let config = binary_config(Some("raffifakeapp"), Some(vec!["one"]));
+        let formatted = format_print_only_command(&config, "").unwrap();
+
+        let output = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(format!(
+                "raffifakeapp() {{ printf 'FUNCTION\\n'; }}\n{formatted}"
+            ))
+            .env("PATH", shadowed_path(&dir))
+            .output()
+            .expect("failed to run formatted command");
+
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "EXTERNAL\n[one]\n");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The same protection applies to a script interpreter whose name collides with a builtin.
+    #[test]
+    fn test_print_only_script_interpreter_shadowing_builtin_runs_external_program() {
+        let dir = temp_test_dir("interpreter-collision");
+        write_argv_printer(&dir, "test");
+
+        let config = script_config("echo hello", None);
+        let formatted = format_print_only_command(&config, "test").unwrap();
+
+        let output = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&formatted)
+            .env("PATH", shadowed_path(&dir))
+            .output()
+            .expect("failed to run formatted command");
+
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "EXTERNAL\n[-c]\n[echo hello]\n"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

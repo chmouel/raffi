@@ -94,14 +94,14 @@ See the full CLI reference: <https://chmouel.github.io/raffi/reference/cli-optio
 ```config
 set $menu raffi -p
 set $super Mod4
-bindsym $super+Space exec $menu | xargs swaymsg exec --
+bindsym $super+Space exec cmd=$($menu) && [ -n "$cmd" ] && swaymsg exec -- "$cmd"
 ```
 
 ### Hyprland
 
 ```conf
 $super = SUPER
-bind = $super, R, exec, (val=$(raffi -pI); echo $val | grep -q . && hyprctl dispatch exec "$val")
+bind = $super, R, exec, (val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val")
 ```
 
 See also: [Sway integration](https://chmouel.github.io/raffi/integration/sway/) · [Hyprland integration](https://chmouel.github.io/raffi/integration/hyprland/) · [Fuzzel integration](https://chmouel.github.io/raffi/integration/fuzzel/)
