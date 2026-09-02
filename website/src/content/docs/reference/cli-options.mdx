@@ -95,15 +95,18 @@ Print the command to stdout instead of executing it.
 
   ```bash
   raffi -p
-  # Output: firefox --marionette
+  # Output: env -- firefox --marionette
   ```
 
   The output is a **shell-ready command line**: arguments that need it are single-quoted, so the
   result is meant to be evaluated by a shell (`sh -c "$cmd"`) rather than word-split. Script entries
   print as `<interpreter> -c '<script>' [<interpreter> <args>...]`, which means a multi-line script
-  produces multi-line output. A command whose name collides with a shell builtin, such as `echo`, is
-  printed with an `env` prefix so the real program on your `PATH` runs, matching what Raffi does when
-  it launches the entry itself.
+  produces multi-line output.
+
+  Commands given by name are printed with an `env` prefix. That makes the receiving shell run the
+  program from your `PATH`, the same one Raffi would launch itself, instead of a shell builtin,
+  alias or function that happens to share the name. Entries configured with a full path are printed
+  as-is.
 
   Example with Sway:
 

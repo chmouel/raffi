@@ -1268,18 +1268,6 @@ pub fn read_icon_map() -> Result<HashMap<String, String>> {
     serde_json::from_str(&contents).context("Failed to deserialize cache file")
 }
 
-/// Shell reserved words and builtins that a shell resolves before looking up an executable.
-///
-/// The exec path uses `Command::new`, which always runs an external program, so these names need
-/// help to behave the same way once the printed line is handed to a shell.
-const SHELL_RESERVED_WORDS_AND_BUILTINS: &[&str] = &[
-    "!", ".", ":", "[", "alias", "bg", "break", "case", "cd", "command", "continue", "do", "done",
-    "echo", "elif", "else", "esac", "eval", "exec", "exit", "export", "false", "fg", "fi", "for",
-    "function", "getopts", "hash", "if", "in", "jobs", "kill", "printf", "pwd", "read", "readonly",
-    "return", "select", "set", "shift", "test", "then", "time", "times", "trap", "true", "type",
-    "ulimit", "umask", "unalias", "unset", "until", "wait", "while", "{", "}",
-];
-
 /// Quote a string for safe use as a single POSIX shell word.
 /// Already-safe tokens are left as-is so the output stays readable.
 fn shell_quote(value: &str) -> String {
@@ -1295,18 +1283,21 @@ fn shell_quote(value: &str) -> String {
 
 /// Render a word that appears in command position.
 ///
-/// Two cases need more than [`shell_quote`]. A word containing `=` would be read as a variable
-/// assignment, so it is always quoted. A word that names a shell builtin or reserved word would be
-/// resolved by the shell instead of being looked up on `PATH`, so it is prefixed with `env`, which
-/// performs the same `PATH` lookup the exec path performs.
+/// The exec path uses `Command::new`, which always runs an external program, while a shell would
+/// first resolve the name as an alias, function, reserved word or builtin. Bare names are therefore
+/// routed through `env`, which performs the same `PATH` lookup, so that a launcher named `echo` or
+/// `source` behaves the same whether Raffi runs it or a shell does.
 fn format_command_word(value: &str) -> String {
-    if SHELL_RESERVED_WORDS_AND_BUILTINS.contains(&value) {
-        return format!("env {}", shell_quote(value));
+    if value.contains('/') {
+        // A path is never resolved as an alias, function, reserved word or builtin.
+        return shell_quote(value);
     }
     if value.contains('=') {
+        // `env` would read this as an environment assignment. Quoting is enough on its own here,
+        // because no alias, function name, reserved word or builtin can contain '='.
         return format!("'{}'", value.replace('\'', r"'\''"));
     }
-    shell_quote(value)
+    format!("env -- {}", shell_quote(value))
 }
 
 /// Format the command that would be run as a shell-ready, quoted command line.
@@ -1628,7 +1619,7 @@ mod tests {
         let config = script_config("echo hello", None);
         assert_eq!(
             format_print_only_command(&config, "bash").unwrap(),
-            "bash -c 'echo hello'"
+            "env -- bash -c 'echo hello'"
         );
     }
 
@@ -1638,7 +1629,7 @@ mod tests {
         let config = script_config("echo hello", Some(vec![]));
         assert_eq!(
             format_print_only_command(&config, "bash").unwrap(),
-            "bash -c 'echo hello' bash"
+            "env -- bash -c 'echo hello' bash"
         );
     }
 
@@ -1647,7 +1638,7 @@ mod tests {
         let config = script_config("echo \"$1\"", Some(vec!["foo", "bar baz"]));
         assert_eq!(
             format_print_only_command(&config, "bash").unwrap(),
-            "bash -c 'echo \"$1\"' bash foo 'bar baz'"
+            "env -- bash -c 'echo \"$1\"' bash foo 'bar baz'"
         );
     }
 
@@ -1656,7 +1647,7 @@ mod tests {
         let config = script_config("echo 'hi there'", None);
         assert_eq!(
             format_print_only_command(&config, "bash").unwrap(),
-            r#"bash -c 'echo '\''hi there'\'''"#
+            r#"env -- bash -c 'echo '\''hi there'\'''"#
         );
     }
 
@@ -1665,7 +1656,7 @@ mod tests {
         let config = script_config("echo one\necho two", None);
         assert_eq!(
             format_print_only_command(&config, "sh").unwrap(),
-            "sh -c 'echo one\necho two'"
+            "env -- sh -c 'echo one\necho two'"
         );
     }
 
@@ -1686,18 +1677,20 @@ mod tests {
         let config = binary_config(Some("kitty"), Some(vec!["hello world", "; rm -rf /tmp/x"]));
         assert_eq!(
             format_print_only_command(&config, "").unwrap(),
-            "kitty 'hello world' '; rm -rf /tmp/x'"
+            "env -- kitty 'hello world' '; rm -rf /tmp/x'"
         );
     }
 
     #[test]
-    fn test_print_only_quotes_command_position_words() {
-        // Builtins and reserved words are routed through env so a PATH lookup still happens.
-        assert_eq!(format_command_word("time"), "env time");
-        assert_eq!(format_command_word("echo"), "env echo");
-        assert_eq!(format_command_word("eval"), "env eval");
+    fn test_print_only_formats_command_position_words() {
+        // Bare names are routed through env so a PATH lookup happens, as Command::new does.
+        assert_eq!(format_command_word("firefox"), "env -- firefox");
+        assert_eq!(format_command_word("source"), "env -- source");
+        // Paths cannot be resolved as an alias, function, reserved word or builtin.
+        assert_eq!(format_command_word("/usr/bin/firefox"), "/usr/bin/firefox");
+        assert_eq!(format_command_word("./my app"), "'./my app'");
+        // env would read this as an environment assignment, so quoting is used instead.
         assert_eq!(format_command_word("FOO=bar"), "'FOO=bar'");
-        assert_eq!(format_command_word("firefox"), "firefox");
         // Only command position is affected; arguments may safely contain '='.
         assert_eq!(shell_quote("--width=100"), "--width=100");
     }
@@ -1780,6 +1773,54 @@ mod tests {
 
         assert_eq!(stdout, "EXTERNAL\n[$(id -u)]\n[a b; echo pwned]\n");
         assert!(!stdout.contains("pwned\n[") && !stdout.ends_with("pwned\n"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// `source` is a builtin in Bash but not in every shell, which is why the rule cannot rely on a
+    /// list of builtin names.
+    #[test]
+    fn test_print_only_binary_shadowing_shell_specific_builtin_runs_external_program() {
+        let dir = temp_test_dir("source-collision");
+        write_argv_printer(&dir, "source");
+
+        let config = binary_config(Some("source"), Some(vec!["/etc/hostname"]));
+        let formatted = format_print_only_command(&config, "").unwrap();
+
+        let output = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&formatted)
+            .env("PATH", shadowed_path(&dir))
+            .output()
+            .expect("failed to run formatted command");
+
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "EXTERNAL\n[/etc/hostname]\n"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A shell function defined in the evaluating shell must not take over from the real program.
+    #[test]
+    fn test_print_only_binary_shadowed_by_shell_function_runs_external_program() {
+        let dir = temp_test_dir("function-collision");
+        write_argv_printer(&dir, "raffi-fake-app");
+
+        let config = binary_config(Some("raffi-fake-app"), Some(vec!["one"]));
+        let formatted = format_print_only_command(&config, "").unwrap();
+
+        let output = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(format!(
+                "raffi-fake-app() {{ printf 'FUNCTION\\n'; }}\n{formatted}"
+            ))
+            .env("PATH", shadowed_path(&dir))
+            .output()
+            .expect("failed to run formatted command");
+
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "EXTERNAL\n[one]\n");
 
         let _ = fs::remove_dir_all(&dir);
     }
