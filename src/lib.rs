@@ -1268,10 +1268,16 @@ pub fn read_icon_map() -> Result<HashMap<String, String>> {
     serde_json::from_str(&contents).context("Failed to deserialize cache file")
 }
 
-/// Shell reserved words that must be quoted when they appear in command position.
-const SHELL_RESERVED_WORDS: &[&str] = &[
-    "!", "{", "}", "case", "do", "done", "elif", "else", "esac", "fi", "for", "function", "if",
-    "in", "select", "then", "time", "until", "while",
+/// Shell reserved words and builtins that a shell resolves before looking up an executable.
+///
+/// The exec path uses `Command::new`, which always runs an external program, so these names need
+/// help to behave the same way once the printed line is handed to a shell.
+const SHELL_RESERVED_WORDS_AND_BUILTINS: &[&str] = &[
+    "!", ".", ":", "[", "alias", "bg", "break", "case", "cd", "command", "continue", "do", "done",
+    "echo", "elif", "else", "esac", "eval", "exec", "exit", "export", "false", "fg", "fi", "for",
+    "function", "getopts", "hash", "if", "in", "jobs", "kill", "printf", "pwd", "read", "readonly",
+    "return", "select", "set", "shift", "test", "then", "time", "times", "trap", "true", "type",
+    "ulimit", "umask", "unalias", "unset", "until", "wait", "while", "{", "}",
 ];
 
 /// Quote a string for safe use as a single POSIX shell word.
@@ -1287,12 +1293,17 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', r"'\''"))
 }
 
-/// Quote a string used in command position.
+/// Render a word that appears in command position.
 ///
-/// Stricter than [`shell_quote`]: a word containing `=` would be parsed as a variable assignment
-/// and a reserved word such as `time` or `if` would be parsed as shell syntax, so both are quoted.
-fn shell_quote_command_word(value: &str) -> String {
-    if value.contains('=') || SHELL_RESERVED_WORDS.contains(&value) {
+/// Two cases need more than [`shell_quote`]. A word containing `=` would be read as a variable
+/// assignment, so it is always quoted. A word that names a shell builtin or reserved word would be
+/// resolved by the shell instead of being looked up on `PATH`, so it is prefixed with `env`, which
+/// performs the same `PATH` lookup the exec path performs.
+fn format_command_word(value: &str) -> String {
+    if SHELL_RESERVED_WORDS_AND_BUILTINS.contains(&value) {
+        return format!("env {}", shell_quote(value));
+    }
+    if value.contains('=') {
         return format!("'{}'", value.replace('\'', r"'\''"));
     }
     shell_quote(value)
@@ -1308,7 +1319,7 @@ fn format_print_only_command(mc: &RaffiConfig, interpreter: &str) -> Result<Stri
     let mut parts = Vec::new();
 
     if let Some(script) = &mc.script {
-        parts.push(shell_quote_command_word(interpreter));
+        parts.push(format_command_word(interpreter));
         parts.push("-c".to_string());
         parts.push(shell_quote(script));
         if let Some(args) = &mc.args {
@@ -1318,7 +1329,7 @@ fn format_print_only_command(mc: &RaffiConfig, interpreter: &str) -> Result<Stri
         }
     } else {
         let binary = mc.binary.as_deref().context("Binary not found")?;
-        parts.push(shell_quote_command_word(binary));
+        parts.push(format_command_word(binary));
         parts.extend(
             mc.args
                 .as_deref()
@@ -1583,6 +1594,7 @@ pub fn run(args: Args) -> Result<()> {
 mod tests {
     use super::*;
     use std::io::Cursor;
+    use std::os::unix::fs::PermissionsExt;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_test_dir(name: &str) -> PathBuf {
@@ -1680,9 +1692,12 @@ mod tests {
 
     #[test]
     fn test_print_only_quotes_command_position_words() {
-        assert_eq!(shell_quote_command_word("time"), "'time'");
-        assert_eq!(shell_quote_command_word("FOO=bar"), "'FOO=bar'");
-        assert_eq!(shell_quote_command_word("firefox"), "firefox");
+        // Builtins and reserved words are routed through env so a PATH lookup still happens.
+        assert_eq!(format_command_word("time"), "env time");
+        assert_eq!(format_command_word("echo"), "env echo");
+        assert_eq!(format_command_word("eval"), "env eval");
+        assert_eq!(format_command_word("FOO=bar"), "'FOO=bar'");
+        assert_eq!(format_command_word("firefox"), "firefox");
         // Only command position is affected; arguments may safely contain '='.
         assert_eq!(shell_quote("--width=100"), "--width=100");
     }
@@ -1725,6 +1740,72 @@ mod tests {
             .expect("failed to run formatted command");
 
         assert_eq!(String::from_utf8_lossy(&output.stdout), "hello world|a'b");
+    }
+
+    /// Put `dir` ahead of the standard directories so its executables shadow the real ones.
+    fn shadowed_path(dir: &Path) -> String {
+        format!("{}:/usr/bin:/bin", dir.display())
+    }
+
+    /// Write an executable that prints each argument it receives on its own line.
+    fn write_argv_printer(dir: &Path, name: &str) {
+        let path = dir.join(name);
+        fs::write(
+            &path,
+            "#!/bin/sh\nprintf 'EXTERNAL\\n'\nfor a in \"$@\"; do printf '[%s]\\n' \"$a\"; done\n",
+        )
+        .unwrap();
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms).unwrap();
+    }
+
+    /// A `binary` that collides with a shell builtin must still run the external program, the way
+    /// `Command::new` does, and its arguments must never be evaluated as shell syntax.
+    #[test]
+    fn test_print_only_binary_shadowing_builtin_runs_external_program() {
+        let dir = temp_test_dir("builtin-collision");
+        write_argv_printer(&dir, "printf");
+
+        let config = binary_config(Some("printf"), Some(vec!["$(id -u)", "a b; echo pwned"]));
+        let formatted = format_print_only_command(&config, "").unwrap();
+
+        let output = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&formatted)
+            .env("PATH", shadowed_path(&dir))
+            .output()
+            .expect("failed to run formatted command");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        assert_eq!(stdout, "EXTERNAL\n[$(id -u)]\n[a b; echo pwned]\n");
+        assert!(!stdout.contains("pwned\n[") && !stdout.ends_with("pwned\n"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The same protection applies to a script interpreter whose name collides with a builtin.
+    #[test]
+    fn test_print_only_script_interpreter_shadowing_builtin_runs_external_program() {
+        let dir = temp_test_dir("interpreter-collision");
+        write_argv_printer(&dir, "test");
+
+        let config = script_config("echo hello", None);
+        let formatted = format_print_only_command(&config, "test").unwrap();
+
+        let output = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&formatted)
+            .env("PATH", shadowed_path(&dir))
+            .output()
+            .expect("failed to run formatted command");
+
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "EXTERNAL\n[-c]\n[echo hello]\n"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

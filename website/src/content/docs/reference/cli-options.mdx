@@ -101,7 +101,9 @@ Print the command to stdout instead of executing it.
   The output is a **shell-ready command line**: arguments that need it are single-quoted, so the
   result is meant to be evaluated by a shell (`sh -c "$cmd"`) rather than word-split. Script entries
   print as `<interpreter> -c '<script>' [<interpreter> <args>...]`, which means a multi-line script
-  produces multi-line output.
+  produces multi-line output. A command whose name collides with a shell builtin, such as `echo`, is
+  printed with an `env` prefix so the real program on your `PATH` runs, matching what Raffi does when
+  it launches the entry itself.
 
   Example with Sway:
 
