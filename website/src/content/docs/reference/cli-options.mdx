@@ -98,11 +98,19 @@ Print the command to stdout instead of executing it.
   # Output: firefox --marionette
   ```
 
+  The output is a **shell-ready command line**: arguments that need it are single-quoted, so the
+  result is meant to be evaluated by a shell (`sh -c "$cmd"`) rather than word-split. Script entries
+  print as `<interpreter> -c '<script>' [<interpreter> <args>...]`, which means a multi-line script
+  produces multi-line output.
+
   Example with Sway:
 
   ```bash
-  raffi -p | xargs swaymsg exec --
+  cmd=$(raffi -p) && [ -n "$cmd" ] && swaymsg exec -- "$cmd"
   ```
+
+  Do not pipe the output through `xargs`: `xargs` strips quotes and splits on whitespace, which
+  mangles arguments containing spaces and breaks `script` entries. Always quote `"$cmd"`.
 
 
 **`-P, --default-script-shell`** `string` (default: `bash`)

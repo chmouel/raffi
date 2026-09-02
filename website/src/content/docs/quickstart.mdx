@@ -220,7 +220,7 @@ Integrate Raffi with your Wayland compositor:
     ```ini
     set $menu raffi -p
     set $super Mod4
-    bindsym $super+Space exec $menu | xargs swaymsg exec --
+    bindsym $super+Space exec cmd=$($menu) && [ -n "$cmd" ] && swaymsg exec -- "$cmd"
     ```
 
     Reload Sway config:
@@ -237,17 +237,18 @@ Integrate Raffi with your Wayland compositor:
 
     ```ini
     $super = SUPER
-    bind = $super, R, exec, (val=$(raffi -pI); echo $val | grep -q . && hyprctl dispatch exec "$val")
+    bind = $super, R, exec, (val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val")
     ```
 
     Reload Hyprland config or restart Hyprland, then press `Super+R` to launch Raffi.
   </TabItem>
 
   <TabItem label="Other Compositors">
-    For other Wayland compositors, bind a key to execute:
+    For other Wayland compositors, bind a key to a command that captures Raffi's output and
+    hands it to the compositor as a single argument:
 
     ```bash
-    raffi -p | xargs swaymsg exec --
+    cmd=$(raffi -p) && [ -n "$cmd" ] && swaymsg exec -- "$cmd"
     ```
 
     Or for direct execution:

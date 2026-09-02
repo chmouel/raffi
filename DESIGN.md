@@ -203,7 +203,7 @@ After a selection is returned from either backend, execution is centralized in `
 
 - Binary launchers use `std::process::Command`.
 - Script launchers run through the configured interpreter or the default script shell.
-- `--print-only` prints the resolved command or script wrapper instead of spawning it.
+- `--print-only` prints the resolved command as a shell-ready, quoted command line instead of spawning it.
 
 This separation keeps UI backends focused on selection rather than process management.
 

@@ -1268,23 +1268,73 @@ pub fn read_icon_map() -> Result<HashMap<String, String>> {
     serde_json::from_str(&contents).context("Failed to deserialize cache file")
 }
 
+/// Shell reserved words that must be quoted when they appear in command position.
+const SHELL_RESERVED_WORDS: &[&str] = &[
+    "!", "{", "}", "case", "do", "done", "elif", "else", "esac", "fi", "for", "function", "if",
+    "in", "select", "then", "time", "until", "while",
+];
+
+/// Quote a string for safe use as a single POSIX shell word.
+/// Already-safe tokens are left as-is so the output stays readable.
+fn shell_quote(value: &str) -> String {
+    let is_safe = !value.is_empty()
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_./:=@%+-".contains(&b));
+    if is_safe {
+        return value.to_string();
+    }
+    format!("'{}'", value.replace('\'', r"'\''"))
+}
+
+/// Quote a string used in command position.
+///
+/// Stricter than [`shell_quote`]: a word containing `=` would be parsed as a variable assignment
+/// and a reserved word such as `time` or `if` would be parsed as shell syntax, so both are quoted.
+fn shell_quote_command_word(value: &str) -> String {
+    if value.contains('=') || SHELL_RESERVED_WORDS.contains(&value) {
+        return format!("'{}'", value.replace('\'', r"'\''"));
+    }
+    shell_quote(value)
+}
+
+/// Format the command that would be run as a shell-ready, quoted command line.
+///
+/// The output is meant to be evaluated by a shell (`sh -c "$cmd"`, `swaymsg exec -- "$cmd"`,
+/// `hyprctl dispatch exec "$cmd"`), not to be word-split by `xargs`. Script entries are rendered as
+/// `<interpreter> -c '<script>' [<interpreter> <args>...]`, mirroring how [`execute_chosen_command`]
+/// spawns them; a multi-line script therefore stays multi-line inside its quotes.
+fn format_print_only_command(mc: &RaffiConfig, interpreter: &str) -> Result<String> {
+    let mut parts = Vec::new();
+
+    if let Some(script) = &mc.script {
+        parts.push(shell_quote_command_word(interpreter));
+        parts.push("-c".to_string());
+        parts.push(shell_quote(script));
+        if let Some(args) = &mc.args {
+            // Passed as $0 by the exec path, so the script can reference $1..$n.
+            parts.push(shell_quote(interpreter));
+            parts.extend(args.iter().map(|arg| shell_quote(arg)));
+        }
+    } else {
+        let binary = mc.binary.as_deref().context("Binary not found")?;
+        parts.push(shell_quote_command_word(binary));
+        parts.extend(
+            mc.args
+                .as_deref()
+                .unwrap_or(&[])
+                .iter()
+                .map(|arg| shell_quote(arg)),
+        );
+    }
+
+    Ok(parts.join(" "))
+}
+
 /// Execute the chosen command or script.
 pub fn execute_chosen_command(mc: &RaffiConfig, args: &Args, interpreter: &str) -> Result<()> {
-    // make interepreter with mc.binary and mc.args on the same line
-    let interpreter_with_args = mc.args.as_ref().map_or(interpreter.to_string(), |args| {
-        format!("{} {}", interpreter, args.join(" "))
-    });
-
     if args.print_only {
-        if let Some(script) = &mc.script {
-            println!("#!/usr/bin/env -S {interpreter_with_args}\n{script}");
-        } else {
-            println!(
-                "{} {}",
-                mc.binary.as_deref().context("Binary not found")?,
-                mc.args.as_deref().unwrap_or(&[]).join(" ")
-            );
-        }
+        println!("{}", format_print_only_command(mc, interpreter)?);
         return Ok(());
     }
     if let Some(script) = &mc.script {
@@ -1543,6 +1593,138 @@ mod tests {
         let path = std::env::temp_dir().join(format!("raffi-{name}-{unique}"));
         fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    fn script_config(script: &str, args: Option<Vec<&str>>) -> RaffiConfig {
+        RaffiConfig {
+            script: Some(script.to_string()),
+            args: args.map(|args| args.iter().map(|arg| arg.to_string()).collect()),
+            ..Default::default()
+        }
+    }
+
+    fn binary_config(binary: Option<&str>, args: Option<Vec<&str>>) -> RaffiConfig {
+        RaffiConfig {
+            binary: binary.map(str::to_string),
+            args: args.map(|args| args.iter().map(|arg| arg.to_string()).collect()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_print_only_script_without_args_has_no_dollar_zero() {
+        let config = script_config("echo hello", None);
+        assert_eq!(
+            format_print_only_command(&config, "bash").unwrap(),
+            "bash -c 'echo hello'"
+        );
+    }
+
+    #[test]
+    fn test_print_only_script_with_empty_args_keeps_dollar_zero() {
+        // Matches the exec path: Some(vec![]) still pushes the interpreter as $0.
+        let config = script_config("echo hello", Some(vec![]));
+        assert_eq!(
+            format_print_only_command(&config, "bash").unwrap(),
+            "bash -c 'echo hello' bash"
+        );
+    }
+
+    #[test]
+    fn test_print_only_script_quotes_args() {
+        let config = script_config("echo \"$1\"", Some(vec!["foo", "bar baz"]));
+        assert_eq!(
+            format_print_only_command(&config, "bash").unwrap(),
+            "bash -c 'echo \"$1\"' bash foo 'bar baz'"
+        );
+    }
+
+    #[test]
+    fn test_print_only_script_escapes_single_quotes() {
+        let config = script_config("echo 'hi there'", None);
+        assert_eq!(
+            format_print_only_command(&config, "bash").unwrap(),
+            r#"bash -c 'echo '\''hi there'\'''"#
+        );
+    }
+
+    #[test]
+    fn test_print_only_script_preserves_newlines() {
+        let config = script_config("echo one\necho two", None);
+        assert_eq!(
+            format_print_only_command(&config, "sh").unwrap(),
+            "sh -c 'echo one\necho two'"
+        );
+    }
+
+    #[test]
+    fn test_print_only_binary_with_safe_args_is_unquoted() {
+        let config = binary_config(
+            Some("/usr/bin/firefox"),
+            Some(vec!["--new-window", "--width=100"]),
+        );
+        assert_eq!(
+            format_print_only_command(&config, "").unwrap(),
+            "/usr/bin/firefox --new-window --width=100"
+        );
+    }
+
+    #[test]
+    fn test_print_only_binary_quotes_unsafe_args() {
+        let config = binary_config(Some("kitty"), Some(vec!["hello world", "; rm -rf /tmp/x"]));
+        assert_eq!(
+            format_print_only_command(&config, "").unwrap(),
+            "kitty 'hello world' '; rm -rf /tmp/x'"
+        );
+    }
+
+    #[test]
+    fn test_print_only_quotes_command_position_words() {
+        assert_eq!(shell_quote_command_word("time"), "'time'");
+        assert_eq!(shell_quote_command_word("FOO=bar"), "'FOO=bar'");
+        assert_eq!(shell_quote_command_word("firefox"), "firefox");
+        // Only command position is affected; arguments may safely contain '='.
+        assert_eq!(shell_quote("--width=100"), "--width=100");
+    }
+
+    #[test]
+    fn test_print_only_missing_binary_errors() {
+        let config = binary_config(None, None);
+        assert!(format_print_only_command(&config, "").is_err());
+    }
+
+    #[test]
+    fn test_print_only_script_round_trips_through_shell() {
+        let config = script_config(
+            "printf '%s|%s|%s' \"$0\" \"$1\" \"$2\"",
+            Some(vec!["first arg", "it's second"]),
+        );
+        let formatted = format_print_only_command(&config, "sh").unwrap();
+
+        let output = Command::new("sh")
+            .arg("-c")
+            .arg(&formatted)
+            .output()
+            .expect("failed to run formatted command");
+
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "sh|first arg|it's second"
+        );
+    }
+
+    #[test]
+    fn test_print_only_binary_round_trips_through_shell() {
+        let config = binary_config(Some("printf"), Some(vec!["%s|%s", "hello world", "a'b"]));
+        let formatted = format_print_only_command(&config, "").unwrap();
+
+        let output = Command::new("sh")
+            .arg("-c")
+            .arg(&formatted)
+            .output()
+            .expect("failed to run formatted command");
+
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "hello world|a'b");
     }
 
     #[test]

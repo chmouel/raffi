@@ -218,13 +218,13 @@ general:
     ```ini
     set $menu raffi -p
     set $super Mod4
-    bindsym $super+Space exec $menu | xargs swaymsg exec --
+    bindsym $super+Space exec cmd=$($menu) && [ -n "$cmd" ] && swaymsg exec -- "$cmd"
     ```
   </TabItem>
   <TabItem label="Hyprland">
     ```ini
     $super = SUPER
-    bind = $super, R, exec, (val=$(raffi -pI); echo $val | grep -q . && hyprctl dispatch exec "$val")
+    bind = $super, R, exec, (val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val")
     ```
   </TabItem>
 </Tabs>

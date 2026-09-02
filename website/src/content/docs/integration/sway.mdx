@@ -7,19 +7,38 @@ Raffi integrates seamlessly with the Sway window manager, allowing you to launch
 
 ## Configuration
 
-Add the following configuration to your Sway config file (typically `~/.config/sway/config`):
+The simplest binding lets Raffi spawn the selected command itself:
+
+```ini
+set $super Mod4
+bindsym $super+Space exec raffi
+```
+
+If you want Sway to be the parent process of the launched application (so it is owned by the
+compositor rather than by Raffi), use print-only mode and hand the command to `swaymsg`:
 
 ```ini
 set $menu raffi -p
 set $super Mod4
-bindsym $super+Space exec $menu | xargs swaymsg exec --
+bindsym $super+Space exec cmd=$($menu) && [ -n "$cmd" ] && swaymsg exec -- "$cmd"
 ```
 
 ## How It Works
 
-- `raffi -p` runs Raffi in print-only mode, which outputs the selected command instead of executing it directly
-- The output is piped to `xargs swaymsg exec --` to execute the command via Sway's IPC interface
+- `raffi -p` runs Raffi in print-only mode, which prints the selected command instead of executing it
+- `cmd=$(...)` captures that output; Sway runs the whole binding through `sh -c`
+- `[ -n "$cmd" ]` skips `swaymsg` when nothing was selected — without this guard `swaymsg` is called
+  with no command and fails (see [Troubleshooting](#invalid-exec-command-expected-at-least-1-argument-got-0))
+- `swaymsg exec -- "$cmd"` passes the command as a **single quoted argument**, which preserves
+  arguments containing spaces as well as multi-line `script` entries
 - `$super+Space` binds the launcher to Super (Windows/Command key) + Space
+
+:::caution[Do not pipe through `xargs`]
+Older versions of this documentation suggested `raffi -p | xargs swaymsg exec --`. Avoid it:
+`xargs` splits on whitespace and strips quotes, so any argument containing a space and every
+`script` entry gets mangled before Sway sees it. Adding `-r`/`--no-run-if-empty` only silences the
+empty-selection error; it does not fix the quoting. Use the command-substitution form above.
+:::
 
 ## Customization
 
@@ -29,10 +48,10 @@ You can change the keybinding to any combination you prefer:
 
 ```ini
 # Use Super+D instead
-bindsym $super+d exec $menu | xargs swaymsg exec --
+bindsym $super+d exec cmd=$($menu) && [ -n "$cmd" ] && swaymsg exec -- "$cmd"
 
 # Use Alt+Space
-bindsym Mod1+Space exec $menu | xargs swaymsg exec --
+bindsym Mod1+Space exec cmd=$($menu) && [ -n "$cmd" ] && swaymsg exec -- "$cmd"
 ```
 
 ### Additional Raffi Options
@@ -66,7 +85,30 @@ After adding the configuration:
 - If using Fuzzel mode (default), verify Fuzzel is installed
 - Check Sway logs: `journalctl --user -u sway`
 
+### `Invalid exec command (expected at least 1 argument, got 0)`
+
+This error comes from `swaymsg`, not from Raffi: it means `swaymsg exec` was called without a
+command because Raffi printed nothing. Common causes:
+
+- **No guard on an empty selection.** `raffi -p | xargs swaymsg exec --` runs `swaymsg` even when
+  its input is empty. Use the `[ -n "$cmd" ]` form shown above.
+- **You cancelled the menu.** Pressing `Escape` or selecting nothing exits without printing, which
+  is normal.
+- **You selected an addon entry.** Emoji, calculator, web search, file browser and text snippet
+  entries perform their action directly in the native UI, so there is no command to print.
+- **Raffi is not in Sway's `PATH`.** Sway's `exec` runs commands through `sh -c`, which does not read
+  `~/.bashrc` or `~/.zshrc`. A `cargo install`ed binary in `~/.cargo/bin` therefore works in a
+  terminal but not from a keybinding. Test with an absolute path:
+
+  ```ini
+  set $menu /home/yourname/.cargo/bin/raffi -p
+  ```
+
+  Or export the directory in Sway's environment, for example via
+  `systemctl --user import-environment PATH` or your login shell profile.
+
 ### Applications don't launch
 
-- Test the command manually: `raffi -p | xargs swaymsg exec --`
+- Test the command manually: `cmd=$(raffi -p) && [ -n "$cmd" ] && swaymsg exec -- "$cmd"`
 - Verify `swaymsg` is working: `swaymsg -t get_version`
+- Capture a debug log from the keybinding: `set $menu raffi -p --debug-file /tmp/raffi.log`

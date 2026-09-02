@@ -203,13 +203,16 @@ To see the exact command without executing:
 raffi --print-only
 ```
 
-For a script entry, this outputs:
+For a script entry, this outputs a shell-ready command line:
 
 ```bash
-#!/usr/bin/env -S bash
-echo "hello world and show me your env"
-env
+bash -c 'echo "hello world and show me your env"
+env'
 ```
+
+Quoting is preserved, so the output can be evaluated directly with `sh -c "$cmd"` or handed to a
+compositor as a single argument. A multi-line script stays multi-line inside the quotes; do not pipe
+it through `xargs`, which strips the quotes.
 
 ## Real-World Examples
 
