@@ -144,7 +144,7 @@ pub(crate) enum Message {
     TextSnippetSelected(usize),
     WebSearchSelected,
     FileBrowserItemSelected(usize),
-    FileBrowserTabComplete,
+    TabComplete,
     FileBrowserToggleHidden,
     ModifiersChanged(iced::keyboard::Modifiers),
     HistoryPrevious,
@@ -153,4 +153,5 @@ pub(crate) enum Message {
     EmojiSelected(usize),
     EmojiDataLoaded(Vec<EmojiEntry>),
     FallbackSelected(usize),
+    KeywordSuggestionSelected(usize),
 }

@@ -5,6 +5,20 @@ description: Configuration reference for built-in addons (currency, calculator, 
 
 The native UI includes several built-in addons that can be configured under the `addons` section of `raffi.yaml`. All addons are enabled by default.
 
+## Keywords
+
+Script filters, web searches, text snippets, and the emoji picker are reached by
+typing their keyword followed by a space. Typing `sn` on its own searches your
+launchers as usual, while `sn ` enters the snippet source.
+
+While you type a keyword, Raffi lists the matching keywords at the top of the
+results with a short description of what each one does. Pressing Enter or Tab on
+one of those rows completes your input to `sn ` and drops you into the addon, so
+you never have to remember the exact keyword.
+
+The file browser (`/`, `~/`) and the currency converter (`$`) are prefix
+triggers rather than keywords, and are not affected.
+
 ## Currency Converter
 
 Converts between currencies using exchange rates from the Frankfurter API. Rates are cached for one hour.
@@ -202,7 +216,8 @@ Display name shown during loading.
 
 **`keyword`** `string` (required)
 
-Text that activates the script filter.
+Text that activates the script filter. Type it followed by a space, so `tz `
+enters the filter while `tz` keeps searching launchers.
 
   ```yaml
   addons:
@@ -389,7 +404,8 @@ Display name shown in the search row (e.g., "Search Google for...").
 
 **`keyword`** `string` (required)
 
-Text that activates the web search.
+Text that activates the web search. Type it followed by a space, so `g `
+enters the search while `g` keeps searching launchers.
 
   ```yaml
   addons:
@@ -481,7 +497,8 @@ Display name shown during loading (for command sources).
 
 **`keyword`** `string` (required)
 
-Text that activates this snippet source.
+Text that activates this snippet source. Type it followed by a space, so `em `
+enters the source while `em` keeps searching launchers.
 
   ```yaml
   addons:

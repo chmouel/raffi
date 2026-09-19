@@ -59,6 +59,96 @@ impl LauncherApp {
 
         let mut special_item_idx = 0;
 
+        for suggestion in &self.keyword_suggestions {
+            let display_idx = special_item_idx;
+            let is_selected = display_idx == self.selected_index;
+            let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
+
+            if let Some(icon_name) = &suggestion.icon {
+                if let Some(icon_path_str) = self.icon_map.get(icon_name) {
+                    let icon_path = PathBuf::from(icon_path_str);
+                    if icon_path.exists() {
+                        let is_svg = icon_path
+                            .extension()
+                            .and_then(|ext| ext.to_str())
+                            .map(|ext| ext.eq_ignore_ascii_case("svg"))
+                            .unwrap_or(false);
+
+                        let icon_content: Element<Message> = if is_svg {
+                            svg(iced::widget::svg::Handle::from_path(&icon_path))
+                                .width(Length::Fixed(40.0))
+                                .height(Length::Fixed(40.0))
+                                .content_fit(iced::ContentFit::Contain)
+                                .into()
+                        } else {
+                            image(icon_path)
+                                .width(Length::Fixed(40.0))
+                                .height(Length::Fixed(40.0))
+                                .content_fit(iced::ContentFit::Contain)
+                                .into()
+                        };
+                        item_row = item_row.push(icon_content);
+                    }
+                }
+            }
+
+            item_row = item_row
+                .push(
+                    text(suggestion.keyword.clone())
+                        .size(fs.item)
+                        .color(t.accent),
+                )
+                .push(
+                    text(suggestion.subtitle.clone())
+                        .size(fs.item)
+                        .color(t.text_main),
+                );
+
+            let item_button = button(item_row)
+                .on_press(Message::ItemClicked(display_idx))
+                .padding(fs.item_padding)
+                .width(Length::Fill)
+                .style(move |_theme, status| {
+                    let base_style = button::Style {
+                        text_color: t.text_main,
+                        border: iced::Border {
+                            radius: 8.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    };
+
+                    if is_selected {
+                        button::Style {
+                            background: Some(iced::Background::Color(t.selection_bg)),
+                            border: iced::Border {
+                                color: t.accent,
+                                width: 1.0,
+                                radius: 8.0.into(),
+                            },
+                            ..base_style
+                        }
+                    } else {
+                        match status {
+                            button::Status::Hovered => button::Style {
+                                background: Some(iced::Background::Color(iced::Color {
+                                    a: 0.1,
+                                    ..t.accent_hover
+                                })),
+                                ..base_style
+                            },
+                            _ => button::Style {
+                                background: None,
+                                ..base_style
+                            },
+                        }
+                    }
+                });
+
+            items_column = items_column.push(item_button);
+            special_item_idx += 1;
+        }
+
         if self.script_filter.loading {
             let loading_name = self
                 .script_filter
@@ -1026,6 +1116,7 @@ impl LauncherApp {
         }
 
         let has_fallbacks = self.fallback_count() > 0;
+        let has_keyword_suggestions = !self.keyword_suggestions.is_empty();
 
         if self.filtered_configs.is_empty()
             && !has_calculator
@@ -1036,6 +1127,7 @@ impl LauncherApp {
             && !has_file_browser
             && !has_web_search
             && !has_fallbacks
+            && !has_keyword_suggestions
         {
             let no_results = container(
                 text("No matching results found.")
@@ -1394,7 +1486,7 @@ impl LauncherApp {
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Named(Named::Tab),
                 ..
-            }) => Some(Message::FileBrowserTabComplete),
+            }) => Some(Message::TabComplete),
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Character(ref c),
                 modifiers,

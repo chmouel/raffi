@@ -377,6 +377,11 @@ launchers:
     ifenvset: SWAYSOCK
 
 addons:
+  # Keywords below (script_filters, web_searches, text_snippets) are typed with
+  # a trailing space: "tz " enters the timezone filter, while "tz" on its own
+  # keeps searching your launchers. While you type a keyword, raffi lists the
+  # matching keywords at the top of the results; Enter or Tab on one of those
+  # rows completes the input for you.
   script_filters:
     # grab batz from https://github.com/chmouel/batzconverter
     - name: "Timezones"

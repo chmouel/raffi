@@ -23,10 +23,10 @@ use super::script_filters::{execute_script_filter, parse_script_filter_output};
 use super::snippets::{execute_text_snippet_command, filter_snippets};
 use super::state::{
     CachedRate, CurrencyConversion, CurrencyConversionRequest, CurrencyResult, CurrencyState,
-    EmojiEntry, EmojiState, FallbackAction, FileBrowserState, HistoryState, LauncherApp, Message,
-    MultiCurrencyRequest, MultiCurrencyResult, ResolvedFallback, ScriptFilterResult,
-    ScriptFilterState, SharedSelection, TextSnippetState, ViewState, WebSearchActiveState,
-    WebSearchState,
+    EmojiEntry, EmojiState, FallbackAction, FileBrowserState, HistoryState, KeywordSuggestion,
+    LauncherApp, Message, MultiCurrencyRequest, MultiCurrencyResult, ResolvedFallback,
+    ScriptFilterResult, ScriptFilterState, SharedSelection, TextSnippetState, ViewState,
+    WebSearchActiveState, WebSearchState,
 };
 use super::support::{
     fuzzy_match_configs, load_history, load_mru_map, mru_sort_key, save_history, save_mru_map,
@@ -48,15 +48,22 @@ pub(super) enum QueryMode {
     Standard,
 }
 
-fn extract_keyword_query(trimmed: &str, keyword: &str) -> Option<String> {
-    if trimmed == keyword {
-        return Some(String::new());
-    }
-
-    trimmed
+/// Match `keyword` followed by a space and return the remaining query.
+///
+/// `input` must only have had its leading whitespace stripped: the space right
+/// after the keyword is what arms the addon, so a fully trimmed string cannot
+/// be used here. `"sn"` yields `None`, `"sn "` yields an empty query.
+fn extract_keyword_query(input: &str, keyword: &str) -> Option<String> {
+    input
         .strip_prefix(keyword)
         .and_then(|rest| rest.strip_prefix(' '))
-        .map(ToOwned::to_owned)
+        .map(|rest| rest.trim().to_string())
+}
+
+/// Strip leading whitespace only, preserving a trailing space so keyword
+/// triggers can tell `sn` apart from `sn `.
+fn keyword_input(query: &str) -> &str {
+    query.trim_start()
 }
 
 fn expand_file_browser_query(trimmed: &str) -> String {
@@ -69,7 +76,10 @@ fn expand_file_browser_query(trimmed: &str) -> String {
     }
 }
 
-pub(super) fn route_query(trimmed: &str, addons: &AddonsConfig) -> QueryMode {
+pub(super) fn route_query(query: &str, addons: &AddonsConfig) -> QueryMode {
+    let input = keyword_input(query);
+    let trimmed = input.trim_end();
+
     let is_file_browser_query = addons.file_browser.enabled
         && (trimmed.starts_with('/') || trimmed == "~" || trimmed.starts_with("~/"));
     if is_file_browser_query {
@@ -90,7 +100,7 @@ pub(super) fn route_query(trimmed: &str, addons: &AddonsConfig) -> QueryMode {
             .iter()
             .enumerate()
             .find_map(|(index, config)| {
-                extract_keyword_query(trimmed, &config.keyword).map(|query| (index, query))
+                extract_keyword_query(input, &config.keyword).map(|query| (index, query))
             })
     {
         return QueryMode::ScriptFilter {
@@ -105,7 +115,7 @@ pub(super) fn route_query(trimmed: &str, addons: &AddonsConfig) -> QueryMode {
             .iter()
             .enumerate()
             .find_map(|(index, config)| {
-                extract_keyword_query(trimmed, &config.keyword).map(|query| (index, query))
+                extract_keyword_query(input, &config.keyword).map(|query| (index, query))
             })
     {
         return QueryMode::TextSnippet {
@@ -116,7 +126,7 @@ pub(super) fn route_query(trimmed: &str, addons: &AddonsConfig) -> QueryMode {
 
     let emoji_trigger = addons.emoji.trigger.as_deref().unwrap_or("emoji");
     if addons.emoji.enabled {
-        if let Some(query) = extract_keyword_query(trimmed, emoji_trigger) {
+        if let Some(query) = extract_keyword_query(input, emoji_trigger) {
             return QueryMode::Emoji { query };
         }
     }
@@ -127,7 +137,7 @@ pub(super) fn route_query(trimmed: &str, addons: &AddonsConfig) -> QueryMode {
             .iter()
             .enumerate()
             .find_map(|(index, config)| {
-                extract_keyword_query(trimmed, &config.keyword).map(|query| (index, query))
+                extract_keyword_query(input, &config.keyword).map(|query| (index, query))
             })
     {
         return QueryMode::WebSearch {
@@ -137,6 +147,70 @@ pub(super) fn route_query(trimmed: &str, addons: &AddonsConfig) -> QueryMode {
     }
 
     QueryMode::Standard
+}
+
+/// Collect the keyword rows to offer for a partially typed keyword.
+///
+/// Matching is a case-insensitive prefix match, so typing `s` already lists
+/// every keyword starting with `s`, and an exactly typed keyword still shows
+/// its row. Returns nothing once the query contains whitespace, since that
+/// means the keyword is already armed or the user is doing a normal search.
+pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<KeywordSuggestion> {
+    let input = query.trim_start();
+    if input.is_empty() || input.chars().any(char::is_whitespace) {
+        return Vec::new();
+    }
+    if addons.file_browser.enabled && (input.starts_with('/') || input.starts_with('~')) {
+        return Vec::new();
+    }
+
+    let input_lower = input.to_lowercase();
+    let matches = |keyword: &str| keyword.to_lowercase().starts_with(&input_lower);
+
+    let mut suggestions = Vec::new();
+
+    for config in &addons.script_filters {
+        if matches(&config.keyword) {
+            suggestions.push(KeywordSuggestion {
+                keyword: config.keyword.clone(),
+                subtitle: format!("Search {}", config.name),
+                icon: config.icon.clone(),
+            });
+        }
+    }
+
+    for config in &addons.text_snippets {
+        if matches(&config.keyword) {
+            suggestions.push(KeywordSuggestion {
+                keyword: config.keyword.clone(),
+                subtitle: format!("Browse {}", config.name),
+                icon: config.icon.clone(),
+            });
+        }
+    }
+
+    if addons.emoji.enabled {
+        let trigger = addons.emoji.trigger.as_deref().unwrap_or("emoji");
+        if matches(trigger) {
+            suggestions.push(KeywordSuggestion {
+                keyword: trigger.to_string(),
+                subtitle: "Browse emoji and icons".to_string(),
+                icon: None,
+            });
+        }
+    }
+
+    for config in &addons.web_searches {
+        if matches(&config.keyword) {
+            suggestions.push(KeywordSuggestion {
+                keyword: config.keyword.clone(),
+                subtitle: format!("Search {}", config.name),
+                icon: config.icon.clone(),
+            });
+        }
+    }
+
+    suggestions
 }
 
 impl LauncherApp {
@@ -244,6 +318,7 @@ impl LauncherApp {
                 },
                 emoji: EmojiState::default(),
                 fallbacks,
+                keyword_suggestions: Vec::new(),
             },
             if initial_query.is_empty() {
                 focus(search_input_id)
@@ -285,7 +360,7 @@ impl LauncherApp {
             Message::TextSnippetSelected(index) => self.handle_text_snippet_selected(index),
             Message::WebSearchSelected => self.handle_web_search_selected(),
             Message::FileBrowserItemSelected(index) => self.handle_file_browser_selected(index),
-            Message::FileBrowserTabComplete => self.handle_file_browser_tab_complete(),
+            Message::TabComplete => self.handle_tab_complete(),
             Message::FileBrowserToggleHidden => self.handle_file_browser_toggle_hidden(),
             Message::ModifiersChanged(modifiers) => {
                 self.view.current_modifiers = modifiers;
@@ -300,6 +375,9 @@ impl LauncherApp {
             Message::EmojiDataLoaded(data) => self.handle_emoji_data_loaded(data),
             Message::EmojiSelected(index) => self.handle_emoji_selected(index),
             Message::FallbackSelected(index) => self.handle_fallback_selected(index),
+            Message::KeywordSuggestionSelected(index) => {
+                self.handle_keyword_suggestion_selected(index)
+            }
         }
     }
 
@@ -329,8 +407,13 @@ impl LauncherApp {
         let trimmed = query.trim();
         let mut tasks = Vec::new();
 
-        let qmode = route_query(trimmed, &self.addons);
+        let qmode = route_query(&query, &self.addons);
         crate::debug_log!("route_query: query={trimmed:?} -> {qmode:?}");
+        self.keyword_suggestions = if matches!(qmode, QueryMode::Standard) {
+            keyword_suggestions(&query, &self.addons)
+        } else {
+            Vec::new()
+        };
         match qmode {
             QueryMode::FileBrowser { expanded, filter } => {
                 self.handle_file_browser_query(&expanded, &filter);
@@ -777,6 +860,11 @@ impl LauncherApp {
     fn activate_index(&mut self, index: usize) -> Task<Message> {
         let mut current_index = 0;
 
+        if index < self.keyword_suggestions.len() {
+            return self.update(Message::KeywordSuggestionSelected(index));
+        }
+        current_index += self.keyword_suggestions.len();
+
         if self.script_filter.loading {
             if index == current_index {
                 return Task::none();
@@ -1030,12 +1118,12 @@ impl LauncherApp {
         match result {
             Ok(snippets) => {
                 self.text_snippets.items = snippets;
-                let trimmed = self.search_query.trim();
+                let input = keyword_input(&self.search_query);
                 let query = self
                     .addons
                     .text_snippets
                     .iter()
-                    .find_map(|config| extract_keyword_query(trimmed, &config.keyword))
+                    .find_map(|config| extract_keyword_query(input, &config.keyword))
                     .unwrap_or_default();
                 self.text_snippets.filtered = filter_snippets(&self.text_snippets.items, &query);
             }
@@ -1099,7 +1187,11 @@ impl LauncherApp {
         iced::exit()
     }
 
-    fn handle_file_browser_tab_complete(&mut self) -> Task<Message> {
+    fn handle_tab_complete(&mut self) -> Task<Message> {
+        if self.selected_index < self.keyword_suggestions.len() {
+            return self.update(Message::KeywordSuggestionSelected(self.selected_index));
+        }
+
         if !self.file_browser.active {
             return Task::none();
         }
@@ -1189,8 +1281,8 @@ impl LauncherApp {
             self.emoji.data = data;
             if self.emoji.active {
                 let emoji_trigger = self.addons.emoji.trigger.as_deref().unwrap_or("emoji");
-                let trimmed = self.search_query.trim();
-                let emoji_query = extract_keyword_query(trimmed, emoji_trigger).unwrap_or_default();
+                let input = keyword_input(&self.search_query);
+                let emoji_query = extract_keyword_query(input, emoji_trigger).unwrap_or_default();
                 filter_emoji_into(
                     &self.emoji.data,
                     &emoji_query,
@@ -1238,7 +1330,7 @@ impl LauncherApp {
     }
 
     pub(super) fn total_items(&self) -> usize {
-        let mut offset = 0;
+        let mut offset = self.keyword_suggestions.len();
         if self.script_filter.loading {
             offset += 1;
         } else if let Some(result) = &self.script_filter.results {
@@ -1286,7 +1378,10 @@ impl LauncherApp {
     }
 
     pub(super) fn fallback_count(&self) -> usize {
-        if !self.search_query.trim().is_empty() && !self.is_in_addon_mode() {
+        if !self.search_query.trim().is_empty()
+            && !self.is_in_addon_mode()
+            && self.keyword_suggestions.is_empty()
+        {
             self.fallbacks.len()
         } else {
             0
@@ -1390,6 +1485,18 @@ impl LauncherApp {
             }
         }
         Task::none()
+    }
+
+    fn handle_keyword_suggestion_selected(&mut self, index: usize) -> Task<Message> {
+        let Some(suggestion) = self.keyword_suggestions.get(index) else {
+            return Task::none();
+        };
+
+        let new_query = format!("{} ", suggestion.keyword);
+        crate::debug_log!("keyword suggestion: completing to {new_query:?}");
+        let input_id = self.view.search_input_id.clone();
+        self.update(Message::SearchChanged(new_query))
+            .chain(move_cursor_to_end(input_id))
     }
 
     pub(super) fn save_query_to_history(&mut self) {

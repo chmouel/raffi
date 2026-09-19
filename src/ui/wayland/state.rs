@@ -219,6 +219,15 @@ pub(super) struct ResolvedFallback {
     pub action: FallbackAction,
 }
 
+/// A keyword row offered while the user is still typing a keyword, before the
+/// space that arms the addon. Selecting it completes the input to `keyword `.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct KeywordSuggestion {
+    pub keyword: String,
+    pub subtitle: String,
+    pub icon: Option<String>,
+}
+
 pub(super) struct LauncherApp {
     pub configs: Vec<crate::RaffiConfig>,
     pub filtered_configs: Vec<usize>,
@@ -239,4 +248,5 @@ pub(super) struct LauncherApp {
     pub history: HistoryState,
     pub emoji: EmojiState,
     pub fallbacks: Vec<ResolvedFallback>,
+    pub keyword_suggestions: Vec<KeywordSuggestion>,
 }

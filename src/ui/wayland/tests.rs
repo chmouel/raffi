@@ -1,5 +1,5 @@
-use super::app::{route_query, QueryMode};
-use super::state::{FallbackAction, LauncherApp};
+use super::app::{keyword_suggestions, route_query, QueryMode};
+use super::state::{FallbackAction, KeywordSuggestion, LauncherApp, Message};
 use super::theme::ThemeColors;
 use crate::ui::FontSizes;
 use crate::{
@@ -115,6 +115,258 @@ fn test_route_query_prefers_emoji_over_web_search() {
         route_query("emoji smile", &addons),
         QueryMode::Emoji { .. }
     ));
+}
+
+#[test]
+fn test_route_query_requires_space_after_keyword() {
+    let mut addons = AddonsConfig::default();
+    addons.emoji.enabled = false;
+    addons.text_snippets.push(TextSnippetSourceConfig {
+        name: "Snippets".into(),
+        keyword: "sn".into(),
+        icon: None,
+        snippets: Some(vec![TextSnippet {
+            name: "Email".into(),
+            value: "user@example.com".into(),
+        }]),
+        file: None,
+        command: None,
+        directory: None,
+        args: Vec::new(),
+        action: None,
+        secondary_action: None,
+    });
+
+    assert_eq!(route_query("sn", &addons), QueryMode::Standard);
+    assert_eq!(route_query("  sn", &addons), QueryMode::Standard);
+    assert_eq!(route_query("snip", &addons), QueryMode::Standard);
+
+    assert_eq!(
+        route_query("sn ", &addons),
+        QueryMode::TextSnippet {
+            config_index: 0,
+            query: String::new()
+        }
+    );
+    assert_eq!(
+        route_query("  sn  email ", &addons),
+        QueryMode::TextSnippet {
+            config_index: 0,
+            query: "email".into()
+        }
+    );
+}
+
+#[test]
+fn test_keyword_suggestions_prefix_match() {
+    let mut addons = AddonsConfig::default();
+    addons.emoji.enabled = false;
+    addons.text_snippets.push(TextSnippetSourceConfig {
+        name: "Snippets".into(),
+        keyword: "sn".into(),
+        icon: Some("snippet-icon".into()),
+        snippets: None,
+        file: None,
+        command: None,
+        directory: None,
+        args: Vec::new(),
+        action: None,
+        secondary_action: None,
+    });
+    addons.web_searches.push(WebSearchConfig {
+        name: "GitHub".into(),
+        keyword: "gh".into(),
+        url: "https://example.invalid?q={query}".into(),
+        icon: None,
+    });
+
+    let suggestions = keyword_suggestions("s", &addons);
+    assert_eq!(suggestions.len(), 1);
+    assert_eq!(suggestions[0].keyword, "sn");
+    assert_eq!(suggestions[0].subtitle, "Browse Snippets");
+    assert_eq!(suggestions[0].icon.as_deref(), Some("snippet-icon"));
+
+    assert_eq!(keyword_suggestions("sn", &addons).len(), 1);
+    assert_eq!(keyword_suggestions("SN", &addons).len(), 1);
+    assert_eq!(
+        keyword_suggestions("g", &addons)[0].subtitle,
+        "Search GitHub"
+    );
+    assert!(keyword_suggestions("zz", &addons).is_empty());
+}
+
+#[test]
+fn test_keyword_suggestions_stop_once_keyword_is_armed() {
+    let mut addons = AddonsConfig::default();
+    addons.emoji.enabled = false;
+    addons.text_snippets.push(TextSnippetSourceConfig {
+        name: "Snippets".into(),
+        keyword: "sn".into(),
+        icon: None,
+        snippets: None,
+        file: None,
+        command: None,
+        directory: None,
+        args: Vec::new(),
+        action: None,
+        secondary_action: None,
+    });
+
+    assert!(keyword_suggestions("", &addons).is_empty());
+    assert!(keyword_suggestions("   ", &addons).is_empty());
+    assert!(keyword_suggestions("sn ", &addons).is_empty());
+    assert!(keyword_suggestions("sn email", &addons).is_empty());
+    assert!(keyword_suggestions("/home", &addons).is_empty());
+    assert!(keyword_suggestions("~/dev", &addons).is_empty());
+}
+
+#[test]
+fn test_keyword_suggestions_follow_routing_precedence() {
+    let mut addons = AddonsConfig::default();
+    addons.emoji.trigger = Some("gh".into());
+    addons.web_searches.push(WebSearchConfig {
+        name: "GitHub".into(),
+        keyword: "gh".into(),
+        url: "https://example.invalid?q={query}".into(),
+        icon: None,
+    });
+    addons.script_filters.push(ScriptFilterConfig {
+        name: "Gists".into(),
+        command: "gists".into(),
+        keyword: "gh".into(),
+        icon: None,
+        args: Vec::new(),
+        action: None,
+        secondary_action: None,
+        env: std::collections::HashMap::new(),
+        min_query_length: None,
+    });
+
+    let subtitles: Vec<String> = keyword_suggestions("gh", &addons)
+        .into_iter()
+        .map(|suggestion| suggestion.subtitle)
+        .collect();
+    assert_eq!(
+        subtitles,
+        vec!["Search Gists", "Browse emoji and icons", "Search GitHub"]
+    );
+}
+
+#[test]
+fn test_keyword_suggestions_skip_disabled_emoji() {
+    let mut addons = AddonsConfig::default();
+    assert_eq!(keyword_suggestions("em", &addons).len(), 1);
+
+    addons.emoji.enabled = false;
+    assert!(keyword_suggestions("em", &addons).is_empty());
+}
+
+#[test]
+fn test_total_items_counts_keyword_suggestions() {
+    let mut app = test_app(AddonsConfig::default());
+    app.filtered_configs = vec![0, 1];
+    app.keyword_suggestions = vec![KeywordSuggestion {
+        keyword: "sn".into(),
+        subtitle: "Browse Snippets".into(),
+        icon: None,
+    }];
+
+    assert_eq!(app.total_items(), 3);
+}
+
+#[test]
+fn test_keyword_suggestions_suppress_fallbacks() {
+    let mut addons = AddonsConfig::default();
+    addons.web_searches.push(WebSearchConfig {
+        name: "Google".into(),
+        keyword: "g".into(),
+        url: "https://google.com/search?q={query}".into(),
+        icon: None,
+    });
+    let mut app = test_app_with_fallbacks(addons, vec!["addons.web_searches.Google".into()]);
+    app.search_query = "sn".into();
+    assert_eq!(app.fallback_count(), 1);
+
+    app.keyword_suggestions = vec![KeywordSuggestion {
+        keyword: "sn".into(),
+        subtitle: "Browse Snippets".into(),
+        icon: None,
+    }];
+    assert_eq!(app.fallback_count(), 0);
+}
+
+fn snippet_addons() -> AddonsConfig {
+    let mut addons = AddonsConfig::default();
+    addons.emoji.enabled = false;
+    addons.text_snippets.push(TextSnippetSourceConfig {
+        name: "Snippets".into(),
+        keyword: "sn".into(),
+        icon: None,
+        snippets: Some(vec![TextSnippet {
+            name: "Email".into(),
+            value: "user@example.com".into(),
+        }]),
+        file: None,
+        command: None,
+        directory: None,
+        args: Vec::new(),
+        action: None,
+        secondary_action: None,
+    });
+    addons
+}
+
+#[test]
+fn test_tab_completes_selected_keyword_suggestion() {
+    let mut app = test_app(snippet_addons());
+    let _ = app.update(Message::SearchChanged("sn".into()));
+    assert_eq!(app.keyword_suggestions.len(), 1);
+    assert_eq!(app.selected_index, 0);
+
+    let _ = app.update(Message::TabComplete);
+
+    assert_eq!(app.search_query, "sn ");
+    assert!(app.keyword_suggestions.is_empty());
+    assert!(app.text_snippets.active);
+}
+
+#[test]
+fn test_tab_leaves_launcher_selection_alone() {
+    let mut app = test_app(snippet_addons());
+    let _ = app.update(Message::SearchChanged("sn".into()));
+    assert_eq!(app.keyword_suggestions.len(), 1);
+
+    app.selected_index = app.keyword_suggestions.len();
+    let _ = app.update(Message::TabComplete);
+
+    assert_eq!(app.search_query, "sn");
+    assert_eq!(app.keyword_suggestions.len(), 1);
+    assert!(!app.text_snippets.active);
+}
+
+#[test]
+fn test_tab_without_suggestions_is_a_no_op() {
+    let mut app = test_app(snippet_addons());
+    let _ = app.update(Message::SearchChanged("zzz".into()));
+    assert!(app.keyword_suggestions.is_empty());
+    assert!(!app.file_browser.active);
+
+    let _ = app.update(Message::TabComplete);
+
+    assert_eq!(app.search_query, "zzz");
+}
+
+#[test]
+fn test_enter_on_keyword_suggestion_completes_it() {
+    let mut app = test_app(snippet_addons());
+    let _ = app.update(Message::SearchChanged("s".into()));
+    assert_eq!(app.keyword_suggestions.len(), 1);
+
+    let _ = app.update(Message::Submit);
+
+    assert_eq!(app.search_query, "sn ");
+    assert!(app.keyword_suggestions.is_empty());
+    assert!(app.text_snippets.active);
 }
 
 #[test]
