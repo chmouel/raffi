@@ -1,4 +1,5 @@
 use super::app::{keyword_suggestions, route_query, QueryMode};
+use super::help::{filter_help_entries, help_entries};
 use super::state::{FallbackAction, KeywordSuggestion, LauncherApp, Message};
 use super::theme::ThemeColors;
 use crate::ui::FontSizes;
@@ -614,4 +615,182 @@ fn test_resolve_fallbacks_empty_when_no_paths() {
 
     let app = test_app(addons);
     assert!(app.fallbacks.is_empty());
+}
+
+fn help_addons() -> AddonsConfig {
+    let mut addons = AddonsConfig::default();
+    addons.script_filters.push(ScriptFilterConfig {
+        name: "Gists".into(),
+        command: "gists".into(),
+        keyword: "gist".into(),
+        icon: Some("gist-icon".into()),
+        args: Vec::new(),
+        action: None,
+        secondary_action: None,
+        env: std::collections::HashMap::new(),
+        min_query_length: None,
+    });
+    addons.text_snippets.push(TextSnippetSourceConfig {
+        name: "Snippets".into(),
+        keyword: "sn".into(),
+        icon: None,
+        snippets: Some(vec![TextSnippet {
+            name: "Email".into(),
+            value: "user@example.com".into(),
+        }]),
+        file: None,
+        command: None,
+        directory: None,
+        args: Vec::new(),
+        action: None,
+        secondary_action: None,
+    });
+    addons.web_searches.push(WebSearchConfig {
+        name: "GitHub".into(),
+        keyword: "gh".into(),
+        url: "https://example.invalid?q={query}".into(),
+        icon: None,
+    });
+    addons
+}
+
+#[test]
+fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
+    let entries = help_entries(&help_addons());
+    let triggers: Vec<&str> = entries.iter().map(|entry| entry.trigger.as_str()).collect();
+
+    assert_eq!(
+        triggers,
+        vec!["~/", "gist", "sn", "emoji", "gh", "math", "$"]
+    );
+    assert_eq!(entries[1].icon.as_deref(), Some("gist-icon"));
+    assert_eq!(entries[1].completion.as_deref(), Some("gist "));
+    assert_eq!(entries[0].completion.as_deref(), Some("~/"));
+    assert_eq!(entries[5].completion, None);
+}
+
+#[test]
+fn test_help_entries_skip_disabled_addons() {
+    let mut addons = AddonsConfig::default();
+    addons.emoji.enabled = false;
+    addons.calculator.enabled = false;
+    addons.currency.enabled = false;
+    addons.file_browser.enabled = false;
+
+    assert!(help_entries(&addons).is_empty());
+}
+
+#[test]
+fn test_help_entries_use_custom_triggers() {
+    let mut addons = AddonsConfig::default();
+    addons.emoji.trigger = Some("ic".into());
+    addons.currency.trigger = Some("cur".into());
+
+    let entries = help_entries(&addons);
+    assert!(entries
+        .iter()
+        .any(|entry| entry.trigger == "ic" && entry.completion.as_deref() == Some("ic ")));
+    assert!(entries
+        .iter()
+        .any(|entry| entry.trigger == "cur" && entry.completion.as_deref() == Some("cur ")));
+}
+
+#[test]
+fn test_filter_help_entries_matches_trigger_title_and_usage() {
+    let entries = help_entries(&help_addons());
+
+    assert_eq!(filter_help_entries(&entries, "").len(), entries.len());
+    assert_eq!(filter_help_entries(&entries, "   ").len(), entries.len());
+
+    let by_title: Vec<&str> = filter_help_entries(&entries, "SNIPPETS")
+        .into_iter()
+        .map(|index| entries[index].trigger.as_str())
+        .collect();
+    assert_eq!(by_title, vec!["sn"]);
+
+    let by_trigger: Vec<&str> = filter_help_entries(&entries, "gist")
+        .into_iter()
+        .map(|index| entries[index].trigger.as_str())
+        .collect();
+    assert_eq!(by_trigger, vec!["gist"]);
+
+    let by_usage: Vec<&str> = filter_help_entries(&entries, "usd")
+        .into_iter()
+        .map(|index| entries[index].trigger.as_str())
+        .collect();
+    assert_eq!(by_usage, vec!["$"]);
+
+    assert!(filter_help_entries(&entries, "zzz").is_empty());
+}
+
+#[test]
+fn test_help_replaces_launcher_entries() {
+    let mut app = test_app(help_addons());
+    app.filtered_configs = vec![0, 1, 2];
+    app.search_query = "gist".into();
+
+    let _ = app.update(Message::ToggleHelp);
+
+    assert!(app.view.help_active);
+    assert!(app.filtered_configs.is_empty());
+    assert!(app.keyword_suggestions.is_empty());
+    assert_eq!(app.total_items(), 1);
+    assert_eq!(app.fallback_count(), 0);
+}
+
+#[test]
+fn test_help_list_filters_while_typing() {
+    let mut app = test_app(help_addons());
+    let _ = app.update(Message::ToggleHelp);
+    assert_eq!(app.total_items(), app.help_entries.len());
+
+    let _ = app.update(Message::SearchChanged("gist".into()));
+    assert_eq!(app.total_items(), 1);
+    assert!(app.filtered_configs.is_empty());
+    assert!(app.calculator_result.is_none());
+}
+
+#[test]
+fn test_help_selection_arms_keyword() {
+    let mut app = test_app(help_addons());
+    let _ = app.update(Message::ToggleHelp);
+    let _ = app.update(Message::SearchChanged("sn".into()));
+    assert_eq!(app.total_items(), 1);
+
+    let _ = app.update(Message::Submit);
+
+    assert!(!app.view.help_active);
+    assert_eq!(app.search_query, "sn ");
+    assert!(app.text_snippets.active);
+}
+
+#[test]
+fn test_help_selection_of_calculator_row_is_a_no_op() {
+    let mut app = test_app(help_addons());
+    let _ = app.update(Message::ToggleHelp);
+    let _ = app.update(Message::SearchChanged("math".into()));
+    assert_eq!(app.total_items(), 1);
+
+    let _ = app.update(Message::Submit);
+
+    assert!(app.view.help_active);
+    assert_eq!(app.search_query, "math");
+}
+
+#[test]
+fn test_help_closes_on_toggle_and_cancel() {
+    let mut app = test_app(help_addons());
+    app.search_query = "gist ".into();
+
+    let _ = app.update(Message::ToggleHelp);
+    assert!(app.view.help_active);
+    let _ = app.update(Message::ToggleHelp);
+    assert!(!app.view.help_active);
+    assert!(app.help_filtered.is_empty());
+    assert!(app.script_filter.loading || app.script_filter.results.is_some());
+
+    let _ = app.update(Message::ToggleHelp);
+    assert!(app.view.help_active);
+    let _ = app.update(Message::Cancel);
+    assert!(!app.view.help_active);
 }

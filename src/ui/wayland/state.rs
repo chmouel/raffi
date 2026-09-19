@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use fuzzy_matcher::skim::SkimMatcherV2;
 use iced::widget::Id;
 
+use super::help::HelpEntry;
 use super::theme::ThemeColors;
 pub(crate) use super::types::{
     CachedRate, CalculatorResult, CurrencyConversion, CurrencyConversionRequest, CurrencyResult,
@@ -143,7 +144,7 @@ pub(super) struct ViewState {
     pub current_modifiers: iced::keyboard::Modifiers,
     pub theme: ThemeColors,
     pub font_sizes: crate::ui::FontSizes,
-    pub show_hints: bool,
+    pub help_active: bool,
 }
 
 impl ViewState {
@@ -156,7 +157,7 @@ impl ViewState {
             current_modifiers: iced::keyboard::Modifiers::empty(),
             theme,
             font_sizes,
-            show_hints: false,
+            help_active: false,
         }
     }
 
@@ -249,4 +250,6 @@ pub(super) struct LauncherApp {
     pub emoji: EmojiState,
     pub fallbacks: Vec<ResolvedFallback>,
     pub keyword_suggestions: Vec<KeywordSuggestion>,
+    pub help_entries: Vec<HelpEntry>,
+    pub help_filtered: Vec<usize>,
 }

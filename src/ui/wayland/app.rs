@@ -19,6 +19,7 @@ use super::emoji::{
     download_and_load_emoji_data, emoji_fallback_entries, filter_emoji_into,
     load_emoji_data_from_disk, resolve_emoji_file_names,
 };
+use super::help::{filter_help_entries, help_entries};
 use super::script_filters::{execute_script_filter, parse_script_filter_output};
 use super::snippets::{execute_text_snippet_command, filter_snippets};
 use super::state::{
@@ -319,6 +320,8 @@ impl LauncherApp {
                 emoji: EmojiState::default(),
                 fallbacks,
                 keyword_suggestions: Vec::new(),
+                help_entries: Vec::new(),
+                help_filtered: Vec::new(),
             },
             if initial_query.is_empty() {
                 focus(search_input_id)
@@ -334,7 +337,12 @@ impl LauncherApp {
             Message::MoveUp => self.move_selection(-1),
             Message::MoveDown => self.move_selection(1),
             Message::Submit => self.activate_index(self.selected_index),
-            Message::Cancel => iced::exit(),
+            Message::Cancel => {
+                if self.view.help_active {
+                    return self.close_help();
+                }
+                iced::exit()
+            }
             Message::ItemClicked(index) => {
                 self.selected_index = index;
                 self.activate_index(index)
@@ -368,10 +376,8 @@ impl LauncherApp {
             }
             Message::HistoryPrevious => self.handle_history_previous(),
             Message::HistoryNext => self.handle_history_next(),
-            Message::ToggleHints => {
-                self.view.show_hints = !self.view.show_hints;
-                Task::none()
-            }
+            Message::ToggleHelp => self.toggle_help(),
+            Message::HelpEntrySelected(index) => self.handle_help_entry_selected(index),
             Message::EmojiDataLoaded(data) => self.handle_emoji_data_loaded(data),
             Message::EmojiSelected(index) => self.handle_emoji_selected(index),
             Message::FallbackSelected(index) => self.handle_fallback_selected(index),
@@ -387,6 +393,14 @@ impl LauncherApp {
         }
 
         self.history.search_in_progress = false;
+
+        if self.view.help_active {
+            self.search_query = query;
+            self.refresh_help_filter();
+            self.view.refresh_ids();
+            return Task::none();
+        }
+
         self.search_query = query.clone();
         self.filter_items(&query);
         self.calculator_result = if self.addons.calculator.enabled {
@@ -858,6 +872,10 @@ impl LauncherApp {
     }
 
     fn activate_index(&mut self, index: usize) -> Task<Message> {
+        if self.view.help_active {
+            return self.update(Message::HelpEntrySelected(index));
+        }
+
         let mut current_index = 0;
 
         if index < self.keyword_suggestions.len() {
@@ -1188,6 +1206,10 @@ impl LauncherApp {
     }
 
     fn handle_tab_complete(&mut self) -> Task<Message> {
+        if self.view.help_active {
+            return self.update(Message::HelpEntrySelected(self.selected_index));
+        }
+
         if self.selected_index < self.keyword_suggestions.len() {
             return self.update(Message::KeywordSuggestionSelected(self.selected_index));
         }
@@ -1330,6 +1352,9 @@ impl LauncherApp {
     }
 
     pub(super) fn total_items(&self) -> usize {
+        if self.view.help_active {
+            return self.help_filtered.len();
+        }
         let mut offset = self.keyword_suggestions.len();
         if self.script_filter.loading {
             offset += 1;
@@ -1378,7 +1403,8 @@ impl LauncherApp {
     }
 
     pub(super) fn fallback_count(&self) -> usize {
-        if !self.search_query.trim().is_empty()
+        if !self.view.help_active
+            && !self.search_query.trim().is_empty()
             && !self.is_in_addon_mode()
             && self.keyword_suggestions.is_empty()
         {
@@ -1485,6 +1511,64 @@ impl LauncherApp {
             }
         }
         Task::none()
+    }
+
+    /// Toggle the `Ctrl+/` keyword help list.
+    ///
+    /// Opening it suppresses launcher entries and every addon result so the
+    /// list shows nothing but help rows; closing it replays the current query
+    /// through the normal routing.
+    fn toggle_help(&mut self) -> Task<Message> {
+        if self.view.help_active {
+            return self.close_help();
+        }
+
+        self.view.help_active = true;
+        if self.help_entries.is_empty() {
+            self.help_entries = help_entries(&self.addons);
+        }
+        self.filtered_configs.clear();
+        self.keyword_suggestions.clear();
+        self.calculator_result = None;
+        self.script_filter.clear();
+        self.text_snippets.clear();
+        self.emoji.clear();
+        self.web_search.clear();
+        self.file_browser.clear();
+        self.currency.clear();
+        self.refresh_help_filter();
+        self.view.refresh_ids();
+        crate::debug_log!("help: opened with {} entries", self.help_filtered.len());
+        Task::none()
+    }
+
+    fn close_help(&mut self) -> Task<Message> {
+        self.view.help_active = false;
+        self.help_filtered.clear();
+        crate::debug_log!("help: closed");
+        self.handle_search_changed(self.search_query.clone())
+    }
+
+    fn refresh_help_filter(&mut self) {
+        self.help_filtered = filter_help_entries(&self.help_entries, &self.search_query);
+        self.selected_index = 0;
+    }
+
+    fn handle_help_entry_selected(&mut self, index: usize) -> Task<Message> {
+        let Some(entry) = self.help_filtered.get(index).and_then(|&entry_index| {
+            self.help_entries
+                .get(entry_index)
+                .and_then(|entry| entry.completion.clone())
+        }) else {
+            return Task::none();
+        };
+
+        crate::debug_log!("help: arming {entry:?}");
+        self.view.help_active = false;
+        self.help_filtered.clear();
+        let input_id = self.view.search_input_id.clone();
+        self.update(Message::SearchChanged(entry))
+            .chain(move_cursor_to_end(input_id))
     }
 
     fn handle_keyword_suggestion_selected(&mut self, index: usize) -> Task<Message> {

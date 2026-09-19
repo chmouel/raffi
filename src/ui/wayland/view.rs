@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use iced::widget::{
     button, container, image, rich_text, scrollable, span, svg, text, text_input, Column, Row,
+    Space,
 };
 use iced::{Element, Length};
 
@@ -9,12 +10,46 @@ use super::ansi::ansi_to_spans;
 use super::browser::mimetype_icon_name;
 use super::state::{LauncherApp, Message};
 
+type HintSpan<'a> = iced::widget::text::Span<'a, (), iced::Font>;
+
+/// Build an icon widget for `path`, or `None` when the file is missing.
+fn icon_element<'a>(path: &Path, size: f32) -> Option<Element<'a, Message>> {
+    if !path.exists() {
+        return None;
+    }
+    let is_svg = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("svg"))
+        .unwrap_or(false);
+
+    Some(if is_svg {
+        svg(iced::widget::svg::Handle::from_path(path))
+            .width(Length::Fixed(size))
+            .height(Length::Fixed(size))
+            .content_fit(iced::ContentFit::Contain)
+            .into()
+    } else {
+        image(PathBuf::from(path))
+            .width(Length::Fixed(size))
+            .height(Length::Fixed(size))
+            .content_fit(iced::ContentFit::Contain)
+            .into()
+    })
+}
+
 impl LauncherApp {
-    pub(super) fn view(&self) -> Element<'_, Message> {
+    /// Wrap the shared window chrome around an already built item list.
+    fn shell<'a>(
+        &'a self,
+        placeholder: &'a str,
+        hint_spans: Vec<HintSpan<'a>>,
+        items_column: Column<'a, Message>,
+    ) -> Element<'a, Message> {
         let t = self.view.theme;
         let fs = self.view.font_sizes;
 
-        let search_input = text_input("Type to search...", &self.search_query)
+        let search_input = text_input(placeholder, &self.search_query)
             .id(self.view.search_input_id.clone())
             .on_input(Message::SearchChanged)
             .on_submit(Message::Submit)
@@ -41,6 +76,214 @@ impl LauncherApp {
                 }
             })
             .width(Length::Fill);
+
+        let items_container = container(items_column)
+            .id(self.view.items_container_id.clone())
+            .width(Length::Fill)
+            .height(Length::Shrink);
+
+        let items_scroll = scrollable(items_container)
+            .id(self.view.scrollable_id.clone())
+            .height(Length::Fill)
+            .width(Length::Fill);
+
+        let hint_row = container(rich_text(hint_spans))
+            .width(Length::Fill)
+            .align_x(iced::Alignment::End);
+
+        let content = Column::new()
+            .spacing(12)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .push(hint_row)
+            .push(search_input)
+            .push(container(items_scroll).padding(iced::Padding {
+                top: fs.scroll_top_padding,
+                right: 4.0,
+                bottom: 0.0,
+                left: 0.0,
+            }));
+
+        container(content)
+            .padding(fs.outer_padding)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |_theme| container::Style {
+                background: Some(iced::Background::Color(t.bg_base)),
+                border: iced::Border {
+                    color: t.border,
+                    width: 1.0,
+                    radius: 16.0.into(),
+                },
+                text_color: Some(t.text_main),
+                ..Default::default()
+            })
+            .into()
+    }
+
+    /// Render one row per available keyword or trigger, shown with `Ctrl+/`.
+    fn help_items_column(&self) -> Column<'_, Message> {
+        let t = self.view.theme;
+        let fs = self.view.font_sizes;
+
+        if self.help_filtered.is_empty() {
+            return Column::new().spacing(6).push(
+                container(
+                    text("No matching keyword.")
+                        .size(fs.subtitle)
+                        .color(t.text_muted),
+                )
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::Alignment::Center)
+                .align_y(iced::Alignment::Center),
+            );
+        }
+
+        // Fixed slot so rows without an icon still line up with icon rows.
+        let icon_size = fs.item + 8.0;
+
+        // Column widths derived from the visible rows so trigger, title and
+        // usage align; 0.62 approximates the average glyph advance.
+        let visible_entries = || {
+            self.help_filtered
+                .iter()
+                .filter_map(|&index| self.help_entries.get(index))
+        };
+        let trigger_width = visible_entries()
+            .map(|entry| entry.trigger.chars().count() as f32 * fs.subtitle * 0.62)
+            .fold(0.0_f32, f32::max)
+            + 20.0;
+        let title_width = visible_entries()
+            .map(|entry| entry.title.chars().count() as f32 * fs.item * 0.62)
+            .fold(0.0_f32, f32::max)
+            + 12.0;
+
+        let mut items_column = Column::new().spacing(4);
+
+        for (display_idx, &entry_index) in self.help_filtered.iter().enumerate() {
+            let Some(entry) = self.help_entries.get(entry_index) else {
+                continue;
+            };
+            let is_selected = display_idx == self.selected_index;
+
+            let icon_slot: Element<Message> = entry
+                .icon
+                .as_ref()
+                .and_then(|icon_name| self.icon_map.get(icon_name))
+                .and_then(|icon_path| icon_element(Path::new(icon_path), icon_size))
+                .unwrap_or_else(|| {
+                    container(Space::new())
+                        .width(Length::Fixed(icon_size))
+                        .height(Length::Fixed(icon_size))
+                        .into()
+                });
+
+            let trigger_pill = container(
+                text(entry.trigger.clone())
+                    .size(fs.subtitle)
+                    .color(t.accent),
+            )
+            .padding([3.0, 10.0])
+            .center_x(Length::Fixed(trigger_width))
+            .style(move |_theme| container::Style {
+                background: Some(iced::Background::Color(iced::Color {
+                    a: 0.14,
+                    ..t.accent
+                })),
+                border: iced::Border {
+                    radius: 6.0.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+
+            let title = container(text(entry.title.clone()).size(fs.item).color(t.text_main))
+                .width(Length::Fixed(title_width));
+
+            let usage = text(entry.usage.clone())
+                .size(fs.subtitle)
+                .color(t.text_muted);
+
+            let item_row = Row::new()
+                .spacing(12)
+                .align_y(iced::Alignment::Center)
+                .push(icon_slot)
+                .push(trigger_pill)
+                .push(title)
+                .push(usage);
+
+            let item_button = button(item_row)
+                .on_press(Message::ItemClicked(display_idx))
+                .padding(fs.item_padding)
+                .width(Length::Fill)
+                .style(move |_theme, status| {
+                    let base_style = button::Style {
+                        text_color: t.text_main,
+                        border: iced::Border {
+                            radius: 8.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    };
+
+                    if is_selected {
+                        button::Style {
+                            background: Some(iced::Background::Color(t.selection_bg)),
+                            border: iced::Border {
+                                color: t.accent,
+                                width: 1.0,
+                                radius: 8.0.into(),
+                            },
+                            ..base_style
+                        }
+                    } else {
+                        match status {
+                            button::Status::Hovered => button::Style {
+                                background: Some(iced::Background::Color(iced::Color {
+                                    a: 0.1,
+                                    ..t.accent_hover
+                                })),
+                                ..base_style
+                            },
+                            _ => button::Style {
+                                background: None,
+                                ..base_style
+                            },
+                        }
+                    }
+                });
+
+            items_column = items_column.push(item_button);
+        }
+
+        items_column
+    }
+
+    fn help_hint_spans(&self) -> Vec<HintSpan<'_>> {
+        let t = self.view.theme;
+        let fs = self.view.font_sizes;
+
+        vec![
+            span("Enter").size(fs.hint).color(t.accent),
+            span(" use keyword").size(fs.hint).color(t.text_muted),
+            span("  ·  ").size(fs.hint).color(t.border),
+            span("Esc").size(fs.hint).color(t.accent),
+            span(" close help").size(fs.hint).color(t.text_muted),
+        ]
+    }
+
+    pub(super) fn view(&self) -> Element<'_, Message> {
+        let t = self.view.theme;
+        let fs = self.view.font_sizes;
+
+        if self.view.help_active {
+            return self.shell(
+                "Search keywords...",
+                self.help_hint_spans(),
+                self.help_items_column(),
+            );
+        }
 
         let mut items_column = Column::new().spacing(6);
 
@@ -1310,18 +1553,8 @@ impl LauncherApp {
             }
         }
 
-        let items_container = container(items_column)
-            .id(self.view.items_container_id.clone())
-            .width(Length::Fill)
-            .height(Length::Shrink);
-
-        let items_scroll = scrollable(items_container)
-            .id(self.view.scrollable_id.clone())
-            .height(Length::Fill)
-            .width(Length::Fill);
-
         let sep = span("  ·  ").size(fs.hint).color(t.border);
-        let mut hint_spans: Vec<iced::widget::text::Span<'_, (), iced::Font>> = Vec::new();
+        let mut hint_spans: Vec<HintSpan<'_>> = Vec::new();
 
         if self.history.max_items > 0 {
             hint_spans.push(span("Alt+P").size(fs.hint).color(t.accent));
@@ -1340,125 +1573,9 @@ impl LauncherApp {
             hint_spans.push(sep.clone());
         }
         hint_spans.push(span("Ctrl+/").size(fs.hint).color(t.accent));
-        hint_spans.push(span(" help").size(fs.hint).color(t.text_muted));
+        hint_spans.push(span(" keywords").size(fs.hint).color(t.text_muted));
 
-        if self.view.show_hints {
-            let mut addon_spans: Vec<iced::widget::text::Span<'_, (), iced::Font>> = Vec::new();
-            if self.addons.calculator.enabled {
-                addon_spans.push(span("math").size(fs.hint).color(t.text_muted));
-            }
-            if self.addons.currency.enabled {
-                let trigger = self.addons.currency.trigger.as_deref().unwrap_or("$");
-                if !addon_spans.is_empty() {
-                    addon_spans.push(sep.clone());
-                }
-                addon_spans.push(span(trigger.to_string()).size(fs.hint).color(t.accent));
-                addon_spans.push(span(" currency").size(fs.hint).color(t.text_muted));
-            }
-            if self.addons.file_browser.enabled {
-                if !addon_spans.is_empty() {
-                    addon_spans.push(sep.clone());
-                }
-                addon_spans.push(span("/").size(fs.hint).color(t.accent));
-                addon_spans.push(span(" files").size(fs.hint).color(t.text_muted));
-            }
-            for script_filter in &self.addons.script_filters {
-                if !addon_spans.is_empty() {
-                    addon_spans.push(sep.clone());
-                }
-                addon_spans.push(
-                    span(script_filter.keyword.clone())
-                        .size(fs.hint)
-                        .color(t.accent),
-                );
-                addon_spans.push(
-                    span(format!(" {}", script_filter.name.to_lowercase()))
-                        .size(fs.hint)
-                        .color(t.text_muted),
-                );
-            }
-            for text_snippet in &self.addons.text_snippets {
-                if !addon_spans.is_empty() {
-                    addon_spans.push(sep.clone());
-                }
-                addon_spans.push(
-                    span(text_snippet.keyword.clone())
-                        .size(fs.hint)
-                        .color(t.accent),
-                );
-                addon_spans.push(
-                    span(format!(" {}", text_snippet.name.to_lowercase()))
-                        .size(fs.hint)
-                        .color(t.text_muted),
-                );
-            }
-            for web_search in &self.addons.web_searches {
-                if !addon_spans.is_empty() {
-                    addon_spans.push(sep.clone());
-                }
-                addon_spans.push(
-                    span(web_search.keyword.clone())
-                        .size(fs.hint)
-                        .color(t.accent),
-                );
-                addon_spans.push(
-                    span(format!(" {}", web_search.name.to_lowercase()))
-                        .size(fs.hint)
-                        .color(t.text_muted),
-                );
-            }
-            if self.addons.emoji.enabled {
-                let emoji_trigger = self.addons.emoji.trigger.as_deref().unwrap_or("emoji");
-                if !addon_spans.is_empty() {
-                    addon_spans.push(sep.clone());
-                }
-                addon_spans.push(
-                    span(emoji_trigger.to_string())
-                        .size(fs.hint)
-                        .color(t.accent),
-                );
-                addon_spans.push(span(" emoji & icons").size(fs.hint).color(t.text_muted));
-            }
-            if !addon_spans.is_empty() {
-                hint_spans.push(span("\n").size(fs.hint));
-                hint_spans.extend(addon_spans);
-            }
-        }
-
-        let mut main_column = Column::new()
-            .spacing(12)
-            .width(Length::Fill)
-            .height(Length::Fill);
-
-        let hint_row = container(rich_text(hint_spans))
-            .width(Length::Fill)
-            .align_x(iced::Alignment::End);
-        main_column = main_column.push(hint_row);
-
-        let content = main_column
-            .push(search_input)
-            .push(container(items_scroll).padding(iced::Padding {
-                top: fs.scroll_top_padding,
-                right: 4.0,
-                bottom: 0.0,
-                left: 0.0,
-            }));
-
-        container(content)
-            .padding(fs.outer_padding)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(move |_theme| container::Style {
-                background: Some(iced::Background::Color(t.bg_base)),
-                border: iced::Border {
-                    color: t.border,
-                    width: 1.0,
-                    radius: 16.0.into(),
-                },
-                text_color: Some(t.text_main),
-                ..Default::default()
-            })
-            .into()
+        self.shell("Type to search...", hint_spans, items_column)
     }
 
     pub(super) fn subscription(&self) -> iced::Subscription<Message> {
@@ -1508,7 +1625,7 @@ impl LauncherApp {
                 key: keyboard::Key::Character(ref c),
                 modifiers,
                 ..
-            }) if c.as_str() == "/" && modifiers.control() => Some(Message::ToggleHints),
+            }) if c.as_str() == "/" && modifiers.control() => Some(Message::ToggleHelp),
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
                 Some(Message::ModifiersChanged(modifiers))
             }

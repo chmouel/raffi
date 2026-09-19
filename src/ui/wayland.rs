@@ -4,6 +4,7 @@ mod app;
 mod browser;
 mod currency;
 mod emoji;
+mod help;
 mod script_filters;
 mod snippets;
 mod state;
