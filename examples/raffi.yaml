@@ -1,4 +1,5 @@
 # yaml-language-server: $schema=raffi-schema.json
+# Validate this file with: raffi --check-config
 version: 1
 
 # Raffi can auto-detect installed desktop applications when your config does not

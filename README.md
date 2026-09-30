@@ -81,6 +81,8 @@ cargo build --release --no-default-features
 
 This reduces the binary from roughly 15 MB to around 1.1 MB by removing the iced GUI dependency.
 
+This minimal build also leaves out config validation (`--check-config` and the startup warnings about unknown keys). Add it back with `--features config-validation` at the cost of a few extra MB.
+
 ## Usage
 
 Running `raffi` launches configured entries through the selected interface. If your config does not define any valid launchers yet, Raffi falls back to auto-detected desktop applications from your system's `.desktop` files.

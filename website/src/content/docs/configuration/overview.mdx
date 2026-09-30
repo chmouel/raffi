@@ -19,6 +19,8 @@ You can override this location using the `-c` or `--configfile` flag:
 raffi --configfile /path/to/custom/config.yaml
 ```
 
+Raffi writes a `raffi-schema.json` file next to your config so editors can validate it as you type, and warns on stderr about unknown or invalid keys when it starts. Run `raffi --check-config` to validate the file on demand. See [Validation](/reference/yaml-schema#validation) for details.
+
 ## Basic Structure
 
 The configuration file is a YAML file with three main sections:

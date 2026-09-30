@@ -31,6 +31,29 @@ Path to the YAML configuration file.
   ```
 
 
+**`--check-config`** `boolean` (default: `false`)
+
+Validate the configuration file against the JSON Schema and exit without launching anything.
+
+  Every problem is printed with the file name, line number and path of the offending key, for example `raffi.yaml:12: /launchers/firefox: Additional properties are not allowed ('binnary' was unexpected)`. The exit code is non-zero when problems are found. Old v0 (flat) configs are checked as if migrated, but the file is left untouched and line numbers refer to the original file.
+
+  Requires the `config-validation` Cargo feature, which is enabled by default. Builds made with `--no-default-features` report that validation is unavailable.
+
+  ```bash
+  raffi --check-config
+  raffi --check-config -c ~/custom/config.yaml
+  ```
+
+
+**`--schema`** `boolean` (default: `false`)
+
+Print the JSON Schema of the configuration format to stdout and exit.
+
+  ```bash
+  raffi --schema > raffi-schema.json
+  ```
+
+
 ## UI Options
 
 **`-u, --ui-type`** `string` (default: `fuzzel`)

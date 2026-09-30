@@ -388,6 +388,28 @@ addons:
   text_snippets: []
 ```
 
+## Validation
+
+Raffi generates a JSON Schema for this format and keeps a copy named `raffi-schema.json` next to your config file. The copy is rewritten whenever it no longer matches the running version of Raffi.
+
+Point your editor at it by adding this line at the top of `raffi.yaml` (supported by any editor using [yaml-language-server](https://github.com/redhat-developer/yaml-language-server)):
+
+```yaml
+# yaml-language-server: $schema=raffi-schema.json
+```
+
+Unknown keys (a typo such as `binnary:`) and wrong value types are then flagged while you edit.
+
+Raffi also validates the config every time it loads it. Problems are printed to stderr as warnings and Raffi keeps running, ignoring unknown keys as before:
+
+```
+raffi: config warning: /home/user/.config/raffi/raffi.yaml:12: /launchers/firefox: Additional properties are not allowed ('binnary' was unexpected)
+```
+
+To check a config explicitly, for example in a script or after editing, run `raffi --check-config`. It prints all problems and exits with a non-zero status if any were found.
+
+The startup warnings and `--check-config` need the `config-validation` Cargo feature, which is enabled by default. Minimal `--no-default-features` builds skip them, though the schema file is still written for your editor.
+
 ## Path Expansion
 
 Most configuration fields (except `script`) support path and variable expansion:

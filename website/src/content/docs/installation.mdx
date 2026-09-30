@@ -135,6 +135,8 @@ cargo build --release --no-default-features
 
 This removes the `iced` GUI dependency, reducing the binary size from ~15 MB to ~1.1 MB.
 
+The minimal build also leaves out config validation (`--check-config` and the startup warnings about unknown keys). To keep it, build with `cargo build --release --no-default-features --features config-validation`, which adds a few MB.
+
 <Tabs>
 <TabItem label="Full build (with native UI)">
 ```bash

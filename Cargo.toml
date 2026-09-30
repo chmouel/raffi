@@ -13,8 +13,9 @@ documentation = "https://github.com/chmouel/raffi"
 repository = "https://github.com/chmouel/raffi"
 
 [features]
-default = ["wayland"]
+default = ["wayland", "config-validation"]
 wayland = ["iced", "ureq", "regex", "meval"]
+config-validation = ["jsonschema"]
 
 [dependencies]
 anyhow = "1.0.102"
@@ -33,3 +34,4 @@ meval = { version = "0.2", optional = true }
 ureq = { version = "3", features = ["json"], optional = true }
 regex = { version = "1.12", optional = true }
 schemars = { version = "1.2", features = ["derive"] }
+jsonschema = { version = "0.58.3", default-features = false, optional = true }

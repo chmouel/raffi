@@ -18,6 +18,7 @@ pub mod ui;
 
 /// Represents the configuration for each Raffi entry.
 #[derive(Deserialize, JsonSchema, Debug, PartialEq, Clone, Default)]
+#[schemars(deny_unknown_fields)]
 pub struct RaffiConfig {
     pub binary: Option<String>,
     pub args: Option<Vec<String>>,
@@ -33,6 +34,7 @@ pub struct RaffiConfig {
 
 /// Configuration for the currency addon
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
 pub struct CurrencyAddonConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -57,6 +59,7 @@ impl Default for CurrencyAddonConfig {
 
 /// Configuration for the calculator addon
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
 pub struct CalculatorAddonConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -70,6 +73,7 @@ impl Default for CalculatorAddonConfig {
 
 /// Configuration for the file browser addon
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
 pub struct FileBrowserAddonConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -103,6 +107,7 @@ pub const DEFAULT_EMOJI_FILES: &[&str] = &[
 
 /// Configuration for the emoji picker addon
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
 pub struct EmojiAddonConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -130,6 +135,7 @@ impl Default for EmojiAddonConfig {
 
 /// Configuration for a script filter addon
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
 pub struct ScriptFilterConfig {
     pub name: String,
     pub command: String,
@@ -146,6 +152,7 @@ pub struct ScriptFilterConfig {
 
 /// Configuration for a web search addon
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
 pub struct WebSearchConfig {
     pub name: String,
     pub keyword: String,
@@ -155,6 +162,7 @@ pub struct WebSearchConfig {
 
 /// A single text snippet entry
 #[derive(Deserialize, JsonSchema, Debug, Clone, PartialEq)]
+#[schemars(deny_unknown_fields)]
 pub struct TextSnippet {
     pub name: String,
     pub value: String,
@@ -162,6 +170,7 @@ pub struct TextSnippet {
 
 /// Configuration for a text snippet source
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
 pub struct TextSnippetSourceConfig {
     pub name: String,
     pub keyword: String,
@@ -185,6 +194,7 @@ pub struct TextSnippetSourceConfig {
 
 /// Container for all addon configurations
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
+#[schemars(deny_unknown_fields)]
 pub struct AddonsConfig {
     #[serde(default)]
     pub currency: CurrencyAddonConfig,
@@ -208,6 +218,7 @@ fn default_true() -> bool {
 
 /// Per-colour overrides for the native UI theme.
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
+#[schemars(deny_unknown_fields)]
 pub struct ThemeColorsConfig {
     pub bg_base: Option<String>,
     pub bg_input: Option<String>,
@@ -234,6 +245,7 @@ pub enum SortMode {
 
 /// General configuration for persistent defaults
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
+#[schemars(deny_unknown_fields)]
 pub struct GeneralConfig {
     #[serde(default)]
     pub ui_type: Option<String>,
@@ -286,6 +298,7 @@ struct Config {
 
 /// Public schema representation of the v1 config format, used for JSON Schema generation.
 #[derive(JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct ConfigSchema {
     /// Config format version (currently 1)
     pub version: u32,
@@ -385,6 +398,11 @@ pub struct Args {
     pub theme: Option<String>,
     #[options(help = "print JSON Schema for the config format to stdout")]
     pub schema: bool,
+    #[options(
+        help = "validate the config file against the JSON Schema and exit",
+        no_short
+    )]
+    pub check_config: bool,
     #[options(help = "write debug log to FILE")]
     pub debug_file: Option<String>,
 }
@@ -528,18 +546,17 @@ pub(crate) fn expand_config_value(s: &str) -> String {
     expand_env_vars(&expand_tilde(s))
 }
 
-/// Migrate a v0 config (launcher entries as top-level keys) to v1 format
-/// (entries under a `launchers` key with an explicit `version` field).
-/// Returns `Ok(true)` if migration was performed, `Ok(false)` if already v1+.
-pub fn migrate_config_v0_to_v1(config_path: &str, raw: &mut Value) -> Result<bool> {
+/// Migrate a v0 config to the v1 shape in memory, without touching any file.
+/// Returns `true` if migration was performed, `false` if already v1+.
+fn migrate_config_v0_in_memory(raw: &mut Value) -> bool {
     let mapping = match raw.as_mapping_mut() {
         Some(m) => m,
-        None => return Ok(false),
+        None => return false,
     };
 
     // If version key exists, no migration needed
     if mapping.contains_key(Value::String("version".to_string())) {
-        return Ok(false);
+        return false;
     }
 
     let reserved = ["general", "addons", "version"];
@@ -569,6 +586,17 @@ pub fn migrate_config_v0_to_v1(config_path: &str, raw: &mut Value) -> Result<boo
         Value::Mapping(launchers),
     );
 
+    true
+}
+
+/// Migrate a v0 config (launcher entries as top-level keys) to v1 format
+/// (entries under a `launchers` key with an explicit `version` field).
+/// Returns `Ok(true)` if migration was performed, `Ok(false)` if already v1+.
+pub fn migrate_config_v0_to_v1(config_path: &str, raw: &mut Value) -> Result<bool> {
+    if !migrate_config_v0_in_memory(raw) {
+        return Ok(false);
+    }
+
     // Back up original file
     let backup_path = format!("{config_path}.bak");
     fs::copy(config_path, &backup_path)
@@ -584,13 +612,269 @@ pub fn migrate_config_v0_to_v1(config_path: &str, raw: &mut Value) -> Result<boo
     Ok(true)
 }
 
+/// A single problem found while checking a config.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConfigProblem {
+    /// JSON pointer to the offending value, `/` for the document root.
+    pub path: String,
+    /// Offending key for unknown-property errors, used to point at its line.
+    pub key: Option<String>,
+    pub message: String,
+    /// 1-based line in the config file, when it could be located.
+    pub line: Option<usize>,
+}
+
+impl ConfigProblem {
+    fn new(path: &str, message: impl Into<String>) -> Self {
+        Self {
+            path: if path.is_empty() { "/" } else { path }.to_string(),
+            key: None,
+            message: message.into(),
+            line: None,
+        }
+    }
+}
+
+impl std::fmt::Display for ConfigProblem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.path, self.message)
+    }
+}
+
+/// Validate a v1-shaped config against the generated JSON Schema.
+/// Returns one problem per schema violation; empty means valid.
+#[cfg(feature = "config-validation")]
+pub fn validate_config_value(raw: &Value) -> Vec<ConfigProblem> {
+    let instance = match serde_json::to_value(raw) {
+        Ok(v) => v,
+        Err(e) => {
+            return vec![ConfigProblem::new(
+                "/",
+                format!("cannot check config against the schema: {e}"),
+            )]
+        }
+    };
+    let schema = match serde_json::to_value(schemars::schema_for!(ConfigSchema)) {
+        Ok(v) => v,
+        Err(e) => {
+            return vec![ConfigProblem::new(
+                "/",
+                format!("cannot serialize the built-in schema: {e}"),
+            )]
+        }
+    };
+    let validator = match jsonschema::validator_for(&schema) {
+        Ok(v) => v,
+        Err(e) => {
+            return vec![ConfigProblem::new(
+                "/",
+                format!("cannot compile the built-in schema: {e}"),
+            )]
+        }
+    };
+    validator
+        .iter_errors(&instance)
+        .map(|e| {
+            let mut problem = ConfigProblem::new(e.instance_path().as_str(), e.to_string());
+            if let jsonschema::error::ValidationErrorKind::AdditionalProperties { unexpected } =
+                e.kind()
+            {
+                problem.key = unexpected.first().cloned();
+            }
+            problem
+        })
+        .collect()
+}
+
+#[cfg(not(feature = "config-validation"))]
+pub fn validate_config_value(_raw: &Value) -> Vec<ConfigProblem> {
+    Vec::new()
+}
+
+enum YamlTokenKind {
+    SeqItem,
+    Key(String),
+    Other,
+}
+
+struct YamlToken {
+    line: usize,
+    indent: usize,
+    kind: YamlTokenKind,
+}
+
+fn parse_yaml_key(s: &str) -> Option<String> {
+    let (key, after) = match s.chars().next()? {
+        q @ ('"' | '\'') => {
+            let end = s[1..].find(q)? + 1;
+            (&s[1..end], &s[end + 1..])
+        }
+        '{' | '[' | '?' | '&' | '*' | '!' | '|' | '>' => return None,
+        _ => {
+            let end = s.find(": ").or_else(|| s.strip_suffix(':').map(str::len))?;
+            (s[..end].trim_end(), &s[end..])
+        }
+    };
+    after.starts_with(':').then(|| key.to_string())
+}
+
+/// Split block-style YAML into key and sequence-item tokens with their column.
+/// `  - name: x` yields a sequence item at column 2 and a key at column 4.
+fn tokenize_yaml(text: &str) -> Vec<YamlToken> {
+    let mut tokens = Vec::new();
+    for (i, raw) in text.lines().enumerate() {
+        let mut rest = raw.trim_start_matches(' ');
+        let mut indent = raw.len() - rest.len();
+        if rest.is_empty() || rest.starts_with('#') || rest.starts_with("---") {
+            continue;
+        }
+        while rest == "-" || rest.starts_with("- ") {
+            tokens.push(YamlToken {
+                line: i + 1,
+                indent,
+                kind: YamlTokenKind::SeqItem,
+            });
+            let after = rest[1..].trim_start_matches(' ');
+            indent += rest.len() - after.len();
+            rest = after;
+        }
+        if rest.is_empty() || rest.starts_with('#') {
+            continue;
+        }
+        tokens.push(YamlToken {
+            line: i + 1,
+            indent,
+            kind: parse_yaml_key(rest).map_or(YamlTokenKind::Other, YamlTokenKind::Key),
+        });
+    }
+    tokens
+}
+
+/// Best-effort lookup of the 1-based line a JSON pointer refers to in
+/// block-style YAML. Falls back to the deepest ancestor that could be found.
+fn find_yaml_line(text: &str, pointer: &str) -> Option<usize> {
+    let tokens = tokenize_yaml(text);
+    let (mut start, mut end) = (0, tokens.len());
+    let mut found = None;
+    for segment in pointer.split('/').skip(1).filter(|s| !s.is_empty()) {
+        let segment = segment.replace("~1", "/").replace("~0", "~");
+        let Some(level) = tokens[start..end].first().map(|t| t.indent) else {
+            break;
+        };
+        let children = || (start..end).filter(|&j| tokens[j].indent == level);
+        let hit = children()
+            .find(|&j| matches!(&tokens[j].kind, YamlTokenKind::Key(k) if *k == segment))
+            .or_else(|| {
+                let n = segment.parse::<usize>().ok()?;
+                children()
+                    .filter(|&j| matches!(tokens[j].kind, YamlTokenKind::SeqItem))
+                    .nth(n)
+            });
+        let Some(j) = hit else {
+            break;
+        };
+        let parent = &tokens[j];
+        found = Some(parent.line);
+        start = j + 1;
+        // A key's block may hold sequence items at the key's own column.
+        end = (start..end)
+            .find(|&k| {
+                let t = &tokens[k];
+                t.indent < parent.indent
+                    || (t.indent == parent.indent
+                        && !(matches!(parent.kind, YamlTokenKind::Key(_))
+                            && matches!(t.kind, YamlTokenKind::SeqItem)))
+            })
+            .unwrap_or(end);
+    }
+    found
+}
+
+/// Fill in `line` for each problem by locating its path in the YAML `text`.
+/// `v0` means `text` uses the old flat format, where launchers sit at the top level.
+fn locate_config_problems(problems: &mut [ConfigProblem], text: &str, v0: bool) {
+    for problem in problems {
+        let mut pointer = problem.path.clone();
+        if let Some(key) = &problem.key {
+            pointer = format!(
+                "{}/{}",
+                pointer.trim_end_matches('/'),
+                key.replace('~', "~0").replace('/', "~1")
+            );
+        }
+        if v0 {
+            if let Some(rest) = pointer.strip_prefix("/launchers") {
+                if rest.is_empty() || rest.starts_with('/') {
+                    pointer = rest.to_string();
+                }
+            }
+        }
+        problem.line = find_yaml_line(text, &pointer);
+    }
+}
+
+/// Format a problem as `source:LINE: path: message`, dropping `LINE` when unknown.
+fn format_config_problem(source: &str, problem: &ConfigProblem) -> String {
+    match problem.line {
+        Some(line) => format!("{source}:{line}: {problem}"),
+        None => format!("{source}: {problem}"),
+    }
+}
+
+fn report_config_warnings(raw: &Value, text: &str, v0: bool, source: &str) {
+    let mut problems = validate_config_value(raw);
+    locate_config_problems(&mut problems, text, v0);
+    for problem in &problems {
+        let problem = format_config_problem(source, problem);
+        debug_log!("config warning: {problem}");
+        eprintln!("raffi: config warning: {problem}");
+    }
+}
+
+/// Check a config file without running raffi or rewriting the file.
+/// Returns the list of problems found; empty means the config is valid.
+pub fn check_config(filename: &str) -> Result<Vec<ConfigProblem>> {
+    if !cfg!(feature = "config-validation") {
+        anyhow::bail!(
+            "config validation is not available in this build; rebuild with the `config-validation` feature"
+        );
+    }
+    let contents =
+        fs::read_to_string(filename).context(format!("cannot open config file {filename}"))?;
+    let mut raw: Value = serde_yaml::from_str(&contents).context("cannot parse config as YAML")?;
+    let v0 = migrate_config_v0_in_memory(&mut raw);
+
+    let mut problems = validate_config_value(&raw);
+    locate_config_problems(&mut problems, &contents, v0);
+    if problems.is_empty() {
+        // Parse v1 files from the text so serde can report where it failed.
+        let result = if v0 {
+            serde_yaml::from_value::<Config>(raw)
+        } else {
+            serde_yaml::from_str::<Config>(&contents)
+        };
+        if let Err(e) = result {
+            let mut problem = ConfigProblem::new("/", e.to_string());
+            problem.line = e.location().map(|l| l.line());
+            problems.push(problem);
+        }
+    }
+    Ok(problems)
+}
+
 /// Read the configuration file and return a ParsedConfig.
 pub fn read_config(filename: &str, args: &Args) -> Result<ParsedConfig> {
     let contents =
         fs::read_to_string(filename).context(format!("cannot open config file {filename}"))?;
     let mut raw: Value = serde_yaml::from_str(&contents).context("cannot parse config as YAML")?;
 
-    migrate_config_v0_to_v1(filename, &mut raw)?;
+    if migrate_config_v0_to_v1(filename, &mut raw)? {
+        // The file on disk now holds the re-serialized v1 config.
+        let migrated = serde_yaml::to_string(&raw).unwrap_or_default();
+        report_config_warnings(&raw, &migrated, false, filename);
+    } else {
+        report_config_warnings(&raw, &contents, false, filename);
+    }
 
     let config: Config = serde_yaml::from_value(raw).context("cannot parse config")?;
 
@@ -608,36 +892,8 @@ pub fn read_config_from_reader<R: Read>(reader: R, args: &Args) -> Result<Parsed
     let mut raw: Value = serde_yaml::from_str(&contents).context("cannot parse config")?;
 
     // For reader-based configs, do an in-memory migration (no file write)
-    if let Some(mapping) = raw.as_mapping_mut() {
-        if !mapping.contains_key(Value::String("version".to_string())) {
-            let reserved = ["general", "addons", "version"];
-            let mut launchers = serde_yaml::Mapping::new();
-            let mut keys_to_move = Vec::new();
-
-            for (key, _) in mapping.iter() {
-                if let Some(k) = key.as_str() {
-                    if !reserved.contains(&k) {
-                        keys_to_move.push(Value::String(k.to_string()));
-                    }
-                }
-            }
-
-            for key in &keys_to_move {
-                if let Some(val) = mapping.remove(key) {
-                    launchers.insert(key.clone(), val);
-                }
-            }
-
-            mapping.insert(
-                Value::String("version".to_string()),
-                Value::Number(serde_yaml::Number::from(1u64)),
-            );
-            mapping.insert(
-                Value::String("launchers".to_string()),
-                Value::Mapping(launchers),
-            );
-        }
-    }
+    let v0 = migrate_config_v0_in_memory(&mut raw);
+    report_config_warnings(&raw, &contents, v0, "config");
 
     let config: Config = serde_yaml::from_value(raw).context("cannot parse config")?;
     process_config(config, args)
@@ -1391,6 +1647,24 @@ fn generate_schema() -> String {
     serde_json::to_string_pretty(&schema).expect("Failed to serialize JSON Schema")
 }
 
+/// Write the JSON Schema to `schema_path` when missing or out of date.
+fn write_schema_if_changed(schema_path: &Path) {
+    let schema = generate_schema();
+    if fs::read_to_string(schema_path).is_ok_and(|current| current == schema) {
+        return;
+    }
+    let dir = schema_path.parent().unwrap_or(Path::new("."));
+    if fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    if let Err(e) = fs::write(schema_path, schema) {
+        eprintln!(
+            "Warning: could not write schema file {}: {e}",
+            schema_path.display()
+        );
+    }
+}
+
 pub fn run(args: Args) -> Result<()> {
     if let Some(ref path) = args.debug_file {
         debug::init(path);
@@ -1420,17 +1694,21 @@ pub fn run(args: Args) -> Result<()> {
     debug_log!("config: using file {configfile}");
     let config_exists = Path::new(configfile).exists();
 
-    // Write schema file if it doesn't exist yet
-    let config_dir = Path::new(configfile).parent().unwrap_or(Path::new("."));
-    let schema_path = config_dir.join("raffi-schema.json");
-    if !schema_path.exists() && fs::create_dir_all(config_dir).is_ok() {
-        if let Err(e) = fs::write(&schema_path, generate_schema()) {
-            eprintln!(
-                "Warning: could not write schema file {}: {e}",
-                schema_path.display()
-            );
+    if args.check_config {
+        let problems = check_config(configfile)?;
+        if problems.is_empty() {
+            println!("{configfile}: config OK");
+            return Ok(());
         }
+        for problem in &problems {
+            eprintln!("{}", format_config_problem(configfile, problem));
+        }
+        anyhow::bail!("{} problem(s) found in {configfile}", problems.len());
     }
+
+    // Keep the schema file next to the config in sync with this binary
+    let config_dir = Path::new(configfile).parent().unwrap_or(Path::new("."));
+    write_schema_if_changed(&config_dir.join("raffi-schema.json"));
 
     let mut parsed_config = if config_exists {
         read_config(configfile, &args).context("Failed to read config")?
@@ -1872,6 +2150,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            check_config: false,
             debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -1925,6 +2204,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            check_config: false,
             debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -1991,6 +2271,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            check_config: false,
             debug_file: None,
         };
         let env_provider = MockEnvProvider {
@@ -2045,6 +2326,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            check_config: false,
             debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -2096,6 +2378,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            check_config: false,
             debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -2273,6 +2556,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            check_config: false,
             debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -2306,6 +2590,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            check_config: false,
             debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -2338,6 +2623,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            check_config: false,
             debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -2373,6 +2659,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            check_config: false,
             debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -2404,6 +2691,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            check_config: false,
             debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -2461,6 +2749,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            check_config: false,
             debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -2517,6 +2806,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            check_config: false,
             debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -2583,6 +2873,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            check_config: false,
             debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -2622,6 +2913,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            check_config: false,
             debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -2657,6 +2949,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            check_config: false,
             debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -2700,6 +2993,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            check_config: false,
             debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -2741,6 +3035,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            check_config: false,
             debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -2781,6 +3076,7 @@ mod tests {
             initial_query: None,
             theme: None,
             schema: false,
+            check_config: false,
             debug_file: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -3097,5 +3393,163 @@ Icon=firefox
         let _ = fs::remove_dir_all(cwd);
 
         result
+    }
+
+    #[cfg(feature = "config-validation")]
+    fn yaml(s: &str) -> Value {
+        serde_yaml::from_str(s).unwrap()
+    }
+
+    #[test]
+    #[cfg(feature = "config-validation")]
+    fn test_example_config_is_valid() {
+        let mut raw = yaml(include_str!("../examples/raffi.yaml"));
+        migrate_config_v0_in_memory(&mut raw);
+        assert_eq!(validate_config_value(&raw), Vec::<ConfigProblem>::new());
+    }
+
+    #[test]
+    fn test_example_schema_is_up_to_date() {
+        assert_eq!(
+            include_str!("../examples/raffi-schema.json").trim_end(),
+            generate_schema(),
+            "regenerate with: cargo run -- --schema > examples/raffi-schema.json"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "config-validation")]
+    fn test_validate_reports_unknown_and_mistyped_keys() {
+        let text = "version: 1\n\
+             general:\n  them: dark\n\
+             addons:\n  calculator:\n    foo: 1\n\
+             launchers:\n  ff:\n    binnary: firefox\n    args: firefox\n";
+        let mut problems = validate_config_value(&yaml(text));
+        locate_config_problems(&mut problems, text, false);
+        let has = |path: &str, needle: &str, line: usize| {
+            problems
+                .iter()
+                .any(|p| p.path == path && p.message.contains(needle) && p.line == Some(line))
+        };
+        assert_eq!(problems.len(), 4, "{problems:?}");
+        assert!(has("/general", "'them'", 3), "{problems:?}");
+        assert!(has("/addons/calculator", "'foo'", 6), "{problems:?}");
+        assert!(has("/launchers/ff", "'binnary'", 9), "{problems:?}");
+        assert!(has("/launchers/ff/args", "array", 10), "{problems:?}");
+    }
+
+    #[test]
+    #[cfg(feature = "config-validation")]
+    fn test_validate_v0_config_after_migration() {
+        let text = "firefox:\n  binary: firefox\n  descr: x\n";
+        let mut raw = yaml(text);
+        let v0 = migrate_config_v0_in_memory(&mut raw);
+        let mut problems = validate_config_value(&raw);
+        locate_config_problems(&mut problems, text, v0);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert_eq!(problems[0].path, "/launchers/firefox");
+        assert_eq!(problems[0].line, Some(3));
+    }
+
+    #[test]
+    fn test_find_yaml_line() {
+        let text = "\
+# comment
+version: 1
+addons:
+  script_filters:
+  - name: one
+    command: a
+  - name: \"two\"
+    command: |
+      echo a: b
+    args:
+      - x
+      - y
+  web_searches: []
+launchers:
+  \"my/app\":
+    binary: foo # trailing
+";
+        let cases = [
+            ("/version", Some(2)),
+            ("/addons", Some(3)),
+            ("/addons/script_filters/0", Some(5)),
+            ("/addons/script_filters/0/name", Some(5)),
+            ("/addons/script_filters/0/command", Some(6)),
+            ("/addons/script_filters/1/command", Some(8)),
+            ("/addons/script_filters/1/args/1", Some(12)),
+            ("/addons/web_searches", Some(13)),
+            ("/addons/web_searches/0", Some(13)),
+            ("/launchers/my~1app/binary", Some(16)),
+            ("/launchers/missing", Some(14)),
+            ("/nope", None),
+            ("/", None),
+        ];
+        for (pointer, line) in cases {
+            assert_eq!(find_yaml_line(text, pointer), line, "{pointer}");
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "config-validation")]
+    fn test_check_config_reports_lines() {
+        let dir = temp_test_dir("check-config-lines");
+        let path = dir.join("raffi.yaml");
+        fs::write(
+            &path,
+            "version: 1\nlaunchers:\n  ff:\n    binary: firefox\n    ifexist: 1\n",
+        )
+        .unwrap();
+
+        let problems = check_config(path.to_str().unwrap()).unwrap();
+
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert_eq!(problems[0].line, Some(5));
+        let shown = format_config_problem("raffi.yaml", &problems[0]);
+        assert!(
+            shown.starts_with("raffi.yaml:5: /launchers/ff/ifexist: "),
+            "{shown}"
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_unknown_keys_still_load() {
+        let config = "version: 1\nlaunchers:\n  sh:\n    binary: sh\n    binnary: typo\n";
+        let args = Args::parse_args_default::<&str>(&[]).unwrap();
+        let parsed = read_config_from_reader(Cursor::new(config), &args).unwrap();
+        assert_eq!(parsed.entries.len(), 1);
+        assert_eq!(parsed.entries[0].binary.as_deref(), Some("sh"));
+    }
+
+    #[test]
+    #[cfg(feature = "config-validation")]
+    fn test_check_config_does_not_rewrite_v0_file() {
+        let dir = temp_test_dir("check-config");
+        let path = dir.join("raffi.yaml");
+        let contents = "firefox:\n  binary: firefox\n";
+        fs::write(&path, contents).unwrap();
+
+        let problems = check_config(path.to_str().unwrap()).unwrap();
+
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(fs::read_to_string(&path).unwrap(), contents);
+        assert!(!dir.join("raffi.yaml.bak").exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_write_schema_if_changed_refreshes_stale_file() {
+        let dir = temp_test_dir("schema-refresh");
+        let path = dir.join("raffi-schema.json");
+
+        write_schema_if_changed(&path);
+        assert_eq!(fs::read_to_string(&path).unwrap(), generate_schema());
+
+        fs::write(&path, "{}").unwrap();
+        write_schema_if_changed(&path);
+        assert_eq!(fs::read_to_string(&path).unwrap(), generate_schema());
+        let _ = fs::remove_dir_all(dir);
     }
 }
