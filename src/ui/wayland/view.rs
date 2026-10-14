@@ -8,6 +8,7 @@ use iced::{Element, Length};
 
 use super::ansi::ansi_to_spans;
 use super::browser::mimetype_icon_name;
+use super::snippets::truncate_preview;
 use super::state::{LauncherApp, Message};
 
 type HintSpan<'a> = iced::widget::text::Span<'a, (), iced::Font>;
@@ -632,6 +633,27 @@ impl LauncherApp {
             items_column = items_column.push(loading_button);
             special_item_idx += 1;
         } else if self.text_snippets.active {
+            if let Some(error) = &self.text_snippets.error {
+                let error_row = Row::new()
+                    .spacing(16)
+                    .align_y(iced::Alignment::Center)
+                    .push(text(error.clone()).size(fs.item).color(t.text_muted));
+
+                let error_button = button(error_row)
+                    .padding(fs.item_padding)
+                    .width(Length::Fill)
+                    .style(move |_theme, _status| button::Style {
+                        text_color: t.text_muted,
+                        border: iced::Border {
+                            radius: 8.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    });
+
+                items_column = items_column.push(error_button);
+            }
+
             for &snippet_idx in &self.text_snippets.filtered {
                 if let Some(snippet) = self.text_snippets.items.get(snippet_idx) {
                     let is_selected = self.selected_index == special_item_idx;
@@ -666,14 +688,26 @@ impl LauncherApp {
                     }
 
                     let mut text_col = Column::new();
-                    text_col = text_col.push(text(&snippet.name).size(fs.item).color(t.text_main));
-                    let truncated_value = if snippet.value.len() > 80 {
-                        format!("{}...", &snippet.value[..80])
-                    } else {
-                        snippet.value.clone()
-                    };
-                    text_col =
-                        text_col.push(text(truncated_value).size(fs.subtitle).color(t.text_muted));
+                    let mut title_row = Row::new()
+                        .spacing(8)
+                        .align_y(iced::Alignment::Center)
+                        .push(text(&snippet.name).size(fs.item).color(t.text_main));
+                    if let Some(keyword) = &snippet.keyword {
+                        title_row =
+                            title_row.push(text(keyword).size(fs.subtitle).color(t.text_muted));
+                    }
+                    text_col = text_col.push(title_row);
+                    let preview = self
+                        .text_snippets
+                        .previews
+                        .get(snippet_idx)
+                        .and_then(Option::as_deref)
+                        .unwrap_or(&snippet.value);
+                    text_col = text_col.push(
+                        text(truncate_preview(preview))
+                            .size(fs.subtitle)
+                            .color(t.text_muted),
+                    );
                     item_row = item_row.push(text_col.width(Length::Fill));
 
                     let item_button = button(item_row)

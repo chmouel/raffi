@@ -2,9 +2,11 @@ mod actions;
 mod ansi;
 mod app;
 mod browser;
+mod clipboard_history;
 mod currency;
 mod emoji;
 mod help;
+mod placeholders;
 mod script_filters;
 mod snippets;
 mod state;
@@ -78,6 +80,7 @@ fn run_wayland_ui(
     let window_height = settings.window_height;
     let sort_mode = settings.sort_mode.clone();
     let fallbacks = settings.fallbacks.clone();
+    let clipboard_history = settings.clipboard_history;
 
     let window_settings = window::Settings {
         size: iced::Size::new(window_width, window_height),
@@ -98,7 +101,7 @@ fn run_wayland_ui(
 
     let mut app = iced::application(
         move || {
-            LauncherApp::new(
+            let (mut app, task) = LauncherApp::new(
                 configs_for_new.clone(),
                 addons_for_new.clone(),
                 no_icons,
@@ -109,7 +112,9 @@ fn run_wayland_ui(
                 font_sizes,
                 sort_mode.clone(),
                 fallbacks.clone(),
-            )
+            );
+            app.text_snippets.clipboard_history = clipboard_history;
+            (app, task)
         },
         LauncherApp::update,
         LauncherApp::view,

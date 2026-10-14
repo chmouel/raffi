@@ -20,6 +20,7 @@ version: 1
 #   window_height: 600       # Window height in pixels (default: 600)
 #   padding: 20              # Outer window padding in pixels (default: 20, scales with font_size)
 #   sort_mode: hybrid        # Sort mode for entries: frequency, recency, or hybrid (default: hybrid)
+#   clipboard_history: auto  # Manager for {clipboard:N} in snippets: auto, cliphist, copyq, clipman or none
 #   fallbacks:               # Addons shown at the bottom of results when typing a query
 #     - addons.web_searches."Google"           # Opens Google search with the current query
 #     - addons.web_searches."DuckDuckGo"       # Opens DuckDuckGo search with the current query
@@ -449,17 +450,33 @@ addons:
   #     #   "copy"   — copy to clipboard via wl-copy (default for Enter)
   #     #   "insert" — type into focused app via wtype/ydotool (default for Ctrl+Enter)
   #     # Any other string is run as a shell command via sh -c, with {value} replaced.
+  #     # The value is also exported as $RAFFI_VALUE; prefer "$RAFFI_VALUE" over
+  #     # {value} in custom commands when the snippet may contain shell syntax.
   #     action: "insert"                       # primary action on Enter: type into focused app
   #     secondary_action: "copy"               # secondary action on Ctrl+Enter: copy to clipboard
   #     snippets:
   #       - name: "Personal Email"
+  #         keyword: "!me"                     # optional abbreviation, ranked first when typed
   #         value: "user@example.com"
   #       - name: "Work Email"
   #         value: "user@company.com"
+  #       # Dynamic placeholders (on by default):
+  #       #   {clipboard} {clipboard:1} {date} {time} {datetime} {date:%A %d %B} {date +1d}
+  #       #   {random:uuid} {random:1-100} {env:VAR} {snippet:NAME} {shell:CMD}
+  #       #   {cursor}, and transforms like {clipboard|trim|uppercase}.
+  #       #   Write \{date} for a literal {date}, in single quotes or a block
+  #       #   scalar since "\{" is an invalid YAML escape: value: '\{date} is {date}'
+  #       - name: "Quote clipboard"
+  #         value: "> {clipboard|trim}"
+  #       - name: "Previous copy"                # needs cliphist, CopyQ or clipman running
+  #         value: "{clipboard:1|trim}"
+  #       - name: "Follow-up"
+  #         value: "Follow up on {date +1w:%A %d %B}: {cursor}"
   #   - name: "Templates"
   #     keyword: "tpl"
   #     icon: "document"
   #     file: "~/.config/raffi/snippets.yaml"
+  #     placeholders: false                  # use values exactly as written
   #   - name: "Dynamic"
   #     keyword: "dyn"
   #     icon: "terminal"

@@ -2,7 +2,9 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-use crate::{AddonsConfig, RaffiConfig, SortMode, ThemeColorsConfig, ThemeMode, UIType};
+use crate::{
+    AddonsConfig, ClipboardHistory, RaffiConfig, SortMode, ThemeColorsConfig, ThemeMode, UIType,
+};
 
 mod fuzzel;
 #[cfg(feature = "wayland")]
@@ -80,6 +82,7 @@ pub struct UISettings {
     pub window_height: f32,
     pub sort_mode: SortMode,
     pub fallbacks: Vec<String>,
+    pub clipboard_history: ClipboardHistory,
 }
 
 impl Default for UISettings {
@@ -96,6 +99,7 @@ impl Default for UISettings {
             window_height: 600.0,
             sort_mode: SortMode::default(),
             fallbacks: Vec::new(),
+            clipboard_history: ClipboardHistory::default(),
         }
     }
 }

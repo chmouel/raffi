@@ -14,7 +14,7 @@ repository = "https://github.com/chmouel/raffi"
 
 [features]
 default = ["wayland", "config-validation"]
-wayland = ["iced", "ureq", "regex", "meval"]
+wayland = ["iced", "ureq", "regex", "meval", "chrono", "shlex"]
 config-validation = ["jsonschema"]
 
 [dependencies]
@@ -33,5 +33,7 @@ iced = { version = "0.14", features = [
 meval = { version = "0.2", optional = true }
 ureq = { version = "3", features = ["json"], optional = true }
 regex = { version = "1.12", optional = true }
+shlex = { version = "2.0", optional = true }
 schemars = { version = "1.2", features = ["derive"] }
 jsonschema = { version = "0.58.3", default-features = false, optional = true }
+chrono = { version = "0.4.45", default-features = false, features = ["clock"], optional = true }

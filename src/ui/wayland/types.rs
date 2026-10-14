@@ -142,6 +142,11 @@ pub(crate) enum Message {
     ScriptFilterItemSelected(usize),
     TextSnippetCommandResult(u64, std::result::Result<Vec<TextSnippet>, String>),
     TextSnippetSelected(usize),
+    TextSnippetClipboard(u64, ClipboardData),
+    TextSnippetExpanded(
+        u64,
+        std::result::Result<super::placeholders::Expanded, String>,
+    ),
     WebSearchSelected,
     FileBrowserItemSelected(usize),
     TabComplete,
@@ -155,4 +160,21 @@ pub(crate) enum Message {
     EmojiDataLoaded(Vec<EmojiEntry>),
     FallbackSelected(usize),
     KeywordSuggestionSelected(usize),
+}
+
+/// Clipboard text fetched for snippet previews. `None` or a missing history
+/// index means it has not been fetched.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ClipboardData {
+    pub current: Option<std::result::Result<String, String>>,
+    pub history: std::collections::BTreeMap<usize, std::result::Result<String, String>>,
+}
+
+impl ClipboardData {
+    pub fn merge(&mut self, other: ClipboardData) {
+        if other.current.is_some() {
+            self.current = other.current;
+        }
+        self.history.extend(other.history);
+    }
 }

@@ -91,7 +91,9 @@ Snippets can come from four different sources:
 
 2. **Filter Results**
 
-   Continue typing to fuzzy-filter snippets by name
+   Continue typing to filter snippets. Exact [keyword](#snippet-keywords-and-search)
+   matches come first, then keyword prefixes, then fuzzy matches on the name,
+   then fuzzy matches on the snippet content
 
 3. **Select Snippet**
 
@@ -158,7 +160,7 @@ The snippet file (`~/.config/raffi/snippets.yaml`):
 - name: "Meeting Template"
   value: |
     Meeting Notes
-    Date: [DATE]
+    Date: {date}
     Attendees: [NAMES]
     Topics:
     -
@@ -203,6 +205,7 @@ The command must output JSON in Alfred Script Filter format:
 
 <Aside type="tip">
 The `title` field becomes the snippet name, and `arg` becomes the snippet value.
+An optional `keyword` field sets the [snippet keyword](#snippet-keywords-and-search).
 </Aside>
 
 ### Directory Source
@@ -238,12 +241,140 @@ john@example.com
 Format:
 
 - **First line**: Snippet name (description)
+- **Optional `keyword: ...` lines**: [Snippet keyword](#snippet-keywords-and-search)
 - **`---`**: Separator
 - **After separator**: Snippet content (value)
+
+```text signature.snippet
+Professional Signature
+keyword: !sig
+---
+Best regards,
+John Doe
+```
 
 <Aside type="note">
 Directory-based snippets are sorted alphabetically and cached per session.
 </Aside>
+
+## Dynamic Placeholders
+
+Snippet values can contain placeholders that are filled in when you pick the
+snippet. The subtitle under each snippet shows a preview of the result.
+
+```yaml raffi.yaml
+snippets:
+  - name: "Quote clipboard"
+    value: "> {clipboard}"
+  - name: "Meeting header"
+    value: "## Meeting {date:%A %d %B}, follow-up on {date +1w}"
+  - name: "Branch"
+    value: "{shell:git -C ~/src/project branch --show-current}"
+  - name: "Function"
+    value: "fn {cursor}() {}"
+```
+
+| Placeholder | Result |
+|---|---|
+| `{clipboard}` | Current clipboard text |
+| `{clipboard:1}` | An earlier clipboard entry, up to `{clipboard:100}`. See [Clipboard history](#clipboard-history) |
+| `{date}` `{time}` `{datetime}` | Now, formatted as `%Y-%m-%d`, `%H:%M` and `%Y-%m-%d %H:%M` |
+| `{date:%A %d %B}` | Custom [strftime](https://docs.rs/chrono/latest/chrono/format/strftime/index.html) format, also for `time` and `datetime` |
+| `{date +1d}` `{datetime -2h +30m:%H:%M}` | Date arithmetic. Units: `s` `m` `h` `d` `w` `M` (months) `y` |
+| `{random:uuid}` | A random UUID (v4) |
+| `{random:1-100}` | A random whole number between both values, inclusive |
+| `{env:USER}` | An environment variable, empty when unset |
+| `{snippet:NAME}` | Another snippet from the same source, by name or keyword |
+| `{shell:COMMAND}` | Output of `sh -c COMMAND` |
+| `{cursor}` | Where the caret ends up after `insert` |
+
+Add transforms after a `|`, chained left to right: `uppercase`, `lowercase`,
+`capitals` (first letter of each word) and `trim`. For example
+`{clipboard|trim|lowercase}` or `{env:USER|capitals}`. Transforms work on every
+placeholder except `shell` and `cursor`.
+
+Some details worth knowing:
+
+- Only the names above are placeholders. Other braces, such as code or a
+  `{value}` in an action, are left alone. Write `\{date}` to get a literal
+  `{date}`. YAML double-quoted strings reject `\{` and `\}` as invalid
+  escapes, so put values containing them in single quotes or a block scalar,
+  for example `value: '\{date} is {date}'`.
+- A placeholder with a mistake in it (unknown transform, bad date format,
+  reversed range, missing snippet) shows an error row and leaves Raffi open
+  instead of copying the wrong text.
+- Month and year offsets clamp to the end of the month: January 31 `+1M` is the
+  last day of February.
+- Text that comes from the clipboard, environment, shell or another snippet's
+  placeholders is inserted as is and not scanned for more placeholders.
+  `{snippet:...}` references can nest up to 5 levels and expand at most 1000
+  times in total.
+- `{shell:...}` ends at the first `}`. Write `\}` for a literal `}` inside the
+  command. It times out after 5 seconds and terminates the command and its
+  child processes. It never runs for the preview, only
+  when you select the snippet, and it is disabled for `command:` sources.
+- Previews leave `{shell:...}` and `{random:...}` untouched. The clipboard
+  preview is read once when the source opens, the final value reads it again.
+- Only the first `{cursor}` counts, and it only moves the caret with `insert`.
+  The caret moves one Left key per character, which can be off by a few for
+  emoji sequences or combining accents.
+- Expanded values are limited to 100 KiB. With `insert`, `{cursor}` can be at
+  most 1000 characters from the end of the value.
+
+### Clipboard History
+
+`{clipboard:1}` is the entry copied before the current one, `{clipboard:2}` the
+one before that, and so on. `{clipboard:0}` is the same as `{clipboard}`. Raffi
+keeps no history of its own, so these read from the clipboard manager you
+already run: [cliphist](https://github.com/sentriz/cliphist),
+[CopyQ](https://hluk.github.io/CopyQ/) or
+[clipman](https://github.com/yory8/clipman).
+
+```yaml raffi.yaml
+snippets:
+  - name: "Previous copy"
+    value: "{clipboard:1|trim}"
+  - name: "Name and email"
+    value: "{clipboard:1} <{clipboard}>"
+```
+
+Raffi picks the manager that is running under your user. It looks for
+`cliphist store` or `clipman store` (usually run from `wl-paste --watch`) and
+for the CopyQ server, and prefers them in that order when several run. A custom
+`-db-path` for cliphist or `--histpath` for clipman on that command line is
+used too, including paths containing spaces. Quote those paths when launching
+the watcher through a shell. To pick one yourself or turn history off, set
+[`clipboard_history`](/configuration/general-settings/) in
+`general:`.
+
+Numbering assumes the newest entry in the manager is the current clipboard, as
+Alfred does. If the manager skipped what you just copied (an image, a password
+it ignores, text below its minimum length), the numbers are off by one. Entries
+that are not text, such as images, show an error instead of being inserted.
+
+<Aside type="caution">
+Placeholders are on by default, so existing snippets containing `{date}` or
+`{clipboard}` now expand. Escape them with `\{` inside single-quoted or block
+scalar YAML values, such as `value: '\{date} is {date}'`, or set
+`placeholders: false` on the source to keep every value exactly as written.
+</Aside>
+
+## Snippet Keywords and Search
+
+Each snippet can have its own `keyword`, a short abbreviation you type to find
+it straight away, like Alfred's snippet keywords:
+
+```yaml raffi.yaml
+snippets:
+  - name: "Email signature"
+    keyword: "!sig"
+    value: "Best regards, John"
+```
+
+Typing `sn !sig` puts that snippet first. Results are ranked as exact keyword,
+then keyword prefix, then fuzzy match on the name, then fuzzy match on the raw
+snippet value (before placeholders are filled in). The keyword is shown next to
+the snippet name.
 
 ## Actions
 
@@ -269,16 +400,26 @@ Configure how snippets are used when selected:
 
 ### Custom Actions
 
-Use command templates with `{value}` placeholder:
+Use a shell command as the action. The value is exported as the `RAFFI_VALUE`
+environment variable:
 
 ```yaml raffi.yaml
 text_snippets:
   - name: "Commands"
     keyword: "cmd"
-    action: "kitty sh -c {value}"
+    action: 'kitty sh -c "$RAFFI_VALUE"'
     snippets:
       - name: "System Update"
         value: "sudo pacman -Syu"
+```
+
+The command can also use a `{value}` placeholder, but `{value}` is pasted into
+the command as raw text, so quotes or `$(...)` in the snippet are interpreted
+by the shell. For snippets that pull in the clipboard, shell output or anything
+else you do not control, quote the variable instead:
+
+```yaml
+action: 'notify-send "Snippet" "$RAFFI_VALUE"'
 ```
 
 ### Primary and Secondary Actions
@@ -318,7 +459,7 @@ Icon name from your icon cache to display next to each snippet
 
 **`snippets`** `array`
 
-Inline list of snippets (each with `name` and `value`)
+Inline list of snippets (each with `name`, `value` and an optional `keyword`)
 
 
 **`file`** `string`
@@ -352,6 +493,12 @@ Action on Enter:
 **`secondary_action`** `string` (default: `insert`)
 
 Action on Ctrl+Enter. Accepts same values as `action`.
+
+
+**`placeholders`** `boolean` (default: `true`)
+
+Expand [dynamic placeholders](#dynamic-placeholders) in snippet values. Set to
+`false` to use values exactly as written.
 
 
 <Aside type="caution">
@@ -419,31 +566,21 @@ text_snippets:
 
 ### Dynamic Dates
 
-Create a script that generates date snippets:
-
-```python date-snippets.py
-#!/usr/bin/env python3
-import json
-from datetime import datetime, timedelta
-
-today = datetime.now()
-
-items = [
-    {"title": "Today", "arg": today.strftime("%Y-%m-%d")},
-    {"title": "Yesterday", "arg": (today - timedelta(days=1)).strftime("%Y-%m-%d")},
-    {"title": "Tomorrow", "arg": (today + timedelta(days=1)).strftime("%Y-%m-%d")},
-    {"title": "ISO Timestamp", "arg": today.isoformat()},
-]
-
-print(json.dumps({"items": items}))
-```
-
 ```yaml raffi.yaml
 text_snippets:
   - name: "Dates"
     keyword: "date"
-    command: "python3 ~/.config/raffi/date-snippets.py"
     icon: "calendar"
+    snippets:
+      - name: "Today"
+        keyword: "td"
+        value: "{date}"
+      - name: "Yesterday"
+        value: "{date -1d}"
+      - name: "Tomorrow"
+        value: "{date +1d}"
+      - name: "ISO Timestamp"
+        value: "{datetime:%Y-%m-%dT%H:%M:%S%:z}"
 ```
 
 ## Use Cases
@@ -524,6 +661,10 @@ text_snippets:
 **For typing/inserting**: `wtype` or `ydotool`
 </Aside>
 
+<Aside type="note">
+**For `{clipboard:N}`**: cliphist, CopyQ or clipman running
+</Aside>
+
 ## Tips
 
 <Aside type="tip">
@@ -531,7 +672,7 @@ Use file sources for large snippet collections to keep your main config clean
 </Aside>
 
 <Aside type="tip">
-Command sources are perfect for dynamic content like dates, git branch names, or API responses
+Use placeholders for dates, the clipboard or a quick shell command, and command sources when the list of snippets itself is dynamic, such as API responses
 </Aside>
 
 <Aside type="tip">
@@ -567,11 +708,11 @@ addons:
       file: "~/.config/raffi/templates.yaml"
       action: "insert"
 
-    # Dynamic dates from command
-    - name: "Dates"
-      keyword: "date"
-      command: "date-snippets"
-      icon: "calendar"
+    # Snippets generated by a command
+    - name: "Projects"
+      keyword: "proj"
+      command: "project-snippets"
+      icon: "folder"
 
     # Code snippets from directory
     - name: "Code Snippets"

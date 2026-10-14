@@ -79,6 +79,36 @@
       },
       "additionalProperties": false
     },
+    "ClipboardHistory": {
+      "description": "Clipboard manager used for `{clipboard:N}` snippet placeholders",
+      "oneOf": [
+        {
+          "description": "Use whichever of cliphist, CopyQ or clipman is running",
+          "type": "string",
+          "const": "auto"
+        },
+        {
+          "description": "Read history with `cliphist list` and `cliphist decode`",
+          "type": "string",
+          "const": "cliphist"
+        },
+        {
+          "description": "Read history with `copyq read`",
+          "type": "string",
+          "const": "copyq"
+        },
+        {
+          "description": "Read clipman's JSON history file",
+          "type": "string",
+          "const": "clipman"
+        },
+        {
+          "description": "Disable clipboard history placeholders",
+          "type": "string",
+          "const": "none"
+        }
+      ]
+    },
     "CurrencyAddonConfig": {
       "description": "Configuration for the currency addon",
       "type": "object",
@@ -178,6 +208,10 @@
       "description": "General configuration for persistent defaults",
       "type": "object",
       "properties": {
+        "clipboard_history": {
+          "description": "Clipboard manager for `{clipboard:N}` snippet placeholders",
+          "$ref": "#/$defs/ClipboardHistory"
+        },
         "default_script_shell": {
           "type": [
             "string",
@@ -435,6 +469,14 @@
       "description": "A single text snippet entry",
       "type": "object",
       "properties": {
+        "keyword": {
+          "description": "Optional short keyword; an exact match ranks the snippet first.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "name": {
           "type": "string"
         },
@@ -499,6 +541,11 @@
         },
         "name": {
           "type": "string"
+        },
+        "placeholders": {
+          "description": "Expand dynamic placeholders such as {clipboard} and {date} in snippet values.",
+          "type": "boolean",
+          "default": true
         },
         "secondary_action": {
           "type": [
