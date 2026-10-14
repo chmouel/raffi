@@ -9,7 +9,7 @@ use iced::widget::operation::{focus, move_cursor_to_end, snap_to};
 use iced::widget::scrollable;
 use iced::Task;
 
-use super::actions::{execute_action, spawn_copy};
+use super::actions::{execute_action, execute_snippet_action, spawn_copy};
 use super::browser::read_directory;
 use super::currency::{
     fetch_exchange_rate, fetch_multi_exchange_rates, is_currency_help_query,
@@ -21,13 +21,16 @@ use super::emoji::{
 };
 use super::help::{filter_help_entries, help_entries};
 use super::script_filters::{execute_script_filter, parse_script_filter_output};
-use super::snippets::{execute_text_snippet_command, filter_snippets};
+use super::snippets::{
+    compute_previews, execute_text_snippet_command, expand_final, fetch_clipboard, filter_snippets,
+    missing_clipboard, parse_snippet_file,
+};
 use super::state::{
-    CachedRate, CurrencyConversion, CurrencyConversionRequest, CurrencyResult, CurrencyState,
-    EmojiEntry, EmojiState, FallbackAction, FileBrowserState, HistoryState, KeywordSuggestion,
-    LauncherApp, Message, MultiCurrencyRequest, MultiCurrencyResult, ResolvedFallback,
-    ScriptFilterResult, ScriptFilterState, SharedSelection, TextSnippetState, ViewState,
-    WebSearchActiveState, WebSearchState,
+    CachedRate, ClipboardData, CurrencyConversion, CurrencyConversionRequest, CurrencyResult,
+    CurrencyState, EmojiEntry, EmojiState, FallbackAction, FileBrowserState, HistoryState,
+    KeywordSuggestion, LauncherApp, Message, MultiCurrencyRequest, MultiCurrencyResult,
+    PendingSelection, ResolvedFallback, ScriptFilterResult, ScriptFilterState, SharedSelection,
+    TextSnippetState, ViewState, WebSearchActiveState, WebSearchState,
 };
 use super::support::{
     fuzzy_match_configs, load_history, load_mru_map, mru_sort_key, save_history, save_mru_map,
@@ -366,6 +369,12 @@ impl LauncherApp {
                 self.handle_text_snippet_command_result(generation, result)
             }
             Message::TextSnippetSelected(index) => self.handle_text_snippet_selected(index),
+            Message::TextSnippetClipboard(session, result) => {
+                self.handle_text_snippet_clipboard(session, result)
+            }
+            Message::TextSnippetExpanded(session, result) => {
+                self.handle_text_snippet_expanded(session, result)
+            }
             Message::WebSearchSelected => self.handle_web_search_selected(),
             Message::FileBrowserItemSelected(index) => self.handle_file_browser_selected(index),
             Message::TabComplete => self.handle_tab_complete(),
@@ -693,15 +702,21 @@ impl LauncherApp {
         };
 
         self.filtered_configs.clear();
+        if !self.text_snippets.active || self.text_snippets.source_index != Some(config_index) {
+            self.text_snippets.reset_session(Some(config_index));
+        }
         self.text_snippets.active = true;
         self.text_snippets.icon = config.icon.clone();
         self.text_snippets.action = config.action.clone();
         self.text_snippets.secondary_action = config.secondary_action.clone();
+        self.text_snippets.placeholders = config.placeholders;
+        // Command output is not written by the user, so it may not run shell code.
+        self.text_snippets.allow_shell = config.placeholders && config.command.is_none();
+        self.text_snippets.error = None;
 
         if let Some(snippets) = config.snippets {
             self.text_snippets.items = snippets;
-            self.text_snippets.filtered = filter_snippets(&self.text_snippets.items, &query);
-            self.text_snippets.loading = false;
+            self.finish_text_snippet_load(&query, tasks);
             return;
         }
 
@@ -733,8 +748,7 @@ impl LauncherApp {
                     }
                 }
             }
-            self.text_snippets.filtered = filter_snippets(&self.text_snippets.items, &query);
-            self.text_snippets.loading = false;
+            self.finish_text_snippet_load(&query, tasks);
             return;
         }
 
@@ -751,21 +765,11 @@ impl LauncherApp {
                                 continue;
                             }
 
-                            if let Ok(contents) = fs::read_to_string(&path) {
-                                let mut lines = contents.lines();
-                                if let Some(name) = lines.next() {
-                                    if let Some(separator) = lines.next() {
-                                        if separator.trim() == "---" {
-                                            let value = lines.collect::<Vec<_>>().join("\n");
-                                            if !value.is_empty() {
-                                                snippets.push(crate::TextSnippet {
-                                                    name: name.trim().to_string(),
-                                                    value,
-                                                });
-                                            }
-                                        }
-                                    }
-                                }
+                            if let Some(snippet) = fs::read_to_string(&path)
+                                .ok()
+                                .and_then(|contents| parse_snippet_file(&contents))
+                            {
+                                snippets.push(snippet);
                             }
                         }
                         snippets.sort_by(|a, b| a.name.cmp(&b.name));
@@ -783,8 +787,7 @@ impl LauncherApp {
                     }
                 }
             }
-            self.text_snippets.filtered = filter_snippets(&self.text_snippets.items, &query);
-            self.text_snippets.loading = false;
+            self.finish_text_snippet_load(&query, tasks);
             return;
         }
 
@@ -793,12 +796,46 @@ impl LauncherApp {
             self.text_snippets.loading = true;
             self.text_snippets.items.clear();
             self.text_snippets.filtered.clear();
+            self.text_snippets.previews.clear();
             tasks.push(execute_text_snippet_command(
                 command,
                 config.args,
                 self.text_snippets.generation,
             ));
         }
+    }
+
+    /// Filter freshly loaded snippets and refresh their previews.
+    fn finish_text_snippet_load(&mut self, query: &str, tasks: &mut Vec<Task<Message>>) {
+        self.text_snippets.filtered = filter_snippets(&self.text_snippets.items, query);
+        self.text_snippets.loading = false;
+        if let Some(task) = self.refresh_text_snippet_previews() {
+            tasks.push(task);
+        }
+    }
+
+    /// Recompute snippet subtitles, starting a clipboard fetch the first time
+    /// a snippet of this source needs it.
+    fn refresh_text_snippet_previews(&mut self) -> Option<Task<Message>> {
+        let state = &mut self.text_snippets;
+        if !state.placeholders {
+            state.previews.clear();
+            return None;
+        }
+        let mut task = None;
+        if !state.clipboard.fetching {
+            let needs = missing_clipboard(&state.items, &state.clipboard.data);
+            if !needs.is_empty() {
+                state.clipboard.fetching = true;
+                task = Some(fetch_clipboard(
+                    state.session,
+                    needs,
+                    state.clipboard_history,
+                ));
+            }
+        }
+        state.previews = compute_previews(&state.items, state.allow_shell, &state.clipboard.data);
+        task
     }
 
     fn handle_emoji_query(&mut self, query: String, tasks: &mut Vec<Task<Message>>) {
@@ -1128,7 +1165,9 @@ impl LauncherApp {
         generation: u64,
         result: std::result::Result<Vec<crate::TextSnippet>, String>,
     ) -> Task<Message> {
-        if generation != self.text_snippets.generation {
+        // A late result after leaving snippet mode must not reload snippets or
+        // start a clipboard read.
+        if !self.text_snippets.active || generation != self.text_snippets.generation {
             return Task::none();
         }
 
@@ -1143,32 +1182,98 @@ impl LauncherApp {
                     .iter()
                     .find_map(|config| extract_keyword_query(input, &config.keyword))
                     .unwrap_or_default();
-                self.text_snippets.filtered = filter_snippets(&self.text_snippets.items, &query);
+                let mut tasks = Vec::new();
+                self.finish_text_snippet_load(&query, &mut tasks);
+                return Task::batch(tasks);
             }
             Err(_) => {
                 self.text_snippets.items.clear();
                 self.text_snippets.filtered.clear();
+                self.text_snippets.previews.clear();
             }
         }
         Task::none()
     }
 
+    fn handle_text_snippet_clipboard(
+        &mut self,
+        session: u64,
+        data: ClipboardData,
+    ) -> Task<Message> {
+        if !self.text_snippets.active || session != self.text_snippets.session {
+            return Task::none();
+        }
+        self.text_snippets.clipboard.fetching = false;
+        self.text_snippets.clipboard.data.merge(data);
+        self.refresh_text_snippet_previews()
+            .unwrap_or_else(Task::none)
+    }
+
     fn handle_text_snippet_selected(&mut self, index: usize) -> Task<Message> {
-        if let Some(&snippet_index) = self.text_snippets.filtered.get(index) {
-            if let Some(snippet) = self.text_snippets.items.get(snippet_index) {
-                let action = if self.view.current_modifiers.control() {
-                    self.text_snippets
-                        .secondary_action
-                        .as_deref()
-                        .unwrap_or("insert")
-                } else {
-                    self.text_snippets.action.as_deref().unwrap_or("copy")
-                };
-                execute_action(action, &snippet.value);
+        if self.text_snippets.pending.is_some() {
+            return Task::none();
+        }
+        let snippet = self
+            .text_snippets
+            .filtered
+            .get(index)
+            .and_then(|&snippet_index| self.text_snippets.items.get(snippet_index))
+            .cloned();
+        if let Some(snippet) = snippet {
+            let action = if self.view.current_modifiers.control() {
+                self.text_snippets
+                    .secondary_action
+                    .as_deref()
+                    .unwrap_or("insert")
+            } else {
+                self.text_snippets.action.as_deref().unwrap_or("copy")
             }
+            .to_string();
+
+            if self.text_snippets.placeholders {
+                let state = &mut self.text_snippets;
+                state.error = None;
+                state.pending = Some(PendingSelection { action });
+                return expand_final(
+                    snippet.value,
+                    state.items.clone(),
+                    state.allow_shell,
+                    state.session,
+                    state.clipboard_history,
+                );
+            }
+            execute_action(&action, &snippet.value);
         }
         self.save_query_to_history();
         iced::exit()
+    }
+
+    fn handle_text_snippet_expanded(
+        &mut self,
+        session: u64,
+        result: std::result::Result<super::placeholders::Expanded, String>,
+    ) -> Task<Message> {
+        let state = &mut self.text_snippets;
+        if !state.active || session != state.session {
+            return Task::none();
+        }
+        let Some(pending) = state.pending.take() else {
+            return Task::none();
+        };
+        let outcome = result.and_then(|expanded| {
+            execute_snippet_action(&pending.action, &expanded.text, expanded.cursor_moves)
+        });
+        match outcome {
+            Ok(()) => {
+                self.save_query_to_history();
+                iced::exit()
+            }
+            Err(error) => {
+                crate::debug_log!("snippets: selection failed: {error}");
+                state.error = Some(error);
+                Task::none()
+            }
+        }
     }
 
     fn handle_web_search_selected(&mut self) -> Task<Message> {

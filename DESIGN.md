@@ -160,6 +160,9 @@ Native-only addons are configured under `addons` and activated from the search b
   - run external commands and expect Alfred Script Filter style JSON
 - Text snippets:
   - source snippets from inline config, files, directories, or command output
+  - rank by snippet keyword, then name, then content
+  - expand placeholders (`placeholders.rs`) on selection, off the UI thread, with
+    previews computed without running shell commands
 - Web searches:
   - fill `{query}` into configured URL templates and open them with `xdg-open`
 - Emoji picker:

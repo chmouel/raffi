@@ -7,9 +7,9 @@ use iced::widget::Id;
 use super::help::HelpEntry;
 use super::theme::ThemeColors;
 pub(crate) use super::types::{
-    CachedRate, CalculatorResult, CurrencyConversion, CurrencyConversionRequest, CurrencyResult,
-    EmojiEntry, FileBrowserEntry, Message, MultiCurrencyRequest, MultiCurrencyResult,
-    ScriptFilterResult, WebSearchActiveState,
+    CachedRate, CalculatorResult, ClipboardData, CurrencyConversion, CurrencyConversionRequest,
+    CurrencyResult, EmojiEntry, FileBrowserEntry, Message, MultiCurrencyRequest,
+    MultiCurrencyResult, ScriptFilterResult, WebSearchActiveState,
 };
 use crate::{AddonsConfig, TextSnippet};
 
@@ -79,6 +79,21 @@ impl ScriptFilterState {
     }
 }
 
+/// Clipboard contents used to render snippet previews.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ClipboardSnapshot {
+    pub fetching: bool,
+    pub data: ClipboardData,
+}
+
+/// A snippet selection waiting for its placeholders to expand. The action is
+/// captured when the user activates the snippet, so releasing Ctrl while the
+/// expansion runs does not change what happens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct PendingSelection {
+    pub action: String,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(super) struct TextSnippetState {
     pub items: Vec<TextSnippet>,
@@ -90,6 +105,20 @@ pub(super) struct TextSnippetState {
     pub secondary_action: Option<String>,
     pub generation: u64,
     pub file_cache: HashMap<String, Vec<TextSnippet>>,
+    /// Config index of the source being shown.
+    pub source_index: Option<usize>,
+    /// Bumped whenever the source changes or snippets are closed, so late
+    /// clipboard and expansion results can be recognised and dropped.
+    pub session: u64,
+    pub placeholders: bool,
+    pub allow_shell: bool,
+    pub clipboard: ClipboardSnapshot,
+    /// Clipboard manager setting for `{clipboard:N}`; kept across sessions.
+    pub clipboard_history: crate::ClipboardHistory,
+    /// Expanded subtitles, indexed like `items`.
+    pub previews: Vec<Option<String>>,
+    pub pending: Option<PendingSelection>,
+    pub error: Option<String>,
 }
 
 impl TextSnippetState {
@@ -101,6 +130,20 @@ impl TextSnippetState {
         self.icon = None;
         self.action = None;
         self.secondary_action = None;
+        self.reset_session(None);
+    }
+
+    /// Start a new session for `source_index`, forgetting anything tied to
+    /// the previous source.
+    pub fn reset_session(&mut self, source_index: Option<usize>) {
+        self.source_index = source_index;
+        self.session = self.session.wrapping_add(1);
+        // Drop late command results from the previous source too.
+        self.generation = self.generation.wrapping_add(1);
+        self.clipboard = ClipboardSnapshot::default();
+        self.previews.clear();
+        self.pending = None;
+        self.error = None;
     }
 }
 

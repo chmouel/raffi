@@ -69,6 +69,18 @@ Controls how launcher entries are sorted when no search query is active. Valid o
   The MRU cache at `~/.cache/raffi/mru.cache` stores both launch counts and timestamps. Existing caches using the old format are migrated automatically on next use.
 
 
+**`clipboard_history`** `string` (default: `auto`)
+
+Clipboard manager used by `{clipboard:N}` in [text snippets](/features/text-snippets/#clipboard-history). Valid options:
+  - `auto` - Use the running one, preferring cliphist, then CopyQ, then clipman (default)
+  - `cliphist` - Always use cliphist
+  - `copyq` - Always use CopyQ
+  - `clipman` - Always use clipman
+  - `none` - Turn clipboard history off
+
+  `{clipboard}` reads the current clipboard with `wl-paste`, `xclip` or `xsel` and does not depend on this setting.
+
+
 ## Fallbacks
 
 **`fallbacks`** `list of strings` (default: `[]`)
@@ -220,7 +232,8 @@ general:
 
 ## Command-Line Override
 
-All general settings can be overridden with command-line flags:
+The following general settings can be overridden with command-line flags.
+`clipboard_history` has no flag and can only be set in the configuration file.
 
 ```bash
 # Override UI type

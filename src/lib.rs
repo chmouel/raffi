@@ -166,6 +166,9 @@ pub struct WebSearchConfig {
 pub struct TextSnippet {
     pub name: String,
     pub value: String,
+    /// Optional short keyword; an exact match ranks the snippet first.
+    #[serde(default)]
+    pub keyword: Option<String>,
 }
 
 /// Configuration for a text snippet source
@@ -190,6 +193,9 @@ pub struct TextSnippetSourceConfig {
     pub action: Option<String>,
     #[serde(default)]
     pub secondary_action: Option<String>,
+    /// Expand dynamic placeholders such as {clipboard} and {date} in snippet values.
+    #[serde(default = "default_true")]
+    pub placeholders: bool,
 }
 
 /// Container for all addon configurations
@@ -243,6 +249,23 @@ pub enum SortMode {
     Hybrid,
 }
 
+/// Clipboard manager used for `{clipboard:N}` snippet placeholders
+#[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ClipboardHistory {
+    /// Use whichever of cliphist, CopyQ or clipman is running
+    #[default]
+    Auto,
+    /// Read history with `cliphist list` and `cliphist decode`
+    Cliphist,
+    /// Read history with `copyq read`
+    Copyq,
+    /// Read clipman's JSON history file
+    Clipman,
+    /// Disable clipboard history placeholders
+    None,
+}
+
 /// General configuration for persistent defaults
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
@@ -273,6 +296,9 @@ pub struct GeneralConfig {
     pub sort_mode: SortMode,
     #[serde(default)]
     pub fallbacks: Vec<String>,
+    /// Clipboard manager for `{clipboard:N}` snippet placeholders
+    #[serde(default)]
+    pub clipboard_history: ClipboardHistory,
 }
 
 /// Complete parsed configuration
@@ -1811,6 +1837,7 @@ pub fn run(args: Args) -> Result<()> {
         window_height: general.window_height.unwrap_or(600.0),
         sort_mode: general.sort_mode.clone(),
         fallbacks: general.fallbacks.clone(),
+        clipboard_history: general.clipboard_history,
     };
 
     debug_log!(
@@ -2602,6 +2629,26 @@ mod tests {
     }
 
     #[test]
+    fn test_general_clipboard_history_parsing() {
+        let parse =
+            |yaml: &str| serde_yaml::from_str::<GeneralConfig>(yaml).map(|g| g.clipboard_history);
+        assert_eq!(parse("{}").unwrap(), ClipboardHistory::Auto);
+        for (value, expected) in [
+            ("auto", ClipboardHistory::Auto),
+            ("cliphist", ClipboardHistory::Cliphist),
+            ("copyq", ClipboardHistory::Copyq),
+            ("clipman", ClipboardHistory::Clipman),
+            ("none", ClipboardHistory::None),
+        ] {
+            assert_eq!(
+                parse(&format!("clipboard_history: {value}")).unwrap(),
+                expected
+            );
+        }
+        assert!(parse("clipboard_history: gpaste").is_err());
+    }
+
+    #[test]
     fn test_partial_general_config() {
         let yaml_config = r#"
         general:
@@ -2782,9 +2829,11 @@ mod tests {
                   value: "user@example.com"
                 - name: "Work Email"
                   value: "user@company.com"
+                  keyword: "!work"
             - name: "Templates"
               keyword: "tpl"
               file: "~/.config/raffi/snippets.yaml"
+              placeholders: false
             - name: "Dynamic"
               keyword: "dyn"
               command: "my-snippet-gen"
@@ -2824,6 +2873,9 @@ mod tests {
         assert_eq!(snippets[0].value, "user@example.com");
         assert_eq!(snippets[1].name, "Work Email");
         assert_eq!(snippets[1].value, "user@company.com");
+        assert_eq!(snippets[0].keyword, None);
+        assert_eq!(snippets[1].keyword.as_deref(), Some("!work"));
+        assert!(emails.placeholders);
 
         // File source
         let templates = &parsed_config.addons.text_snippets[1];
@@ -2836,6 +2888,7 @@ mod tests {
         );
         assert!(templates.snippets.is_none());
         assert!(templates.command.is_none());
+        assert!(!templates.placeholders);
 
         // Command source
         let dynamic = &parsed_config.addons.text_snippets[2];

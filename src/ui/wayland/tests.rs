@@ -1,6 +1,7 @@
 use super::app::{keyword_suggestions, route_query, QueryMode};
 use super::help::{filter_help_entries, help_entries};
-use super::state::{FallbackAction, KeywordSuggestion, LauncherApp, Message};
+use super::placeholders::Expanded;
+use super::state::{ClipboardData, FallbackAction, KeywordSuggestion, LauncherApp, Message};
 use super::theme::ThemeColors;
 use crate::ui::FontSizes;
 use crate::{
@@ -83,6 +84,7 @@ fn test_route_query_prefers_script_filter_over_text_snippet() {
         snippets: Some(vec![TextSnippet {
             name: "Issue".into(),
             value: "issue".into(),
+            keyword: None,
         }]),
         file: None,
         command: None,
@@ -90,6 +92,7 @@ fn test_route_query_prefers_script_filter_over_text_snippet() {
         args: Vec::new(),
         action: None,
         secondary_action: None,
+        placeholders: true,
     });
 
     assert!(matches!(
@@ -129,6 +132,7 @@ fn test_route_query_requires_space_after_keyword() {
         snippets: Some(vec![TextSnippet {
             name: "Email".into(),
             value: "user@example.com".into(),
+            keyword: None,
         }]),
         file: None,
         command: None,
@@ -136,6 +140,7 @@ fn test_route_query_requires_space_after_keyword() {
         args: Vec::new(),
         action: None,
         secondary_action: None,
+        placeholders: true,
     });
 
     assert_eq!(route_query("sn", &addons), QueryMode::Standard);
@@ -173,6 +178,7 @@ fn test_keyword_suggestions_prefix_match() {
         args: Vec::new(),
         action: None,
         secondary_action: None,
+        placeholders: true,
     });
     addons.web_searches.push(WebSearchConfig {
         name: "GitHub".into(),
@@ -211,6 +217,7 @@ fn test_keyword_suggestions_stop_once_keyword_is_armed() {
         args: Vec::new(),
         action: None,
         secondary_action: None,
+        placeholders: true,
     });
 
     assert!(keyword_suggestions("", &addons).is_empty());
@@ -306,6 +313,7 @@ fn snippet_addons() -> AddonsConfig {
         snippets: Some(vec![TextSnippet {
             name: "Email".into(),
             value: "user@example.com".into(),
+            keyword: None,
         }]),
         file: None,
         command: None,
@@ -313,8 +321,319 @@ fn snippet_addons() -> AddonsConfig {
         args: Vec::new(),
         action: None,
         secondary_action: None,
+        placeholders: true,
     });
     addons
+}
+
+fn snippet_source(
+    name: &str,
+    keyword: &str,
+    snippets: Vec<TextSnippet>,
+) -> TextSnippetSourceConfig {
+    TextSnippetSourceConfig {
+        name: name.into(),
+        keyword: keyword.into(),
+        icon: None,
+        snippets: Some(snippets),
+        file: None,
+        command: None,
+        directory: None,
+        args: Vec::new(),
+        action: None,
+        secondary_action: None,
+        placeholders: true,
+    }
+}
+
+fn snippet(name: &str, value: &str) -> TextSnippet {
+    TextSnippet {
+        name: name.into(),
+        value: value.into(),
+        keyword: None,
+    }
+}
+
+fn open_snippets(app: &mut LauncherApp, query: &str) {
+    let _ = app.update(Message::SearchChanged(query.into()));
+    assert!(app.text_snippets.active);
+}
+
+#[test]
+fn test_snippet_previews_use_fetched_clipboard_and_ignore_stale_results() {
+    let mut addons = AddonsConfig::default();
+    addons.emoji.enabled = false;
+    addons.text_snippets.push(snippet_source(
+        "Snippets",
+        "sn",
+        vec![
+            snippet("Quote", "> {clipboard}"),
+            snippet("Signed", "{snippet:Name}!"),
+            snippet("Name", "Raffi"),
+            snippet("Older", "was {clipboard:2}"),
+        ],
+    ));
+    let mut app = test_app(addons);
+    open_snippets(&mut app, "sn ");
+
+    assert!(app.text_snippets.clipboard.fetching);
+    assert_eq!(app.text_snippets.previews[0], None);
+    assert_eq!(app.text_snippets.previews[1].as_deref(), Some("Raffi!"));
+    assert_eq!(app.text_snippets.previews[3], None);
+
+    let fetched = |current: &str, older: &str| {
+        let mut data = ClipboardData {
+            current: Some(Ok(current.into())),
+            ..Default::default()
+        };
+        data.history.insert(2, Ok(older.into()));
+        data
+    };
+    let session = app.text_snippets.session;
+    let _ = app.update(Message::TextSnippetClipboard(
+        session.wrapping_sub(1),
+        fetched("stale", "stale"),
+    ));
+    assert_eq!(app.text_snippets.previews[0], None);
+    assert_eq!(app.text_snippets.previews[3], None);
+
+    let _ = app.update(Message::TextSnippetClipboard(
+        session,
+        fetched("copied", "before"),
+    ));
+    assert_eq!(app.text_snippets.previews[0].as_deref(), Some("> copied"));
+    assert_eq!(app.text_snippets.previews[3].as_deref(), Some("was before"));
+
+    // Typing more keeps the fetched clipboard instead of reading it again.
+    let _ = app.update(Message::SearchChanged("sn quo".into()));
+    assert!(!app.text_snippets.clipboard.fetching);
+    assert_eq!(
+        app.text_snippets.clipboard.data,
+        fetched("copied", "before")
+    );
+}
+
+#[test]
+fn test_snippet_expansion_error_keeps_launcher_open() {
+    let mut addons = AddonsConfig::default();
+    addons.emoji.enabled = false;
+    addons.text_snippets.push(snippet_source(
+        "Snippets",
+        "sn",
+        vec![snippet("Bad", "{date:%Q}")],
+    ));
+    let mut app = test_app(addons);
+    open_snippets(&mut app, "sn ");
+
+    let _ = app.update(Message::TextSnippetSelected(0));
+    let session = app.text_snippets.session;
+    assert!(app.text_snippets.pending.is_some());
+
+    let _ = app.update(Message::TextSnippetExpanded(
+        session,
+        Err("bad format".into()),
+    ));
+
+    assert!(app.text_snippets.active);
+    assert!(app.text_snippets.pending.is_none());
+    assert_eq!(app.text_snippets.error.as_deref(), Some("bad format"));
+    // The error row is not selectable.
+    assert_eq!(app.total_items(), 1);
+}
+
+#[test]
+fn test_snippet_results_from_a_previous_source_are_ignored() {
+    let mut addons = AddonsConfig::default();
+    addons.emoji.enabled = false;
+    addons
+        .text_snippets
+        .push(snippet_source("First", "aa", vec![snippet("One", "1")]));
+    addons
+        .text_snippets
+        .push(snippet_source("Second", "bb", vec![snippet("Two", "2")]));
+    let mut app = test_app(addons);
+    open_snippets(&mut app, "aa ");
+    let _ = app.update(Message::TextSnippetSelected(0));
+    let old_session = app.text_snippets.session;
+
+    open_snippets(&mut app, "bb ");
+    assert_ne!(app.text_snippets.session, old_session);
+    assert!(app.text_snippets.pending.is_none());
+
+    let _ = app.update(Message::TextSnippetExpanded(
+        old_session,
+        Err("late".into()),
+    ));
+    assert!(app.text_snippets.error.is_none());
+
+    let _ = app.update(Message::SearchChanged("zzz".into()));
+    assert!(!app.text_snippets.active);
+    let _ = app.update(Message::TextSnippetExpanded(
+        old_session,
+        Err("late".into()),
+    ));
+    assert!(app.text_snippets.error.is_none());
+}
+
+#[test]
+fn test_snippet_command_result_after_leaving_snippets_is_ignored() {
+    let mut source = snippet_source("Snippets", "sn", Vec::new());
+    source.snippets = None;
+    source.command = Some("snippets-command".into());
+    let mut addons = AddonsConfig::default();
+    addons.emoji.enabled = false;
+    addons.text_snippets.push(source);
+    let mut app = test_app(addons);
+    open_snippets(&mut app, "sn ");
+    assert!(app.text_snippets.loading);
+    let generation = app.text_snippets.generation;
+
+    let _ = app.update(Message::SearchChanged("zzz".into()));
+    assert!(!app.text_snippets.active);
+
+    let _ = app.update(Message::TextSnippetCommandResult(
+        generation,
+        Ok(vec![snippet("Quote", "> {clipboard}")]),
+    ));
+    assert!(app.text_snippets.items.is_empty());
+    assert!(app.text_snippets.filtered.is_empty());
+    assert!(!app.text_snippets.clipboard.fetching);
+}
+
+#[test]
+fn test_snippet_command_result_from_previous_source_is_ignored_by_inline_source() {
+    let mut command_source = snippet_source("Command", "cc", Vec::new());
+    command_source.snippets = None;
+    command_source.command = Some("snippets-command".into());
+    let mut addons = AddonsConfig::default();
+    addons.emoji.enabled = false;
+    addons.text_snippets.push(command_source);
+    addons
+        .text_snippets
+        .push(snippet_source("Inline", "ii", vec![snippet("Hi", "hi")]));
+    let mut app = test_app(addons);
+    open_snippets(&mut app, "cc ");
+    assert!(app.text_snippets.loading);
+    let old_generation = app.text_snippets.generation;
+
+    let _ = app.update(Message::SearchChanged("zzz".into()));
+    assert!(!app.text_snippets.active);
+    open_snippets(&mut app, "ii ");
+    assert!(app.text_snippets.allow_shell);
+
+    let _ = app.update(Message::TextSnippetCommandResult(
+        old_generation,
+        Ok(vec![snippet("Quote", "> {clipboard} {shell:id}")]),
+    ));
+    assert_eq!(app.text_snippets.items, vec![snippet("Hi", "hi")]);
+    assert_eq!(app.text_snippets.filtered, vec![0]);
+    assert!(!app.text_snippets.clipboard.fetching);
+}
+
+#[test]
+fn test_snippet_selection_captures_action_and_ignores_repeats() {
+    let dir = std::env::temp_dir().join(format!("raffi-snippet-app-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("out");
+
+    let mut source = snippet_source("Snippets", "sn", vec![snippet("Hi", "hi {cursor}there")]);
+    source.action = Some(format!(
+        "printf '%s' \"$RAFFI_VALUE\" > '{}'",
+        out.display()
+    ));
+    source.secondary_action = Some("false".into());
+    let mut addons = AddonsConfig::default();
+    addons.emoji.enabled = false;
+    addons.text_snippets.push(source);
+    let mut app = test_app(addons);
+    // Selecting exits and saves the query; keep the real history cache intact.
+    app.history.max_items = 0;
+    open_snippets(&mut app, "sn ");
+
+    let _ = app.update(Message::TextSnippetSelected(0));
+    let session = app.text_snippets.session;
+    let captured = app.text_snippets.pending.clone().unwrap();
+
+    app.view.current_modifiers = iced::keyboard::Modifiers::CTRL;
+    let _ = app.update(Message::TextSnippetSelected(0));
+    assert_eq!(app.text_snippets.pending.as_ref(), Some(&captured));
+
+    let _ = app.update(Message::TextSnippetExpanded(
+        session,
+        Ok(Expanded {
+            text: "hi there".into(),
+            cursor_moves: Some(5),
+        }),
+    ));
+    assert!(app.text_snippets.pending.is_none());
+    assert!(app.text_snippets.error.is_none());
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline && std::fs::read_to_string(&out).is_err() {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), "hi there");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_snippet_shell_policy_follows_source() {
+    let mut command_source = snippet_source("Command", "cc", Vec::new());
+    command_source.snippets = None;
+    command_source.command = Some("true".into());
+    let mut disabled = snippet_source("Plain", "pp", vec![snippet("Today", "{date}")]);
+    disabled.placeholders = false;
+    let mut addons = AddonsConfig::default();
+    addons.emoji.enabled = false;
+    addons.text_snippets.push(snippet_source(
+        "Inline",
+        "ii",
+        vec![snippet("Today", "{date}")],
+    ));
+    addons.text_snippets.push(command_source);
+    addons.text_snippets.push(disabled);
+    let mut app = test_app(addons);
+
+    open_snippets(&mut app, "ii ");
+    assert!(app.text_snippets.allow_shell);
+    assert_ne!(app.text_snippets.previews[0].as_deref(), Some("{date}"));
+
+    open_snippets(&mut app, "cc ");
+    assert!(!app.text_snippets.allow_shell);
+
+    open_snippets(&mut app, "pp ");
+    assert!(!app.text_snippets.allow_shell);
+    assert!(app.text_snippets.previews.is_empty());
+}
+
+#[test]
+fn test_snippet_directory_reads_keyword_header() {
+    let dir = std::env::temp_dir().join(format!("raffi-snippet-dir-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("sig.snippet"),
+        "Signature\nkeyword: !sig\n---\n-- me",
+    )
+    .unwrap();
+    std::fs::write(dir.join("plain.snippet"), "Address\n---\n1 Main St").unwrap();
+
+    let mut source = snippet_source("Dir", "dd", Vec::new());
+    source.snippets = None;
+    source.directory = Some(dir.display().to_string());
+    let mut addons = AddonsConfig::default();
+    addons.emoji.enabled = false;
+    addons.text_snippets.push(source);
+    let mut app = test_app(addons);
+    open_snippets(&mut app, "dd !sig");
+
+    let first = app.text_snippets.filtered[0];
+    assert_eq!(app.text_snippets.items[first].name, "Signature");
+    assert_eq!(
+        app.text_snippets.items[first].keyword.as_deref(),
+        Some("!sig")
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -637,6 +956,7 @@ fn help_addons() -> AddonsConfig {
         snippets: Some(vec![TextSnippet {
             name: "Email".into(),
             value: "user@example.com".into(),
+            keyword: None,
         }]),
         file: None,
         command: None,
@@ -644,6 +964,7 @@ fn help_addons() -> AddonsConfig {
         args: Vec::new(),
         action: None,
         secondary_action: None,
+        placeholders: true,
     });
     addons.web_searches.push(WebSearchConfig {
         name: "GitHub".into(),
