@@ -102,6 +102,39 @@ fn paste_mods(class: &str, extra: &[String]) -> &'static str {
     }
 }
 
+/// Whether Raffi runs inside a Hyprland session.
+pub(super) fn in_session() -> bool {
+    std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some_and(|value| !value.is_empty())
+}
+
+/// Capture the paste target when a snippet source needs it. Inside Hyprland,
+/// sources without an `action` default to `hypr_paste`, but only when a paste
+/// target was found; otherwise they keep the regular `copy` default.
+pub(super) fn default_to_hypr_paste(
+    sources: &mut [crate::TextSnippetSourceConfig],
+    in_session: bool,
+    capture: impl FnOnce() -> Result<Hyprland, String>,
+) -> Option<Result<Hyprland, String>> {
+    let explicit = sources.iter().any(|source| {
+        source.action.as_deref() == Some("hypr_paste")
+            || source.secondary_action.as_deref() == Some("hypr_paste")
+    });
+    let defaulting = in_session && sources.iter().any(|source| source.action.is_none());
+    let target = (explicit || defaulting).then(capture)?;
+    if defaulting {
+        match &target {
+            Ok(_) => sources
+                .iter_mut()
+                .filter(|source| source.action.is_none())
+                .for_each(|source| source.action = Some("hypr_paste".into())),
+            Err(error) => {
+                crate::debug_log!("hypr_paste: not used as default action: {error}")
+            }
+        }
+    }
+    (explicit || target.is_ok()).then_some(target)
+}
+
 impl Hyprland {
     pub(super) fn capture(terminal_classes: &[String]) -> Result<Self, String> {
         let instance = std::env::var("HYPRLAND_INSTANCE_SIGNATURE")

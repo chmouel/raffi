@@ -66,14 +66,11 @@ fn run_wayland_ui(
     };
     let selected_item: SharedSelection = Arc::new(Mutex::new(None));
     let selected_item_clone = selected_item.clone();
-    let hyprland = addons
-        .text_snippets
-        .iter()
-        .any(|source| {
-            source.action.as_deref() == Some("hypr_paste")
-                || source.secondary_action.as_deref() == Some("hypr_paste")
-        })
-        .then(|| hyprland::Hyprland::capture(&settings.terminal_classes));
+    let mut addons = addons.clone();
+    let hyprland =
+        hyprland::default_to_hypr_paste(&mut addons.text_snippets, hyprland::in_session(), || {
+            hyprland::Hyprland::capture(&settings.terminal_classes)
+        });
     let deferred_paste = Arc::new(Mutex::new(None::<hyprland::Hyprland>));
     let deferred_paste_for_new = deferred_paste.clone();
 

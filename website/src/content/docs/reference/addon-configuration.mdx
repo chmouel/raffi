@@ -622,13 +622,14 @@ Arguments passed to the command.
 
 ```
 
-**`action`** `string` (default: `copy`)
+**`action`** `string` (default: `copy`, or `hypr_paste` on Hyprland)
 
-Action to perform on Enter.
+Action to perform on Enter. Inside Hyprland, an unset `action` becomes
+`hypr_paste` when Raffi finds a window to paste into, and `copy` otherwise.
 
   Special values:
 
-- `copy` - Copy to clipboard via `wl-copy`/`xclip`/`xsel` (default)
+- `copy` - Copy to clipboard via `wl-copy`/`xclip`/`xsel` (default outside Hyprland)
 - `insert` - Type into focused app via `wtype`/`ydotool`
 - `hypr_paste` - On Hyprland, copy with `wl-copy`, close Raffi, wait for the
   original window to regain focus, and send Ctrl+V to that window (Ctrl+Shift+V
