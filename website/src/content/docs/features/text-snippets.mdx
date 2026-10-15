@@ -408,7 +408,7 @@ Configure how snippets are used when selected:
     ```
     Types snippet into focused app using `wtype` or `ydotool`
   </TabItem>
-  <TabItem label="Hyprland Paste">
+  <TabItem label="Hyprland Paste (Default on Hyprland)">
     ```yaml
     action: "hypr_paste"
     secondary_action: "copy"
@@ -419,6 +419,10 @@ Configure how snippets are used when selected:
     that window through Hyprland: Ctrl+V, or Ctrl+Shift+V in terminals. This avoids typing long snippets character by character.
   </TabItem>
 </Tabs>
+
+When Raffi runs inside Hyprland and a source has no `action`, Enter uses
+`hypr_paste`. If Raffi finds no window to paste into when it opens, Enter keeps
+the `copy` default. Set `action: "copy"` to keep copying on Hyprland.
 
 `hypr_paste` requires Hyprland's Lua API (0.55 or later), `hyprctl`, and
 `wl-clipboard`. Run Raffi inside the Hyprland session so it inherits
@@ -535,11 +539,12 @@ Path to a directory of `.snippet` files (cached per session)
 Arguments passed to the command
 
 
-**`action`** `string` (default: `copy`)
+**`action`** `string` (default: `copy`, or `hypr_paste` on Hyprland)
 
 Action on Enter:
   - `"copy"`: Copy to clipboard
   - `"insert"`: Type into focused app
+  - `"hypr_paste"`: Paste into the original window on Hyprland
   - Command template with `{value}` placeholder
 
 
@@ -777,7 +782,7 @@ text_snippets:
 
 ## Keyboard Shortcuts
 
-- **Enter**: Execute primary action (default: copy)
+- **Enter**: Execute primary action (default: copy, or paste on Hyprland)
 - **Ctrl+Enter**: Execute secondary action (default: insert)
 - **Esc**: Cancel and return to normal mode
 - **↑/↓**: Navigate through snippets

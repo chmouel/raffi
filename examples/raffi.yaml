@@ -451,7 +451,8 @@ addons:
   #     # action/secondary_action accept three special keywords:
   #     #   "copy"   — copy to clipboard via wl-copy (default for Enter)
   #     #   "insert" — type into focused app via wtype/ydotool (default for Ctrl+Enter)
-  #     #   "hypr_paste" — paste into the original window on Hyprland
+  #     #   "hypr_paste" — paste into the original window on Hyprland (default for
+  #     #                  Enter inside Hyprland; set action: "copy" to keep copying)
   #     #                  (Ctrl+V, or Ctrl+Shift+V in terminals; see general.terminal_classes)
   #     # Any other string is run as a shell command via sh -c, with {value} replaced.
   #     # The value is also exported as $RAFFI_VALUE; prefer "$RAFFI_VALUE" over

@@ -516,6 +516,49 @@ fn test_hypr_paste_preparation_tracks_selection_and_reports_errors() {
 }
 
 #[test]
+fn test_hypr_paste_is_default_action_inside_hyprland() {
+    use super::hyprland::{default_to_hypr_paste, Hyprland};
+    let sources = || {
+        let mut explicit = snippet_source("Explicit", "ex", vec![]);
+        explicit.action = Some("copy".into());
+        vec![snippet_source("Default", "de", vec![]), explicit]
+    };
+    let actions = |sources: &[TextSnippetSourceConfig]| {
+        sources
+            .iter()
+            .map(|source| source.action.clone())
+            .collect::<Vec<_>>()
+    };
+    let unchanged = vec![None, Some("copy".to_string())];
+
+    // Inside Hyprland with a paste target: only unset actions change.
+    let mut list = sources();
+    let target = default_to_hypr_paste(&mut list, true, || Ok(Hyprland::test_target()));
+    assert!(matches!(target, Some(Ok(_))));
+    assert_eq!(
+        actions(&list),
+        vec![Some("hypr_paste".to_string()), Some("copy".to_string())]
+    );
+
+    // No paste target: keep the copy default and do not report an error.
+    let mut list = sources();
+    assert!(default_to_hypr_paste(&mut list, true, || Err("no window".into())).is_none());
+    assert_eq!(actions(&list), unchanged);
+
+    // Outside Hyprland: nothing is captured or changed.
+    let mut list = sources();
+    assert!(default_to_hypr_paste(&mut list, false, || unreachable!()).is_none());
+    assert_eq!(actions(&list), unchanged);
+
+    // An explicit hypr_paste still reports capture errors.
+    let mut list = sources();
+    list[1].secondary_action = Some("hypr_paste".into());
+    let target = default_to_hypr_paste(&mut list, true, || Err("no window".into()));
+    assert!(matches!(target, Some(Err(_))));
+    assert_eq!(actions(&list), unchanged);
+}
+
+#[test]
 fn test_hypr_paste_missing_session_and_late_results_do_not_queue_paste() {
     let mut source = snippet_source("Snippets", "sn", vec![snippet("Hi", "hello")]);
     source.action = Some("hypr_paste".into());
