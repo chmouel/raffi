@@ -1709,6 +1709,47 @@ fn test_preview_script_filter_precedence() {
 }
 
 #[test]
+fn test_preview_script_filter_decodes_file_url_paths() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("raffi-preview-url-test-{unique}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file_path = dir.join("report one.txt");
+    std::fs::write(&file_path, "file contents").unwrap();
+    let file_url = format!("file://{}", file_path.to_string_lossy().replace(' ', "%20"));
+
+    let mut app = test_app(AddonsConfig::default());
+    app.script_filter.results = Some(ScriptFilterResult {
+        default_icon: None,
+        items: vec![ScriptFilterItem {
+            title: "File".into(),
+            subtitle: None,
+            arg: None,
+            icon: None,
+            preview: None,
+            quicklookurl: Some(file_url),
+            text: None,
+        }],
+    });
+
+    let preview = app
+        .resolve_selected_preview()
+        .expect("expected Script Filter preview");
+    assert!(preview.bodies.iter().any(|body| matches!(
+        body,
+        PreviewBody::Text {
+            heading: Some(heading),
+            content,
+            ..
+        } if heading == "Contents" && content == "file contents"
+    )));
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn test_preview_emoji_calculator_currency_and_web_search() {
     let mut addons = AddonsConfig::default();
     addons.web_searches.push(WebSearchConfig {
