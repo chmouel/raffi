@@ -166,6 +166,9 @@ pub struct WebSearchConfig {
 pub struct TextSnippet {
     pub name: String,
     pub value: String,
+    /// Emoji, icon name, or image path overriding the source icon.
+    #[serde(default)]
+    pub icon: Option<String>,
     /// Optional short keyword; an exact match ranks the snippet first.
     #[serde(default)]
     pub keyword: Option<String>,
@@ -196,6 +199,9 @@ pub struct TextSnippetSourceConfig {
     /// Expand dynamic placeholders such as {clipboard} and {date} in snippet values.
     #[serde(default = "default_true")]
     pub placeholders: bool,
+    /// Best-effort restoration of plain text after the `hypr_paste` action.
+    #[serde(default)]
+    pub restore_clipboard: bool,
 }
 
 /// Container for all addon configurations
@@ -1431,7 +1437,10 @@ pub(crate) fn read_desktop_icon_map() -> HashMap<String, String> {
     desktop_entry_icon_map_from_dirs(&desktop_entry_dirs(), &DefaultBinaryChecker)
 }
 
-fn resolve_icon_reference(icon: &str, icon_map: &HashMap<String, String>) -> Option<String> {
+pub(crate) fn resolve_icon_reference(
+    icon: &str,
+    icon_map: &HashMap<String, String>,
+) -> Option<String> {
     let expanded = expand_config_value(icon);
     if is_icon_file(Path::new(&expanded)) {
         return Some(expanded);
@@ -2827,6 +2836,7 @@ mod tests {
               snippets:
                 - name: "Personal Email"
                   value: "user@example.com"
+                  icon: "📨"
                 - name: "Work Email"
                   value: "user@company.com"
                   keyword: "!work"
@@ -2834,6 +2844,7 @@ mod tests {
               keyword: "tpl"
               file: "~/.config/raffi/snippets.yaml"
               placeholders: false
+              restore_clipboard: true
             - name: "Dynamic"
               keyword: "dyn"
               command: "my-snippet-gen"
@@ -2871,11 +2882,14 @@ mod tests {
         assert_eq!(snippets.len(), 2);
         assert_eq!(snippets[0].name, "Personal Email");
         assert_eq!(snippets[0].value, "user@example.com");
+        assert_eq!(snippets[0].icon.as_deref(), Some("📨"));
+        assert_eq!(snippets[1].icon, None);
         assert_eq!(snippets[1].name, "Work Email");
         assert_eq!(snippets[1].value, "user@company.com");
         assert_eq!(snippets[0].keyword, None);
         assert_eq!(snippets[1].keyword.as_deref(), Some("!work"));
         assert!(emails.placeholders);
+        assert!(!emails.restore_clipboard);
 
         // File source
         let templates = &parsed_config.addons.text_snippets[1];
@@ -2889,6 +2903,7 @@ mod tests {
         assert!(templates.snippets.is_none());
         assert!(templates.command.is_none());
         assert!(!templates.placeholders);
+        assert!(templates.restore_clipboard);
 
         // Command source
         let dynamic = &parsed_config.addons.text_snippets[2];

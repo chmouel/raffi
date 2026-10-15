@@ -18,11 +18,45 @@ use crate::{ClipboardHistory, TextSnippet};
 const SHELL_TIMEOUT: Duration = Duration::from_secs(5);
 const PREVIEW_CHARS: usize = 80;
 
+#[derive(Debug, PartialEq)]
+pub(super) enum SnippetIcon {
+    File(String),
+    Glyph(String),
+}
+
+impl super::state::LauncherApp {
+    pub(super) fn snippet_icon(&self, snippet: &TextSnippet) -> Option<SnippetIcon> {
+        if self.no_icons {
+            return None;
+        }
+        snippet
+            .icon
+            .iter()
+            .chain(self.text_snippets.icon.iter())
+            .find_map(|icon| {
+                if let Some(path) = crate::resolve_icon_reference(icon, &self.icon_map)
+                    .filter(|path| std::path::Path::new(path).is_file())
+                {
+                    return Some(SnippetIcon::File(path));
+                }
+                // Literal glyphs may include variation selectors or joined emoji.
+                if icon.chars().any(|c| !c.is_ascii() && !c.is_alphanumeric())
+                    && !icon.contains('/')
+                    && !icon.chars().any(char::is_whitespace)
+                {
+                    return Some(SnippetIcon::Glyph(icon.clone()));
+                }
+                None
+            })
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct SnippetCommandItem {
     title: String,
     arg: Option<String>,
     keyword: Option<String>,
+    icon: Option<super::types::ScriptFilterIcon>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -60,6 +94,7 @@ pub(super) fn execute_text_snippet_command(
                                     name: item.title,
                                     value: item.arg.unwrap_or_default(),
                                     keyword: item.keyword,
+                                    icon: item.icon.and_then(|icon| icon.path),
                                 })
                                 .collect())
                         }
@@ -74,18 +109,23 @@ pub(super) fn execute_text_snippet_command(
     )
 }
 
-/// Parse a `.snippet` file: a name line, optional `keyword: ...` header
+/// Parse a `.snippet` file: a name line, optional `keyword:` and `icon:` header
 /// lines, a `---` separator, then the snippet value.
 pub(super) fn parse_snippet_file(contents: &str) -> Option<TextSnippet> {
     let mut lines = contents.lines();
     let name = lines.next()?.trim().to_string();
     let mut keyword = None;
+    let mut icon = None;
     loop {
         let line = lines.next()?.trim();
         if line == "---" {
             break;
         }
-        keyword = Some(line.strip_prefix("keyword:")?.trim().to_string());
+        if let Some(value) = line.strip_prefix("keyword:") {
+            keyword = Some(value.trim().to_string());
+        } else {
+            icon = Some(line.strip_prefix("icon:")?.trim().to_string());
+        }
     }
     let value = lines.collect::<Vec<_>>().join("\n");
     if value.is_empty() {
@@ -95,6 +135,7 @@ pub(super) fn parse_snippet_file(contents: &str) -> Option<TextSnippet> {
         name,
         value,
         keyword: keyword.filter(|keyword| !keyword.is_empty()),
+        icon: icon.filter(|icon| !icon.is_empty()),
     })
 }
 
@@ -372,6 +413,7 @@ mod tests {
 
     fn snippet(name: &str, value: &str, keyword: Option<&str>) -> TextSnippet {
         TextSnippet {
+            icon: None,
             name: name.to_string(),
             value: value.to_string(),
             keyword: keyword.map(str::to_string),
@@ -442,9 +484,35 @@ mod tests {
         let parsed = parse_snippet_file("Signature\nkeyword: !sig\n---\n-- me").unwrap();
         assert_eq!(parsed, snippet("Signature", "-- me", Some("!sig")));
 
+        for headers in ["icon: ✍️\nkeyword: !sig", "keyword: !sig\nicon: ✍️"] {
+            let parsed =
+                parse_snippet_file(&format!("Signature\n{headers}\n---\nicon: body")).unwrap();
+            assert_eq!(parsed.name, "Signature");
+            assert_eq!(parsed.keyword.as_deref(), Some("!sig"));
+            assert_eq!(parsed.icon.as_deref(), Some("✍️"));
+            assert_eq!(parsed.value, "icon: body");
+        }
+        assert_eq!(
+            parse_snippet_file("Name\nicon: \n---\nbody").unwrap().icon,
+            None
+        );
+
         assert!(parse_snippet_file("Name\nnot a header\n---\nvalue").is_none());
         assert!(parse_snippet_file("Name\nvalue without separator").is_none());
         assert!(parse_snippet_file("Name\n---\n").is_none());
+    }
+
+    #[test]
+    fn test_command_icons_use_alfred_format() {
+        let response: super::SnippetCommandResponse = serde_json::from_str(
+            r#"{"items":[{"title":"Mail","arg":"body","icon":{"path":"📨"}},{"title":"Plain"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            response.items[0].icon.as_ref().unwrap().path.as_deref(),
+            Some("📨")
+        );
+        assert!(response.items[1].icon.is_none());
     }
 
     #[test]

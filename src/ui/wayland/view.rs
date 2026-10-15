@@ -8,7 +8,7 @@ use iced::{Element, Length};
 
 use super::ansi::ansi_to_spans;
 use super::browser::mimetype_icon_name;
-use super::snippets::truncate_preview;
+use super::snippets::{truncate_preview, SnippetIcon};
 use super::state::{LauncherApp, Message};
 
 type HintSpan<'a> = iced::widget::text::Span<'a, (), iced::Font>;
@@ -659,30 +659,17 @@ impl LauncherApp {
                     let is_selected = self.selected_index == special_item_idx;
                     let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
 
-                    if let Some(icon_name) = &self.text_snippets.icon {
-                        if let Some(icon_path_str) = self.icon_map.get(icon_name) {
-                            let icon_path = PathBuf::from(icon_path_str);
-                            if icon_path.exists() {
-                                let is_svg = icon_path
-                                    .extension()
-                                    .and_then(|ext| ext.to_str())
-                                    .map(|ext| ext.eq_ignore_ascii_case("svg"))
-                                    .unwrap_or(false);
-
-                                let icon_content: Element<Message> = if is_svg {
-                                    svg(iced::widget::svg::Handle::from_path(&icon_path))
-                                        .width(Length::Fixed(40.0))
-                                        .height(Length::Fixed(40.0))
-                                        .content_fit(iced::ContentFit::Contain)
-                                        .into()
-                                } else {
-                                    image(icon_path)
-                                        .width(Length::Fixed(40.0))
-                                        .height(Length::Fixed(40.0))
-                                        .content_fit(iced::ContentFit::Contain)
-                                        .into()
-                                };
-                                item_row = item_row.push(icon_content);
+                    if let Some(icon) = self.snippet_icon(snippet) {
+                        match icon {
+                            SnippetIcon::File(path) => {
+                                if let Some(icon) = icon_element(Path::new(&path), 40.0) {
+                                    item_row = item_row.push(icon);
+                                }
+                            }
+                            SnippetIcon::Glyph(glyph) => {
+                                item_row = item_row.push(
+                                    text(glyph).size(fs.item + 4.0).width(Length::Fixed(40.0)),
+                                );
                             }
                         }
                     }

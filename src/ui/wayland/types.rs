@@ -147,6 +147,7 @@ pub(crate) enum Message {
         u64,
         std::result::Result<super::placeholders::Expanded, String>,
     ),
+    HyprPastePrepared(u64, std::result::Result<super::hyprland::Hyprland, String>),
     WebSearchSelected,
     FileBrowserItemSelected(usize),
     TabComplete,

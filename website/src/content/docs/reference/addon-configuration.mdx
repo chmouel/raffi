@@ -514,7 +514,9 @@ enters the source while `em` keeps searching launchers.
 
 **`icon`** `string`
 
-Icon name displayed next to each snippet.
+Default emoji, icon name, or image path displayed next to each snippet.
+A per-snippet `icon` overrides it; an unavailable icon falls back to this
+default. `no_icons` hides both. Paths support tilde and environment variables.
 
   ```yaml
   addons:
@@ -534,12 +536,14 @@ Inline list of snippets.
   [dynamic placeholders](/features/text-snippets/#dynamic-placeholders)
   such as `{clipboard}` or `{date +1d}`
 - `keyword` (string, optional): Abbreviation ranked first when typed exactly
+- `icon` (string, optional): Emoji (for example `🏠`), icon name, or image path
 
   ```yaml
   addons:
     text_snippets:
       - snippets:
           - name: "Personal Email"
+            icon: "📨"
             value: "user@example.com"
           - name: "Work Email"
             value: "user@company.com"
@@ -574,7 +578,7 @@ Path to a YAML file containing snippets.
 
 Executable that outputs Alfred Script Filter JSON.
 
-  The `title` field maps to snippet name, `arg` to snippet value, and the optional `keyword` field to the snippet keyword. `{shell:...}` placeholders are disabled for command output. Supports tilde and environment variable expansion.
+  The `title` field maps to snippet name, `arg` to snippet value, and the optional `keyword` field to the snippet keyword. An optional `icon.path` sets the item icon. `{shell:...}` placeholders are disabled for command output. Supports tilde and environment variable expansion.
 
   ```yaml
   addons:
@@ -592,11 +596,12 @@ Path to a directory of `.snippet` files.
   ```
   Description (first line)
   keyword: !abbr (optional)
+  icon: 🏠 (optional)
   ---
   Actual snippet content (everything after the separator)
   ```
 
-  Supports tilde and environment variable expansion. Files are cached per session.
+  The optional headers can appear in either order. Supports tilde and environment variable expansion. Files are cached per session.
 
   ```yaml
   addons:
@@ -625,6 +630,13 @@ Action to perform on Enter.
 
 - `copy` - Copy to clipboard via `wl-copy`/`xclip`/`xsel` (default)
 - `insert` - Type into focused app via `wtype`/`ydotool`
+- `hypr_paste` - On Hyprland, copy with `wl-copy`, close Raffi, wait for the
+  original window to regain focus, and send Ctrl+V to that window. Requires
+  Hyprland's Lua API, `hyprctl`, and `wl-clipboard`. Leaves the snippet on the
+  clipboard unless `restore_clipboard` is enabled; does not reposition
+  `{cursor}`. Marks the snippet sensitive so CopyQ and other clipboard managers
+  that honor the hint skip storing it. See
+  [Hyprland paste](/features/text-snippets/#default-actions).
 
   Any other string is executed as a shell command via `sh -c`, with `{value}` replaced by the snippet value. The value is also exported as `$RAFFI_VALUE`; prefer `"$RAFFI_VALUE"` when the snippet may contain quotes or shell syntax, since `{value}` is substituted as raw text.
 
@@ -633,6 +645,7 @@ Action to perform on Enter.
     text_snippets:
       - action: "copy"                    # Copy to clipboard
       - action: "insert"                  # Type into app
+      - action: "hypr_paste"              # Paste into the original window on Hyprland
       - action: 'notify-send "$RAFFI_VALUE"'  # Custom command
 
 ```
@@ -651,6 +664,17 @@ Action to perform on Ctrl+Enter.
         secondary_action: "copy"  # Ctrl+Enter: Copy
 
 ```
+
+**`restore_clipboard`** `boolean` (default: `false`)
+
+For `action: "hypr_paste"` or `secondary_action: "hypr_paste"`, save the
+previous plain-text clipboard and restore it one second after the shortcut
+if Raffi's clipboard marker is still present. Requires `wl-paste`. Saving or
+restoration failures do not block pasting. Snapshots are limited to 100 KiB of
+UTF-8 text without NUL bytes; unavailable or non-text selections are skipped.
+Rich-text formatting and images are not preserved. The delay is best effort
+and may be too short for slow applications. This setting does not affect other
+actions.
 
 **`placeholders`** `boolean` (default: `true`)
 

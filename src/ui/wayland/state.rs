@@ -92,6 +92,7 @@ pub(crate) struct ClipboardSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct PendingSelection {
     pub action: String,
+    pub preparing_paste: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -111,6 +112,7 @@ pub(super) struct TextSnippetState {
     /// clipboard and expansion results can be recognised and dropped.
     pub session: u64,
     pub placeholders: bool,
+    pub restore_clipboard: bool,
     pub allow_shell: bool,
     pub clipboard: ClipboardSnapshot,
     /// Clipboard manager setting for `{clipboard:N}`; kept across sessions.
@@ -279,6 +281,7 @@ pub(super) struct LauncherApp {
     pub selected_index: usize,
     pub selected_item: SharedSelection,
     pub icon_map: HashMap<String, String>,
+    pub no_icons: bool,
     pub launcher_icon_paths: Vec<Option<String>>,
     pub mru_map: HashMap<String, super::support::MruEntry>,
     pub addons: AddonsConfig,
@@ -286,6 +289,8 @@ pub(super) struct LauncherApp {
     pub currency: CurrencyState,
     pub script_filter: ScriptFilterState,
     pub text_snippets: TextSnippetState,
+    pub hyprland: Option<Result<super::hyprland::Hyprland, String>>,
+    pub deferred_paste: Arc<Mutex<Option<super::hyprland::Hyprland>>>,
     pub web_search: WebSearchState,
     pub file_browser: FileBrowserState,
     pub view: ViewState,

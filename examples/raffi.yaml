@@ -446,16 +446,23 @@ addons:
   #   - name: "Emails"
   #     keyword: "em"
   #     icon: "mail"
-  #     # action/secondary_action accept two special keywords:
+  #     # action/secondary_action accept three special keywords:
   #     #   "copy"   — copy to clipboard via wl-copy (default for Enter)
   #     #   "insert" — type into focused app via wtype/ydotool (default for Ctrl+Enter)
+  #     #   "hypr_paste" — paste with Ctrl+V into the original window on Hyprland
   #     # Any other string is run as a shell command via sh -c, with {value} replaced.
   #     # The value is also exported as $RAFFI_VALUE; prefer "$RAFFI_VALUE" over
   #     # {value} in custom commands when the snippet may contain shell syntax.
   #     action: "insert"                       # primary action on Enter: type into focused app
   #     secondary_action: "copy"               # secondary action on Ctrl+Enter: copy to clipboard
+  #     # Use action: "hypr_paste" on Hyprland (Lua API) with hyprctl and wl-clipboard.
+  #     # hypr_paste marks snippets sensitive so CopyQ's default settings keep them out of history.
+  #     # {cursor} does not reposition the caret with hypr_paste.
+  #     restore_clipboard: false               # hypr_paste: true restores old plain text after 1s
+  #     # Restoration needs wl-paste; skips newer copies and unavailable/non-text snapshots.
   #     snippets:
   #       - name: "Personal Email"
+  #         icon: "📨"                        # optional emoji, icon name, or image path
   #         keyword: "!me"                     # optional abbreviation, ranked first when typed
   #         value: "user@example.com"
   #       - name: "Work Email"

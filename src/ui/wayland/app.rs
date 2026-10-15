@@ -298,6 +298,7 @@ impl LauncherApp {
                 selected_index: 0,
                 selected_item,
                 icon_map,
+                no_icons,
                 launcher_icon_paths,
                 mru_map,
                 addons,
@@ -305,6 +306,8 @@ impl LauncherApp {
                 currency: CurrencyState::default(),
                 script_filter: ScriptFilterState::default(),
                 text_snippets: TextSnippetState::default(),
+                hyprland: None,
+                deferred_paste: Default::default(),
                 web_search: WebSearchState::default(),
                 file_browser: FileBrowserState {
                     show_hidden: file_browser_show_hidden,
@@ -374,6 +377,9 @@ impl LauncherApp {
             }
             Message::TextSnippetExpanded(session, result) => {
                 self.handle_text_snippet_expanded(session, result)
+            }
+            Message::HyprPastePrepared(session, result) => {
+                self.handle_hypr_paste_prepared(session, result)
             }
             Message::WebSearchSelected => self.handle_web_search_selected(),
             Message::FileBrowserItemSelected(index) => self.handle_file_browser_selected(index),
@@ -710,6 +716,7 @@ impl LauncherApp {
         self.text_snippets.action = config.action.clone();
         self.text_snippets.secondary_action = config.secondary_action.clone();
         self.text_snippets.placeholders = config.placeholders;
+        self.text_snippets.restore_clipboard = config.restore_clipboard;
         // Command output is not written by the user, so it may not run shell code.
         self.text_snippets.allow_shell = config.placeholders && config.command.is_none();
         self.text_snippets.error = None;
@@ -1233,7 +1240,10 @@ impl LauncherApp {
             if self.text_snippets.placeholders {
                 let state = &mut self.text_snippets;
                 state.error = None;
-                state.pending = Some(PendingSelection { action });
+                state.pending = Some(PendingSelection {
+                    action,
+                    preparing_paste: false,
+                });
                 return expand_final(
                     snippet.value,
                     state.items.clone(),
@@ -1241,6 +1251,9 @@ impl LauncherApp {
                     state.session,
                     state.clipboard_history,
                 );
+            }
+            if action == "hypr_paste" {
+                return self.prepare_hypr_paste(snippet.value);
             }
             execute_action(&action, &snippet.value);
         }
@@ -1257,9 +1270,25 @@ impl LauncherApp {
         if !state.active || session != state.session {
             return Task::none();
         }
+        if state
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.preparing_paste)
+        {
+            return Task::none();
+        }
         let Some(pending) = state.pending.take() else {
             return Task::none();
         };
+        if pending.action == "hypr_paste" {
+            return match result {
+                Ok(expanded) => self.prepare_hypr_paste(expanded.text),
+                Err(error) => {
+                    state.error = Some(error);
+                    Task::none()
+                }
+            };
+        }
         let outcome = result.and_then(|expanded| {
             execute_snippet_action(&pending.action, &expanded.text, expanded.cursor_moves)
         });
@@ -1270,6 +1299,67 @@ impl LauncherApp {
             }
             Err(error) => {
                 crate::debug_log!("snippets: selection failed: {error}");
+                state.error = Some(error);
+                Task::none()
+            }
+        }
+    }
+
+    fn prepare_hypr_paste(&mut self, value: String) -> Task<Message> {
+        let target = self.hyprland.clone().unwrap_or_else(|| {
+            Err("hypr_paste requires a Hyprland session and an original target window".into())
+        });
+        let mut target = match target {
+            Ok(target) => target,
+            Err(error) => {
+                self.text_snippets.error = Some(error);
+                return Task::none();
+            }
+        };
+        let state = &mut self.text_snippets;
+        state.error = None;
+        state.pending = Some(PendingSelection {
+            action: "hypr_paste".into(),
+            preparing_paste: true,
+        });
+        let session = state.session;
+        let restore_clipboard = state.restore_clipboard;
+        Task::perform(
+            async move { target.prepare(&value, restore_clipboard).map(|()| target) },
+            move |result| Message::HyprPastePrepared(session, result),
+        )
+    }
+
+    fn handle_hypr_paste_prepared(
+        &mut self,
+        session: u64,
+        result: Result<super::hyprland::Hyprland, String>,
+    ) -> Task<Message> {
+        let state = &mut self.text_snippets;
+        if !state.active
+            || session != state.session
+            || !state
+                .pending
+                .as_ref()
+                .is_some_and(|pending| pending.preparing_paste)
+        {
+            return Task::none();
+        }
+        state.pending = None;
+        let outcome = result.and_then(|target| {
+            self.deferred_paste
+                .lock()
+                .map_err(|_| "cannot queue Hyprland paste".to_string())?
+                .replace(target);
+            Ok(())
+        });
+        match outcome {
+            Ok(()) => {
+                self.save_query_to_history();
+                iced::exit()
+            }
+            Err(error) => {
+                crate::debug_log!("hypr_paste preparation failed: {error}");
                 state.error = Some(error);
                 Task::none()
             }
