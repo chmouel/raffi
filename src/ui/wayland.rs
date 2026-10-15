@@ -73,7 +73,7 @@ fn run_wayland_ui(
             source.action.as_deref() == Some("hypr_paste")
                 || source.secondary_action.as_deref() == Some("hypr_paste")
         })
-        .then(hyprland::Hyprland::capture);
+        .then(|| hyprland::Hyprland::capture(&settings.terminal_classes));
     let deferred_paste = Arc::new(Mutex::new(None::<hyprland::Hyprland>));
     let deferred_paste_for_new = deferred_paste.clone();
 

@@ -62,11 +62,48 @@ pub(super) struct Hyprland {
     socket_dir: PathBuf,
     address: String,
     program: PathBuf,
+    mods: &'static str,
     restoration: Option<ClipboardRestore>,
 }
 
+/// Window classes of terminals that paste the clipboard with Ctrl+Shift+V.
+const TERMINAL_CLASSES: &[&str] = &[
+    "alacritty",
+    "foot",
+    "footclient",
+    "kitty",
+    "com.mitchellh.ghostty",
+    "org.wezfurlong.wezterm",
+    "org.gnome.terminal",
+    "org.gnome.console",
+    "org.gnome.ptyxis",
+    "org.kde.konsole",
+    "konsole",
+    "com.gexperts.tilix",
+    "terminator",
+    "xfce4-terminal",
+    "rio",
+    "st",
+    "st-256color",
+];
+
+/// Modifiers for the paste shortcut: terminals reserve Ctrl+V, so use Ctrl+Shift+V there.
+/// `extra` (from `general.terminal_classes`) extends the built-in list.
+fn paste_mods(class: &str, extra: &[String]) -> &'static str {
+    let is_terminal = TERMINAL_CLASSES
+        .iter()
+        .copied()
+        .chain(extra.iter().map(String::as_str))
+        .any(|known| known.eq_ignore_ascii_case(class));
+    if !class.is_empty() && is_terminal {
+        "CTRL SHIFT"
+    } else {
+        "CTRL"
+    }
+}
+
 impl Hyprland {
-    pub(super) fn capture() -> Result<Self, String> {
+    pub(super) fn capture(terminal_classes: &[String]) -> Result<Self, String> {
         let instance = std::env::var("HYPRLAND_INSTANCE_SIGNATURE")
             .map_err(|_| "hypr_paste requires a Hyprland session".to_string())?;
         if instance.is_empty()
@@ -83,12 +120,19 @@ impl Hyprland {
             instance,
             address: String::new(),
             program: "hyprctl".into(),
+            mods: "CTRL",
             restoration: None,
         };
         let window = target.active_window()?;
-        if window.get("class").and_then(|class| class.as_str()) == Some("com.chmouel.raffi") {
+        let class = window
+            .get("class")
+            .and_then(|class| class.as_str())
+            .unwrap_or_default();
+        if class == "com.chmouel.raffi" {
             return Err("the paste target is another Raffi window".into());
         }
+        target.mods = paste_mods(class, terminal_classes);
+        crate::debug_log!("hypr_paste: target class={class:?} mods={}", target.mods);
         target.address = window
             .get("address")
             .and_then(|address| address.as_str())
@@ -170,8 +214,8 @@ impl Hyprland {
         wait_for_focus(events, &self.address, focused, deadline)?;
         // Check focus again inside the dispatch to reject stale/queued events.
         self.eval(&format!(
-            "local w = hl.get_window(\"activewindow\"); assert(w and w.address == \"{}\", \"paste target lost focus\"); hl.dispatch(hl.dsp.send_shortcut({{ mods = \"CTRL\", key = \"v\", window = w }}))",
-            self.address
+            "local w = hl.get_window(\"activewindow\"); assert(w and w.address == \"{}\", \"paste target lost focus\"); hl.dispatch(hl.dsp.send_shortcut({{ mods = \"{}\", key = \"v\", window = w }}))",
+            self.address, self.mods
         ))?;
         if let Some(restoration) = &self.restoration {
             std::thread::sleep(RESTORE_DELAY);
@@ -199,6 +243,7 @@ impl Hyprland {
             socket_dir: PathBuf::new(),
             address: "0x123".into(),
             program: "hyprctl".into(),
+            mods: "CTRL",
             restoration: None,
         }
     }
@@ -302,6 +347,27 @@ test "$5" = "$EXPECTED_VALUE"
     }
 
     #[test]
+    fn test_paste_shortcut_uses_ctrl_shift_v_for_terminals() {
+        for class in [
+            "kitty",
+            "foot",
+            "Alacritty",
+            "com.mitchellh.ghostty",
+            "org.wezfurlong.wezterm",
+        ] {
+            assert_eq!(paste_mods(class, &[]), "CTRL SHIFT", "{class}");
+        }
+        for class in ["", "firefox", "code", "org.gnome.TextEditor", "kittyish"] {
+            assert_eq!(paste_mods(class, &[]), "CTRL", "{class}");
+        }
+        let extra = vec!["My.Term".to_string(), String::new()];
+        assert_eq!(paste_mods("my.term", &extra), "CTRL SHIFT");
+        assert_eq!(paste_mods("kitty", &extra), "CTRL SHIFT");
+        assert_eq!(paste_mods("", &extra), "CTRL");
+        assert_eq!(paste_mods("firefox", &extra), "CTRL");
+    }
+
+    #[test]
     fn test_target_address_rejects_missing_and_unsafe_windows() {
         for address in ["", "0x", "0x0", "0x000", "123", "0x123\";error('bad')"] {
             assert!(!valid_address(address), "{address}");
@@ -375,7 +441,7 @@ if [ "$3" = -j ]; then
     printf '%s' '{{"address":"0x123"}}'
 else
     case "$4" in
-        *'w.address == "0x123"'*'send_shortcut'*'window = w'*) touch '{}' ;;
+        *'w.address == "0x123"'*'send_shortcut'*'mods = "CTRL SHIFT"'*'window = w'*) touch '{}' ;;
         *) exit 9 ;;
     esac
     printf 'ok\n'
@@ -388,6 +454,7 @@ fi
         let target = Hyprland {
             socket_dir: dir.clone(),
             program: program.clone(),
+            mods: "CTRL SHIFT",
             ..Hyprland::test_target()
         };
         target.paste().unwrap();
