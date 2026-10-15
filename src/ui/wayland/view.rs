@@ -11,8 +11,105 @@ use super::browser::mimetype_icon_name;
 use super::preview::{PreviewBody, PreviewData, PreviewIcon};
 use super::snippets::{truncate_preview, SnippetIcon};
 use super::state::{LauncherApp, Message};
+use super::theme::ThemeColors;
 
 type HintSpan<'a> = iced::widget::text::Span<'a, (), iced::Font>;
+
+fn item_button_style(
+    t: ThemeColors,
+    is_selected: bool,
+    text_color: iced::Color,
+) -> impl Fn(&iced::Theme, button::Status) -> button::Style {
+    move |_theme, status| {
+        let base_style = button::Style {
+            text_color,
+            border: iced::Border {
+                radius: 10.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        if is_selected {
+            button::Style {
+                background: Some(iced::Background::Color(t.selection_bg)),
+                border: iced::Border {
+                    color: iced::Color {
+                        a: 0.38,
+                        ..t.accent
+                    },
+                    width: 1.0,
+                    radius: 10.0.into(),
+                },
+                ..base_style
+            }
+        } else {
+            match status {
+                button::Status::Hovered => button::Style {
+                    background: Some(iced::Background::Color(iced::Color {
+                        a: 0.12,
+                        ..t.accent_hover
+                    })),
+                    ..base_style
+                },
+                _ => button::Style {
+                    background: None,
+                    ..base_style
+                },
+            }
+        }
+    }
+}
+
+fn slim_scrollbar() -> scrollable::Direction {
+    scrollable::Direction::Vertical(
+        scrollable::Scrollbar::new()
+            .width(4)
+            .scroller_width(4)
+            .spacing(6),
+    )
+}
+
+fn scrollable_style(
+    t: ThemeColors,
+) -> impl Fn(&iced::Theme, scrollable::Status) -> scrollable::Style {
+    move |theme, status| {
+        let mut style = scrollable::default(theme, status);
+        let is_active = matches!(
+            status,
+            scrollable::Status::Hovered {
+                is_vertical_scrollbar_hovered: true,
+                ..
+            } | scrollable::Status::Dragged { .. }
+        );
+        let thumb_color = if is_active {
+            iced::Color {
+                a: 0.65,
+                ..t.accent
+            }
+        } else {
+            iced::Color {
+                a: 0.35,
+                ..t.text_muted
+            }
+        };
+        let rail = scrollable::Rail {
+            background: None,
+            border: iced::Border::default(),
+            scroller: scrollable::Scroller {
+                background: iced::Background::Color(thumb_color),
+                border: iced::Border {
+                    radius: 2.0.into(),
+                    ..Default::default()
+                },
+            },
+        };
+        style.vertical_rail = rail;
+        style.horizontal_rail = rail;
+        style.gap = None;
+        style
+    }
+}
 
 /// Build an icon widget for `path`, or `None` when the file is missing.
 fn icon_element<'a>(path: &Path, size: f32) -> Option<Element<'a, Message>> {
@@ -87,7 +184,10 @@ impl LauncherApp {
             .size(fs.input)
             .style(move |_theme, status| {
                 let border_color = if matches!(status, text_input::Status::Focused { .. }) {
-                    t.accent
+                    iced::Color {
+                        a: 0.65,
+                        ..t.accent
+                    }
                 } else {
                     t.border
                 };
@@ -114,17 +214,42 @@ impl LauncherApp {
 
         let items_scroll = scrollable(items_container)
             .id(self.view.scrollable_id.clone())
+            .direction(slim_scrollbar())
+            .style(scrollable_style(t))
             .height(Length::Fill)
             .width(Length::Fill);
 
+        let footer_divider = container(Space::new())
+            .width(Length::Fill)
+            .height(Length::Fixed(1.0))
+            .style(move |_theme| container::Style {
+                background: Some(iced::Background::Color(iced::Color {
+                    a: 0.45,
+                    ..t.border
+                })),
+                ..Default::default()
+            });
+
         let hint_row = container(rich_text(hint_spans))
+            .padding(iced::Padding {
+                top: 4.0,
+                right: 2.0,
+                bottom: 0.0,
+                left: 2.0,
+            })
             .width(Length::Fill)
             .align_x(iced::Alignment::End);
+
+        let footer = Column::new()
+            .spacing(4)
+            .width(Length::Fill)
+            .push(footer_divider)
+            .push(hint_row);
 
         let left_pane = container(items_scroll)
             .padding(iced::Padding {
                 top: fs.scroll_top_padding,
-                right: 4.0,
+                right: 6.0,
                 bottom: 0.0,
                 left: 0.0,
             })
@@ -140,7 +265,10 @@ impl LauncherApp {
                     .width(Length::Fixed(1.0))
                     .height(Length::Fill)
                     .style(move |_theme| container::Style {
-                        background: Some(iced::Background::Color(t.border)),
+                        background: Some(iced::Background::Color(iced::Color {
+                            a: 0.55,
+                            ..t.border
+                        })),
                         ..Default::default()
                     });
 
@@ -167,12 +295,12 @@ impl LauncherApp {
             };
 
         let content = Column::new()
-            .spacing(12)
+            .spacing(10)
             .width(Length::Fill)
             .height(Length::Fill)
-            .push(hint_row)
             .push(search_input)
-            .push(body_area);
+            .push(body_area)
+            .push(footer);
 
         container(content)
             .padding(fs.outer_padding)
@@ -287,42 +415,7 @@ impl LauncherApp {
                 .on_press(Message::ItemClicked(display_idx))
                 .padding(fs.item_padding)
                 .width(Length::Fill)
-                .style(move |_theme, status| {
-                    let base_style = button::Style {
-                        text_color: t.text_main,
-                        border: iced::Border {
-                            radius: 8.0.into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    };
-
-                    if is_selected {
-                        button::Style {
-                            background: Some(iced::Background::Color(t.selection_bg)),
-                            border: iced::Border {
-                                color: t.accent,
-                                width: 1.0,
-                                radius: 8.0.into(),
-                            },
-                            ..base_style
-                        }
-                    } else {
-                        match status {
-                            button::Status::Hovered => button::Style {
-                                background: Some(iced::Background::Color(iced::Color {
-                                    a: 0.1,
-                                    ..t.accent_hover
-                                })),
-                                ..base_style
-                            },
-                            _ => button::Style {
-                                background: None,
-                                ..base_style
-                            },
-                        }
-                    }
-                });
+                .style(item_button_style(t, is_selected, t.text_main));
 
             items_column = items_column.push(item_button);
         }
@@ -366,6 +459,7 @@ impl LauncherApp {
 
     /// Render the right-hand preview pane for `data`.
     fn render_preview_pane(&self, data: PreviewData) -> Element<'_, Message> {
+        let t = self.view.theme;
         let ps = self.view.preview_style.clone();
         let block_style = {
             let ps = ps.clone();
@@ -373,7 +467,7 @@ impl LauncherApp {
                 background: Some(iced::Background::Color(ps.bg_block)),
                 border: iced::Border {
                     color: iced::Color {
-                        a: 0.3,
+                        a: 0.55,
                         ..ps.border
                     },
                     width: 1.0,
@@ -640,24 +734,26 @@ impl LauncherApp {
             left: 0.0,
         }))
         .id(self.view.preview_scrollable_id.clone())
+        .direction(slim_scrollbar())
+        .style(scrollable_style(t))
         .width(Length::Fill)
         .height(Length::Fill);
 
         let pane_bg = ps.bg;
-        let pane_border = ps.border;
         container(scroll)
-            .padding(16.0)
+            .padding(iced::Padding {
+                top: 8.0,
+                right: 12.0,
+                bottom: 8.0,
+                left: 14.0,
+            })
             .width(Length::Fill)
             .height(Length::Fill)
             .style(move |_theme| container::Style {
                 background: Some(iced::Background::Color(pane_bg)),
                 border: iced::Border {
-                    color: iced::Color {
-                        a: 0.4,
-                        ..pane_border
-                    },
-                    width: 1.0,
-                    radius: 12.0.into(),
+                    radius: 10.0.into(),
+                    ..Default::default()
                 },
                 ..Default::default()
             })
@@ -742,42 +838,7 @@ impl LauncherApp {
                 .on_press(Message::ItemClicked(display_idx))
                 .padding(fs.item_padding)
                 .width(Length::Fill)
-                .style(move |_theme, status| {
-                    let base_style = button::Style {
-                        text_color: t.text_main,
-                        border: iced::Border {
-                            radius: 8.0.into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    };
-
-                    if is_selected {
-                        button::Style {
-                            background: Some(iced::Background::Color(t.selection_bg)),
-                            border: iced::Border {
-                                color: t.accent,
-                                width: 1.0,
-                                radius: 8.0.into(),
-                            },
-                            ..base_style
-                        }
-                    } else {
-                        match status {
-                            button::Status::Hovered => button::Style {
-                                background: Some(iced::Background::Color(iced::Color {
-                                    a: 0.1,
-                                    ..t.accent_hover
-                                })),
-                                ..base_style
-                            },
-                            _ => button::Style {
-                                background: None,
-                                ..base_style
-                            },
-                        }
-                    }
-                });
+                .style(item_button_style(t, is_selected, t.text_main));
 
             items_column = items_column.push(item_button);
             special_item_idx += 1;
@@ -800,33 +861,7 @@ impl LauncherApp {
             let loading_button = button(loading_row)
                 .padding(fs.item_padding)
                 .width(Length::Fill)
-                .style(move |_theme, _status| {
-                    let base_style = button::Style {
-                        text_color: t.text_muted,
-                        border: iced::Border {
-                            radius: 8.0.into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    };
-
-                    if is_selected {
-                        button::Style {
-                            background: Some(iced::Background::Color(t.selection_bg)),
-                            border: iced::Border {
-                                color: t.accent,
-                                width: 1.0,
-                                radius: 8.0.into(),
-                            },
-                            ..base_style
-                        }
-                    } else {
-                        button::Style {
-                            background: None,
-                            ..base_style
-                        }
-                    }
-                });
+                .style(item_button_style(t, is_selected, t.text_muted));
 
             items_column = items_column.push(loading_button);
             special_item_idx += 1;
@@ -840,33 +875,7 @@ impl LauncherApp {
             let help_button = button(help_row)
                 .padding(fs.item_padding)
                 .width(Length::Fill)
-                .style(move |_theme, _status| {
-                    let base_style = button::Style {
-                        text_color: t.text_muted,
-                        border: iced::Border {
-                            radius: 8.0.into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    };
-
-                    if is_selected {
-                        button::Style {
-                            background: Some(iced::Background::Color(t.selection_bg)),
-                            border: iced::Border {
-                                color: t.accent,
-                                width: 1.0,
-                                radius: 8.0.into(),
-                            },
-                            ..base_style
-                        }
-                    } else {
-                        button::Style {
-                            background: None,
-                            ..base_style
-                        }
-                    }
-                });
+                .style(item_button_style(t, is_selected, t.text_muted));
 
             items_column = items_column.push(help_button);
             special_item_idx += 1;
@@ -936,42 +945,7 @@ impl LauncherApp {
                     .on_press(Message::ItemClicked(special_item_idx))
                     .padding(fs.item_padding)
                     .width(Length::Fill)
-                    .style(move |_theme, status| {
-                        let base_style = button::Style {
-                            text_color: t.text_main,
-                            border: iced::Border {
-                                radius: 8.0.into(),
-                                ..Default::default()
-                            },
-                            ..Default::default()
-                        };
-
-                        if is_selected {
-                            button::Style {
-                                background: Some(iced::Background::Color(t.selection_bg)),
-                                border: iced::Border {
-                                    color: t.accent,
-                                    width: 1.0,
-                                    radius: 8.0.into(),
-                                },
-                                ..base_style
-                            }
-                        } else {
-                            match status {
-                                button::Status::Hovered => button::Style {
-                                    background: Some(iced::Background::Color(iced::Color {
-                                        a: 0.1,
-                                        ..t.accent_hover
-                                    })),
-                                    ..base_style
-                                },
-                                _ => button::Style {
-                                    background: None,
-                                    ..base_style
-                                },
-                            }
-                        }
-                    });
+                    .style(item_button_style(t, is_selected, t.text_main));
 
                 items_column = items_column.push(item_button);
                 special_item_idx += 1;
@@ -992,33 +966,7 @@ impl LauncherApp {
             let loading_button = button(loading_row)
                 .padding(fs.item_padding)
                 .width(Length::Fill)
-                .style(move |_theme, _status| {
-                    let base_style = button::Style {
-                        text_color: t.text_muted,
-                        border: iced::Border {
-                            radius: 8.0.into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    };
-
-                    if is_selected {
-                        button::Style {
-                            background: Some(iced::Background::Color(t.selection_bg)),
-                            border: iced::Border {
-                                color: t.accent,
-                                width: 1.0,
-                                radius: 8.0.into(),
-                            },
-                            ..base_style
-                        }
-                    } else {
-                        button::Style {
-                            background: None,
-                            ..base_style
-                        }
-                    }
-                });
+                .style(item_button_style(t, is_selected, t.text_muted));
 
             items_column = items_column.push(loading_button);
             special_item_idx += 1;
@@ -1091,42 +1039,7 @@ impl LauncherApp {
                         .on_press(Message::ItemClicked(special_item_idx))
                         .padding(fs.item_padding)
                         .width(Length::Fill)
-                        .style(move |_theme, status| {
-                            let base_style = button::Style {
-                                text_color: t.text_main,
-                                border: iced::Border {
-                                    radius: 8.0.into(),
-                                    ..Default::default()
-                                },
-                                ..Default::default()
-                            };
-
-                            if is_selected {
-                                button::Style {
-                                    background: Some(iced::Background::Color(t.selection_bg)),
-                                    border: iced::Border {
-                                        color: t.accent,
-                                        width: 1.0,
-                                        radius: 8.0.into(),
-                                    },
-                                    ..base_style
-                                }
-                            } else {
-                                match status {
-                                    button::Status::Hovered => button::Style {
-                                        background: Some(iced::Background::Color(iced::Color {
-                                            a: 0.1,
-                                            ..t.accent_hover
-                                        })),
-                                        ..base_style
-                                    },
-                                    _ => button::Style {
-                                        background: None,
-                                        ..base_style
-                                    },
-                                }
-                            }
-                        });
+                        .style(item_button_style(t, is_selected, t.text_main));
 
                     items_column = items_column.push(item_button);
                     special_item_idx += 1;
@@ -1158,42 +1071,7 @@ impl LauncherApp {
                         .on_press(Message::ItemClicked(special_item_idx))
                         .padding(fs.item_padding)
                         .width(Length::Fill)
-                        .style(move |_theme, status| {
-                            let base_style = button::Style {
-                                text_color: t.text_main,
-                                border: iced::Border {
-                                    radius: 8.0.into(),
-                                    ..Default::default()
-                                },
-                                ..Default::default()
-                            };
-
-                            if is_selected {
-                                button::Style {
-                                    background: Some(iced::Background::Color(t.selection_bg)),
-                                    border: iced::Border {
-                                        color: t.accent,
-                                        width: 1.0,
-                                        radius: 8.0.into(),
-                                    },
-                                    ..base_style
-                                }
-                            } else {
-                                match status {
-                                    button::Status::Hovered => button::Style {
-                                        background: Some(iced::Background::Color(iced::Color {
-                                            a: 0.1,
-                                            ..t.accent_hover
-                                        })),
-                                        ..base_style
-                                    },
-                                    _ => button::Style {
-                                        background: None,
-                                        ..base_style
-                                    },
-                                }
-                            }
-                        });
+                        .style(item_button_style(t, is_selected, t.text_main));
 
                     items_column = items_column.push(item_button);
                     special_item_idx += 1;
@@ -1280,42 +1158,7 @@ impl LauncherApp {
                     .on_press(Message::ItemClicked(special_item_idx))
                     .padding(fs.item_padding)
                     .width(Length::Fill)
-                    .style(move |_theme, status| {
-                        let base_style = button::Style {
-                            text_color: t.text_main,
-                            border: iced::Border {
-                                radius: 8.0.into(),
-                                ..Default::default()
-                            },
-                            ..Default::default()
-                        };
-
-                        if is_selected {
-                            button::Style {
-                                background: Some(iced::Background::Color(t.selection_bg)),
-                                border: iced::Border {
-                                    color: t.accent,
-                                    width: 1.0,
-                                    radius: 8.0.into(),
-                                },
-                                ..base_style
-                            }
-                        } else {
-                            match status {
-                                button::Status::Hovered => button::Style {
-                                    background: Some(iced::Background::Color(iced::Color {
-                                        a: 0.1,
-                                        ..t.accent_hover
-                                    })),
-                                    ..base_style
-                                },
-                                _ => button::Style {
-                                    background: None,
-                                    ..base_style
-                                },
-                            }
-                        }
-                    });
+                    .style(item_button_style(t, is_selected, t.text_main));
 
                 items_column = items_column.push(item_button);
                 special_item_idx += 1;
@@ -1361,33 +1204,7 @@ impl LauncherApp {
                 let ws_button = button(ws_row)
                     .padding(fs.item_padding)
                     .width(Length::Fill)
-                    .style(move |_theme, _status| {
-                        let base_style = button::Style {
-                            text_color: t.text_muted,
-                            border: iced::Border {
-                                radius: 8.0.into(),
-                                ..Default::default()
-                            },
-                            ..Default::default()
-                        };
-
-                        if is_selected {
-                            button::Style {
-                                background: Some(iced::Background::Color(t.selection_bg)),
-                                border: iced::Border {
-                                    color: t.accent,
-                                    width: 1.0,
-                                    radius: 8.0.into(),
-                                },
-                                ..base_style
-                            }
-                        } else {
-                            button::Style {
-                                background: None,
-                                ..base_style
-                            }
-                        }
-                    });
+                    .style(item_button_style(t, is_selected, t.text_muted));
 
                 items_column = items_column.push(ws_button);
             } else {
@@ -1398,42 +1215,7 @@ impl LauncherApp {
                     .on_press(Message::WebSearchSelected)
                     .padding(fs.item_padding)
                     .width(Length::Fill)
-                    .style(move |_theme, status| {
-                        let base_style = button::Style {
-                            text_color: t.accent,
-                            border: iced::Border {
-                                radius: 8.0.into(),
-                                ..Default::default()
-                            },
-                            ..Default::default()
-                        };
-
-                        if is_selected {
-                            button::Style {
-                                background: Some(iced::Background::Color(t.selection_bg)),
-                                border: iced::Border {
-                                    color: t.accent,
-                                    width: 1.0,
-                                    radius: 8.0.into(),
-                                },
-                                ..base_style
-                            }
-                        } else {
-                            match status {
-                                button::Status::Hovered => button::Style {
-                                    background: Some(iced::Background::Color(iced::Color {
-                                        a: 0.1,
-                                        ..t.accent_hover
-                                    })),
-                                    ..base_style
-                                },
-                                _ => button::Style {
-                                    background: None,
-                                    ..base_style
-                                },
-                            }
-                        }
-                    });
+                    .style(item_button_style(t, is_selected, t.accent));
 
                 items_column = items_column.push(ws_button);
             }
@@ -1454,33 +1236,7 @@ impl LauncherApp {
             let help_button = button(help_row)
                 .padding(fs.item_padding)
                 .width(Length::Fill)
-                .style(move |_theme, _status| {
-                    let base_style = button::Style {
-                        text_color: t.text_muted,
-                        border: iced::Border {
-                            radius: 8.0.into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    };
-
-                    if is_selected {
-                        button::Style {
-                            background: Some(iced::Background::Color(t.selection_bg)),
-                            border: iced::Border {
-                                color: t.accent,
-                                width: 1.0,
-                                radius: 8.0.into(),
-                            },
-                            ..base_style
-                        }
-                    } else {
-                        button::Style {
-                            background: None,
-                            ..base_style
-                        }
-                    }
-                });
+                .style(item_button_style(t, is_selected, t.text_muted));
 
             items_column = items_column.push(help_button);
             special_item_idx += 1;
@@ -1505,33 +1261,7 @@ impl LauncherApp {
             let loading_button = button(loading_row)
                 .padding(fs.item_padding)
                 .width(Length::Fill)
-                .style(move |_theme, _status| {
-                    let base_style = button::Style {
-                        text_color: t.text_muted,
-                        border: iced::Border {
-                            radius: 8.0.into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    };
-
-                    if is_selected {
-                        button::Style {
-                            background: Some(iced::Background::Color(t.selection_bg)),
-                            border: iced::Border {
-                                color: t.accent,
-                                width: 1.0,
-                                radius: 8.0.into(),
-                            },
-                            ..base_style
-                        }
-                    } else {
-                        button::Style {
-                            background: None,
-                            ..base_style
-                        }
-                    }
-                });
+                .style(item_button_style(t, is_selected, t.text_muted));
 
             items_column = items_column.push(loading_button);
             special_item_idx += 1;
@@ -1555,42 +1285,7 @@ impl LauncherApp {
                 .on_press(Message::CurrencyResultCopied)
                 .padding(fs.item_padding)
                 .width(Length::Fill)
-                .style(move |_theme, status| {
-                    let base_style = button::Style {
-                        text_color: t.accent,
-                        border: iced::Border {
-                            radius: 8.0.into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    };
-
-                    if is_selected {
-                        button::Style {
-                            background: Some(iced::Background::Color(t.selection_bg)),
-                            border: iced::Border {
-                                color: t.accent,
-                                width: 1.0,
-                                radius: 8.0.into(),
-                            },
-                            ..base_style
-                        }
-                    } else {
-                        match status {
-                            button::Status::Hovered => button::Style {
-                                background: Some(iced::Background::Color(iced::Color {
-                                    a: 0.1,
-                                    ..t.accent_hover
-                                })),
-                                ..base_style
-                            },
-                            _ => button::Style {
-                                background: None,
-                                ..base_style
-                            },
-                        }
-                    }
-                });
+                .style(item_button_style(t, is_selected, t.accent));
 
             items_column = items_column.push(currency_button);
             special_item_idx += 1;
@@ -1617,33 +1312,7 @@ impl LauncherApp {
             let loading_button = button(loading_row)
                 .padding(fs.item_padding)
                 .width(Length::Fill)
-                .style(move |_theme, _status| {
-                    let base_style = button::Style {
-                        text_color: t.text_muted,
-                        border: iced::Border {
-                            radius: 8.0.into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    };
-
-                    if is_selected {
-                        button::Style {
-                            background: Some(iced::Background::Color(t.selection_bg)),
-                            border: iced::Border {
-                                color: t.accent,
-                                width: 1.0,
-                                radius: 8.0.into(),
-                            },
-                            ..base_style
-                        }
-                    } else {
-                        button::Style {
-                            background: None,
-                            ..base_style
-                        }
-                    }
-                });
+                .style(item_button_style(t, is_selected, t.text_muted));
 
             items_column = items_column.push(loading_button);
             special_item_idx += 1;
@@ -1668,42 +1337,7 @@ impl LauncherApp {
                     .on_press(Message::MultiCurrencyResultCopied(idx))
                     .padding(fs.item_padding)
                     .width(Length::Fill)
-                    .style(move |_theme, status| {
-                        let base_style = button::Style {
-                            text_color: t.accent,
-                            border: iced::Border {
-                                radius: 8.0.into(),
-                                ..Default::default()
-                            },
-                            ..Default::default()
-                        };
-
-                        if is_selected {
-                            button::Style {
-                                background: Some(iced::Background::Color(t.selection_bg)),
-                                border: iced::Border {
-                                    color: t.accent,
-                                    width: 1.0,
-                                    radius: 8.0.into(),
-                                },
-                                ..base_style
-                            }
-                        } else {
-                            match status {
-                                button::Status::Hovered => button::Style {
-                                    background: Some(iced::Background::Color(iced::Color {
-                                        a: 0.1,
-                                        ..t.accent_hover
-                                    })),
-                                    ..base_style
-                                },
-                                _ => button::Style {
-                                    background: None,
-                                    ..base_style
-                                },
-                            }
-                        }
-                    });
+                    .style(item_button_style(t, is_selected, t.accent));
 
                 items_column = items_column.push(conversion_button);
                 special_item_idx += 1;
@@ -1728,42 +1362,7 @@ impl LauncherApp {
                 .on_press(Message::CalculatorSelected)
                 .padding(fs.item_padding)
                 .width(Length::Fill)
-                .style(move |_theme, status| {
-                    let base_style = button::Style {
-                        text_color: t.accent,
-                        border: iced::Border {
-                            radius: 8.0.into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    };
-
-                    if is_selected {
-                        button::Style {
-                            background: Some(iced::Background::Color(t.selection_bg)),
-                            border: iced::Border {
-                                color: t.accent,
-                                width: 1.0,
-                                radius: 8.0.into(),
-                            },
-                            ..base_style
-                        }
-                    } else {
-                        match status {
-                            button::Status::Hovered => button::Style {
-                                background: Some(iced::Background::Color(iced::Color {
-                                    a: 0.1,
-                                    ..t.accent_hover
-                                })),
-                                ..base_style
-                            },
-                            _ => button::Style {
-                                background: None,
-                                ..base_style
-                            },
-                        }
-                    }
-                });
+                .style(item_button_style(t, is_selected, t.accent));
 
             items_column = items_column.push(calc_button);
             special_item_idx += 1;
@@ -1836,42 +1435,7 @@ impl LauncherApp {
                     .on_press(Message::ItemClicked(display_idx))
                     .padding(fs.item_padding)
                     .width(Length::Fill)
-                    .style(move |_theme, status| {
-                        let base_style = button::Style {
-                            text_color: t.text_main,
-                            border: iced::Border {
-                                radius: 8.0.into(),
-                                ..Default::default()
-                            },
-                            ..Default::default()
-                        };
-
-                        if is_selected {
-                            button::Style {
-                                background: Some(iced::Background::Color(t.selection_bg)),
-                                border: iced::Border {
-                                    color: t.accent,
-                                    width: 1.0,
-                                    radius: 8.0.into(),
-                                },
-                                ..base_style
-                            }
-                        } else {
-                            match status {
-                                button::Status::Hovered => button::Style {
-                                    background: Some(iced::Background::Color(iced::Color {
-                                        a: 0.1,
-                                        ..t.accent_hover
-                                    })),
-                                    ..base_style
-                                },
-                                _ => button::Style {
-                                    background: None,
-                                    ..base_style
-                                },
-                            }
-                        }
-                    });
+                    .style(item_button_style(t, is_selected, t.text_main));
 
                 items_column = items_column.push(item_button);
             }
@@ -1917,48 +1481,18 @@ impl LauncherApp {
                     fallback.name,
                     self.search_query.trim()
                 );
-                item_row = item_row.push(text(label).size(fs.item).color(t.text_muted));
+                let fb_text_color = if is_selected {
+                    t.text_main
+                } else {
+                    t.text_muted
+                };
+                item_row = item_row.push(text(label).size(fs.item).color(fb_text_color));
 
                 let item_button = button(item_row)
                     .on_press(Message::ItemClicked(display_idx))
                     .padding(fs.item_padding)
                     .width(Length::Fill)
-                    .style(move |_theme, status| {
-                        let base_style = button::Style {
-                            text_color: t.text_muted,
-                            border: iced::Border {
-                                radius: 8.0.into(),
-                                ..Default::default()
-                            },
-                            ..Default::default()
-                        };
-
-                        if is_selected {
-                            button::Style {
-                                background: Some(iced::Background::Color(t.selection_bg)),
-                                border: iced::Border {
-                                    color: t.accent,
-                                    width: 1.0,
-                                    radius: 8.0.into(),
-                                },
-                                ..base_style
-                            }
-                        } else {
-                            match status {
-                                button::Status::Hovered => button::Style {
-                                    background: Some(iced::Background::Color(iced::Color {
-                                        a: 0.1,
-                                        ..t.accent_hover
-                                    })),
-                                    ..base_style
-                                },
-                                _ => button::Style {
-                                    background: None,
-                                    ..base_style
-                                },
-                            }
-                        }
-                    });
+                    .style(item_button_style(t, is_selected, fb_text_color));
 
                 items_column = items_column.push(item_button);
             }

@@ -1671,6 +1671,39 @@ fn test_preview_style_resolves_defaults_and_overrides() {
 }
 
 #[test]
+fn test_theme_colors_presets_and_overrides() {
+    let presets = [
+        crate::ThemeMode::Dark,
+        crate::ThemeMode::Light,
+        crate::ThemeMode::CatppuccinMocha,
+        crate::ThemeMode::CatppuccinLatte,
+        crate::ThemeMode::TokyoNight,
+        crate::ThemeMode::Nord,
+        crate::ThemeMode::Gruvbox,
+        crate::ThemeMode::Dracula,
+        crate::ThemeMode::RosePine,
+        crate::ThemeMode::Kanagawa,
+    ];
+    for mode in &presets {
+        let colors = ThemeColors::from_mode_with_overrides(mode, None);
+        assert_ne!(colors.text_main, colors.bg_base);
+        assert_ne!(colors.text_muted, colors.bg_base);
+    }
+
+    let overrides = crate::ThemeColorsConfig {
+        accent: Some("#112233".into()),
+        ..Default::default()
+    };
+    let customized =
+        ThemeColors::from_mode_with_overrides(&crate::ThemeMode::TokyoNight, Some(&overrides));
+    assert_eq!(customized.accent, iced::Color::from_rgb8(0x11, 0x22, 0x33));
+    assert_eq!(
+        customized.bg_input,
+        ThemeColors::from_mode_with_overrides(&crate::ThemeMode::TokyoNight, None).bg_input
+    );
+}
+
+#[test]
 fn test_preview_launcher_binary_and_script() {
     let configs = vec![
         RaffiConfig {

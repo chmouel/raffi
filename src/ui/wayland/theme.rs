@@ -83,15 +83,15 @@ impl PreviewStyle {
             bg: color(
                 colors.and_then(|c| c.bg.as_ref()),
                 iced::Color {
-                    a: 0.55,
+                    a: 0.25,
                     ..theme.bg_input
                 },
             ),
             bg_block: color(
                 colors.and_then(|c| c.bg_block.as_ref()),
                 iced::Color {
-                    a: 0.45,
-                    ..theme.bg_base
+                    a: 0.75,
+                    ..theme.bg_input
                 },
             ),
             text_main: color(colors.and_then(|c| c.text_main.as_ref()), theme.text_main),
@@ -125,96 +125,136 @@ pub(super) struct ThemeColors {
 }
 
 impl ThemeColors {
+    /// Default dark theme: Sleek Obsidian (deep neutral charcoal, high-contrast
+    /// silver-slate secondary text, and refined electric indigo/violet accent).
     fn dark() -> Self {
         Self {
-            bg_base: iced::Color {
-                r: 0.15,
-                g: 0.16,
-                b: 0.21,
-                a: 0.95,
-            },
-            bg_input: iced::Color {
-                r: 0.26,
-                g: 0.27,
-                b: 0.35,
-                a: 1.0,
-            },
-            accent: iced::Color {
-                r: 0.74,
-                g: 0.57,
-                b: 0.97,
-                a: 1.0,
-            },
-            accent_hover: iced::Color {
-                r: 0.54,
-                g: 0.91,
-                b: 0.99,
-                a: 1.0,
-            },
-            text_main: iced::Color::WHITE,
-            text_muted: iced::Color {
-                r: 0.38,
-                g: 0.44,
-                b: 0.64,
-                a: 1.0,
-            },
-            selection_bg: iced::Color {
-                r: 0.27,
-                g: 0.29,
-                b: 0.36,
-                a: 0.8,
-            },
-            border: iced::Color {
-                r: 0.38,
-                g: 0.44,
-                b: 0.64,
-                a: 0.5,
-            },
+            bg_base: iced::Color::from_rgba8(0x13, 0x14, 0x19, 0.96),
+            bg_input: iced::Color::from_rgba8(0x1C, 0x1E, 0x26, 1.0),
+            accent: iced::Color::from_rgba8(0x8B, 0x7C, 0xFF, 1.0),
+            accent_hover: iced::Color::from_rgba8(0xA5, 0x99, 0xFF, 1.0),
+            text_main: iced::Color::from_rgba8(0xF2, 0xF4, 0xF8, 1.0),
+            text_muted: iced::Color::from_rgba8(0x94, 0x9C, 0xB0, 1.0),
+            selection_bg: iced::Color::from_rgba8(0x25, 0x28, 0x36, 0.92),
+            border: iced::Color::from_rgba8(0x2D, 0x32, 0x42, 0.75),
         }
     }
 
+    /// Default light theme: Rosé Pine Dawn with improved secondary text legibility.
     fn light() -> Self {
         Self {
-            bg_base: iced::Color::from_rgb(
-                0xfa as f32 / 255.0,
-                0xf4 as f32 / 255.0,
-                0xed as f32 / 255.0,
-            ),
-            bg_input: iced::Color::from_rgb(
-                0xff as f32 / 255.0,
-                0xfa as f32 / 255.0,
-                0xf3 as f32 / 255.0,
-            ),
-            accent: iced::Color::from_rgb(
-                0x90 as f32 / 255.0,
-                0x7a as f32 / 255.0,
-                0xa9 as f32 / 255.0,
-            ),
-            accent_hover: iced::Color::from_rgb(
-                0x56 as f32 / 255.0,
-                0x94 as f32 / 255.0,
-                0x9f as f32 / 255.0,
-            ),
-            text_main: iced::Color::from_rgb(
-                0x57 as f32 / 255.0,
-                0x52 as f32 / 255.0,
-                0x79 as f32 / 255.0,
-            ),
-            text_muted: iced::Color::from_rgb(
-                0x98 as f32 / 255.0,
-                0x93 as f32 / 255.0,
-                0xa5 as f32 / 255.0,
-            ),
-            selection_bg: iced::Color::from_rgb(
-                0xdf as f32 / 255.0,
-                0xda as f32 / 255.0,
-                0xd9 as f32 / 255.0,
-            ),
-            border: iced::Color::from_rgb(
-                0x79 as f32 / 255.0,
-                0x75 as f32 / 255.0,
-                0x93 as f32 / 255.0,
-            ),
+            bg_base: iced::Color::from_rgba8(0xFA, 0xF4, 0xED, 0.98),
+            bg_input: iced::Color::from_rgba8(0xFF, 0xFA, 0xF3, 1.0),
+            accent: iced::Color::from_rgba8(0x79, 0x5E, 0x9E, 1.0),
+            accent_hover: iced::Color::from_rgba8(0x28, 0x69, 0x83, 1.0),
+            text_main: iced::Color::from_rgba8(0x46, 0x42, 0x61, 1.0),
+            text_muted: iced::Color::from_rgba8(0x79, 0x75, 0x93, 1.0),
+            selection_bg: iced::Color::from_rgba8(0xEB, 0xE5, 0xDF, 1.0),
+            border: iced::Color::from_rgba8(0xCE, 0xCA, 0xCD, 0.85),
+        }
+    }
+
+    fn catppuccin_mocha() -> Self {
+        Self {
+            bg_base: iced::Color::from_rgba8(0x1E, 0x1E, 0x2E, 0.96),
+            bg_input: iced::Color::from_rgba8(0x31, 0x32, 0x44, 1.0),
+            accent: iced::Color::from_rgba8(0xCB, 0xA6, 0xF7, 1.0),
+            accent_hover: iced::Color::from_rgba8(0x89, 0xB4, 0xFA, 1.0),
+            text_main: iced::Color::from_rgba8(0xCD, 0xD6, 0xF4, 1.0),
+            text_muted: iced::Color::from_rgba8(0xA6, 0xAD, 0xC8, 1.0),
+            selection_bg: iced::Color::from_rgba8(0x31, 0x32, 0x44, 0.90),
+            border: iced::Color::from_rgba8(0x45, 0x47, 0x5A, 0.80),
+        }
+    }
+
+    fn catppuccin_latte() -> Self {
+        Self {
+            bg_base: iced::Color::from_rgba8(0xEF, 0xF1, 0xF5, 0.98),
+            bg_input: iced::Color::from_rgba8(0xE6, 0xE9, 0xEF, 1.0),
+            accent: iced::Color::from_rgba8(0x88, 0x39, 0xEF, 1.0),
+            accent_hover: iced::Color::from_rgba8(0x1E, 0x66, 0xF5, 1.0),
+            text_main: iced::Color::from_rgba8(0x4C, 0x4F, 0x69, 1.0),
+            text_muted: iced::Color::from_rgba8(0x6C, 0x6F, 0x85, 1.0),
+            selection_bg: iced::Color::from_rgba8(0xDC, 0xE0, 0xE8, 1.0),
+            border: iced::Color::from_rgba8(0xBC, 0xC0, 0xCC, 0.85),
+        }
+    }
+
+    fn tokyo_night() -> Self {
+        Self {
+            bg_base: iced::Color::from_rgba8(0x1A, 0x1B, 0x26, 0.96),
+            bg_input: iced::Color::from_rgba8(0x24, 0x28, 0x3B, 1.0),
+            accent: iced::Color::from_rgba8(0x7A, 0xA2, 0xF7, 1.0),
+            accent_hover: iced::Color::from_rgba8(0xBB, 0x9A, 0xF7, 1.0),
+            text_main: iced::Color::from_rgba8(0xC0, 0xCA, 0xF5, 1.0),
+            text_muted: iced::Color::from_rgba8(0x82, 0x89, 0xB0, 1.0),
+            selection_bg: iced::Color::from_rgba8(0x29, 0x2E, 0x42, 0.92),
+            border: iced::Color::from_rgba8(0x3B, 0x42, 0x61, 0.80),
+        }
+    }
+
+    fn nord() -> Self {
+        Self {
+            bg_base: iced::Color::from_rgba8(0x2E, 0x34, 0x40, 0.96),
+            bg_input: iced::Color::from_rgba8(0x3B, 0x42, 0x52, 1.0),
+            accent: iced::Color::from_rgba8(0x88, 0xC0, 0xD0, 1.0),
+            accent_hover: iced::Color::from_rgba8(0x81, 0xA1, 0xC1, 1.0),
+            text_main: iced::Color::from_rgba8(0xEC, 0xEF, 0xF4, 1.0),
+            text_muted: iced::Color::from_rgba8(0x9C, 0xA6, 0xBA, 1.0),
+            selection_bg: iced::Color::from_rgba8(0x43, 0x4C, 0x5E, 0.92),
+            border: iced::Color::from_rgba8(0x4C, 0x56, 0x6A, 0.85),
+        }
+    }
+
+    fn gruvbox() -> Self {
+        Self {
+            bg_base: iced::Color::from_rgba8(0x28, 0x28, 0x28, 0.96),
+            bg_input: iced::Color::from_rgba8(0x3C, 0x38, 0x36, 1.0),
+            accent: iced::Color::from_rgba8(0xFA, 0xBD, 0x2F, 1.0),
+            accent_hover: iced::Color::from_rgba8(0xFE, 0x80, 0x19, 1.0),
+            text_main: iced::Color::from_rgba8(0xEB, 0xDB, 0xB2, 1.0),
+            text_muted: iced::Color::from_rgba8(0xA8, 0x99, 0x84, 1.0),
+            selection_bg: iced::Color::from_rgba8(0x50, 0x49, 0x45, 0.90),
+            border: iced::Color::from_rgba8(0x66, 0x5C, 0x54, 0.75),
+        }
+    }
+
+    fn dracula() -> Self {
+        Self {
+            bg_base: iced::Color::from_rgba8(0x28, 0x2A, 0x36, 0.96),
+            bg_input: iced::Color::from_rgba8(0x34, 0x37, 0x46, 1.0),
+            accent: iced::Color::from_rgba8(0xBD, 0x93, 0xF9, 1.0),
+            accent_hover: iced::Color::from_rgba8(0x8B, 0xE9, 0xFD, 1.0),
+            text_main: iced::Color::from_rgba8(0xF8, 0xF8, 0xF2, 1.0),
+            text_muted: iced::Color::from_rgba8(0x95, 0xA1, 0xC9, 1.0),
+            selection_bg: iced::Color::from_rgba8(0x44, 0x47, 0x5A, 0.85),
+            border: iced::Color::from_rgba8(0x62, 0x72, 0xA4, 0.55),
+        }
+    }
+
+    fn rose_pine() -> Self {
+        Self {
+            bg_base: iced::Color::from_rgba8(0x19, 0x17, 0x24, 0.96),
+            bg_input: iced::Color::from_rgba8(0x1F, 0x1D, 0x2E, 1.0),
+            accent: iced::Color::from_rgba8(0xC4, 0xA7, 0xE7, 1.0),
+            accent_hover: iced::Color::from_rgba8(0xEB, 0xBC, 0xBA, 1.0),
+            text_main: iced::Color::from_rgba8(0xE0, 0xDE, 0xF4, 1.0),
+            text_muted: iced::Color::from_rgba8(0x90, 0x8C, 0xAA, 1.0),
+            selection_bg: iced::Color::from_rgba8(0x26, 0x23, 0x3A, 0.92),
+            border: iced::Color::from_rgba8(0x40, 0x3D, 0x52, 0.80),
+        }
+    }
+
+    fn kanagawa() -> Self {
+        Self {
+            bg_base: iced::Color::from_rgba8(0x1F, 0x1F, 0x28, 0.96),
+            bg_input: iced::Color::from_rgba8(0x2A, 0x2A, 0x37, 1.0),
+            accent: iced::Color::from_rgba8(0x95, 0x7F, 0xB8, 1.0),
+            accent_hover: iced::Color::from_rgba8(0x7E, 0x9C, 0xD8, 1.0),
+            text_main: iced::Color::from_rgba8(0xDC, 0xD7, 0xBA, 1.0),
+            text_muted: iced::Color::from_rgba8(0x93, 0x8A, 0xA9, 1.0),
+            selection_bg: iced::Color::from_rgba8(0x2D, 0x4F, 0x67, 0.70),
+            border: iced::Color::from_rgba8(0x54, 0x54, 0x6D, 0.75),
         }
     }
 
@@ -222,6 +262,14 @@ impl ThemeColors {
         match mode {
             ThemeMode::Dark => Self::dark(),
             ThemeMode::Light => Self::light(),
+            ThemeMode::CatppuccinMocha => Self::catppuccin_mocha(),
+            ThemeMode::CatppuccinLatte => Self::catppuccin_latte(),
+            ThemeMode::TokyoNight => Self::tokyo_night(),
+            ThemeMode::Nord => Self::nord(),
+            ThemeMode::Gruvbox => Self::gruvbox(),
+            ThemeMode::Dracula => Self::dracula(),
+            ThemeMode::RosePine => Self::rose_pine(),
+            ThemeMode::Kanagawa => Self::kanagawa(),
         }
     }
 

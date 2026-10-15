@@ -25,7 +25,7 @@ use iced::window;
 use std::sync::{Arc, Mutex};
 
 use super::{UISettings, UI};
-use crate::{AddonsConfig, RaffiConfig, ThemeMode};
+use crate::{AddonsConfig, RaffiConfig};
 
 use self::state::{LauncherApp, SharedSelection};
 use self::theme::ThemeColors;
@@ -66,9 +66,10 @@ fn run_wayland_ui(
     );
     let theme_colors =
         ThemeColors::from_mode_with_overrides(&settings.theme, settings.theme_colors.as_ref());
-    let iced_theme = match settings.theme {
-        ThemeMode::Dark => iced::Theme::Dark,
-        ThemeMode::Light => iced::Theme::Light,
+    let iced_theme = if settings.theme.is_light() {
+        iced::Theme::Light
+    } else {
+        iced::Theme::Dark
     };
     let selected_item: SharedSelection = Arc::new(Mutex::new(None));
     let selected_item_clone = selected_item.clone();

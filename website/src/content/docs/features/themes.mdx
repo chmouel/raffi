@@ -21,10 +21,18 @@ Themes are only available in **native mode**. Fuzzel mode uses system Fuzzel con
 
 ## Built-in Themes
 
-Raffi comes with two built-in themes:
+Raffi includes built-in dark and light theme presets:
 
-- **Dark Theme** — Dracula-inspired dark palette (default)
-- **Light Theme** — Rose Pine Dawn light palette
+- **`dark`** — Sleek Obsidian dark palette (default)
+- **`light`** — Rose Pine Dawn light palette
+- **`catppuccin`** / **`catppuccin-mocha`** — Catppuccin Mocha dark palette
+- **`catppuccin-latte`** — Catppuccin Latte light palette
+- **`tokyo-night`** / **`tokyonight`** — Tokyo Night dark palette
+- **`nord`** — Nord dark palette
+- **`gruvbox`** — Gruvbox dark palette
+- **`dracula`** — Dracula dark palette
+- **`rose-pine`** / **`rosepine`** — Rosé Pine dark palette
+- **`kanagawa`** — Kanagawa Wave dark palette
 
 ## Selecting a Theme
 
@@ -41,13 +49,18 @@ raffi -u native -t dark
 raffi -u native -t light
 ```
 </TabItem>
+<TabItem label="Named Preset">
+```bash
+raffi -u native -t catppuccin
+```
+</TabItem>
 </Tabs>
 
 ### Configuration File
 
 ```yaml raffi.yaml
 general:
-  theme: dark  # or "light"
+  theme: dark  # or "light", "catppuccin", "tokyo-night", "nord", "gruvbox", "dracula", "rose-pine", "kanagawa"
 ```
 
 <Tabs>
@@ -58,7 +71,7 @@ general:
       theme: dark
     ```
 
-    Dracula-inspired dark palette with high contrast
+    Sleek Obsidian dark palette with crisp slate text and indigo accents
   </TabItem>
 
   <TabItem label="Light Theme">

@@ -413,17 +413,40 @@ pub enum UIType {
 pub enum ThemeMode {
     Dark,
     Light,
+    CatppuccinMocha,
+    CatppuccinLatte,
+    TokyoNight,
+    Nord,
+    Gruvbox,
+    Dracula,
+    RosePine,
+    Kanagawa,
+}
+
+impl ThemeMode {
+    /// Returns true if this preset is a light theme.
+    pub fn is_light(&self) -> bool {
+        matches!(self, Self::Light | Self::CatppuccinLatte)
+    }
 }
 
 impl std::str::FromStr for ThemeMode {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "dark" => Ok(ThemeMode::Dark),
-            "light" => Ok(ThemeMode::Light),
+        match s.trim().to_lowercase().replace('_', "-").as_str() {
+            "dark" | "obsidian" => Ok(ThemeMode::Dark),
+            "light" | "rose-pine-dawn" | "rosepinedawn" => Ok(ThemeMode::Light),
+            "catppuccin" | "catppuccin-mocha" => Ok(ThemeMode::CatppuccinMocha),
+            "catppuccin-latte" => Ok(ThemeMode::CatppuccinLatte),
+            "tokyo-night" | "tokyonight" => Ok(ThemeMode::TokyoNight),
+            "nord" => Ok(ThemeMode::Nord),
+            "gruvbox" | "gruvbox-dark" => Ok(ThemeMode::Gruvbox),
+            "dracula" => Ok(ThemeMode::Dracula),
+            "rose-pine" | "rosepine" => Ok(ThemeMode::RosePine),
+            "kanagawa" => Ok(ThemeMode::Kanagawa),
             _ => Err(format!(
-                "Invalid theme: {}. Valid options are: dark, light",
+                "Invalid theme: {}. Valid options are: dark, light, catppuccin, catppuccin-latte, tokyo-night, nord, gruvbox, dracula, rose-pine, kanagawa",
                 s
             )),
         }
@@ -481,7 +504,10 @@ pub struct Args {
     pub ui_type: Option<String>,
     #[options(help = "initial search query (native mode only)", short = "i")]
     pub initial_query: Option<String>,
-    #[options(help = "theme: dark, light (default: dark)", short = "t")]
+    #[options(
+        help = "theme: dark, light, catppuccin, catppuccin-latte, tokyo-night, nord, gruvbox, dracula, rose-pine, kanagawa (default: dark)",
+        short = "t"
+    )]
     pub theme: Option<String>,
     #[options(help = "print JSON Schema for the config format to stdout")]
     pub schema: bool,
@@ -2822,6 +2848,45 @@ mod tests {
         assert_eq!("light".parse::<ThemeMode>().unwrap(), ThemeMode::Light);
         assert_eq!("Light".parse::<ThemeMode>().unwrap(), ThemeMode::Light);
         assert_eq!("LIGHT".parse::<ThemeMode>().unwrap(), ThemeMode::Light);
+        assert_eq!(
+            "catppuccin".parse::<ThemeMode>().unwrap(),
+            ThemeMode::CatppuccinMocha
+        );
+        assert_eq!(
+            "catppuccin-mocha".parse::<ThemeMode>().unwrap(),
+            ThemeMode::CatppuccinMocha
+        );
+        assert_eq!(
+            "catppuccin-latte".parse::<ThemeMode>().unwrap(),
+            ThemeMode::CatppuccinLatte
+        );
+        assert_eq!(
+            "tokyo-night".parse::<ThemeMode>().unwrap(),
+            ThemeMode::TokyoNight
+        );
+        assert_eq!(
+            "tokyonight".parse::<ThemeMode>().unwrap(),
+            ThemeMode::TokyoNight
+        );
+        assert_eq!("nord".parse::<ThemeMode>().unwrap(), ThemeMode::Nord);
+        assert_eq!("gruvbox".parse::<ThemeMode>().unwrap(), ThemeMode::Gruvbox);
+        assert_eq!("dracula".parse::<ThemeMode>().unwrap(), ThemeMode::Dracula);
+        assert_eq!(
+            "rose-pine".parse::<ThemeMode>().unwrap(),
+            ThemeMode::RosePine
+        );
+        assert_eq!(
+            "rosepine".parse::<ThemeMode>().unwrap(),
+            ThemeMode::RosePine
+        );
+        assert_eq!(
+            "kanagawa".parse::<ThemeMode>().unwrap(),
+            ThemeMode::Kanagawa
+        );
+        assert!(!ThemeMode::Dark.is_light());
+        assert!(ThemeMode::Light.is_light());
+        assert!(ThemeMode::CatppuccinLatte.is_light());
+        assert!(!ThemeMode::CatppuccinMocha.is_light());
         assert!("invalid".parse::<ThemeMode>().is_err());
     }
 

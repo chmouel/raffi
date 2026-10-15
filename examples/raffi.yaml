@@ -12,7 +12,8 @@ version: 1
 #   default_script_shell: bash  # Shell for script entries
 #   no_icons: false          # Hide icons
 #   max_history: 10          # Max search query history entries (0 to disable, navigate with Alt-P/N)
-#   theme: dark
+#   theme: dark              # Built-in theme: dark (default), light, catppuccin, catppuccin-latte,
+#                            # tokyo-night, nord, gruvbox, dracula, rose-pine, or kanagawa
 #   font_size: 20            # Base font size in px (default: 20). Other sizes and paddings
 #                            # scale proportionally (input=24, items=20, subtitles=14, hints=12)
 #   font_family: "Inter"     # Font family name (default: system sans-serif)

@@ -174,11 +174,24 @@ pub(super) fn filter_snippets(snippets: &[TextSnippet], query: &str) -> Vec<usiz
     result
 }
 
-/// Shorten a subtitle to `PREVIEW_CHARS` characters without splitting one.
+/// Collapse line breaks into single spaces and shorten a subtitle to
+/// `PREVIEW_CHARS` characters without splitting a multibyte codepoint.
 pub(super) fn truncate_preview(value: &str) -> String {
-    match value.char_indices().nth(PREVIEW_CHARS) {
-        Some((cut, _)) => format!("{}...", &value[..cut]),
-        None => value.to_string(),
+    let normalized;
+    let source = if value.contains(['\n', '\r']) {
+        normalized = value
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        normalized.as_str()
+    } else {
+        value
+    };
+    match source.char_indices().nth(PREVIEW_CHARS) {
+        Some((cut, _)) => format!("{}...", &source[..cut]),
+        None => source.to_string(),
     }
 }
 
@@ -521,6 +534,10 @@ mod tests {
         // The old byte slice at 80 would split the two-byte 'é' and panic.
         assert_eq!(truncate_preview(&value), format!("{}é...", "a".repeat(79)));
         assert_eq!(truncate_preview("short"), "short");
+        assert_eq!(
+            truncate_preview("# Title\n\nline one\nline two\r\nline three"),
+            "# Title line one line two line three"
+        );
     }
 
     #[test]
