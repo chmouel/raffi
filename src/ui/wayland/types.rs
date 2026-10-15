@@ -57,6 +57,13 @@ pub(crate) struct ScriptFilterIcon {
     pub path: Option<String>,
 }
 
+/// Alfred Script Filter JSON text object (`copy` and `largetype`).
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+pub(crate) struct ScriptFilterItemText {
+    pub copy: Option<String>,
+    pub largetype: Option<String>,
+}
+
 /// Alfred Script Filter JSON item.
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct ScriptFilterItem {
@@ -64,6 +71,15 @@ pub(crate) struct ScriptFilterItem {
     pub subtitle: Option<String>,
     pub arg: Option<String>,
     pub icon: Option<ScriptFilterIcon>,
+    /// Optional explicit preview text or local file/image path for the right-hand preview pane.
+    #[serde(default)]
+    pub preview: Option<String>,
+    /// Optional Alfred QuickLook URL or local file path.
+    #[serde(default)]
+    pub quicklookurl: Option<String>,
+    /// Optional Alfred `text` object (`copy` and `largetype`).
+    #[serde(default)]
+    pub text: Option<ScriptFilterItemText>,
 }
 
 /// Container for script filter results with default icon.
@@ -156,6 +172,7 @@ pub(crate) enum Message {
     HistoryPrevious,
     HistoryNext,
     ToggleHelp,
+    TogglePreview,
     HelpEntrySelected(usize),
     EmojiSelected(usize),
     EmojiDataLoaded(Vec<EmojiEntry>),

@@ -67,6 +67,32 @@ Disable icon loading globally.
 ```
 
 
+**`general.show_preview`** `boolean` (default: `false` for launchers)
+
+Show the right-hand preview pane for plain launcher entries. Addon results always preview. Toggle at runtime with `Ctrl+P`.
+
+  ```yaml
+  general:
+    show_preview: true
+
+```
+
+
+**`general.preview`** `object`
+
+Appearance of the preview pane: `font_size` (default `16`), `font_family`, `mono_font_family`, `width_percent` (default `50`, 10–80) and `colors` (`bg`, `bg_block`, `text_main`, `text_muted`, `accent`, `border`).
+
+  ```yaml
+  general:
+    preview:
+      font_size: 18
+      width_percent: 55
+      colors:
+        accent: "#cba6f7"
+
+```
+
+
 **`general.theme`** `string` (default: `dark`)
 
 Color theme for native UI.
@@ -305,6 +331,21 @@ Hide this entry from the launcher.
       binary: experimental
       description: "Experimental Feature"
       disabled: true
+
+```
+
+
+**`show_preview`** `boolean` (default: `false`)
+
+Show the right-hand preview pane for this entry in the native UI, regardless of `general.show_preview`.
+
+  ```yaml
+  launchers:
+    deploy:
+      script: |
+        kubectl apply -f deploy.yaml
+      description: "Deploy"
+      show_preview: true
 
 ```
 

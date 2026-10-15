@@ -30,6 +30,8 @@ pub struct RaffiConfig {
     pub ifexist: Option<String>,
     pub disabled: Option<bool>,
     pub script: Option<String>,
+    /// Show the right-hand preview pane when this launcher entry is selected (default: false).
+    pub show_preview: Option<bool>,
 }
 
 /// Configuration for the currency addon
@@ -242,6 +244,46 @@ pub struct ThemeColorsConfig {
     pub border: Option<String>,
 }
 
+/// Colour overrides for the right-hand preview pane (hex: #RGB, #RRGGBB, or #RRGGBBAA).
+#[derive(Deserialize, JsonSchema, Debug, Clone, Default, PartialEq)]
+#[schemars(deny_unknown_fields)]
+pub struct PreviewColorsConfig {
+    /// Background of the whole preview pane
+    pub bg: Option<String>,
+    /// Background of the content/code blocks inside the pane
+    pub bg_block: Option<String>,
+    /// Title and main text colour
+    pub text_main: Option<String>,
+    /// Subtitles, metadata keys and hints
+    pub text_muted: Option<String>,
+    /// Headings, badges and hero values
+    pub accent: Option<String>,
+    /// Pane and block borders
+    pub border: Option<String>,
+}
+
+/// Appearance settings for the right-hand preview pane in native mode.
+#[derive(Deserialize, JsonSchema, Debug, Clone, Default, PartialEq)]
+#[schemars(deny_unknown_fields)]
+pub struct PreviewConfig {
+    /// Base font size in px for preview text (default: 16). Title, headings and
+    /// hero values scale from it.
+    #[serde(default)]
+    pub font_size: Option<f32>,
+    /// Font family for the preview pane (default: the UI font)
+    #[serde(default)]
+    pub font_family: Option<String>,
+    /// Monospace font family for code/text blocks (default: system monospace)
+    #[serde(default)]
+    pub mono_font_family: Option<String>,
+    /// Width of the preview pane as a percentage of the window (10-80, default: 50)
+    #[serde(default)]
+    pub width_percent: Option<f32>,
+    /// Colour overrides for the preview pane
+    #[serde(default)]
+    pub colors: Option<PreviewColorsConfig>,
+}
+
 /// Sort mode for launcher entries when no search query is active
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -309,6 +351,15 @@ pub struct GeneralConfig {
     /// instead of Ctrl+V). Added to the built-in list; matched case-insensitively.
     #[serde(default)]
     pub terminal_classes: Vec<String>,
+    /// Show the Alfred-style right-hand preview pane in native mode.
+    /// By default, previews are shown automatically for addons (snippets, file browser,
+    /// script filters, etc.) and hidden for standard launcher entries unless `show_preview: true`
+    /// is set in `general` or on the launcher entry. Can also be toggled at runtime with Ctrl+P.
+    #[serde(default)]
+    pub show_preview: Option<bool>,
+    /// Appearance of the right-hand preview pane (font, size, colours, width)
+    #[serde(default)]
+    pub preview: PreviewConfig,
 }
 
 /// Complete parsed configuration
@@ -1852,6 +1903,9 @@ pub fn run(args: Args) -> Result<()> {
         fallbacks: general.fallbacks.clone(),
         clipboard_history: general.clipboard_history,
         terminal_classes: general.terminal_classes.clone(),
+        show_preview: general.show_preview,
+        preview: general.preview.clone(),
+        default_script_shell: default_script_shell.clone(),
     };
 
     debug_log!(
@@ -2299,6 +2353,7 @@ mod tests {
             ifenvnotset: Some("MISSING_VAR".to_string()),
             ifexist: Some("another-binary".to_string()),
             disabled: None,
+            show_preview: None,
         };
         let args = Args {
             help: false,

@@ -19,6 +19,21 @@ version: 1
 #   window_width: 800        # Window width in pixels (default: 800)
 #   window_height: 600       # Window height in pixels (default: 600)
 #   padding: 20              # Outer window padding in pixels (default: 20, scales with font_size)
+#   show_preview: true       # Right-hand preview pane. Addons (snippets, files, script filters...)
+#                            # preview automatically; plain launchers only when this is true or the
+#                            # launcher sets show_preview: true. Toggle at runtime with Ctrl+P.
+#   preview:                 # Appearance of the preview pane
+#     font_size: 16          # Base preview text size in px (default: 16)
+#     font_family: "Inter"   # Font for the pane (default: the UI font)
+#     mono_font_family: "JetBrains Mono"  # Font for code/text blocks (default: system monospace)
+#     width_percent: 50      # Pane width as a share of the window, 10-80 (default: 50)
+#     colors:                # Hex overrides; defaults come from the theme
+#       bg: "#31324480"
+#       bg_block: "#1e1e2e"
+#       text_main: "#cdd6f4"
+#       text_muted: "#6c7086"
+#       accent: "#cba6f7"
+#       border: "#585b70"
 #   sort_mode: hybrid        # Sort mode for entries: frequency, recency, or hybrid (default: hybrid)
 #   clipboard_history: auto  # Manager for {clipboard:N} in snippets: auto, cliphist, copyq, clipman or none
 #   terminal_classes:        # Extra window classes that hypr_paste treats as terminals (Ctrl+Shift+V)
@@ -149,6 +164,7 @@ launchers:
     args: ["-c", "jetbrains-goland", "goland"]
     description: "Goland"
     icon: /opt/goland/bin/goland.svg
+    show_preview: true # show the command and usage stats in the preview pane for this entry
 
   add-org-note:
     binary: add-org-task

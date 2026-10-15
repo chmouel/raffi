@@ -8,6 +8,7 @@ use iced::{Element, Length};
 
 use super::ansi::ansi_to_spans;
 use super::browser::mimetype_icon_name;
+use super::preview::{PreviewBody, PreviewData, PreviewIcon};
 use super::snippets::{truncate_preview, SnippetIcon};
 use super::state::{LauncherApp, Message};
 
@@ -92,18 +93,58 @@ impl LauncherApp {
             .width(Length::Fill)
             .align_x(iced::Alignment::End);
 
+        let left_pane = container(items_scroll)
+            .padding(iced::Padding {
+                top: fs.scroll_top_padding,
+                right: 4.0,
+                bottom: 0.0,
+                left: 0.0,
+            })
+            .height(Length::Fill);
+
+        let body_area: Element<'a, Message> =
+            if let Some(preview_data) = self.resolve_selected_preview() {
+                let right_portion = (self.view.preview_style.width_fraction * 100.0)
+                    .round()
+                    .max(1.0) as u16;
+                let left_portion = (100u16).saturating_sub(right_portion).max(1);
+                let divider = container(Space::new())
+                    .width(Length::Fixed(1.0))
+                    .height(Length::Fill)
+                    .style(move |_theme| container::Style {
+                        background: Some(iced::Background::Color(t.border)),
+                        ..Default::default()
+                    });
+
+                let right_pane = container(self.render_preview_pane(preview_data))
+                    .padding(iced::Padding {
+                        top: fs.scroll_top_padding,
+                        right: 0.0,
+                        bottom: 0.0,
+                        left: 0.0,
+                    })
+                    .width(Length::FillPortion(right_portion))
+                    .height(Length::Fill);
+
+                Row::new()
+                    .spacing(12)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .push(left_pane.width(Length::FillPortion(left_portion)))
+                    .push(divider)
+                    .push(right_pane)
+                    .into()
+            } else {
+                left_pane.width(Length::Fill).into()
+            };
+
         let content = Column::new()
             .spacing(12)
             .width(Length::Fill)
             .height(Length::Fill)
             .push(hint_row)
             .push(search_input)
-            .push(container(items_scroll).padding(iced::Padding {
-                top: fs.scroll_top_padding,
-                right: 4.0,
-                bottom: 0.0,
-                left: 0.0,
-            }));
+            .push(body_area);
 
         container(content)
             .padding(fs.outer_padding)
@@ -269,9 +310,322 @@ impl LauncherApp {
             span("Enter").size(fs.hint).color(t.accent),
             span(" use keyword").size(fs.hint).color(t.text_muted),
             span("  ·  ").size(fs.hint).color(t.border),
+            span("Ctrl+P").size(fs.hint).color(t.accent),
+            span(" preview").size(fs.hint).color(t.text_muted),
+            span("  ·  ").size(fs.hint).color(t.border),
             span("Esc").size(fs.hint).color(t.accent),
             span(" close help").size(fs.hint).color(t.text_muted),
         ]
+    }
+
+    /// Render the right-hand preview pane for `data`.
+    fn render_preview_pane(&self, data: PreviewData) -> Element<'_, Message> {
+        let ps = self.view.preview_style.clone();
+        let block_style = {
+            let ps = ps.clone();
+            move |_theme: &iced::Theme| container::Style {
+                background: Some(iced::Background::Color(ps.bg_block)),
+                border: iced::Border {
+                    color: iced::Color {
+                        a: 0.3,
+                        ..ps.border
+                    },
+                    width: 1.0,
+                    radius: 8.0.into(),
+                },
+                ..Default::default()
+            }
+        };
+        let heading = |label: String| text(label).size(ps.small).color(ps.accent).font(ps.font);
+        let body_text = |value: String| {
+            text(value)
+                .size(ps.text)
+                .color(ps.text_main)
+                .font(ps.mono_font)
+        };
+
+        let mut col = Column::new().spacing(14).width(Length::Fill);
+
+        // Header: optional icon + title/subtitle + optional badge
+        let mut header_row = Row::new()
+            .spacing(14)
+            .align_y(iced::Alignment::Center)
+            .width(Length::Fill);
+
+        if let Some(icon) = data.icon {
+            match icon {
+                PreviewIcon::File(path) => {
+                    if let Some(el) = icon_element(Path::new(&path), ps.icon) {
+                        header_row = header_row.push(el);
+                    }
+                }
+                PreviewIcon::Glyph(glyph) => {
+                    header_row = header_row.push(
+                        text(glyph)
+                            .size(ps.icon * 0.8)
+                            .width(Length::Fixed(ps.icon)),
+                    );
+                }
+            }
+        }
+
+        let mut title_col = Column::new().spacing(2).width(Length::Fill);
+        title_col = title_col.push(
+            text(data.title)
+                .size(ps.title)
+                .color(ps.text_main)
+                .font(ps.font),
+        );
+        if let Some(sub) = data.subtitle {
+            title_col = title_col.push(text(sub).size(ps.small).color(ps.text_muted).font(ps.font));
+        }
+        header_row = header_row.push(title_col);
+
+        if let Some(badge) = data.badge {
+            let accent = ps.accent;
+            let badge_pill = container(text(badge).size(ps.small).color(accent).font(ps.font))
+                .padding([4.0, 10.0])
+                .style(move |_theme| container::Style {
+                    background: Some(iced::Background::Color(iced::Color { a: 0.14, ..accent })),
+                    border: iced::Border {
+                        radius: 6.0.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                });
+            header_row = header_row.push(badge_pill);
+        }
+
+        col = col.push(header_row);
+
+        // Horizontal divider under header
+        let border = ps.border;
+        col = col.push(
+            container(Space::new())
+                .width(Length::Fill)
+                .height(Length::Fixed(1.0))
+                .style(move |_theme| container::Style {
+                    background: Some(iced::Background::Color(iced::Color { a: 0.3, ..border })),
+                    ..Default::default()
+                }),
+        );
+
+        // Body sections
+        for body in data.bodies {
+            match body {
+                PreviewBody::Text {
+                    heading: h,
+                    content,
+                    truncated,
+                } => {
+                    let mut section = Column::new().spacing(6).width(Length::Fill);
+                    if let Some(h) = h {
+                        section = section.push(heading(h));
+                    }
+                    section = section.push(
+                        container(body_text(content))
+                            .padding(12.0)
+                            .width(Length::Fill)
+                            .style(block_style),
+                    );
+                    if truncated {
+                        section = section.push(
+                            text("Preview truncated (showing first 8 KiB / 100 lines)")
+                                .size(ps.small)
+                                .color(ps.text_muted)
+                                .font(ps.font),
+                        );
+                    }
+                    col = col.push(section);
+                }
+                PreviewBody::AnsiText {
+                    heading: h,
+                    content,
+                } => {
+                    let mut section = Column::new().spacing(6).width(Length::Fill);
+                    if let Some(h) = h {
+                        section = section.push(heading(h));
+                    }
+                    section = section.push(
+                        container(
+                            rich_text(ansi_to_spans(&content, ps.text, ps.text_main))
+                                .font(ps.mono_font),
+                        )
+                        .padding(12.0)
+                        .width(Length::Fill)
+                        .style(block_style),
+                    );
+                    col = col.push(section);
+                }
+                PreviewBody::Image { path } => {
+                    let img_path = Path::new(&path);
+                    if img_path.exists() {
+                        let is_svg = img_path
+                            .extension()
+                            .and_then(|ext| ext.to_str())
+                            .map(|ext| ext.eq_ignore_ascii_case("svg"))
+                            .unwrap_or(false);
+
+                        let img_el: Element<Message> = if is_svg {
+                            svg(iced::widget::svg::Handle::from_path(img_path))
+                                .width(Length::Fill)
+                                .height(Length::Fixed(ps.image_height))
+                                .content_fit(iced::ContentFit::Contain)
+                                .into()
+                        } else {
+                            image(PathBuf::from(img_path))
+                                .width(Length::Fill)
+                                .height(Length::Fixed(ps.image_height))
+                                .content_fit(iced::ContentFit::Contain)
+                                .into()
+                        };
+
+                        col = col.push(
+                            container(img_el)
+                                .padding(8.0)
+                                .width(Length::Fill)
+                                .align_x(iced::Alignment::Center)
+                                .style(block_style),
+                        );
+                    }
+                }
+                PreviewBody::HeroGlyph { glyph } => {
+                    col = col.push(
+                        container(text(glyph).size(ps.hero_glyph))
+                            .padding(20.0)
+                            .width(Length::Fill)
+                            .align_x(iced::Alignment::Center)
+                            .align_y(iced::Alignment::Center)
+                            .style(block_style),
+                    );
+                }
+                PreviewBody::HeroValue { expression, value } => {
+                    let mut inner = Column::new()
+                        .spacing(6)
+                        .align_x(iced::Alignment::Center)
+                        .width(Length::Fill);
+                    if let Some(expr) = expression {
+                        inner =
+                            inner.push(text(expr).size(ps.text).color(ps.text_muted).font(ps.font));
+                    }
+                    inner = inner.push(
+                        text(value)
+                            .size(ps.hero_value)
+                            .color(ps.accent)
+                            .font(ps.font),
+                    );
+
+                    col = col.push(
+                        container(inner)
+                            .padding(20.0)
+                            .width(Length::Fill)
+                            .align_x(iced::Alignment::Center)
+                            .style(block_style),
+                    );
+                }
+                PreviewBody::DirectoryList {
+                    entries,
+                    total_count,
+                } => {
+                    let mut section = Column::new().spacing(6).width(Length::Fill);
+                    section = section.push(heading(format!("Directory Contents ({total_count})")));
+
+                    if entries.is_empty() {
+                        section = section.push(
+                            text("(Empty directory)")
+                                .size(ps.text)
+                                .color(ps.text_muted)
+                                .font(ps.font),
+                        );
+                    } else {
+                        let mut list_col = Column::new().spacing(3).width(Length::Fill);
+                        for (name, is_dir) in entries {
+                            let label = if is_dir {
+                                format!("\u{1f4c1} {name}/")
+                            } else {
+                                name
+                            };
+                            let color = if is_dir { ps.accent } else { ps.text_main };
+                            list_col =
+                                list_col.push(text(label).size(ps.text).color(color).font(ps.font));
+                        }
+                        if total_count > super::preview::MAX_DIR_PREVIEW_ENTRIES {
+                            list_col = list_col.push(
+                                text(format!(
+                                    "... and {} more",
+                                    total_count - super::preview::MAX_DIR_PREVIEW_ENTRIES
+                                ))
+                                .size(ps.small)
+                                .color(ps.text_muted)
+                                .font(ps.font),
+                            );
+                        }
+                        section = section.push(
+                            container(list_col)
+                                .padding(12.0)
+                                .width(Length::Fill)
+                                .style(block_style),
+                        );
+                    }
+                    col = col.push(section);
+                }
+            }
+        }
+
+        // Metadata key-value rows
+        if !data.metadata.is_empty() {
+            let mut meta_col = Column::new().spacing(8).width(Length::Fill);
+            meta_col = meta_col.push(heading("Information".to_string()));
+            for (k, v) in data.metadata {
+                let row = Row::new()
+                    .spacing(10)
+                    .align_y(iced::Alignment::Start)
+                    .width(Length::Fill)
+                    .push(
+                        container(text(k).size(ps.small).color(ps.text_muted).font(ps.font))
+                            .width(Length::Fixed(ps.key_width)),
+                    )
+                    .push(
+                        text(v)
+                            .size(ps.text)
+                            .color(ps.text_main)
+                            .font(ps.font)
+                            .width(Length::Fill),
+                    );
+                meta_col = meta_col.push(row);
+            }
+            col = col.push(meta_col);
+        }
+
+        let scroll = scrollable(col.padding(iced::Padding {
+            top: 0.0,
+            right: 6.0,
+            bottom: 0.0,
+            left: 0.0,
+        }))
+        .id(self.view.preview_scrollable_id.clone())
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+        let pane_bg = ps.bg;
+        let pane_border = ps.border;
+        container(scroll)
+            .padding(16.0)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |_theme| container::Style {
+                background: Some(iced::Background::Color(pane_bg)),
+                border: iced::Border {
+                    color: iced::Color {
+                        a: 0.4,
+                        ..pane_border
+                    },
+                    width: 1.0,
+                    radius: 12.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
     }
 
     pub(super) fn view(&self) -> Element<'_, Message> {
@@ -1593,6 +1947,9 @@ impl LauncherApp {
         if !hint_spans.is_empty() {
             hint_spans.push(sep.clone());
         }
+        hint_spans.push(span("Ctrl+P").size(fs.hint).color(t.accent));
+        hint_spans.push(span(" preview").size(fs.hint).color(t.text_muted));
+        hint_spans.push(sep.clone());
         hint_spans.push(span("Ctrl+/").size(fs.hint).color(t.accent));
         hint_spans.push(span(" keywords").size(fs.hint).color(t.text_muted));
 
@@ -1647,6 +2004,11 @@ impl LauncherApp {
                 modifiers,
                 ..
             }) if c.as_str() == "/" && modifiers.control() => Some(Message::ToggleHelp),
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Character(ref c),
+                modifiers,
+                ..
+            }) if c.as_str() == "p" && modifiers.control() => Some(Message::TogglePreview),
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
                 Some(Message::ModifiersChanged(modifiers))
             }

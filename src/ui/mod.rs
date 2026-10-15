@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use anyhow::Result;
 
 use crate::{
-    AddonsConfig, ClipboardHistory, RaffiConfig, SortMode, ThemeColorsConfig, ThemeMode, UIType,
+    AddonsConfig, ClipboardHistory, PreviewConfig, RaffiConfig, SortMode, ThemeColorsConfig,
+    ThemeMode, UIType,
 };
 
 mod fuzzel;
@@ -84,6 +85,9 @@ pub struct UISettings {
     pub fallbacks: Vec<String>,
     pub clipboard_history: ClipboardHistory,
     pub terminal_classes: Vec<String>,
+    pub show_preview: Option<bool>,
+    pub preview: PreviewConfig,
+    pub default_script_shell: String,
 }
 
 impl Default for UISettings {
@@ -102,6 +106,9 @@ impl Default for UISettings {
             fallbacks: Vec::new(),
             clipboard_history: ClipboardHistory::default(),
             terminal_classes: Vec::new(),
+            show_preview: None,
+            preview: PreviewConfig::default(),
+            default_script_shell: "bash".to_string(),
         }
     }
 }

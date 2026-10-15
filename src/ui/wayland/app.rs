@@ -392,6 +392,25 @@ impl LauncherApp {
             Message::HistoryPrevious => self.handle_history_previous(),
             Message::HistoryNext => self.handle_history_next(),
             Message::ToggleHelp => self.toggle_help(),
+            Message::TogglePreview => {
+                // If a standard launcher is selected and launcher previews are currently hidden,
+                // pressing Ctrl+P turns launcher preview on rather than disabling addon previews.
+                if self.view.show_preview
+                    && !self.view.show_launcher_preview
+                    && self.resolve_selected_preview().is_none()
+                {
+                    self.view.show_launcher_preview = true;
+                } else {
+                    self.view.show_preview = !self.view.show_preview;
+                    if self.view.show_preview {
+                        self.view.show_launcher_preview = true;
+                    }
+                }
+                if self.view.show_preview {
+                    self.refresh_file_preview_cache();
+                }
+                Task::none()
+            }
             Message::HelpEntrySelected(index) => self.handle_help_entry_selected(index),
             Message::EmojiDataLoaded(data) => self.handle_emoji_data_loaded(data),
             Message::EmojiSelected(index) => self.handle_emoji_selected(index),
@@ -453,6 +472,7 @@ impl LauncherApp {
                 self.emoji.clear();
                 self.web_search.clear();
                 self.currency.clear();
+                self.refresh_file_preview_cache();
                 return Task::batch(tasks);
             }
             QueryMode::ScriptFilter {
@@ -904,6 +924,9 @@ impl LauncherApp {
             self.selected_index = 0;
         }
 
+        self.refresh_file_preview_cache();
+        self.view.preview_scrollable_id = super::state::ScrollableId::unique();
+
         if total > 1 {
             let offset = self.selected_index as f32 / (total - 1) as f32;
             snap_to(
@@ -1145,6 +1168,7 @@ impl LauncherApp {
         self.script_filter.loading = false;
         self.script_filter.loading_name = None;
         self.script_filter.results = result.ok();
+        self.refresh_file_preview_cache();
         Task::none()
     }
 
