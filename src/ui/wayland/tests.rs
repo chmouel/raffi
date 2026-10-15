@@ -971,6 +971,69 @@ fn test_file_browser_clear_resets_browsing_results() {
 }
 
 #[test]
+fn test_file_preview_cache_skips_inspection_when_hidden() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("raffi-hidden-preview-test-{unique}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let first_path = dir.join("first.txt");
+    let first_path_str = first_path.to_string_lossy().into_owned();
+    std::fs::write(&first_path, "first contents").unwrap();
+    let second_path = dir.join("second.txt");
+    let second_path_str = second_path.to_string_lossy().into_owned();
+    std::fs::write(&second_path, "second contents").unwrap();
+
+    let mut app = test_app(AddonsConfig::default());
+    app.keyword_suggestions.clear();
+    app.file_browser.active = true;
+    app.file_browser
+        .entries
+        .push(super::state::FileBrowserEntry {
+            name: "first.txt".into(),
+            full_path: first_path_str.clone(),
+            is_dir: false,
+        });
+    app.file_browser
+        .entries
+        .push(super::state::FileBrowserEntry {
+            name: "second.txt".into(),
+            full_path: second_path_str.clone(),
+            is_dir: false,
+        });
+
+    assert_eq!(app.total_items(), 2);
+    app.refresh_file_preview_cache();
+    assert_eq!(
+        app.file_browser
+            .cached_preview
+            .as_ref()
+            .map(|preview| preview.path.clone()),
+        Some(first_path_str)
+    );
+
+    let _ = app.update(Message::TogglePreview);
+    assert!(!app.view.show_preview);
+    assert!(app.file_browser.cached_preview.is_none());
+
+    let _ = app.update(Message::MoveDown);
+    assert_eq!(app.selected_index, 1);
+    assert!(app.file_browser.cached_preview.is_none());
+
+    let _ = app.update(Message::TogglePreview);
+    assert!(app.view.show_preview);
+    let cached = app
+        .file_browser
+        .cached_preview
+        .as_ref()
+        .expect("preview should be inspected when shown again");
+    assert_eq!(cached.path, second_path_str);
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn test_font_sizes_default() {
     let fs = FontSizes::default_sizes();
     assert_eq!(fs.input, 24.0);
