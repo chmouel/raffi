@@ -86,11 +86,23 @@ pub(super) fn read_entries(
                 .collect()
         }
         Backend::CopyQ => {
-            let count =
-                match run("copyq", ["count"], 64).and_then(|output| parse_copyq_count(&output)) {
-                    Ok(count) => count,
-                    Err(error) => return all(error),
-                };
+            // Commands use CopyQ's first tab unless told otherwise; history lives
+            // in the configured clipboard tab, which the user may have moved.
+            let tab = match run("copyq", ["config", "clipboard_tab"], 4096) {
+                Ok(output) => copyq_tab_args(&output),
+                Err(error) => return all(error),
+            };
+            let copyq = |args: &[&str], max_output| {
+                run(
+                    "copyq",
+                    tab.iter().map(String::as_str).chain(args.iter().copied()),
+                    max_output,
+                )
+            };
+            let count = match copyq(&["count"], 64).and_then(|output| parse_copyq_count(&output)) {
+                Ok(count) => count,
+                Err(error) => return all(error),
+            };
             indices
                 .iter()
                 .map(|&index| {
@@ -98,7 +110,7 @@ pub(super) fn read_entries(
                         Err(only_entries(count))
                     } else {
                         let index_arg = index.to_string();
-                        run("copyq", ["read", "text/plain", &index_arg], MAX_VALUE)
+                        copyq(&["read", "text/plain", &index_arg], MAX_VALUE)
                             .and_then(|bytes| text_entry(bytes, index))
                     };
                     (index, entry)
@@ -155,6 +167,18 @@ fn cliphist_id(list: &str, index: usize) -> Result<&str, String> {
         return Err(format!("entry {index} is not text"));
     }
     Ok(id)
+}
+
+/// `tab NAME` arguments selecting CopyQ's clipboard tab, from the output of
+/// `copyq config clipboard_tab`. An empty name keeps CopyQ's default tab.
+fn copyq_tab_args(output: &[u8]) -> Vec<String> {
+    let name = String::from_utf8_lossy(output);
+    let name = name.trim_end_matches(['\n', '\r']);
+    if name.is_empty() {
+        Vec::new()
+    } else {
+        vec!["tab".into(), name.into()]
+    }
 }
 
 fn parse_copyq_count(output: &[u8]) -> Result<usize, String> {
@@ -485,6 +509,9 @@ mod tests {
         assert!(clipman_entry("{", 1).is_err());
 
         assert_eq!(parse_copyq_count(b"1000\n"), Ok(1000));
+        assert_eq!(copyq_tab_args(b"&clipboard\n"), ["tab", "&clipboard"]);
+        assert_eq!(copyq_tab_args(b"My History\n"), ["tab", "My History"]);
+        assert!(copyq_tab_args(b"\n").is_empty());
         assert!(parse_copyq_count(b"nope").is_err());
         assert!(text_entry(Vec::new(), 4).unwrap_err().contains("not text"));
         assert!(text_entry(vec![0xff], 4).is_err());
