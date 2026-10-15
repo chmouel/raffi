@@ -3,7 +3,13 @@ title: Text Snippets
 description: Reusable text values from inline, file, command, or directory sources
 ---
 
-import { Aside, Tabs, TabItem, Card, CardGrid, Steps } from '@astrojs/starlight/components';
+import { Aside, Tabs, TabItem, Card, CardGrid, Steps, Code } from '@astrojs/starlight/components';
+import bugReport from '../../../../../examples/snippets/bug-report.snippet?raw';
+import reviewRequest from '../../../../../examples/snippets/review-request.snippet?raw';
+import meetingNotes from '../../../../../examples/snippets/meeting-notes.snippet?raw';
+import incidentHandover from '../../../../../examples/snippets/incident-handover.snippet?raw';
+import followUp from '../../../../../examples/snippets/follow-up.snippet?raw';
+import signOff from '../../../../../examples/snippets/sign-off.snippet?raw';
 
 The native interface supports text snippets, which let you define reusable text values that can be searched and copied to the clipboard or typed into applications.
 
@@ -551,6 +557,84 @@ Exactly one of `snippets`, `file`, `command`, or `directory` should be specified
 </Aside>
 
 ## Examples
+
+### Work Templates
+
+These templates turn copied context into bug reports, review requests, notes,
+and emails. Browse the [snippet files on GitHub](https://github.com/chmouel/raffi/tree/main/examples/snippets),
+or download all six with `curl`. This command skips files you already have:
+
+```sh
+snippet_dir="$HOME/.local/share/raffi/snippets"
+base_url="https://raw.githubusercontent.com/chmouel/raffi/main/examples/snippets"
+mkdir -p "$snippet_dir"
+
+for name in bug-report review-request meeting-notes incident-handover follow-up sign-off; do
+  [ -e "$snippet_dir/$name.snippet" ] && continue
+  curl --fail --location --remove-on-error \
+    "$base_url/$name.snippet" \
+    --output "$snippet_dir/$name.snippet" || break
+done
+```
+
+Keep all six files together: the review request and follow-up email reuse the
+sign-off by its `!signoff` keyword. Edit that file to use your preferred name;
+by default it uses your login name with an initial capital.
+
+Add a directory source to your existing `addons.text_snippets` list:
+
+```yaml raffi.yaml
+addons:
+  text_snippets:
+    - name: "Work templates"
+      keyword: "sn"
+      directory: "~/.local/share/raffi/snippets"
+      action: "hypr_paste"
+      secondary_action: "copy"
+      restore_clipboard: true
+```
+
+Use `action: "copy"` on other compositors. Placeholders are enabled by default.
+Copy the context described below, focus a browser text field, open Raffi, and
+search for the template's keyword. Dates use local time; `+2d` means two
+calendar days. Replace the bracketed prompts after pasting.
+
+| Search | Copy before opening Raffi | Result |
+|---|---|---|
+| `sn !bug` | Error output or a failing test log | Markdown bug report with the error and report date |
+| `sn !review` | A pull request URL | Review request with testing prompts, a deadline, and your sign-off |
+| `sn !meeting` | A meeting topic on one line | Notes with decisions, action owners, and next week's date |
+| `sn !handover` | The latest incident summary | Handover with impact, next actions, and an update time in 30 minutes |
+| `sn !followup` | A ticket, link, or earlier message | Follow-up email with a reply date and your sign-off |
+| `sn !signoff` | Nothing | The shared sign-off used by the email templates |
+
+<Tabs>
+  <TabItem label="Bug report">
+    <Code code={bugReport} lang="text" title="bug-report.snippet" />
+  </TabItem>
+  <TabItem label="PR review">
+    <Code code={reviewRequest} lang="text" title="review-request.snippet" />
+  </TabItem>
+  <TabItem label="Meeting notes">
+    <Code code={meetingNotes} lang="text" title="meeting-notes.snippet" />
+  </TabItem>
+  <TabItem label="Incident handover">
+    <Code code={incidentHandover} lang="text" title="incident-handover.snippet" />
+  </TabItem>
+  <TabItem label="Follow-up email">
+    <Code code={followUp} lang="text" title="follow-up.snippet" />
+  </TabItem>
+  <TabItem label="Sign-off">
+    <Code code={signOff} lang="text" title="sign-off.snippet" />
+  </TabItem>
+</Tabs>
+
+To check clipboard restoration, copy a recognizable piece of text, paste a
+template with Enter, wait a second, then paste manually again. The second
+paste should contain the original text. With CopyQ's default settings, the
+generated template should stay out of history. Ctrl+Enter uses the ordinary
+copy action, so you can keep a generated template on the clipboard and in
+history when you want to reuse it.
 
 ### Email Addresses
 
