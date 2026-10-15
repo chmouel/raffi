@@ -282,9 +282,15 @@ fn resolve_local_preview_path(raw: &str) -> Option<String> {
     if trimmed.is_empty() || trimmed.contains('\n') {
         return None;
     }
-    let (path_str, is_file_url) = match trimmed.strip_prefix("file://") {
-        Some(path) => (path, true),
-        None => (trimmed, false),
+    let (path_str, is_file_url) = if let Some(url_path) = trimmed.strip_prefix("file://") {
+        let path_start = url_path.find('/')?;
+        let authority = &url_path[..path_start];
+        if !authority.is_empty() && !authority.eq_ignore_ascii_case("localhost") {
+            return None;
+        }
+        (&url_path[path_start..], true)
+    } else {
+        (trimmed, false)
     };
     if !(path_str.starts_with('/') || path_str.starts_with("~/")) {
         return None;
