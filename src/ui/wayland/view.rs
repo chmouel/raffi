@@ -40,6 +40,34 @@ fn icon_element<'a>(path: &Path, size: f32) -> Option<Element<'a, Message>> {
     })
 }
 
+/// Build an image (or SVG) widget that fills the preview pane viewport at
+/// `height`, preserving its aspect ratio. The pane width fills automatically.
+fn full_pane_image<'a>(path: &str, height: f32) -> Option<Element<'a, Message>> {
+    let img_path = Path::new(path);
+    if !img_path.exists() {
+        return None;
+    }
+    let is_svg = img_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("svg"))
+        .unwrap_or(false);
+
+    Some(if is_svg {
+        svg(iced::widget::svg::Handle::from_path(img_path))
+            .width(Length::Fill)
+            .height(Length::Fixed(height))
+            .content_fit(iced::ContentFit::Contain)
+            .into()
+    } else {
+        image(PathBuf::from(img_path))
+            .width(Length::Fill)
+            .height(Length::Fixed(height))
+            .content_fit(iced::ContentFit::Contain)
+            .into()
+    })
+}
+
 impl LauncherApp {
     /// Wrap the shared window chrome around an already built item list.
     fn shell<'a>(
@@ -318,6 +346,24 @@ impl LauncherApp {
         ]
     }
 
+    /// Height of the preview pane viewport, derived from the live window size
+    /// so image previews fill the pane and track window resizes.
+    pub(super) fn preview_viewport_height(&self) -> f32 {
+        let fs = self.view.font_sizes;
+        // Chrome above and below the pane: window padding, hint row, search
+        // input, column spacing, the body top padding and the pane's padding.
+        let chrome = fs.outer_padding * 2.0
+            + fs.hint
+            + 4.0
+            + 24.0
+            + fs.input
+            + fs.input_padding * 2.0
+            + 2.0
+            + fs.scroll_top_padding
+            + 32.0;
+        (self.view.window_size.height - chrome).max(160.0)
+    }
+
     /// Render the right-hand preview pane for `data`.
     fn render_preview_pane(&self, data: PreviewData) -> Element<'_, Message> {
         let ps = self.view.preview_style.clone();
@@ -345,6 +391,12 @@ impl LauncherApp {
         };
 
         let mut col = Column::new().spacing(14).width(Length::Fill);
+
+        // Image previews fill the whole pane: the image is rendered first at the
+        // full viewport size, and the header plus file info follow below the fold,
+        // reachable by scrolling with Ctrl+J / Ctrl+K.
+        let image_first = matches!(data.bodies.first(), Some(PreviewBody::Image { .. }));
+        let viewport_height = self.preview_viewport_height();
 
         // Header: optional icon + title/subtitle + optional badge
         let mut header_row = Row::new()
@@ -396,6 +448,14 @@ impl LauncherApp {
             header_row = header_row.push(badge_pill);
         }
 
+        if image_first {
+            if let Some(PreviewBody::Image { path }) = data.bodies.first() {
+                if let Some(el) = full_pane_image(path, viewport_height) {
+                    col = col.push(el);
+                }
+            }
+        }
+
         col = col.push(header_row);
 
         // Horizontal divider under header
@@ -411,7 +471,10 @@ impl LauncherApp {
         );
 
         // Body sections
-        for body in data.bodies {
+        for (body_index, body) in data.bodies.into_iter().enumerate() {
+            if image_first && body_index == 0 {
+                continue; // already rendered above, filling the first view
+            }
             match body {
                 PreviewBody::Text {
                     heading: h,
@@ -458,35 +521,8 @@ impl LauncherApp {
                     col = col.push(section);
                 }
                 PreviewBody::Image { path } => {
-                    let img_path = Path::new(&path);
-                    if img_path.exists() {
-                        let is_svg = img_path
-                            .extension()
-                            .and_then(|ext| ext.to_str())
-                            .map(|ext| ext.eq_ignore_ascii_case("svg"))
-                            .unwrap_or(false);
-
-                        let img_el: Element<Message> = if is_svg {
-                            svg(iced::widget::svg::Handle::from_path(img_path))
-                                .width(Length::Fill)
-                                .height(Length::Fixed(ps.image_height))
-                                .content_fit(iced::ContentFit::Contain)
-                                .into()
-                        } else {
-                            image(PathBuf::from(img_path))
-                                .width(Length::Fill)
-                                .height(Length::Fixed(ps.image_height))
-                                .content_fit(iced::ContentFit::Contain)
-                                .into()
-                        };
-
-                        col = col.push(
-                            container(img_el)
-                                .padding(8.0)
-                                .width(Length::Fill)
-                                .align_x(iced::Alignment::Center)
-                                .style(block_style),
-                        );
+                    if let Some(el) = full_pane_image(&path, viewport_height) {
+                        col = col.push(el);
                     }
                 }
                 PreviewBody::HeroGlyph { glyph } => {
@@ -1959,6 +1995,7 @@ impl LauncherApp {
     pub(super) fn subscription(&self) -> iced::Subscription<Message> {
         use iced::keyboard;
         use iced::keyboard::key::Named;
+        use iced::window;
         use iced::{event, Event};
 
         event::listen_with(|event, _status, _id| match event {
@@ -2009,6 +2046,17 @@ impl LauncherApp {
                 modifiers,
                 ..
             }) if c.as_str() == "p" && modifiers.control() => Some(Message::TogglePreview),
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Character(ref c),
+                modifiers,
+                ..
+            }) if c.as_str() == "j" && modifiers.control() => Some(Message::PreviewScrollDown),
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Character(ref c),
+                modifiers,
+                ..
+            }) if c.as_str() == "k" && modifiers.control() => Some(Message::PreviewScrollUp),
+            Event::Window(window::Event::Resized(size)) => Some(Message::WindowResized(size)),
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
                 Some(Message::ModifiersChanged(modifiers))
             }

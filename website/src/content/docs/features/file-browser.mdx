@@ -6,6 +6,10 @@ description: Navigate your filesystem with keyboard shortcuts
 import { Aside, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import fileBrowserScreenshot from '../../../assets/screenshots/file-browser.png';
+import codePreviewScreenshot from '../../../assets/screenshots/file-browser-code-preview.png';
+import imagePreviewScreenshot from '../../../assets/screenshots/file-browser-image-preview.png';
+import imageDetailsScreenshot from '../../../assets/screenshots/file-browser-image-scrolled.png';
+import hiddenFilesScreenshot from '../../../assets/screenshots/file-browser-hidden.png';
 
 The native interface includes a built-in file browser for quick filesystem navigation using keyboard shortcuts.
 
@@ -15,7 +19,7 @@ The file browser is only available in **native mode**. It is not available when 
 
 ## Overview
 
-Navigate your filesystem directly from the launcher with fuzzy filtering, hidden file support, and keyboard-driven actions.
+Navigate your filesystem directly from the launcher with fuzzy filtering, hidden file support, keyboard-driven actions, and a right-hand preview pane. Image previews scale to the largest size that fits the preview pane while keeping their aspect ratio and rescale when the window is resized; file details appear below the image and can be reached by scrolling the pane with Ctrl+J / Ctrl+K.
 
 <Image src={fileBrowserScreenshot} alt="File browser example" width={800} />
 
@@ -51,9 +55,18 @@ Start the file browser by typing one of these prefixes:
 | **Alt+Enter** | Copy file/directory path to clipboard |
 | **Tab** | Autocomplete selected entry into search bar |
 | **Ctrl+H** | Toggle hidden file visibility |
+| **Ctrl+J** / **Ctrl+K** | Scroll the right-hand preview pane down / up |
 | **Ctrl+P** | Toggle right-hand file/directory/image preview pane |
 | **Esc** | Exit file browser |
 | **↑/↓** | Navigate through results |
+
+### File and Image Previews
+
+<Image src={codePreviewScreenshot} alt="File browser showing a text file and its contents in the preview pane" width={800} />
+
+<Image src={imagePreviewScreenshot} alt="Image scaled into the right-hand preview pane" width={800} />
+
+<Image src={imageDetailsScreenshot} alt="Image preview scrolled down to file details" width={800} />
 
 ## Fuzzy Filtering
 
@@ -114,6 +127,8 @@ Control visibility of hidden files (dotfiles):
 <Aside type="note">
 Hidden files start with a dot (`.`), like `.bashrc`, `.config`, etc.
 </Aside>
+
+<Image src={hiddenFilesScreenshot} alt="File browser showing hidden project files" width={800} />
 
 ## Actions
 

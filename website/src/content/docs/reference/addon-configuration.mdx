@@ -3,6 +3,11 @@ title: Addon Configuration
 description: Configuration reference for built-in addons (currency, calculator, file browser, script filters, web searches, text snippets)
 ---
 
+import { Image } from 'astro:assets';
+import keywordSuggestionScreenshot from '../../../assets/screenshots/keyword-suggestion.png';
+import keywordHelpScreenshot from '../../../assets/screenshots/keyword-help.png';
+import emojiScreenshot from '../../../assets/screenshots/emoji-picker.png';
+
 The native UI includes several built-in addons that can be configured under the `addons` section of `raffi.yaml`. All addons are enabled by default.
 
 ## Keywords
@@ -19,10 +24,16 @@ you never have to remember the exact keyword.
 The file browser (`/`, `~/`) and the currency converter (`$`) are prefix
 triggers rather than keywords, and are not affected.
 
-Press **Ctrl+/** in the native UI to list every keyword and trigger you have
-available, each with its usage syntax. The list replaces the launcher entries,
-typing narrows it, Enter or Tab on a row arms that keyword, and Escape closes
-it.
+Press **Ctrl+/** in the native UI to list every keyword, trigger and keyboard
+shortcut you have available, each with its usage syntax. The list replaces the
+launcher entries, typing narrows it, Enter or Tab on a keyword row arms that
+keyword, and Escape closes it.
+
+<Image src={keywordSuggestionScreenshot} alt="Keyword suggestion appearing before the trigger is fully typed" width={800} />
+
+<Image src={keywordHelpScreenshot} alt="Keyword help overlay with details for the selected shortcut" width={800} />
+
+<Image src={emojiScreenshot} alt="Emoji picker with a selected character and Unicode information" width={800} />
 
 ## Currency Converter
 

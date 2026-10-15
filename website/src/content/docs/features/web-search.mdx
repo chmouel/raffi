@@ -4,6 +4,9 @@ description: Quick web searches with URL templates and keywords
 ---
 
 import { Aside, Tabs, TabItem, Card, CardGrid, Steps } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import webSearchScreenshot from '../../../assets/screenshots/web-search.png';
+import fallbackScreenshot from '../../../assets/screenshots/fallbacks.png';
 
 The native interface supports quick web searches via URL templates. Type a keyword followed by your query to open search results in your default browser.
 
@@ -82,6 +85,8 @@ gh iced-rs
 wiki functional programming
 # Opens: https://en.wikipedia.org/wiki/Special:Search?search=functional%20programming
 ```
+
+<Image src={webSearchScreenshot} alt="GitHub web search with a resolved URL in the preview pane" width={800} />
 
 ## How It Works
 
@@ -388,6 +393,12 @@ You can add any search engine that accepts a query parameter:
   }
 `}
 </style>
+
+### Search Fallbacks
+
+Configure search addons as [fallbacks](/configuration/general-settings/#fallbacks) to keep them available for arbitrary queries without typing their keyword.
+
+<Image src={fallbackScreenshot} alt="Fallback search entries shown for a query with the selected URL preview" width={800} />
 
 ## Keyboard Shortcuts
 

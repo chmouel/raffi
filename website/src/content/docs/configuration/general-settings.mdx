@@ -4,6 +4,9 @@ description: Configure Raffi's UI, theme, fonts, and window properties
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import mainScreenshot from '../../../assets/screenshots/main.png';
+import fallbacksScreenshot from '../../../assets/screenshots/fallbacks.png';
 
 ## Overview
 
@@ -94,6 +97,7 @@ general:
       bg_block: "#1e1e2e"
 ```
 
+<Image src={mainScreenshot} alt="Native launcher showing a standard entry in the preview pane" width={800} />
 
 **`default_script_shell`** `string` (default: `bash`)
 
@@ -170,6 +174,7 @@ general:
 Fallbacks work best with search-type addons. The referenced addon must be defined in your `addons` section.
 </Aside>
 
+<Image src={fallbacksScreenshot} alt="Configured fallback search entries and selected URL preview" width={800} />
 
 ## Font and Typography
 

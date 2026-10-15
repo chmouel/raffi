@@ -91,7 +91,67 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         });
     }
 
+    entries.extend(keyboard_shortcut_entries());
+
     entries
+}
+
+/// Informational rows listing the global keyboard shortcuts, shown after the
+/// keyword rows. They cannot be armed, so Enter and Tab do nothing on them.
+fn keyboard_shortcut_entries() -> Vec<HelpEntry> {
+    let shortcut = |trigger: &str, title: &str, usage: &str| HelpEntry {
+        trigger: trigger.to_string(),
+        title: title.to_string(),
+        usage: usage.to_string(),
+        icon: None,
+        completion: None,
+    };
+
+    vec![
+        shortcut(
+            "↑/↓",
+            "Navigate results",
+            "Moves the selection through the results",
+        ),
+        shortcut(
+            "Ctrl+J",
+            "Scroll preview down",
+            "Scrolls the right-hand preview pane",
+        ),
+        shortcut(
+            "Ctrl+K",
+            "Scroll preview up",
+            "Scrolls the right-hand preview pane",
+        ),
+        shortcut(
+            "Ctrl+P",
+            "Toggle preview pane",
+            "Shows or hides the right-hand preview",
+        ),
+        shortcut(
+            "Ctrl+H",
+            "Toggle hidden files",
+            "File browser: show or hide dotfiles",
+        ),
+        shortcut("Alt+P/N", "Search history", "Previous / next query"),
+        shortcut(
+            "Tab",
+            "Complete selection",
+            "Completes the keyword or file browser path",
+        ),
+        shortcut("Ctrl+/", "Keyword and shortcut help", "Opens this list"),
+        shortcut("Esc", "Close help or quit", "Closes help, otherwise exits"),
+        shortcut(
+            "Enter",
+            "Use selected entry",
+            "Launches, arms or activates the selection",
+        ),
+        shortcut(
+            "Ctrl+Enter",
+            "Secondary action",
+            "Runs the addon's secondary action; file browser copies the path",
+        ),
+    ]
 }
 
 /// Return the indices of the help rows matching `query`.

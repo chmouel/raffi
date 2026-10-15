@@ -4,6 +4,9 @@ description: Reusable text values from inline, file, command, or directory sourc
 ---
 
 import { Aside, Tabs, TabItem, Card, CardGrid, Steps, Code } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import snippetsScreenshot from '../../../assets/screenshots/text-snippets.png';
+import placeholdersScreenshot from '../../../assets/screenshots/text-snippets-placeholders.png';
 import bugReport from '../../../../../examples/snippets/bug-report.snippet?raw';
 import reviewRequest from '../../../../../examples/snippets/review-request.snippet?raw';
 import meetingNotes from '../../../../../examples/snippets/meeting-notes.snippet?raw';
@@ -45,6 +48,8 @@ Snippets can come from four different sources:
     </a>
   </CardGrid>
 </div>
+
+<Image src={snippetsScreenshot} alt="Text snippets list with a selected snippet and expanded preview" width={800} />
 
 <style>
 {`
@@ -299,6 +304,8 @@ snippets:
 | `{snippet:NAME}` | Another snippet from the same source, by name or keyword |
 | `{shell:COMMAND}` | Output of `sh -c COMMAND` |
 | `{cursor}` | Where the caret ends up after `insert` |
+
+<Image src={placeholdersScreenshot} alt="Snippet preview showing an expanded dynamic value and its raw template" width={800} />
 
 Add transforms after a `|`, chained left to right: `uppercase`, `lowercase`,
 `capitals` (first letter of each word) and `trim`. For example
