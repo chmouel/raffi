@@ -118,6 +118,9 @@ fn dispatch(action: &str, value: &str, cursor_moves: usize) -> Result<(), String
     match action {
         "insert" => spawn_insert(value, cursor_moves),
         "copy" => try_copy(value),
+        "hypr_paste" => {
+            Err("hypr_paste is only available for text snippets in the native UI".into())
+        }
         _ => spawn_custom_action(action, value),
     }
 }
@@ -130,15 +133,7 @@ pub(super) fn execute_snippet_action(
     cursor_moves: Option<usize>,
 ) -> Result<(), String> {
     crate::debug_log!("action: snippet action={action:?} cursor={cursor_moves:?}");
-    if value.len() > MAX_VALUE {
-        return Err(format!(
-            "snippet is larger than {} KiB and cannot be passed to the action",
-            MAX_VALUE / 1024
-        ));
-    }
-    if value.contains('\0') {
-        return Err("snippet contains a NUL byte and cannot be passed to the action".into());
-    }
+    validate_snippet(value)?;
     let cursor_moves = if action == "insert" {
         let moves = cursor_moves.unwrap_or(0);
         if moves > MAX_CURSOR_MOVES {
@@ -153,13 +148,26 @@ pub(super) fn execute_snippet_action(
     dispatch(action, value, cursor_moves)
 }
 
+pub(super) fn validate_snippet(value: &str) -> Result<(), String> {
+    if value.len() > MAX_VALUE {
+        return Err(format!(
+            "snippet is larger than {} KiB and cannot be passed to the action",
+            MAX_VALUE / 1024
+        ));
+    }
+    if value.contains('\0') {
+        return Err("snippet contains a NUL byte and cannot be passed to the action".into());
+    }
+    Ok(())
+}
+
 enum ReadOutcome {
     Done(Vec<u8>),
     Overflow,
     Failed(String),
 }
 
-fn kill_process_group(pgid: u32) {
+pub(super) fn kill_process_group(pgid: u32) {
     let _ = Command::new("sh")
         .arg("-c")
         .arg(format!(

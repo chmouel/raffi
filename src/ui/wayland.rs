@@ -6,6 +6,7 @@ mod clipboard_history;
 mod currency;
 mod emoji;
 mod help;
+mod hyprland;
 mod placeholders;
 mod script_filters;
 mod snippets;
@@ -65,6 +66,16 @@ fn run_wayland_ui(
     };
     let selected_item: SharedSelection = Arc::new(Mutex::new(None));
     let selected_item_clone = selected_item.clone();
+    let hyprland = addons
+        .text_snippets
+        .iter()
+        .any(|source| {
+            source.action.as_deref() == Some("hypr_paste")
+                || source.secondary_action.as_deref() == Some("hypr_paste")
+        })
+        .then(hyprland::Hyprland::capture);
+    let deferred_paste = Arc::new(Mutex::new(None::<hyprland::Hyprland>));
+    let deferred_paste_for_new = deferred_paste.clone();
 
     let configs_owned = configs.to_vec();
     let addons_owned = addons.clone();
@@ -114,6 +125,8 @@ fn run_wayland_ui(
                 fallbacks.clone(),
             );
             app.text_snippets.clipboard_history = clipboard_history;
+            app.hyprland = hyprland.clone();
+            app.deferred_paste = deferred_paste_for_new.clone();
             (app, task)
         },
         LauncherApp::update,
@@ -135,6 +148,17 @@ fn run_wayland_ui(
     let result = app.run();
     if let Err(error) = result {
         return Err(anyhow::anyhow!("Failed to run UI: {:?}", error));
+    }
+
+    if let Some(target) = deferred_paste
+        .lock()
+        .map_err(|_| anyhow::anyhow!("cannot read pending paste"))?
+        .take()
+    {
+        if let Err(error) = target.paste() {
+            target.notify_error(&error);
+            return Err(anyhow::anyhow!("hypr_paste: {error}"));
+        }
     }
 
     if let Ok(selected) = selected_item.lock() {

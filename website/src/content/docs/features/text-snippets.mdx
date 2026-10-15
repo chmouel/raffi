@@ -120,6 +120,7 @@ addons:
       icon: "mail"
       snippets:
         - name: "Personal Email"
+          icon: "📨"
           value: "user@example.com"
         - name: "Work Email"
           value: "user@company.com"
@@ -206,6 +207,7 @@ The command must output JSON in Alfred Script Filter format:
 <Aside type="tip">
 The `title` field becomes the snippet name, and `arg` becomes the snippet value.
 An optional `keyword` field sets the [snippet keyword](#snippet-keywords-and-search).
+An optional `icon` object, such as `"icon": {"path": "mail-client"}`, sets the item icon.
 </Aside>
 
 ### Directory Source
@@ -241,20 +243,24 @@ john@example.com
 Format:
 
 - **First line**: Snippet name (description)
-- **Optional `keyword: ...` lines**: [Snippet keyword](#snippet-keywords-and-search)
+- **Optional `keyword: ...` header**: [Snippet keyword](#snippet-keywords-and-search)
+- **Optional `icon: ...` header**: Emoji, icon name, or image path
 - **`---`**: Separator
 - **After separator**: Snippet content (value)
 
 ```text signature.snippet
 Professional Signature
 keyword: !sig
+icon: ✍️
 ---
 Best regards,
 John Doe
 ```
 
 <Aside type="note">
-Directory-based snippets are sorted alphabetically and cached per session.
+The `keyword:` and `icon:` headers can appear in either order. Keep the name
+on the first line and the content after `---`. Directory-based snippets are
+sorted alphabetically and cached per session.
 </Aside>
 
 ## Dynamic Placeholders
@@ -396,7 +402,44 @@ Configure how snippets are used when selected:
     ```
     Types snippet into focused app using `wtype` or `ydotool`
   </TabItem>
+  <TabItem label="Hyprland Paste">
+    ```yaml
+    action: "hypr_paste"
+    secondary_action: "copy"
+    restore_clipboard: true
+    ```
+    Copies the expanded snippet with `wl-copy`, closes Raffi, waits for the
+    original window to regain focus, and sends Ctrl+V directly to that window
+    through Hyprland. This avoids typing long snippets character by character.
+  </TabItem>
 </Tabs>
+
+`hypr_paste` requires Hyprland's Lua API (0.55 or later), `hyprctl`, and
+`wl-clipboard`. Run Raffi inside the Hyprland session so it inherits
+`HYPRLAND_INSTANCE_SIGNATURE` and `XDG_RUNTIME_DIR`. It works with either
+`action` or `secondary_action` on a text snippet source. The receiving app
+must accept Ctrl+V; terminals often use a different shortcut.
+
+Snippet copies are marked sensitive so clipboard managers that honor this
+hint, including CopyQ with its default settings, keep them out of history.
+This applies whether clipboard restoration is enabled or not. Ordinary `copy`
+actions and restored clipboard text are not marked sensitive. Existing history
+entries are not removed.
+
+By default, the snippet stays on the clipboard. Set `restore_clipboard: true`
+on the source to restore the previous plain text one second after sending the
+paste shortcut, provided the clipboard still has Raffi's paste marker. A newer
+copy skips restoration, even if it contains identical text. Saving an empty,
+unavailable, non-text, invalid UTF-8, or larger-than-100-KiB selection skips
+restoration and still allows pasting. Rich text is restored as plain text;
+images and other formats are not preserved. Restoration is best effort: a
+slow application may not finish reading the snippet before the delay expires.
+
+`{cursor}` is removed during expansion but does not move the caret with this
+action. Clipboard preparation errors keep Raffi open. If the original window
+does not regain focus within two seconds, or Hyprland rejects the shortcut,
+Raffi reports an error and does not paste elsewhere. Successful dispatch means
+the shortcut was sent, not that the receiving app confirmed insertion.
 
 ### Custom Actions
 
@@ -454,12 +497,14 @@ Text that activates the snippet source
 
 **`icon`** `string`
 
-Icon name from your icon cache to display next to each snippet
+Default icon for the source: an emoji, a name from your icon cache, or an image
+path. A snippet’s `icon` overrides it. Missing icons fall back to the source
+icon. `no_icons` hides both. Image paths support `~` and environment variables.
 
 
 **`snippets`** `array`
 
-Inline list of snippets (each with `name`, `value` and an optional `keyword`)
+Inline list of snippets (each with `name`, `value`, and optional `keyword` and `icon` fields)
 
 
 **`file`** `string`

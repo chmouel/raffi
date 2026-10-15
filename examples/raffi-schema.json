@@ -469,6 +469,14 @@
       "description": "A single text snippet entry",
       "type": "object",
       "properties": {
+        "icon": {
+          "description": "Emoji, icon name, or image path overriding the source icon.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "keyword": {
           "description": "Optional short keyword; an exact match ranks the snippet first.",
           "type": [
@@ -546,6 +554,11 @@
           "description": "Expand dynamic placeholders such as {clipboard} and {date} in snippet values.",
           "type": "boolean",
           "default": true
+        },
+        "restore_clipboard": {
+          "description": "Best-effort restoration of plain text after the `hypr_paste` action.",
+          "type": "boolean",
+          "default": false
         },
         "secondary_action": {
           "type": [

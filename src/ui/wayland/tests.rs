@@ -82,6 +82,7 @@ fn test_route_query_prefers_script_filter_over_text_snippet() {
         keyword: "gh".into(),
         icon: None,
         snippets: Some(vec![TextSnippet {
+            icon: None,
             name: "Issue".into(),
             value: "issue".into(),
             keyword: None,
@@ -93,6 +94,7 @@ fn test_route_query_prefers_script_filter_over_text_snippet() {
         action: None,
         secondary_action: None,
         placeholders: true,
+        restore_clipboard: false,
     });
 
     assert!(matches!(
@@ -130,6 +132,7 @@ fn test_route_query_requires_space_after_keyword() {
         keyword: "sn".into(),
         icon: None,
         snippets: Some(vec![TextSnippet {
+            icon: None,
             name: "Email".into(),
             value: "user@example.com".into(),
             keyword: None,
@@ -141,6 +144,7 @@ fn test_route_query_requires_space_after_keyword() {
         action: None,
         secondary_action: None,
         placeholders: true,
+        restore_clipboard: false,
     });
 
     assert_eq!(route_query("sn", &addons), QueryMode::Standard);
@@ -179,6 +183,7 @@ fn test_keyword_suggestions_prefix_match() {
         action: None,
         secondary_action: None,
         placeholders: true,
+        restore_clipboard: false,
     });
     addons.web_searches.push(WebSearchConfig {
         name: "GitHub".into(),
@@ -218,6 +223,7 @@ fn test_keyword_suggestions_stop_once_keyword_is_armed() {
         action: None,
         secondary_action: None,
         placeholders: true,
+        restore_clipboard: false,
     });
 
     assert!(keyword_suggestions("", &addons).is_empty());
@@ -311,6 +317,7 @@ fn snippet_addons() -> AddonsConfig {
         keyword: "sn".into(),
         icon: None,
         snippets: Some(vec![TextSnippet {
+            icon: None,
             name: "Email".into(),
             value: "user@example.com".into(),
             keyword: None,
@@ -322,6 +329,7 @@ fn snippet_addons() -> AddonsConfig {
         action: None,
         secondary_action: None,
         placeholders: true,
+        restore_clipboard: false,
     });
     addons
 }
@@ -343,11 +351,13 @@ fn snippet_source(
         action: None,
         secondary_action: None,
         placeholders: true,
+        restore_clipboard: false,
     }
 }
 
 fn snippet(name: &str, value: &str) -> TextSnippet {
     TextSnippet {
+        icon: None,
         name: name.into(),
         value: value.into(),
         keyword: None,
@@ -439,6 +449,99 @@ fn test_snippet_expansion_error_keeps_launcher_open() {
     assert_eq!(app.text_snippets.error.as_deref(), Some("bad format"));
     // The error row is not selectable.
     assert_eq!(app.total_items(), 1);
+}
+
+#[test]
+fn test_hypr_paste_preparation_tracks_selection_and_reports_errors() {
+    for placeholders in [false, true] {
+        let mut source = snippet_source("Snippets", "sn", vec![snippet("Hi", "hello")]);
+        source.action = Some("hypr_paste".into());
+        source.secondary_action = Some("hypr_paste".into());
+        source.placeholders = placeholders;
+        source.restore_clipboard = true;
+        let mut addons = AddonsConfig::default();
+        addons.text_snippets.push(source);
+        let mut app = test_app(addons);
+        app.hyprland = Some(Ok(super::hyprland::Hyprland::test_target()));
+        open_snippets(&mut app, "sn ");
+        assert!(app.text_snippets.restore_clipboard);
+        app.view.current_modifiers = iced::keyboard::Modifiers::CTRL;
+        let _ = app.update(Message::TextSnippetSelected(0));
+        let session = app.text_snippets.session;
+        if placeholders {
+            app.view.current_modifiers = iced::keyboard::Modifiers::empty();
+            let _ = app.update(Message::TextSnippetExpanded(
+                session,
+                Ok(Expanded {
+                    text: "hello".into(),
+                    cursor_moves: None,
+                }),
+            ));
+        }
+        assert!(app.text_snippets.pending.as_ref().unwrap().preparing_paste);
+        let _ = app.update(Message::TextSnippetSelected(0));
+        assert!(app.text_snippets.pending.as_ref().unwrap().preparing_paste);
+        let _ = app.update(Message::HyprPastePrepared(
+            session.wrapping_sub(1),
+            Ok(super::hyprland::Hyprland::test_target()),
+        ));
+        assert!(app.deferred_paste.lock().unwrap().is_none());
+        assert!(app.text_snippets.pending.is_some());
+        let _ = app.update(Message::HyprPastePrepared(
+            session,
+            Err("wl-copy failed".into()),
+        ));
+        assert_eq!(app.text_snippets.error.as_deref(), Some("wl-copy failed"));
+        assert!(app.text_snippets.active);
+        assert!(app.text_snippets.pending.is_none());
+        assert!(app.deferred_paste.lock().unwrap().is_none());
+
+        let _ = app.update(Message::TextSnippetSelected(0));
+        if placeholders {
+            let _ = app.update(Message::TextSnippetExpanded(
+                session,
+                Ok(Expanded {
+                    text: "hello".into(),
+                    cursor_moves: None,
+                }),
+            ));
+        }
+        let _ = app.update(Message::HyprPastePrepared(
+            session,
+            Ok(super::hyprland::Hyprland::test_target()),
+        ));
+        assert!(app.deferred_paste.lock().unwrap().is_some());
+        assert!(app.text_snippets.pending.is_none());
+    }
+}
+
+#[test]
+fn test_hypr_paste_missing_session_and_late_results_do_not_queue_paste() {
+    let mut source = snippet_source("Snippets", "sn", vec![snippet("Hi", "hello")]);
+    source.action = Some("hypr_paste".into());
+    source.placeholders = false;
+    let mut addons = AddonsConfig::default();
+    addons.text_snippets.push(source);
+    let mut app = test_app(addons);
+    open_snippets(&mut app, "sn ");
+    let _ = app.update(Message::TextSnippetSelected(0));
+    assert!(app
+        .text_snippets
+        .error
+        .as_ref()
+        .unwrap()
+        .contains("Hyprland session"));
+    assert!(app.text_snippets.pending.is_none());
+
+    app.hyprland = Some(Ok(super::hyprland::Hyprland::test_target()));
+    let _ = app.update(Message::TextSnippetSelected(0));
+    let session = app.text_snippets.session;
+    let _ = app.update(Message::SearchChanged("other ".into()));
+    let _ = app.update(Message::HyprPastePrepared(
+        session,
+        Ok(super::hyprland::Hyprland::test_target()),
+    ));
+    assert!(app.deferred_paste.lock().unwrap().is_none());
 }
 
 #[test]
@@ -608,12 +711,12 @@ fn test_snippet_shell_policy_follows_source() {
 }
 
 #[test]
-fn test_snippet_directory_reads_keyword_header() {
+fn test_snippet_directory_reads_metadata_headers() {
     let dir = std::env::temp_dir().join(format!("raffi-snippet-dir-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("sig.snippet"),
-        "Signature\nkeyword: !sig\n---\n-- me",
+        "Signature\nkeyword: !sig\nicon: ✍️\n---\n-- me",
     )
     .unwrap();
     std::fs::write(dir.join("plain.snippet"), "Address\n---\n1 Main St").unwrap();
@@ -629,11 +732,61 @@ fn test_snippet_directory_reads_keyword_header() {
 
     let first = app.text_snippets.filtered[0];
     assert_eq!(app.text_snippets.items[first].name, "Signature");
+    assert_eq!(app.text_snippets.items[first].icon.as_deref(), Some("✍️"));
     assert_eq!(
         app.text_snippets.items[first].keyword.as_deref(),
         Some("!sig")
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_snippet_icons_override_source_and_respect_no_icons() {
+    use super::snippets::SnippetIcon;
+    let mut app = test_app(AddonsConfig::default());
+    app.no_icons = false;
+    let path = std::env::temp_dir().join(format!("raffi-snippet-icon-{}.svg", std::process::id()));
+    std::fs::write(&path, "<svg xmlns=\"http://www.w3.org/2000/svg\"/>").unwrap();
+    let path = path.to_string_lossy().into_owned();
+    app.icon_map.insert("mail".into(), path.clone());
+    app.text_snippets.icon = Some("mail".into());
+    let mut item = snippet("Address", "body");
+    assert_eq!(
+        app.snippet_icon(&item),
+        Some(SnippetIcon::File(path.clone()))
+    );
+    item.icon = Some("🏠".into());
+    assert_eq!(
+        app.snippet_icon(&item),
+        Some(SnippetIcon::Glyph("🏠".into()))
+    );
+    item.icon = Some(path.clone());
+    assert_eq!(
+        app.snippet_icon(&item),
+        Some(SnippetIcon::File(path.clone()))
+    );
+    for missing in ["missing-icon", "", "/missing/icon.png"] {
+        item.icon = Some(missing.into());
+        assert_eq!(
+            app.snippet_icon(&item),
+            Some(SnippetIcon::File(path.clone()))
+        );
+    }
+    app.no_icons = true;
+    assert_eq!(app.snippet_icon(&item), None);
+    item.icon = Some("🧑‍💻".into());
+    assert_eq!(app.snippet_icon(&item), None);
+    app.no_icons = false;
+    assert_eq!(
+        app.snippet_icon(&item),
+        Some(SnippetIcon::Glyph("🧑‍💻".into()))
+    );
+    item.icon = Some("1️⃣".into());
+    assert_eq!(
+        app.snippet_icon(&item),
+        Some(SnippetIcon::Glyph("1️⃣".into()))
+    );
+    std::fs::remove_file(path).unwrap();
 }
 
 #[test]
@@ -954,6 +1107,7 @@ fn help_addons() -> AddonsConfig {
         keyword: "sn".into(),
         icon: None,
         snippets: Some(vec![TextSnippet {
+            icon: None,
             name: "Email".into(),
             value: "user@example.com".into(),
             keyword: None,
@@ -965,6 +1119,7 @@ fn help_addons() -> AddonsConfig {
         action: None,
         secondary_action: None,
         placeholders: true,
+        restore_clipboard: false,
     });
     addons.web_searches.push(WebSearchConfig {
         name: "GitHub".into(),

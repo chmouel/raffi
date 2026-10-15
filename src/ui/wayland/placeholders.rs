@@ -831,6 +831,7 @@ mod tests {
 
     fn snippet(name: &str, value: &str, keyword: Option<&str>) -> TextSnippet {
         TextSnippet {
+            icon: None,
             name: name.into(),
             value: value.into(),
             keyword: keyword.map(Into::into),
