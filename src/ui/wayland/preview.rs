@@ -273,16 +273,42 @@ fn resolve_local_preview_path(raw: &str) -> Option<String> {
     if trimmed.is_empty() || trimmed.contains('\n') {
         return None;
     }
-    let path_str = trimmed.strip_prefix("file://").unwrap_or(trimmed);
+    let (path_str, is_file_url) = match trimmed.strip_prefix("file://") {
+        Some(path) => (path, true),
+        None => (trimmed, false),
+    };
     if !(path_str.starts_with('/') || path_str.starts_with("~/")) {
         return None;
     }
-    let expanded = crate::expand_config_value(path_str);
+    let expanded = if is_file_url {
+        crate::expand_config_value(&percent_decode_path(path_str)?)
+    } else {
+        crate::expand_config_value(path_str)
+    };
     if Path::new(&expanded).exists() {
         Some(expanded)
     } else {
         None
     }
+}
+
+fn percent_decode_path(path: &str) -> Option<String> {
+    let bytes = path.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let escape = std::str::from_utf8(bytes.get(index + 1..index + 3)?).ok()?;
+            decoded.push(u8::from_str_radix(escape, 16).ok()?);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+
+    String::from_utf8(decoded).ok()
 }
 
 fn describe_action(action: &str) -> String {
