@@ -173,6 +173,10 @@ impl Hyprland {
             .ok_or("no active Hyprland window to paste into")?
             .to_string();
         target.events()?;
+        // Hyprland before 0.55 has no Lua API, so pasting would always fail.
+        target
+            .eval("assert(true)")
+            .map_err(|error| format!("hypr_paste needs Hyprland 0.55 or later: {error}"))?;
         Ok(target)
     }
 
@@ -222,17 +226,27 @@ impl Hyprland {
         } else {
             None
         };
-        self.publish(Command::new("wl-copy"), value)
+        self.publish(|| Command::new("wl-copy"), value)
     }
 
-    fn publish(&self, mut command: Command, value: &str) -> Result<(), String> {
+    fn publish(&self, wl_copy: impl Fn() -> Command, value: &str) -> Result<(), String> {
         // wl-copy advertises standard plain-text formats alongside text/* types.
         let mime = self
             .restoration
             .as_ref()
             .map_or("text/plain;charset=utf-8", |r| r.marker.as_str());
-        command.args(["--sensitive", "--type", mime, "--", value]);
-        wait_status(command, TIMEOUT).map_err(|error| format!("wl-copy (wl-clipboard): {error}"))
+        let copy = |flags: &[&str]| {
+            let mut command = wl_copy();
+            command.args(flags).args(["--type", mime, "--", value]);
+            wait_status(command, TIMEOUT)
+        };
+        // wl-clipboard before 2.3 rejects --sensitive; copy without the hint there.
+        copy(&["--sensitive"])
+            .or_else(|error| {
+                crate::debug_log!("hypr_paste: sensitive copy failed ({error}); retrying without");
+                copy(&[])
+            })
+            .map_err(|error| format!("wl-copy (wl-clipboard): {error}"))
     }
 
     pub(super) fn paste(&self) -> Result<(), String> {
@@ -311,12 +325,16 @@ mod tests {
     }
 
     #[test]
-    fn test_snippet_publication_is_sensitive_with_or_without_restoration() {
+    fn test_snippet_publication_is_sensitive_when_wl_copy_supports_it() {
+        let dir = std::env::temp_dir().join(format!("raffi-publish-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("args");
         let snapshot = ClipboardRestore {
             previous: "previous".into(),
             marker: "text/x-raffi-test".into(),
         };
         let failed_snapshot = ClipboardRestore::snapshot(shell("exit 1")).ok();
+        let value = "--a snippet with 'quotes'\nand Unicode: café";
         for restoration in [None, Some(snapshot), failed_snapshot] {
             let mime = if restoration.is_some() {
                 "text/x-raffi-test"
@@ -327,22 +345,32 @@ mod tests {
                 restoration,
                 ..Hyprland::test_target()
             };
-            let value = "--a snippet with 'quotes'\nand Unicode: café";
-            let mut command = shell(
-                r#"
-test "$#" = 5 &&
-test "$1" = --sensitive &&
-test "$2" = --type &&
-test "$3" = "$EXPECTED_MIME" &&
-test "$4" = -- &&
-test "$5" = "$EXPECTED_VALUE"
+            // wl-clipboard before 2.3 rejects --sensitive.
+            for old_wl_copy in [false, true] {
+                let wl_copy = || {
+                    let mut command = shell(
+                        r#"
+if [ "$1" = --sensitive ] && [ -n "$OLD" ]; then exit 1; fi
+printf '%s|' "$@" > "$OUT"
 "#,
-            );
-            command
-                .env("EXPECTED_MIME", mime)
-                .env("EXPECTED_VALUE", value);
-            target.publish(command, value).unwrap();
+                    );
+                    command.env("OUT", &out);
+                    if old_wl_copy {
+                        command.env("OLD", "1");
+                    }
+                    command
+                };
+                target.publish(wl_copy, value).unwrap();
+                let sensitive = if old_wl_copy { "" } else { "--sensitive|" };
+                assert_eq!(
+                    std::fs::read_to_string(&out).unwrap(),
+                    format!("{sensitive}--type|{mime}|--|{value}|")
+                );
+            }
         }
+        let target = Hyprland::test_target();
+        assert!(target.publish(|| shell("exit 1"), value).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

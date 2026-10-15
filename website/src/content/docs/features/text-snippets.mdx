@@ -424,8 +424,8 @@ Configure how snippets are used when selected:
 </Tabs>
 
 When Raffi runs inside Hyprland and a source has no `action`, Enter uses
-`hypr_paste`. If Raffi finds no window to paste into when it opens, Enter keeps
-the `copy` default. Set `action: "copy"` to keep copying on Hyprland.
+`hypr_paste`. If Raffi finds no window to paste into when it opens, or
+Hyprland is older than 0.55, Enter keeps the `copy` default. Set `action: "copy"` to keep copying on Hyprland.
 
 `hypr_paste` requires Hyprland's Lua API (0.55 or later), `hyprctl`, and
 `wl-clipboard`. Run Raffi inside the Hyprland session so it inherits
@@ -437,6 +437,7 @@ terminals by their window class; add others with
 
 Snippet copies are marked sensitive so clipboard managers that honor this
 hint, including CopyQ with its default settings, keep them out of history.
+The hint needs wl-clipboard 2.3 or later; older versions paste without it.
 This applies whether clipboard restoration is enabled or not. Ordinary `copy`
 actions and restored clipboard text are not marked sensitive. Existing history
 entries are not removed.
