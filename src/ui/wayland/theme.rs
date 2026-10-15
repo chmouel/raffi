@@ -17,8 +17,6 @@ pub(super) struct PreviewStyle {
     pub icon: f32,
     /// Width of the metadata key column.
     pub key_width: f32,
-    /// Max height for image previews.
-    pub image_height: f32,
     /// Pane width as a portion of the window, 0.1..=0.8.
     pub width_fraction: f32,
     pub font: iced::Font,
@@ -74,7 +72,6 @@ impl PreviewStyle {
             hero_value: (base * 2.2).round(),
             icon: (base * 3.0).round(),
             key_width: (base * 7.0).round(),
-            image_height: (base * 14.0).round(),
             width_fraction: width_percent / 100.0,
             font,
             mono_font,

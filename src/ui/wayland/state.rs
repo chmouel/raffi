@@ -197,6 +197,8 @@ pub(super) struct ViewState {
     pub show_preview: bool,
     pub show_launcher_preview: bool,
     pub preview_style: PreviewStyle,
+    /// Live window size, updated on resize events, used to size image previews.
+    pub window_size: iced::Size,
     pub default_script_shell: String,
 }
 
@@ -210,6 +212,7 @@ impl ViewState {
             generation: 0,
             current_modifiers: iced::keyboard::Modifiers::empty(),
             preview_style: PreviewStyle::resolve(&theme, &crate::PreviewConfig::default()),
+            window_size: iced::Size::new(800.0, 600.0),
             theme,
             font_sizes,
             help_active: false,

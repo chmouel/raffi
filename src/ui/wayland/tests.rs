@@ -1187,12 +1187,86 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
 
     assert_eq!(
         triggers,
-        vec!["~/", "gist", "sn", "emoji", "gh", "math", "$"]
+        vec![
+            "~/",
+            "gist",
+            "sn",
+            "emoji",
+            "gh",
+            "math",
+            "$",
+            "↑/↓",
+            "Ctrl+J",
+            "Ctrl+K",
+            "Ctrl+P",
+            "Ctrl+H",
+            "Alt+P/N",
+            "Tab",
+            "Ctrl+/",
+            "Esc",
+            "Enter",
+            "Ctrl+Enter"
+        ]
     );
     assert_eq!(entries[1].icon.as_deref(), Some("gist-icon"));
     assert_eq!(entries[1].completion.as_deref(), Some("gist "));
     assert_eq!(entries[0].completion.as_deref(), Some("~/"));
     assert_eq!(entries[5].completion, None);
+    // Shortcut rows are informational: they never arm a keyword.
+    for entry in entries.iter().skip(7) {
+        assert_eq!(entry.completion, None);
+    }
+}
+
+#[test]
+fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
+    let mut addons = AddonsConfig::default();
+    addons.emoji.enabled = false;
+    addons.calculator.enabled = false;
+    addons.currency.enabled = false;
+    addons.file_browser.enabled = false;
+    let entries = help_entries(&addons);
+
+    // With every addon disabled only the shortcut rows remain.
+    let triggers: Vec<&str> = entries.iter().map(|entry| entry.trigger.as_str()).collect();
+    assert_eq!(
+        triggers,
+        vec![
+            "↑/↓",
+            "Ctrl+J",
+            "Ctrl+K",
+            "Ctrl+P",
+            "Ctrl+H",
+            "Alt+P/N",
+            "Tab",
+            "Ctrl+/",
+            "Esc",
+            "Enter",
+            "Ctrl+Enter"
+        ]
+    );
+
+    let by_ctrl: Vec<&str> = filter_help_entries(&entries, "ctrl")
+        .into_iter()
+        .map(|index| entries[index].trigger.as_str())
+        .collect();
+    assert_eq!(
+        by_ctrl,
+        vec![
+            "Ctrl+J",
+            "Ctrl+K",
+            "Ctrl+P",
+            "Ctrl+H",
+            "Ctrl+/",
+            "Ctrl+Enter"
+        ]
+    );
+
+    let by_scroll: Vec<&str> = filter_help_entries(&entries, "scroll")
+        .into_iter()
+        .map(|index| entries[index].trigger.as_str())
+        .collect();
+    assert_eq!(by_scroll, vec!["Ctrl+J", "Ctrl+K"]);
 }
 
 #[test]
@@ -1203,7 +1277,10 @@ fn test_help_entries_skip_disabled_addons() {
     addons.currency.enabled = false;
     addons.file_browser.enabled = false;
 
-    assert!(help_entries(&addons).is_empty());
+    // Disabled addons drop their keyword rows; the keyboard shortcut rows stay.
+    let entries = help_entries(&addons);
+    assert!(entries.iter().all(|entry| entry.completion.is_none()));
+    assert_eq!(entries.len(), 11);
 }
 
 #[test]
@@ -1319,6 +1396,46 @@ fn test_help_closes_on_toggle_and_cancel() {
     assert!(app.view.help_active);
     let _ = app.update(Message::Cancel);
     assert!(!app.view.help_active);
+}
+
+#[test]
+fn test_preview_scroll_messages_leave_state_unchanged() {
+    let mut app = test_app(AddonsConfig::default());
+    app.calculator_result = Some(super::types::CalculatorResult {
+        expression: "1+1".into(),
+        result: 2.0,
+    });
+    assert!(app.view.show_preview);
+
+    // Scrolling with the pane visible must not change any app state.
+    let _ = app.update(Message::PreviewScrollDown);
+    let _ = app.update(Message::PreviewScrollUp);
+    assert_eq!(app.selected_index, 0);
+    assert!(app.view.show_preview);
+    assert!(app.resolve_selected_preview().is_some());
+
+    // With the pane hidden the handlers are no-ops, not panics.
+    app.view.show_preview = false;
+    let _ = app.update(Message::PreviewScrollDown);
+    let _ = app.update(Message::PreviewScrollUp);
+    assert!(!app.view.show_preview);
+    assert_eq!(app.selected_index, 0);
+}
+
+#[test]
+fn test_window_resize_updates_preview_sizing() {
+    let mut app = test_app(AddonsConfig::default());
+    assert_eq!(app.view.window_size, iced::Size::new(800.0, 600.0));
+    // Default-font chrome is 178px, so a 600px window leaves a 422px viewport.
+    assert_eq!(app.preview_viewport_height(), 422.0);
+
+    // Resizing the window grows the full-pane image preview with it.
+    let _ = app.update(Message::WindowResized(iced::Size::new(1200.0, 900.0)));
+    assert_eq!(app.view.window_size.width, 1200.0);
+    assert_eq!(app.preview_viewport_height(), 722.0);
+
+    let _ = app.update(Message::WindowResized(iced::Size::new(800.0, 400.0)));
+    assert_eq!(app.preview_viewport_height(), 222.0);
 }
 
 #[test]

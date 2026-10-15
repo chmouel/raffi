@@ -129,6 +129,7 @@ fn run_wayland_ui(
             app.view.show_preview = show_preview.unwrap_or(true);
             app.view.show_launcher_preview = show_preview == Some(true);
             app.view.preview_style = preview_style.clone();
+            app.view.window_size = iced::Size::new(window_width, window_height);
             app.view.default_script_shell = default_script_shell.clone();
             app.hyprland = hyprland.clone();
             app.deferred_paste = deferred_paste_for_new.clone();

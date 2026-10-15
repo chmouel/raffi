@@ -5,8 +5,8 @@ use std::process::{Command, Stdio};
 
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
-use iced::widget::operation::{focus, move_cursor_to_end, snap_to};
-use iced::widget::scrollable;
+use iced::widget::operation::{focus, move_cursor_to_end, scroll_by, snap_to};
+use iced::widget::scrollable::{self, AbsoluteOffset};
 use iced::Task;
 
 use super::actions::{execute_action, execute_snippet_action, spawn_copy};
@@ -51,6 +51,9 @@ pub(super) enum QueryMode {
     WebSearch { config_index: usize, query: String },
     Standard,
 }
+
+/// Pixels scrolled per Ctrl+J / Ctrl+K press in the preview pane.
+const PREVIEW_SCROLL_STEP: f32 = 120.0;
 
 /// Match `keyword` followed by a space and return the remaining query.
 ///
@@ -409,6 +412,12 @@ impl LauncherApp {
                 if self.view.show_preview {
                     self.refresh_file_preview_cache();
                 }
+                Task::none()
+            }
+            Message::PreviewScrollDown => self.scroll_preview(PREVIEW_SCROLL_STEP),
+            Message::PreviewScrollUp => self.scroll_preview(-PREVIEW_SCROLL_STEP),
+            Message::WindowResized(size) => {
+                self.view.window_size = size;
                 Task::none()
             }
             Message::HelpEntrySelected(index) => self.handle_help_entry_selected(index),
@@ -904,6 +913,18 @@ impl LauncherApp {
                 icon: config.icon.clone(),
             });
         }
+    }
+
+    /// Scroll the preview pane by `delta` pixels (negative scrolls up).
+    /// A no-op when the pane is hidden; `scroll_by` clamps at the pane bounds.
+    fn scroll_preview(&self, delta: f32) -> Task<Message> {
+        if !self.view.show_preview {
+            return Task::none();
+        }
+        scroll_by(
+            self.view.preview_scrollable_id.clone(),
+            AbsoluteOffset { x: 0.0, y: delta },
+        )
     }
 
     fn move_selection(&mut self, delta: isize) -> Task<Message> {

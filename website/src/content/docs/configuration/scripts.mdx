@@ -4,6 +4,8 @@ description: Execute inline scripts with bash, python, or custom interpreters
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import launcherScriptScreenshot from '../../../assets/screenshots/launcher-script-preview.png';
 
 ## Overview
 
@@ -13,6 +15,8 @@ Raffi entries can execute inline scripts instead of launching binaries directly.
 - Executing Python/Ruby/Perl code
 - Chaining multiple commands
 - Setting up environments before launching applications
+
+<Image src={launcherScriptScreenshot} alt="Launcher script source and interpreter shown in the preview pane" width={800} />
 
 ## Script Configuration
 

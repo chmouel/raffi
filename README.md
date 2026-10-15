@@ -32,7 +32,7 @@ Useful entry points:
 
 ## Screenshot
 
-![image](https://github.com/chmouel/raffi/assets/98980/04d6af0f-2a80-47d5-a2ec-95443a629305)
+![Raffi native launcher with right-hand preview pane](website/src/assets/screenshots/main.png)
 
 *See more screenshots [below](#screenshots)*
 
@@ -115,7 +115,8 @@ Raffi supports two interface modes:
 - **Fuzzel** — uses the external Fuzzel launcher, integrates naturally with Wayland environments.
 - **Native** — built-in iced-based GUI with fuzzy search, keyboard navigation, and theme support.
 
-The native interface includes built-in addons: calculator, currency converter, file browser, emoji/Nerd Fonts picker, script filters, web searches, and text snippets, along with an Alfred-style right-hand preview pane (**Ctrl+P** to toggle). Press **Ctrl+/** to list every keyword and trigger you have configured.
+The native interface includes built-in addons: calculator, currency converter, file browser, emoji/Nerd Fonts picker, script filters, web searches, and text snippets, along with an Alfred-style right-hand preview pane (**Ctrl+P** to toggle).
+Press **Ctrl+/** to list every keyword, trigger and keyboard shortcut available as configured.
 
 See: [UI modes](https://chmouel.github.io/raffi/features/ui-modes/) · [Themes](https://chmouel.github.io/raffi/features/themes/) · [Calculator](https://chmouel.github.io/raffi/features/calculator/) · [Currency converter](https://chmouel.github.io/raffi/features/currency-converter/) · [File browser](https://chmouel.github.io/raffi/features/file-browser/) · [Script filters](https://chmouel.github.io/raffi/features/script-filters/) · [Web search](https://chmouel.github.io/raffi/features/web-search/) · [Text snippets](https://chmouel.github.io/raffi/features/text-snippets/)
 
@@ -160,29 +161,42 @@ pre-commit install
 
 ## Screenshots
 
-### File Browser (`/`)
+All screenshots below were captured on an empty Hyprland workspace using a synthetic Raffi configuration and sample data.
 
-<img width="321" height="224" alt="optimized-file-browse" src="https://github.com/user-attachments/assets/bbfbe937-c590-43c9-8853-9aaf786a3dc6" />
+### Interface Modes
 
-### Currency Converter (`$`)
+<p><img width="800" alt="Fuzzel dmenu mode populated by Raffi launchers" src="website/src/assets/screenshots/fuzzel-mode.png" /></p>
+<p><img width="800" alt="Native launcher with application preview" src="website/src/assets/screenshots/main.png" /></p>
+<p><img width="800" alt="Calculator with expression preview and number bases" src="website/src/assets/screenshots/calculator.png" /></p>
+<p><img width="800" alt="Currency converter with multi-currency preview" src="website/src/assets/screenshots/currency-converter.png" /></p>
+<p><img width="800" alt="File browser with directory preview" src="website/src/assets/screenshots/file-browser.png" /></p>
+<p><img width="800" alt="File browser source code preview" src="website/src/assets/screenshots/file-browser-code-preview.png" /></p>
+<p><img width="800" alt="File browser image preview" src="website/src/assets/screenshots/file-browser-image-preview.png" /></p>
+<p><img width="800" alt="File browser image preview scrolled to file details" src="website/src/assets/screenshots/file-browser-image-scrolled.png" /></p>
+<p><img width="800" alt="File browser showing hidden files" src="website/src/assets/screenshots/file-browser-hidden.png" /></p>
+<p><img width="800" alt="Text snippets with expanded content preview" src="website/src/assets/screenshots/text-snippets.png" /></p>
+<p><img width="800" alt="Text snippet with expanded dynamic placeholders and raw template" src="website/src/assets/screenshots/text-snippets-placeholders.png" /></p>
+<p><img width="800" alt="Emoji picker with Unicode and glyph preview" src="website/src/assets/screenshots/emoji-picker.png" /></p>
+<p><img width="800" alt="Web search with resolved URL preview" src="website/src/assets/screenshots/web-search.png" /></p>
+<p><img width="800" alt="Configured fallback search results and preview" src="website/src/assets/screenshots/fallbacks.png" /></p>
 
-<img width="522" height="150" alt="image" src="https://github.com/user-attachments/assets/aaf35e3f-1cef-4604-b87a-ecfa626300c1" />
+### Search, Help, and Scripts
 
-## Calculator
+<p><img width="800" alt="Keyword suggestion while typing" src="website/src/assets/screenshots/keyword-suggestion.png" /></p>
+<p><img width="800" alt="Keyword and shortcut help list" src="website/src/assets/screenshots/keyword-help.png" /></p>
+<p><img width="800" alt="Keyboard shortcut help filtered to Ctrl shortcuts" src="website/src/assets/screenshots/keyword-help-shortcuts.png" /></p>
+<p><img width="800" alt="Inline launcher script shown in the preview pane" src="website/src/assets/screenshots/launcher-script-preview.png" /></p>
+<p><img width="800" alt="Timezone script filter with ANSI-formatted preview" src="website/src/assets/screenshots/script-filter-tz.png" /></p>
+<p><img width="800" alt="Pull request script filter with CI status and details" src="website/src/assets/screenshots/script-filter-pr.png" /></p>
 
-<img width="522" height="150" alt="image" src="https://github.com/user-attachments/assets/eb7069c9-21f7-413d-b455-c2db186591d5" />
+### Themes
 
-### Script Filter with github PR browser
-
-<img width="441" height="559" alt="optimized-pull-requests-dashboard" src="https://github.com/user-attachments/assets/48da3b90-b8dd-4f4d-8465-3ae27fe267c3" />
-
-### Script Filter with timezone converter
-
-<img width="522" height="400" alt="image" src="https://github.com/user-attachments/assets/f65acf34-b499-477d-9952-48590723d5bb" />
-
-### Light Theme
-
-<img width="403" height="473" alt="suspend-to-sleep-then-hibernate" src="https://github.com/user-attachments/assets/9c6549dc-be51-422d-9b82-5dbbb89779b6" />
+<p><img width="800" alt="Built-in light theme" src="website/src/assets/screenshots/light-theme.png" /></p>
+<p><img width="800" alt="Catppuccin Mocha theme" src="website/src/assets/screenshots/theme-catppuccin.png" /></p>
+<p><img width="800" alt="Nord theme" src="website/src/assets/screenshots/theme-nord.png" /></p>
+<p><img width="800" alt="Gruvbox Dark theme" src="website/src/assets/screenshots/theme-gruvbox.png" /></p>
+<p><img width="800" alt="Solarized Light theme" src="website/src/assets/screenshots/theme-solarized-light.png" /></p>
+<p><img width="800" alt="Tokyo Night theme" src="website/src/assets/screenshots/theme-tokyonight.png" /></p>
 
 ## Licence
 
