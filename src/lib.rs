@@ -3499,17 +3499,15 @@ Icon=firefox
         std::env::set_var("XDG_CACHE_HOME", &cache_root);
         std::env::set_current_dir(&cwd).unwrap();
 
-        let result = (|| {
-            let resolved = default_icon_path(&HashMap::new()).unwrap();
-            let resolved_path = PathBuf::from(&resolved);
+        let resolved = default_icon_path(&HashMap::new()).unwrap();
+        let resolved_path = PathBuf::from(&resolved);
 
-            assert!(resolved_path.exists());
-            assert_eq!(
-                resolved_path.file_name().and_then(|name| name.to_str()),
-                Some("default_icon.svg")
-            );
-            assert_eq!(fs::read(&resolved_path).unwrap(), DEFAULT_ICON_BYTES);
-        })();
+        assert!(resolved_path.exists());
+        assert_eq!(
+            resolved_path.file_name().and_then(|name| name.to_str()),
+            Some("default_icon.svg")
+        );
+        assert_eq!(fs::read(&resolved_path).unwrap(), DEFAULT_ICON_BYTES);
 
         std::env::set_current_dir(previous_cwd).unwrap();
         match previous_cache_home {
@@ -3519,8 +3517,6 @@ Icon=firefox
 
         let _ = fs::remove_dir_all(cache_root);
         let _ = fs::remove_dir_all(cwd);
-
-        result
     }
 
     #[cfg(feature = "config-validation")]
