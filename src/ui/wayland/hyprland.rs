@@ -296,6 +296,97 @@ impl Hyprland {
     }
 }
 
+fn valid_address(address: &str) -> bool {
+    address.strip_prefix("0x").is_some_and(|digits| {
+        !digits.is_empty()
+            && digits.bytes().all(|b| b.is_ascii_hexdigit())
+            && digits.bytes().any(|b| b != b'0')
+    })
+}
+
+fn checked_reply(output: &[u8]) -> Result<(), String> {
+    let reply = String::from_utf8_lossy(output);
+    if reply.trim() == "ok" {
+        Ok(())
+    } else {
+        Err(format!(
+            "Hyprland rejected the paste operation: {}",
+            reply.trim()
+        ))
+    }
+}
+
+fn wait_for_focus(
+    events: UnixStream,
+    address: &str,
+    focused: bool,
+    deadline: Instant,
+) -> Result<(), String> {
+    if focused {
+        return Ok(());
+    }
+    let mut reader = BufReader::new(events);
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err("timed out waiting for the original window to regain focus".into());
+        }
+        reader
+            .get_ref()
+            .set_read_timeout(Some(remaining))
+            .map_err(|error| format!("cannot watch Hyprland focus: {error}"))?;
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) => {
+                return Err("Hyprland disconnected before the paste target regained focus".into())
+            }
+            Ok(_) => {
+                if let Some(event) = line.trim().strip_prefix("activewindowv2>>") {
+                    if event.trim_start_matches("0x") == address.trim_start_matches("0x") {
+                        return Ok(());
+                    }
+                }
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                ) =>
+            {
+                return Err("timed out waiting for the original window to regain focus".into());
+            }
+            Err(error) => return Err(format!("cannot watch Hyprland focus: {error}")),
+        }
+    }
+}
+
+fn wait_status(mut command: Command, timeout: Duration) -> Result<(), String> {
+    // wl-copy's serving child outlives its parent; do not wait for pipe EOF.
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()
+        .map_err(|error| format!("cannot start: {error}"))?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return Ok(()),
+            Ok(Some(status)) => return Err(format!("exited with {status}")),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            outcome => {
+                kill_process_group(child.id());
+                let _ = child.wait();
+                return Err(match outcome {
+                    Err(error) => format!("cannot wait: {error}"),
+                    _ => "timed out setting the clipboard".into(),
+                });
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -568,96 +659,5 @@ fi
             .unwrap_err()
             .contains("exited"));
         std::fs::remove_dir_all(dir).unwrap();
-    }
-}
-
-fn valid_address(address: &str) -> bool {
-    address.strip_prefix("0x").is_some_and(|digits| {
-        !digits.is_empty()
-            && digits.bytes().all(|b| b.is_ascii_hexdigit())
-            && digits.bytes().any(|b| b != b'0')
-    })
-}
-
-fn checked_reply(output: &[u8]) -> Result<(), String> {
-    let reply = String::from_utf8_lossy(output);
-    if reply.trim() == "ok" {
-        Ok(())
-    } else {
-        Err(format!(
-            "Hyprland rejected the paste operation: {}",
-            reply.trim()
-        ))
-    }
-}
-
-fn wait_for_focus(
-    events: UnixStream,
-    address: &str,
-    focused: bool,
-    deadline: Instant,
-) -> Result<(), String> {
-    if focused {
-        return Ok(());
-    }
-    let mut reader = BufReader::new(events);
-    loop {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return Err("timed out waiting for the original window to regain focus".into());
-        }
-        reader
-            .get_ref()
-            .set_read_timeout(Some(remaining))
-            .map_err(|error| format!("cannot watch Hyprland focus: {error}"))?;
-        let mut line = String::new();
-        match reader.read_line(&mut line) {
-            Ok(0) => {
-                return Err("Hyprland disconnected before the paste target regained focus".into())
-            }
-            Ok(_) => {
-                if let Some(event) = line.trim().strip_prefix("activewindowv2>>") {
-                    if event.trim_start_matches("0x") == address.trim_start_matches("0x") {
-                        return Ok(());
-                    }
-                }
-            }
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-                ) =>
-            {
-                return Err("timed out waiting for the original window to regain focus".into());
-            }
-            Err(error) => return Err(format!("cannot watch Hyprland focus: {error}")),
-        }
-    }
-}
-
-fn wait_status(mut command: Command, timeout: Duration) -> Result<(), String> {
-    // wl-copy's serving child outlives its parent; do not wait for pipe EOF.
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .process_group(0)
-        .spawn()
-        .map_err(|error| format!("cannot start: {error}"))?;
-    let deadline = Instant::now() + timeout;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => return Ok(()),
-            Ok(Some(status)) => return Err(format!("exited with {status}")),
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
-            outcome => {
-                kill_process_group(child.id());
-                let _ = child.wait();
-                return Err(match outcome {
-                    Err(error) => format!("cannot wait: {error}"),
-                    _ => "timed out setting the clipboard".into(),
-                });
-            }
-        }
     }
 }
