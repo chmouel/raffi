@@ -461,6 +461,19 @@ test "$5" = "$EXPECTED_VALUE"
         );
     }
 
+    /// Another test thread forking while a script is being written makes running
+    /// it fail with ETXTBSY until that child execs; wait for this to clear.
+    fn wait_until_runnable(program: &std::path::Path) {
+        for _ in 0..200 {
+            match Command::new(program).output() {
+                Err(error) if error.raw_os_error() == Some(26) => {
+                    std::thread::sleep(Duration::from_millis(5))
+                }
+                _ => return,
+            }
+        }
+    }
+
     #[test]
     fn test_paste_dispatch_is_targeted_and_checks_reply() {
         let dir = std::env::temp_dir().join(format!("raffi-hypr-{}", std::process::id()));
@@ -484,6 +497,7 @@ fi
         );
         std::fs::write(&program, script).unwrap();
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        wait_until_runnable(&program);
         let target = Hyprland {
             socket_dir: dir.clone(),
             program: program.clone(),
@@ -495,6 +509,7 @@ fi
 
         std::fs::remove_file(&called).unwrap();
         std::fs::write(&program, "#!/bin/sh\nif [ \"$3\" = -j ]; then printf '%s' '{\"address\":\"0x999\"}'; else exit 9; fi\n").unwrap();
+        wait_until_runnable(&program);
         let mut target = target.clone();
         // Drop all pending event connections, then close the next connection.
         while let Ok((stream, _)) = {
