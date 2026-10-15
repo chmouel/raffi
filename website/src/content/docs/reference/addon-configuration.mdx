@@ -631,7 +631,8 @@ Action to perform on Enter.
 - `copy` - Copy to clipboard via `wl-copy`/`xclip`/`xsel` (default)
 - `insert` - Type into focused app via `wtype`/`ydotool`
 - `hypr_paste` - On Hyprland, copy with `wl-copy`, close Raffi, wait for the
-  original window to regain focus, and send Ctrl+V to that window. Requires
+  original window to regain focus, and send Ctrl+V to that window (Ctrl+Shift+V
+  for terminals, see `general.terminal_classes`). Requires
   Hyprland's Lua API, `hyprctl`, and `wl-clipboard`. Leaves the snippet on the
   clipboard unless `restore_clipboard` is enabled; does not reposition
   `{cursor}`. Marks the snippet sensitive so CopyQ and other clipboard managers

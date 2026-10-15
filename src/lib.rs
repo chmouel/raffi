@@ -305,6 +305,10 @@ pub struct GeneralConfig {
     /// Clipboard manager for `{clipboard:N}` snippet placeholders
     #[serde(default)]
     pub clipboard_history: ClipboardHistory,
+    /// Extra window classes treated as terminals by `hypr_paste` (sent Ctrl+Shift+V
+    /// instead of Ctrl+V). Added to the built-in list; matched case-insensitively.
+    #[serde(default)]
+    pub terminal_classes: Vec<String>,
 }
 
 /// Complete parsed configuration
@@ -1847,6 +1851,7 @@ pub fn run(args: Args) -> Result<()> {
         sort_mode: general.sort_mode.clone(),
         fallbacks: general.fallbacks.clone(),
         clipboard_history: general.clipboard_history,
+        terminal_classes: general.terminal_classes.clone(),
     };
 
     debug_log!(

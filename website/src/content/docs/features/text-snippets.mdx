@@ -415,8 +415,8 @@ Configure how snippets are used when selected:
     restore_clipboard: true
     ```
     Copies the expanded snippet with `wl-copy`, closes Raffi, waits for the
-    original window to regain focus, and sends Ctrl+V directly to that window
-    through Hyprland. This avoids typing long snippets character by character.
+    original window to regain focus, and sends the paste shortcut directly to
+    that window through Hyprland: Ctrl+V, or Ctrl+Shift+V in terminals. This avoids typing long snippets character by character.
   </TabItem>
 </Tabs>
 
@@ -424,7 +424,9 @@ Configure how snippets are used when selected:
 `wl-clipboard`. Run Raffi inside the Hyprland session so it inherits
 `HYPRLAND_INSTANCE_SIGNATURE` and `XDG_RUNTIME_DIR`. It works with either
 `action` or `secondary_action` on a text snippet source. The receiving app
-must accept Ctrl+V; terminals often use a different shortcut.
+must accept Ctrl+V, or Ctrl+Shift+V for terminals. Raffi recognises common
+terminals by their window class; add others with
+[`general.terminal_classes`](/configuration/general-settings/).
 
 Snippet copies are marked sensitive so clipboard managers that honor this
 hint, including CopyQ with its default settings, keep them out of history.

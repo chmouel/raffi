@@ -80,6 +80,16 @@ Clipboard manager used by `{clipboard:N}` in [text snippets](/features/text-snip
 
   `{clipboard}` reads the current clipboard with `wl-paste`, `xclip` or `xsel` and does not depend on this setting.
 
+**`terminal_classes`** `list of strings` (default: `[]`)
+
+Extra window classes that the [`hypr_paste`](/features/text-snippets/#default-actions) snippet action treats as terminals. Terminals get Ctrl+Shift+V instead of Ctrl+V. The list is added to the built-in one, which covers Alacritty, foot, kitty, Ghostty, WezTerm, GNOME Terminal, GNOME Console, Ptyxis, Konsole, Tilix, Terminator, Xfce Terminal, Rio and st. Classes are matched case-insensitively. Run `hyprctl activewindow` in your terminal to find its class.
+
+```yaml
+general:
+  terminal_classes:
+    - my-terminal
+```
+
 
 ## Fallbacks
 
@@ -233,7 +243,7 @@ general:
 ## Command-Line Override
 
 The following general settings can be overridden with command-line flags.
-`clipboard_history` has no flag and can only be set in the configuration file.
+`clipboard_history` and `terminal_classes` have no flag and can only be set in the configuration file.
 
 ```bash
 # Override UI type

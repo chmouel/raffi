@@ -83,6 +83,7 @@ pub struct UISettings {
     pub sort_mode: SortMode,
     pub fallbacks: Vec<String>,
     pub clipboard_history: ClipboardHistory,
+    pub terminal_classes: Vec<String>,
 }
 
 impl Default for UISettings {
@@ -100,6 +101,7 @@ impl Default for UISettings {
             sort_mode: SortMode::default(),
             fallbacks: Vec::new(),
             clipboard_history: ClipboardHistory::default(),
+            terminal_classes: Vec::new(),
         }
     }
 }
