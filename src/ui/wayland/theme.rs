@@ -34,7 +34,11 @@ impl PreviewStyle {
     pub const DEFAULT_WIDTH_PERCENT: f32 = 50.0;
 
     /// Build the preview style from the UI theme and the optional `general.preview` config.
-    pub fn resolve(theme: &ThemeColors, config: &PreviewConfig) -> Self {
+    pub fn resolve(
+        theme: &ThemeColors,
+        config: &PreviewConfig,
+        ui_font_family: Option<&str>,
+    ) -> Self {
         let base = config
             .font_size
             .filter(|size| size.is_finite() && *size > 0.0)
@@ -56,6 +60,7 @@ impl PreviewStyle {
         let font = config
             .font_family
             .as_deref()
+            .or(ui_font_family)
             .map(leaked_font)
             .unwrap_or_default();
         let mono_font = config

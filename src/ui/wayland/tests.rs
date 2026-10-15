@@ -1401,10 +1401,12 @@ fn test_help_closes_on_toggle_and_cancel() {
 #[test]
 fn test_preview_scroll_messages_leave_state_unchanged() {
     let mut app = test_app(AddonsConfig::default());
+    super::configure_preview_visibility(&mut app.view, Some(false));
     app.calculator_result = Some(super::types::CalculatorResult {
         expression: "1+1".into(),
         result: 2.0,
     });
+    assert!(!app.view.show_launcher_preview);
     assert!(app.view.show_preview);
 
     // Scrolling with the pane visible must not change any app state.
@@ -1491,6 +1493,9 @@ fn test_launcher_preview_is_opt_in() {
         SortMode::Hybrid,
         Vec::new(),
     );
+    super::configure_preview_visibility(&mut app.view, Some(false));
+    assert!(app.view.show_preview);
+    assert!(!app.view.show_launcher_preview);
 
     // Plain launchers show nothing unless explicitly enabled.
     assert!(app.resolve_selected_preview().is_none());
@@ -1524,14 +1529,22 @@ fn test_preview_style_resolves_defaults_and_overrides() {
     use super::theme::PreviewStyle;
     let theme = ThemeColors::from_mode_with_overrides(&crate::ThemeMode::Dark, None);
 
-    let default_style = PreviewStyle::resolve(&theme, &crate::PreviewConfig::default());
+    let default_style = PreviewStyle::resolve(&theme, &crate::PreviewConfig::default(), None);
     assert_eq!(default_style.text, PreviewStyle::DEFAULT_FONT_SIZE);
     assert_eq!(default_style.width_fraction, 0.5);
     assert_eq!(default_style.accent, theme.accent);
 
+    let inherited_font_style =
+        PreviewStyle::resolve(&theme, &crate::PreviewConfig::default(), Some("UI Font"));
+    assert!(matches!(
+        inherited_font_style.font.family,
+        iced::font::Family::Name("UI Font")
+    ));
+
     let config = crate::PreviewConfig {
         font_size: Some(20.0),
         width_percent: Some(95.0),
+        font_family: Some("Preview Font".into()),
         colors: Some(crate::PreviewColorsConfig {
             accent: Some("#ff0000".into()),
             bg: Some("#00000080".into()),
@@ -1539,7 +1552,11 @@ fn test_preview_style_resolves_defaults_and_overrides() {
         }),
         ..Default::default()
     };
-    let style = PreviewStyle::resolve(&theme, &config);
+    let style = PreviewStyle::resolve(&theme, &config, Some("UI Font"));
+    assert!(matches!(
+        style.font.family,
+        iced::font::Family::Name("Preview Font")
+    ));
     assert_eq!(style.text, 20.0);
     assert_eq!(style.title, 28.0);
     assert_eq!(style.width_fraction, 0.8); // clamped
