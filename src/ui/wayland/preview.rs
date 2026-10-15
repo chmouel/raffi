@@ -333,6 +333,10 @@ impl LauncherApp {
     /// Refresh the cached file preview whenever the selected File Browser item or
     /// Script Filter QuickLook file changes.
     pub(super) fn refresh_file_preview_cache(&mut self) {
+        if !self.view.show_preview {
+            self.file_browser.cached_preview = None;
+            return;
+        }
         if let Some((path, show_hidden)) = self.selected_file_to_inspect() {
             let needs_update = self
                 .file_browser

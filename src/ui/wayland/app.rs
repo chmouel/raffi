@@ -409,9 +409,7 @@ impl LauncherApp {
                         self.view.show_launcher_preview = true;
                     }
                 }
-                if self.view.show_preview {
-                    self.refresh_file_preview_cache();
-                }
+                self.refresh_file_preview_cache();
                 Task::none()
             }
             Message::PreviewScrollDown => self.scroll_preview(PREVIEW_SCROLL_STEP),
