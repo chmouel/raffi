@@ -49,6 +49,48 @@ fn test_app_with_fallbacks(addons: AddonsConfig, fallback_paths: Vec<String>) ->
     app
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn test_preview_script_filter_reads_virtual_file_with_zero_reported_size() {
+    let path = std::path::Path::new("/proc/cpuinfo");
+    let Ok(meta) = std::fs::metadata(path) else {
+        return;
+    };
+    if !meta.is_file() || meta.len() != 0 {
+        return;
+    }
+
+    let mut app = test_app(AddonsConfig::default());
+    app.script_filter.results = Some(ScriptFilterResult {
+        default_icon: None,
+        items: vec![ScriptFilterItem {
+            title: "CPU info".into(),
+            subtitle: None,
+            arg: None,
+            icon: None,
+            preview: None,
+            quicklookurl: Some("file:///proc/cpuinfo".into()),
+            text: None,
+        }],
+    });
+
+    let preview = app
+        .resolve_selected_preview()
+        .expect("expected Script Filter preview");
+    assert!(preview
+        .metadata
+        .iter()
+        .any(|(k, v)| k == "Type" && v == "Text file"));
+    assert!(preview.bodies.iter().any(|body| matches!(
+        body,
+        PreviewBody::Text {
+            heading: Some(heading),
+            content,
+            ..
+        } if heading == "Contents" && !content.is_empty()
+    )));
+}
+
 #[test]
 fn test_route_query_file_browser_precedence() {
     let mut addons = AddonsConfig::default();
@@ -1835,6 +1877,19 @@ fn test_inspect_path_text_binary_truncation_and_directory() {
     let dir = std::env::temp_dir().join(format!("raffi-preview-test-{unique}"));
     std::fs::create_dir_all(&dir).unwrap();
 
+    // Empty regular file
+    let empty_path = dir.join("empty.txt");
+    std::fs::write(&empty_path, "").unwrap();
+    let empty_inspected = inspect_path(empty_path.to_str().unwrap(), false);
+    assert!(empty_inspected
+        .metadata
+        .iter()
+        .any(|(k, v)| k == "Type" && v == "Empty file"));
+    assert!(empty_inspected.bodies.iter().any(|b| matches!(
+        b,
+        PreviewBody::Text { content, .. } if content == "(Empty file)"
+    )));
+
     // Text file
     let txt_path = dir.join("hello.txt");
     std::fs::write(&txt_path, "line 1\nline 2\n").unwrap();
@@ -1881,7 +1936,7 @@ fn test_inspect_path_text_binary_truncation_and_directory() {
     assert!(dir_inspected
         .bodies
         .iter()
-        .any(|b| matches!(b, PreviewBody::DirectoryList { total_count: 4, .. })));
+        .any(|b| matches!(b, PreviewBody::DirectoryList { total_count: 5, .. })));
 
     assert_eq!(format_byte_size(500), "500 B");
     assert_eq!(format_byte_size(2048), "2.0 KiB");

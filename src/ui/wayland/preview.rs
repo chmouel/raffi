@@ -178,17 +178,17 @@ pub(super) fn inspect_path(full_path: &str, show_hidden: bool) -> InspectedFile 
         });
     } else {
         metadata.push(("Size".to_string(), format_byte_size(meta.len())));
-        if is_previewable_image_path(path) {
+        if !meta.is_file() {
+            metadata.push(("Type".to_string(), "Special file".to_string()));
+            bodies.push(PreviewBody::Text {
+                heading: Some("Preview unavailable".to_string()),
+                content: "Special files cannot be previewed.".to_string(),
+                truncated: false,
+            });
+        } else if is_previewable_image_path(path) {
             metadata.push(("Type".to_string(), "Image".to_string()));
             bodies.push(PreviewBody::Image {
                 path: full_path.to_string(),
-            });
-        } else if meta.len() == 0 {
-            metadata.push(("Type".to_string(), "Empty file".to_string()));
-            bodies.push(PreviewBody::Text {
-                heading: Some("Contents".to_string()),
-                content: "(Empty file)".to_string(),
-                truncated: false,
             });
         } else if let Ok(file) = File::open(path) {
             let mut buf = Vec::with_capacity(MAX_FILE_PREVIEW_BYTES.min(meta.len() as usize) + 1);
@@ -196,50 +196,59 @@ pub(super) fn inspect_path(full_path: &str, show_hidden: bool) -> InspectedFile 
                 .take((MAX_FILE_PREVIEW_BYTES + 1) as u64)
                 .read_to_end(&mut buf);
             if read_res.is_ok() {
-                let byte_truncated = buf.len() > MAX_FILE_PREVIEW_BYTES;
-                let slice = if byte_truncated {
-                    &buf[..MAX_FILE_PREVIEW_BYTES]
-                } else {
-                    &buf[..]
-                };
-
-                if slice.contains(&0) {
-                    metadata.push(("Type".to_string(), "Binary file".to_string()));
+                if buf.is_empty() {
+                    metadata.push(("Type".to_string(), "Empty file".to_string()));
                     bodies.push(PreviewBody::Text {
-                        heading: Some("Binary File".to_string()),
-                        content: "Binary file preview is not shown.".to_string(),
+                        heading: Some("Contents".to_string()),
+                        content: "(Empty file)".to_string(),
                         truncated: false,
                     });
                 } else {
-                    // Trim incomplete trailing UTF-8 sequence if truncated mid-codepoint.
-                    let text_str = match std::str::from_utf8(slice) {
-                        Ok(s) => Some(s.to_string()),
-                        Err(err) if byte_truncated && err.error_len().is_none() => {
-                            let valid = &slice[..err.valid_up_to()];
-                            std::str::from_utf8(valid).ok().map(str::to_string)
-                        }
-                        Err(_) => None,
+                    let byte_truncated = buf.len() > MAX_FILE_PREVIEW_BYTES;
+                    let slice = if byte_truncated {
+                        &buf[..MAX_FILE_PREVIEW_BYTES]
+                    } else {
+                        &buf[..]
                     };
 
-                    if let Some(text_content) = text_str {
-                        metadata.push(("Type".to_string(), "Text file".to_string()));
-                        let mut lines: Vec<&str> = text_content.lines().collect();
-                        let line_truncated = lines.len() > MAX_FILE_PREVIEW_LINES;
-                        if line_truncated {
-                            lines.truncate(MAX_FILE_PREVIEW_LINES);
-                        }
-                        bodies.push(PreviewBody::Text {
-                            heading: Some("Contents".to_string()),
-                            content: lines.join("\n"),
-                            truncated: byte_truncated || line_truncated,
-                        });
-                    } else {
+                    if slice.contains(&0) {
                         metadata.push(("Type".to_string(), "Binary file".to_string()));
                         bodies.push(PreviewBody::Text {
                             heading: Some("Binary File".to_string()),
                             content: "Binary file preview is not shown.".to_string(),
                             truncated: false,
                         });
+                    } else {
+                        // Trim incomplete trailing UTF-8 sequence if truncated mid-codepoint.
+                        let text_str = match std::str::from_utf8(slice) {
+                            Ok(s) => Some(s.to_string()),
+                            Err(err) if byte_truncated && err.error_len().is_none() => {
+                                let valid = &slice[..err.valid_up_to()];
+                                std::str::from_utf8(valid).ok().map(str::to_string)
+                            }
+                            Err(_) => None,
+                        };
+
+                        if let Some(text_content) = text_str {
+                            metadata.push(("Type".to_string(), "Text file".to_string()));
+                            let mut lines: Vec<&str> = text_content.lines().collect();
+                            let line_truncated = lines.len() > MAX_FILE_PREVIEW_LINES;
+                            if line_truncated {
+                                lines.truncate(MAX_FILE_PREVIEW_LINES);
+                            }
+                            bodies.push(PreviewBody::Text {
+                                heading: Some("Contents".to_string()),
+                                content: lines.join("\n"),
+                                truncated: byte_truncated || line_truncated,
+                            });
+                        } else {
+                            metadata.push(("Type".to_string(), "Binary file".to_string()));
+                            bodies.push(PreviewBody::Text {
+                                heading: Some("Binary File".to_string()),
+                                content: "Binary file preview is not shown.".to_string(),
+                                truncated: false,
+                            });
+                        }
                     }
                 }
             }
