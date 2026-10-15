@@ -44,6 +44,11 @@ impl UI for WaylandUI {
     }
 }
 
+fn configure_preview_visibility(view: &mut state::ViewState, show_preview: Option<bool>) {
+    view.show_preview = true;
+    view.show_launcher_preview = show_preview == Some(true);
+}
+
 /// Run the Wayland UI with the provided configurations and return the selected item.
 fn run_wayland_ui(
     configs: &[RaffiConfig],
@@ -91,7 +96,11 @@ fn run_wayland_ui(
     let fallbacks = settings.fallbacks.clone();
     let clipboard_history = settings.clipboard_history;
     let show_preview = settings.show_preview;
-    let preview_style = theme::PreviewStyle::resolve(&theme_colors, &settings.preview);
+    let preview_style = theme::PreviewStyle::resolve(
+        &theme_colors,
+        &settings.preview,
+        settings.font_family.as_deref(),
+    );
     let default_script_shell = settings.default_script_shell.clone();
 
     let window_settings = window::Settings {
@@ -126,8 +135,7 @@ fn run_wayland_ui(
                 fallbacks.clone(),
             );
             app.text_snippets.clipboard_history = clipboard_history;
-            app.view.show_preview = show_preview.unwrap_or(true);
-            app.view.show_launcher_preview = show_preview == Some(true);
+            configure_preview_visibility(&mut app.view, show_preview);
             app.view.preview_style = preview_style.clone();
             app.view.window_size = iced::Size::new(window_width, window_height);
             app.view.default_script_shell = default_script_shell.clone();
