@@ -42,6 +42,59 @@ Disables icon loading for faster startup.
   Equivalent to `-I` or `--no-icons` flag.
 
 
+**`show_preview`** `boolean` (default: `false` for launchers, automatic for addons)
+
+Controls the Alfred-style right-hand preview and details pane in the native UI.
+
+  Addon results (text snippets, file browser, script filters, emoji, calculator, currency, web searches) always show a preview. Plain launcher entries only show one when this is `true`, or when the entry itself sets `show_preview: true`. Press **Ctrl+P** to toggle the pane at runtime; when nothing is shown for a launcher, the first press turns launcher previews on.
+
+
+## Preview Pane
+
+**`preview`** `object`
+
+Appearance of the right-hand preview pane. All fields are optional.
+
+**`preview.font_size`** `number` (default: `16`)
+
+Base text size in pixels. The title (1.4×), headings (0.8×), hero values (2.2×) and emoji glyphs (5×) scale from it.
+
+**`preview.font_family`** `string`
+
+Font family for the pane. Defaults to the UI font (`font_family`).
+
+**`preview.mono_font_family`** `string`
+
+Font family for code and text blocks (snippet content, scripts, file contents). Defaults to the system monospace font.
+
+**`preview.width_percent`** `number` (default: `50`)
+
+Share of the window width given to the pane, clamped to 10–80.
+
+**`preview.colors`** `object`
+
+Hex colour overrides (`#RGB`, `#RRGGBB`, or `#RRGGBBAA`). Unset colours come from the theme.
+
+- `bg` - pane background
+- `bg_block` - background of content blocks
+- `text_main` - title and body text
+- `text_muted` - subtitles, metadata keys
+- `accent` - headings, badges, hero values
+- `border` - pane and block borders
+
+```yaml
+general:
+  show_preview: true
+  preview:
+    font_size: 18
+    mono_font_family: "JetBrains Mono"
+    width_percent: 55
+    colors:
+      accent: "#cba6f7"
+      bg_block: "#1e1e2e"
+```
+
+
 **`default_script_shell`** `string` (default: `bash`)
 
 Default interpreter for inline scripts. Common values:

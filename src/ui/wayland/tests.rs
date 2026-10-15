@@ -1,11 +1,18 @@
 use super::app::{keyword_suggestions, route_query, QueryMode};
 use super::help::{filter_help_entries, help_entries};
 use super::placeholders::Expanded;
-use super::state::{ClipboardData, FallbackAction, KeywordSuggestion, LauncherApp, Message};
+use super::preview::{
+    format_byte_size, inspect_path, PreviewBody, MAX_FILE_PREVIEW_BYTES, MAX_FILE_PREVIEW_LINES,
+};
+use super::state::{
+    ClipboardData, CurrencyConversionRequest, CurrencyResult, EmojiEntry, FallbackAction,
+    KeywordSuggestion, LauncherApp, Message, ScriptFilterResult,
+};
 use super::theme::ThemeColors;
+use super::types::{ScriptFilterItem, ScriptFilterItemText};
 use crate::ui::FontSizes;
 use crate::{
-    AddonsConfig, ScriptFilterConfig, SortMode, TextSnippet, TextSnippetSourceConfig,
+    AddonsConfig, RaffiConfig, ScriptFilterConfig, SortMode, TextSnippet, TextSnippetSourceConfig,
     WebSearchConfig,
 };
 use std::sync::{Arc, Mutex};
@@ -1312,4 +1319,397 @@ fn test_help_closes_on_toggle_and_cancel() {
     assert!(app.view.help_active);
     let _ = app.update(Message::Cancel);
     assert!(!app.view.help_active);
+}
+
+#[test]
+fn test_toggle_preview_message() {
+    let mut app = test_app(AddonsConfig::default());
+    assert!(app.view.show_preview);
+    assert!(!app.view.show_launcher_preview);
+
+    // Nothing is previewed yet, so the first Ctrl+P opts launcher previews in.
+    let _ = app.update(Message::TogglePreview);
+    assert!(app.view.show_preview);
+    assert!(app.view.show_launcher_preview);
+
+    // Once something would show, Ctrl+P hides the pane entirely.
+    app.calculator_result = Some(super::types::CalculatorResult {
+        expression: "1+1".into(),
+        result: 2.0,
+    });
+    assert!(app.resolve_selected_preview().is_some());
+    let _ = app.update(Message::TogglePreview);
+    assert!(!app.view.show_preview);
+    assert!(app.resolve_selected_preview().is_none());
+
+    let _ = app.update(Message::TogglePreview);
+    assert!(app.view.show_preview);
+    assert!(app.resolve_selected_preview().is_some());
+}
+
+#[test]
+fn test_launcher_preview_is_opt_in() {
+    let configs = vec![
+        RaffiConfig {
+            binary: Some("firefox".into()),
+            description: Some("Firefox".into()),
+            ..Default::default()
+        },
+        RaffiConfig {
+            binary: Some("kitty".into()),
+            description: Some("Kitty".into()),
+            show_preview: Some(true),
+            ..Default::default()
+        },
+    ];
+    let (mut app, _) = LauncherApp::new(
+        configs,
+        AddonsConfig::default(),
+        true,
+        Arc::new(Mutex::new(None)),
+        None,
+        ThemeColors::from_mode_with_overrides(&crate::ThemeMode::Dark, None),
+        10,
+        FontSizes::default_sizes(),
+        SortMode::Hybrid,
+        Vec::new(),
+    );
+
+    // Plain launchers show nothing unless explicitly enabled.
+    assert!(app.resolve_selected_preview().is_none());
+
+    // A launcher with `show_preview: true` always previews.
+    app.selected_index = 1;
+    assert_eq!(
+        app.resolve_selected_preview().map(|p| p.title),
+        Some("Kitty".to_string())
+    );
+
+    // Ctrl+P on a hidden launcher preview turns launcher previews on.
+    app.selected_index = 0;
+    let _ = app.update(Message::TogglePreview);
+    assert!(app.view.show_preview);
+    assert!(app.view.show_launcher_preview);
+    assert_eq!(
+        app.resolve_selected_preview().map(|p| p.title),
+        Some("Firefox".to_string())
+    );
+
+    // `general.show_preview: true` enables launcher previews globally.
+    app.view.show_launcher_preview = false;
+    assert!(app.resolve_selected_preview().is_none());
+    app.view.show_launcher_preview = true;
+    assert!(app.resolve_selected_preview().is_some());
+}
+
+#[test]
+fn test_preview_style_resolves_defaults_and_overrides() {
+    use super::theme::PreviewStyle;
+    let theme = ThemeColors::from_mode_with_overrides(&crate::ThemeMode::Dark, None);
+
+    let default_style = PreviewStyle::resolve(&theme, &crate::PreviewConfig::default());
+    assert_eq!(default_style.text, PreviewStyle::DEFAULT_FONT_SIZE);
+    assert_eq!(default_style.width_fraction, 0.5);
+    assert_eq!(default_style.accent, theme.accent);
+
+    let config = crate::PreviewConfig {
+        font_size: Some(20.0),
+        width_percent: Some(95.0),
+        colors: Some(crate::PreviewColorsConfig {
+            accent: Some("#ff0000".into()),
+            bg: Some("#00000080".into()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let style = PreviewStyle::resolve(&theme, &config);
+    assert_eq!(style.text, 20.0);
+    assert_eq!(style.title, 28.0);
+    assert_eq!(style.width_fraction, 0.8); // clamped
+    assert_eq!(style.accent, iced::Color::from_rgb8(255, 0, 0));
+    assert!((style.bg.a - 128.0 / 255.0).abs() < 0.01);
+    assert_eq!(style.text_main, theme.text_main);
+}
+
+#[test]
+fn test_preview_launcher_binary_and_script() {
+    let configs = vec![
+        RaffiConfig {
+            binary: Some("jumpapp".into()),
+            args: Some(vec!["-X".into(), "firefox".into()]),
+            description: Some("Firefox".into()),
+            ifexist: Some("firefox".into()),
+            ..Default::default()
+        },
+        RaffiConfig {
+            script: Some("echo hello\necho world".into()),
+            description: Some("Greeting Script".into()),
+            ..Default::default()
+        },
+    ];
+    let (mut app, _) = LauncherApp::new(
+        configs,
+        AddonsConfig::default(),
+        true,
+        Arc::new(Mutex::new(None)),
+        None,
+        ThemeColors::from_mode_with_overrides(&crate::ThemeMode::Dark, None),
+        10,
+        FontSizes::default_sizes(),
+        SortMode::Hybrid,
+        Vec::new(),
+    );
+    app.view.show_launcher_preview = true;
+
+    let preview = app
+        .resolve_selected_preview()
+        .expect("expected launcher preview");
+    assert_eq!(preview.title, "Firefox");
+    assert_eq!(preview.badge.as_deref(), Some("Launcher"));
+    assert!(preview.bodies.iter().any(|b| matches!(
+        b,
+        PreviewBody::Text { content, .. } if content == "jumpapp -X firefox"
+    )));
+    assert!(preview
+        .metadata
+        .iter()
+        .any(|(k, v)| k == "Condition" && v == "ifexist: firefox"));
+
+    app.selected_index = 1;
+    let script_preview = app
+        .resolve_selected_preview()
+        .expect("expected script preview");
+    assert_eq!(script_preview.title, "Greeting Script");
+    assert_eq!(script_preview.badge.as_deref(), Some("Script"));
+    assert!(script_preview.bodies.iter().any(|b| matches!(
+        b,
+        PreviewBody::Text { content, .. } if content == "echo hello\necho world"
+    )));
+}
+
+#[test]
+fn test_preview_text_snippet_shows_full_multiline_and_raw_template() {
+    let mut addons = AddonsConfig::default();
+    addons.text_snippets.push(TextSnippetSourceConfig {
+        name: "Templates".into(),
+        keyword: "sn".into(),
+        icon: None,
+        snippets: Some(vec![TextSnippet {
+            name: "Bug Report".into(),
+            keyword: Some("!bug".into()),
+            icon: Some("🐛".into()),
+            value: "Date: {date:%Y}\nSteps:\n1. {cursor}\n2. Expected".into(),
+        }]),
+        file: None,
+        command: None,
+        directory: None,
+        args: Vec::new(),
+        action: Some("copy".into()),
+        secondary_action: Some("insert".into()),
+        placeholders: true,
+        restore_clipboard: false,
+    });
+
+    let mut app = test_app(addons);
+    let _ = app.update(Message::SearchChanged("sn ".into()));
+
+    let preview = app
+        .resolve_selected_preview()
+        .expect("expected snippet preview");
+    assert_eq!(preview.title, "Bug Report");
+    assert_eq!(preview.badge.as_deref(), Some("!bug"));
+    // Both expanded content and raw template should be present since {date:%Y} expands
+    assert_eq!(preview.bodies.len(), 2);
+    assert!(preview.metadata.iter().any(|(k, _)| k == "Cursor"));
+}
+
+#[test]
+fn test_preview_script_filter_precedence() {
+    let mut app = test_app(AddonsConfig::default());
+    app.script_filter.results = Some(ScriptFilterResult {
+        default_icon: None,
+        items: vec![
+            ScriptFilterItem {
+                title: "Item 1".into(),
+                subtitle: Some("Fallback subtitle".into()),
+                arg: Some("arg1".into()),
+                icon: None,
+                preview: Some("Explicit preview body".into()),
+                quicklookurl: None,
+                text: Some(ScriptFilterItemText {
+                    copy: Some("copy1".into()),
+                    largetype: Some("Large type body".into()),
+                }),
+            },
+            ScriptFilterItem {
+                title: "Item 2".into(),
+                subtitle: Some("Fallback subtitle".into()),
+                arg: Some("arg2".into()),
+                icon: None,
+                preview: None,
+                quicklookurl: None,
+                text: Some(ScriptFilterItemText {
+                    copy: None,
+                    largetype: Some("Large type body".into()),
+                }),
+            },
+        ],
+    });
+
+    let p1 = app
+        .resolve_selected_preview()
+        .expect("expected script filter preview 1");
+    assert!(p1.bodies.iter().any(|b| matches!(
+        b,
+        PreviewBody::AnsiText { content, .. } if content == "Explicit preview body"
+    )));
+
+    app.selected_index = 1;
+    let p2 = app
+        .resolve_selected_preview()
+        .expect("expected script filter preview 2");
+    assert!(p2.bodies.iter().any(|b| matches!(
+        b,
+        PreviewBody::AnsiText { content, .. } if content == "Large type body"
+    )));
+}
+
+#[test]
+fn test_preview_emoji_calculator_currency_and_web_search() {
+    let mut addons = AddonsConfig::default();
+    addons.web_searches.push(WebSearchConfig {
+        name: "GitHub".into(),
+        keyword: "gh".into(),
+        url: "https://github.com/search?q={query}".into(),
+        icon: None,
+    });
+
+    let mut app = test_app(addons);
+
+    // Calculator
+    let _ = app.update(Message::SearchChanged("16 * 16".into()));
+    let calc_preview = app
+        .resolve_selected_preview()
+        .expect("expected calculator preview");
+    assert_eq!(calc_preview.title, "Calculator");
+    assert!(calc_preview
+        .metadata
+        .iter()
+        .any(|(k, v)| k == "Hexadecimal" && v == "0x100"));
+    assert!(calc_preview
+        .metadata
+        .iter()
+        .any(|(k, v)| k == "Binary" && v == "0b100000000"));
+
+    // Web search
+    let _ = app.update(Message::SearchChanged("gh rust iced".into()));
+    let ws_preview = app
+        .resolve_selected_preview()
+        .expect("expected web search preview");
+    assert_eq!(ws_preview.title, "GitHub");
+    assert!(ws_preview.bodies.iter().any(|b| matches!(
+        b,
+        PreviewBody::Text { content, .. } if content == "https://github.com/search?q=rust%20iced"
+    )));
+
+    // Emoji
+    app.web_search.clear();
+    app.emoji.active = true;
+    app.emoji.data = vec![EmojiEntry {
+        name: "grinning face".into(),
+        value: "😀".into(),
+    }];
+    app.emoji.filtered = vec![0];
+    app.selected_index = 0;
+    let emoji_preview = app
+        .resolve_selected_preview()
+        .expect("expected emoji preview");
+    assert_eq!(emoji_preview.title, "grinning face");
+    assert!(emoji_preview
+        .metadata
+        .iter()
+        .any(|(k, v)| k == "Codepoints" && v == "U+1F600"));
+
+    // Currency
+    app.emoji.clear();
+    app.currency.result = Some(CurrencyResult {
+        request: CurrencyConversionRequest {
+            amount: 100.0,
+            from_currency: "USD".into(),
+            to_currency: "EUR".into(),
+        },
+        converted_amount: 92.5,
+        rate: 0.925,
+    });
+    let curr_preview = app
+        .resolve_selected_preview()
+        .expect("expected currency preview");
+    assert_eq!(curr_preview.title, "USD → EUR");
+    assert!(curr_preview
+        .metadata
+        .iter()
+        .any(|(k, v)| k == "Rate" && v == "1 USD = 0.9250 EUR"));
+}
+
+#[test]
+fn test_inspect_path_text_binary_truncation_and_directory() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("raffi-preview-test-{unique}"));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // Text file
+    let txt_path = dir.join("hello.txt");
+    std::fs::write(&txt_path, "line 1\nline 2\n").unwrap();
+    let txt_inspected = inspect_path(txt_path.to_str().unwrap(), false);
+    assert!(txt_inspected.bodies.iter().any(|b| matches!(
+        b,
+        PreviewBody::Text { content, truncated: false, .. } if content == "line 1\nline 2"
+    )));
+
+    // Binary file with NUL byte
+    let bin_path = dir.join("data.bin");
+    std::fs::write(&bin_path, b"hello\0world").unwrap();
+    let bin_inspected = inspect_path(bin_path.to_str().unwrap(), false);
+    assert!(bin_inspected
+        .metadata
+        .iter()
+        .any(|(k, v)| k == "Type" && v == "Binary file"));
+
+    // Large file exceeding MAX_FILE_PREVIEW_BYTES
+    let big_path = dir.join("big.txt");
+    let big_content = "a".repeat(MAX_FILE_PREVIEW_BYTES + 512);
+    std::fs::write(&big_path, &big_content).unwrap();
+    let big_inspected = inspect_path(big_path.to_str().unwrap(), false);
+    assert!(big_inspected.bodies.iter().any(|b| matches!(
+        b,
+        PreviewBody::Text { content, truncated: true, .. } if content.len() == MAX_FILE_PREVIEW_BYTES
+    )));
+
+    // Many lines exceeding MAX_FILE_PREVIEW_LINES
+    let lines_path = dir.join("lines.txt");
+    let many_lines = (0..150)
+        .map(|i| format!("line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&lines_path, &many_lines).unwrap();
+    let lines_inspected = inspect_path(lines_path.to_str().unwrap(), false);
+    assert!(lines_inspected.bodies.iter().any(|b| matches!(
+        b,
+        PreviewBody::Text { content, truncated: true, .. } if content.lines().count() == MAX_FILE_PREVIEW_LINES
+    )));
+
+    // Directory inspection
+    let dir_inspected = inspect_path(dir.to_str().unwrap(), false);
+    assert!(dir_inspected
+        .bodies
+        .iter()
+        .any(|b| matches!(b, PreviewBody::DirectoryList { total_count: 4, .. })));
+
+    assert_eq!(format_byte_size(500), "500 B");
+    assert_eq!(format_byte_size(2048), "2.0 KiB");
+
+    let _ = std::fs::remove_dir_all(dir);
 }

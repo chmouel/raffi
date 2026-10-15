@@ -108,6 +108,41 @@ mod tests {
             Some("icon.png")
         );
         assert_eq!(result.default_icon.as_deref(), Some("default.svg"));
+        assert!(result.items[0].preview.is_none());
+        assert!(result.items[0].quicklookurl.is_none());
+        assert!(result.items[0].text.is_none());
+    }
+
+    #[test]
+    fn test_parse_script_filter_output_with_preview_and_alfred_fields() {
+        let stdout = r##"{
+            "items": [
+                {
+                    "title": "PR #42",
+                    "subtitle": "Add preview pane",
+                    "arg": "https://github.com/chmouel/raffi/pull/42",
+                    "preview": "Detailed PR body\nLine 2",
+                    "quicklookurl": "https://github.com/chmouel/raffi/pull/42",
+                    "text": {
+                        "copy": "#42",
+                        "largetype": "Large type text"
+                    }
+                }
+            ]
+        }"##;
+        let result = parse_script_filter_output(stdout, None)
+            .expect("expected valid script filter json with preview fields");
+
+        assert_eq!(result.items.len(), 1);
+        let item = &result.items[0];
+        assert_eq!(item.preview.as_deref(), Some("Detailed PR body\nLine 2"));
+        assert_eq!(
+            item.quicklookurl.as_deref(),
+            Some("https://github.com/chmouel/raffi/pull/42")
+        );
+        let text = item.text.as_ref().expect("expected text object");
+        assert_eq!(text.copy.as_deref(), Some("#42"));
+        assert_eq!(text.largetype.as_deref(), Some("Large type text"));
     }
 
     #[test]

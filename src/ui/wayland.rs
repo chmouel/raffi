@@ -8,6 +8,7 @@ mod emoji;
 mod help;
 mod hyprland;
 mod placeholders;
+mod preview;
 mod script_filters;
 mod snippets;
 mod state;
@@ -89,6 +90,9 @@ fn run_wayland_ui(
     let sort_mode = settings.sort_mode.clone();
     let fallbacks = settings.fallbacks.clone();
     let clipboard_history = settings.clipboard_history;
+    let show_preview = settings.show_preview;
+    let preview_style = theme::PreviewStyle::resolve(&theme_colors, &settings.preview);
+    let default_script_shell = settings.default_script_shell.clone();
 
     let window_settings = window::Settings {
         size: iced::Size::new(window_width, window_height),
@@ -122,6 +126,10 @@ fn run_wayland_ui(
                 fallbacks.clone(),
             );
             app.text_snippets.clipboard_history = clipboard_history;
+            app.view.show_preview = show_preview.unwrap_or(true);
+            app.view.show_launcher_preview = show_preview == Some(true);
+            app.view.preview_style = preview_style.clone();
+            app.view.default_script_shell = default_script_shell.clone();
             app.hyprland = hyprland.clone();
             app.deferred_paste = deferred_paste_for_new.clone();
             (app, task)

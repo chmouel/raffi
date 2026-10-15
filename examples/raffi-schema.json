@@ -265,6 +265,18 @@
           "format": "float",
           "default": null
         },
+        "preview": {
+          "description": "Appearance of the right-hand preview pane (font, size, colours, width)",
+          "$ref": "#/$defs/PreviewConfig"
+        },
+        "show_preview": {
+          "description": "Show the Alfred-style right-hand preview pane in native mode.\nBy default, previews are shown automatically for addons (snippets, file browser,\nscript filters, etc.) and hidden for standard launcher entries unless `show_preview: true`\nis set in `general` or on the launcher entry. Can also be toggled at runtime with Ctrl+P.",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
         "sort_mode": {
           "$ref": "#/$defs/SortMode"
         },
@@ -309,6 +321,107 @@
           "default": null
         },
         "window_width": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float",
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "PreviewColorsConfig": {
+      "description": "Colour overrides for the right-hand preview pane (hex: #RGB, #RRGGBB, or #RRGGBBAA).",
+      "type": "object",
+      "properties": {
+        "accent": {
+          "description": "Headings, badges and hero values",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bg": {
+          "description": "Background of the whole preview pane",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bg_block": {
+          "description": "Background of the content/code blocks inside the pane",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "border": {
+          "description": "Pane and block borders",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text_main": {
+          "description": "Title and main text colour",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text_muted": {
+          "description": "Subtitles, metadata keys and hints",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "PreviewConfig": {
+      "description": "Appearance settings for the right-hand preview pane in native mode.",
+      "type": "object",
+      "properties": {
+        "colors": {
+          "description": "Colour overrides for the preview pane",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreviewColorsConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "font_family": {
+          "description": "Font family for the preview pane (default: the UI font)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "font_size": {
+          "description": "Base font size in px for preview text (default: 16). Title, headings and\nhero values scale from it.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float",
+          "default": null
+        },
+        "mono_font_family": {
+          "description": "Monospace font family for code/text blocks (default: system monospace)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "width_percent": {
+          "description": "Width of the preview pane as a percentage of the window (10-80, default: 50)",
           "type": [
             "number",
             "null"
@@ -386,6 +499,13 @@
         "script": {
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "show_preview": {
+          "description": "Show the right-hand preview pane when this launcher entry is selected (default: false).",
+          "type": [
+            "boolean",
             "null"
           ]
         }

@@ -104,3 +104,7 @@ pub(crate) fn ansi_to_spans<'a>(
 
     spans
 }
+
+pub(crate) fn strip_ansi(s: &str) -> String {
+    ANSI_SGR_RE.replace_all(s, "").into_owned()
+}

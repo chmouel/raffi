@@ -1,4 +1,113 @@
-use crate::{ThemeColorsConfig, ThemeMode};
+use crate::{PreviewConfig, ThemeColorsConfig, ThemeMode};
+
+/// Resolved appearance of the right-hand preview pane.
+#[derive(Debug, Clone)]
+pub(super) struct PreviewStyle {
+    /// Base text size (body text, metadata values).
+    pub text: f32,
+    /// Title size.
+    pub title: f32,
+    /// Subtitle, headings, metadata keys.
+    pub small: f32,
+    /// Hero glyph size (emoji).
+    pub hero_glyph: f32,
+    /// Hero value size (calculator/currency results).
+    pub hero_value: f32,
+    /// Header icon size.
+    pub icon: f32,
+    /// Width of the metadata key column.
+    pub key_width: f32,
+    /// Max height for image previews.
+    pub image_height: f32,
+    /// Pane width as a portion of the window, 0.1..=0.8.
+    pub width_fraction: f32,
+    pub font: iced::Font,
+    pub mono_font: iced::Font,
+    pub bg: iced::Color,
+    pub bg_block: iced::Color,
+    pub text_main: iced::Color,
+    pub text_muted: iced::Color,
+    pub accent: iced::Color,
+    pub border: iced::Color,
+}
+
+impl PreviewStyle {
+    pub const DEFAULT_FONT_SIZE: f32 = 16.0;
+    pub const DEFAULT_WIDTH_PERCENT: f32 = 50.0;
+
+    /// Build the preview style from the UI theme and the optional `general.preview` config.
+    pub fn resolve(theme: &ThemeColors, config: &PreviewConfig) -> Self {
+        let base = config
+            .font_size
+            .filter(|size| size.is_finite() && *size > 0.0)
+            .unwrap_or(Self::DEFAULT_FONT_SIZE);
+        let width_percent = config
+            .width_percent
+            .filter(|p| p.is_finite())
+            .unwrap_or(Self::DEFAULT_WIDTH_PERCENT)
+            .clamp(10.0, 80.0);
+
+        let colors = config.colors.as_ref();
+        let color = |value: Option<&String>, fallback: iced::Color| {
+            value
+                .map(String::as_str)
+                .and_then(parse_hex_color)
+                .unwrap_or(fallback)
+        };
+
+        let font = config
+            .font_family
+            .as_deref()
+            .map(leaked_font)
+            .unwrap_or_default();
+        let mono_font = config
+            .mono_font_family
+            .as_deref()
+            .map(leaked_font)
+            .unwrap_or(iced::Font::MONOSPACE);
+
+        Self {
+            text: base,
+            title: (base * 1.4).round(),
+            small: (base * 0.8).round(),
+            hero_glyph: (base * 5.0).round(),
+            hero_value: (base * 2.2).round(),
+            icon: (base * 3.0).round(),
+            key_width: (base * 7.0).round(),
+            image_height: (base * 14.0).round(),
+            width_fraction: width_percent / 100.0,
+            font,
+            mono_font,
+            bg: color(
+                colors.and_then(|c| c.bg.as_ref()),
+                iced::Color {
+                    a: 0.55,
+                    ..theme.bg_input
+                },
+            ),
+            bg_block: color(
+                colors.and_then(|c| c.bg_block.as_ref()),
+                iced::Color {
+                    a: 0.45,
+                    ..theme.bg_base
+                },
+            ),
+            text_main: color(colors.and_then(|c| c.text_main.as_ref()), theme.text_main),
+            text_muted: color(colors.and_then(|c| c.text_muted.as_ref()), theme.text_muted),
+            accent: color(colors.and_then(|c| c.accent.as_ref()), theme.accent),
+            border: color(colors.and_then(|c| c.border.as_ref()), theme.border),
+        }
+    }
+}
+
+/// iced fonts need a `'static` family name; the preview style is built once per run.
+fn leaked_font(family: &str) -> iced::Font {
+    let family: &'static str = Box::leak(family.to_string().into_boxed_str());
+    iced::Font {
+        family: iced::font::Family::Name(family),
+        ..iced::Font::default()
+    }
+}
 
 /// Per-color theme values resolved from the configured mode and overrides.
 #[derive(Debug, Clone, Copy)]

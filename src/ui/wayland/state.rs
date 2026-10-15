@@ -5,7 +5,8 @@ use fuzzy_matcher::skim::SkimMatcherV2;
 use iced::widget::Id;
 
 use super::help::HelpEntry;
-use super::theme::ThemeColors;
+use super::preview::InspectedFile;
+use super::theme::{PreviewStyle, ThemeColors};
 pub(crate) use super::types::{
     CachedRate, CalculatorResult, ClipboardData, CurrencyConversion, CurrencyConversionRequest,
     CurrencyResult, EmojiEntry, FileBrowserEntry, Message, MultiCurrencyRequest,
@@ -168,6 +169,7 @@ pub(super) struct FileBrowserState {
     pub show_hidden: bool,
     pub current_dir: String,
     pub error: Option<String>,
+    pub cached_preview: Option<InspectedFile>,
 }
 
 impl FileBrowserState {
@@ -177,6 +179,7 @@ impl FileBrowserState {
         self.active = false;
         self.current_dir.clear();
         self.error = None;
+        self.cached_preview = None;
     }
 }
 
@@ -184,12 +187,17 @@ impl FileBrowserState {
 pub(super) struct ViewState {
     pub search_input_id: TextInputId,
     pub scrollable_id: ScrollableId,
+    pub preview_scrollable_id: ScrollableId,
     pub items_container_id: ContainerId,
     pub generation: u64,
     pub current_modifiers: iced::keyboard::Modifiers,
     pub theme: ThemeColors,
     pub font_sizes: crate::ui::FontSizes,
     pub help_active: bool,
+    pub show_preview: bool,
+    pub show_launcher_preview: bool,
+    pub preview_style: PreviewStyle,
+    pub default_script_shell: String,
 }
 
 impl ViewState {
@@ -197,17 +205,23 @@ impl ViewState {
         Self {
             search_input_id: TextInputId::unique(),
             scrollable_id: ScrollableId::unique(),
+            preview_scrollable_id: ScrollableId::unique(),
             items_container_id: ContainerId::unique(),
             generation: 0,
             current_modifiers: iced::keyboard::Modifiers::empty(),
+            preview_style: PreviewStyle::resolve(&theme, &crate::PreviewConfig::default()),
             theme,
             font_sizes,
             help_active: false,
+            show_preview: true,
+            show_launcher_preview: false,
+            default_script_shell: "bash".to_string(),
         }
     }
 
     pub fn refresh_ids(&mut self) {
         self.scrollable_id = ScrollableId::unique();
+        self.preview_scrollable_id = ScrollableId::unique();
         self.items_container_id = ContainerId::unique();
         self.generation = self.generation.wrapping_add(1);
     }
