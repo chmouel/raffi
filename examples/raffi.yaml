@@ -490,6 +490,7 @@ addons:
   #     command: "my-snippet-gen"
   #     args: ["-j"]
   #   - name: "Snippets"
+  #     # Download the work templates linked in the text snippets documentation.
   #     keyword: "sn"
   #     icon: "snippets"
   #     directory: "~/.local/share/snippets"
