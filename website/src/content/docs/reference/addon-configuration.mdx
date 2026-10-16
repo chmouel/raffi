@@ -1,6 +1,6 @@
 ---
 title: Addon Configuration
-description: Configuration reference for built-in addons (currency, calculator, unit conversion, color converter, developer tools, file browser, script filters, web searches, text snippets, clipboard history, system commands)
+description: Configuration reference for built-in addons (currency, calculator, unit conversion, color converter, world clock, developer tools, file browser, script filters, web searches, text snippets, clipboard history, system commands)
 ---
 
 import { Image } from 'astro:assets';
@@ -197,6 +197,24 @@ Enable or disable the color converter.
 ```yaml
 addons:
   color:
+    enabled: false
+```
+
+## World Clock
+
+Shows the time in another place (`time tokyo`, `time in new york`) or converts
+a time between places (`15:00 paris to nyc`). Needs the system `tzdata`
+package. See [World Clock](/features/world-clock/) for place names and rules.
+
+### Configuration
+
+**`addons.world_clock.enabled`** `boolean` (default: `true`)
+
+Enable or disable the world clock.
+
+```yaml
+addons:
+  world_clock:
     enabled: false
 ```
 
@@ -1006,6 +1024,9 @@ addons:
     enabled: true
 
   color:
+    enabled: true
+
+  world_clock:
     enabled: true
 
   devtools:

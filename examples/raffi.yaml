@@ -598,6 +598,12 @@ addons:
   # color:
   #   enabled: true
 
+  # World clock (native UI only, needs tzdata). Type "time tokyo" or
+  # "time in new york" for the current time there, or "15:00 paris to nyc"
+  # to convert a time. Enter copies the time, Ctrl+Enter a full timestamp.
+  # world_clock:
+  #   enabled: true
+
   # Developer tools (native UI only). Type "dev " followed by text to see it
   # base64 and URL encoded or decoded, hashed (sha256sum, sha1sum, md5sum),
   # converted between epoch and date, JSON reformatted or case changed.

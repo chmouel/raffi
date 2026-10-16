@@ -23,6 +23,7 @@ mod theme;
 mod types;
 mod units;
 mod view;
+mod world_clock;
 
 #[cfg(test)]
 mod tests;

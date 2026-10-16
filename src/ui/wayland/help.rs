@@ -182,6 +182,17 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         });
     }
 
+    if addons.world_clock.enabled {
+        entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
+            trigger: "time".to_string(),
+            title: "World clock".to_string(),
+            usage: "time tokyo or 15:00 paris to nyc".to_string(),
+            icon: None,
+            completion: None,
+        });
+    }
+
     if addons.devtools.enabled {
         entries.push(HelpEntry {
             section: HelpSection::KeywordsAndActions,

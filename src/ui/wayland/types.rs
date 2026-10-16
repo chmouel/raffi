@@ -18,6 +18,7 @@ pub(crate) enum InlineProvider {
     Currency,
     Units,
     Color,
+    Time,
     Uuid,
     Password,
 }

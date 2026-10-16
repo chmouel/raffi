@@ -13,7 +13,9 @@ use super::state::{
 };
 use super::system::system_entries;
 use super::theme::ThemeColors;
-use super::types::{InlineProvider, ScriptFilterItem, ScriptFilterItemText};
+use super::types::{
+    InlineProvider, InlineResult, InlineRow, ScriptFilterItem, ScriptFilterItemText,
+};
 use crate::ui::FontSizes;
 use crate::{
     AddonsConfig, RaffiConfig, ScriptFilterConfig, SortMode, TextSnippet, TextSnippetSourceConfig,
@@ -1601,6 +1603,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "$",
             "units",
             "color",
+            "time",
             "uuid/pw",
             "↑/↓",
             "Ctrl+J",
@@ -1651,6 +1654,7 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
     addons.system.enabled = false;
     addons.units.enabled = false;
     addons.color.enabled = false;
+    addons.world_clock.enabled = false;
     addons.devtools.enabled = false;
     let entries = help_entries(&addons);
 
@@ -1701,6 +1705,7 @@ fn test_help_entries_skip_disabled_addons() {
     addons.system.enabled = false;
     addons.units.enabled = false;
     addons.color.enabled = false;
+    addons.world_clock.enabled = false;
     addons.devtools.enabled = false;
 
     // Disabled addons drop their keyword rows and addon-specific shortcuts.
@@ -3320,6 +3325,80 @@ fn test_color_inline_provider_order_and_rejections() {
     let mut disabled = addons;
     disabled.color.enabled = false;
     assert_eq!(classify_query("#ff8800", &disabled).inline_provider, None);
+}
+
+#[test]
+fn test_world_clock_inline_rows_copy_time_and_timestamp() {
+    let mut app = test_app(AddonsConfig::default());
+    app.history.max_items = 0;
+    let _ = app.update(Message::SearchChanged("time in tokyo".into()));
+    assert_eq!(app.query_class.inline_provider, Some(InlineProvider::Time));
+    assert!(!app.query_class.sensitive);
+    let inline = app.inline_result.as_ref().expect("time row");
+    assert_eq!(inline.rows.len(), 1);
+    let row = inline.rows[0].clone();
+    assert!(row.subtitle.as_deref().unwrap().contains("Asia/Tokyo"));
+    assert!(app.resolve_selected_preview().is_some());
+    assert_eq!(app.inline_copy_value(0), Some(row.title.clone()));
+    app.view.current_modifiers = iced::keyboard::Modifiers::CTRL;
+    let iso = app.inline_copy_value(0).unwrap();
+    assert!(iso.ends_with("+09:00"), "{iso}");
+    app.view.current_modifiers = iced::keyboard::Modifiers::empty();
+
+    let _ = app.update(Message::SearchChanged("time eastern".into()));
+    assert_eq!(app.inline_result.as_ref().map(|r| r.rows.len()), Some(2));
+    let _ = app.update(Message::SearchChanged("timeshift".into()));
+    assert!(app.inline_result.is_none());
+}
+
+#[test]
+fn test_world_clock_provider_order_and_rejections() {
+    let addons = AddonsConfig::default();
+    for (query, provider) in [
+        ("time tokyo", Some(InlineProvider::Time)),
+        ("time nyc", Some(InlineProvider::Time)),
+        ("now in paris", Some(InlineProvider::Time)),
+        ("15:00 paris to nyc", Some(InlineProvider::Time)),
+        ("3pm paris in tokyo", Some(InlineProvider::Time)),
+        ("10 km to mi", Some(InlineProvider::Units)),
+        ("2*3", Some(InlineProvider::Calculator)),
+        ("time", None),
+        ("timeshift", None),
+        ("time foo", None),
+        ("15:00 paris", None),
+    ] {
+        assert_eq!(
+            classify_query(query, &addons).inline_provider,
+            provider,
+            "{query}"
+        );
+    }
+
+    let mut disabled = addons;
+    disabled.world_clock.enabled = false;
+    assert_eq!(
+        classify_query("time tokyo", &disabled).inline_provider,
+        None
+    );
+}
+
+#[test]
+fn test_status_inline_row_is_not_copied() {
+    let mut app = test_app(AddonsConfig::default());
+    app.inline_result = Some(InlineResult {
+        provider: InlineProvider::Time,
+        rows: vec![InlineRow {
+            title: "Time zone data not found (install tzdata)".into(),
+            subtitle: None,
+            copy_value: String::new(),
+            alt_copy_value: None,
+            swatch: None,
+            preview: None,
+        }],
+    });
+    assert_eq!(app.inline_copy_value(0), None);
+    let _ = app.update(Message::Submit);
+    assert!(!app.in_flight.is_pending("inline-copy", ""));
 }
 
 fn open_system(app: &mut LauncherApp, query: &str) {

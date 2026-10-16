@@ -1666,6 +1666,22 @@ fn describe_addon_by_keyword(
         );
     }
 
+    if keyword == "time" && addons.world_clock.enabled {
+        return (
+            "World Clock".to_string(),
+            vec![
+                (
+                    "Input".to_string(),
+                    "time <place>, time in <place>, <time> <place> to <place>".to_string(),
+                ),
+                (
+                    "Output".to_string(),
+                    "The time in each matching time zone".to_string(),
+                ),
+            ],
+        );
+    }
+
     let curr_trigger = addons.currency.trigger.as_deref().unwrap_or("$");
     if addons.currency.enabled && keyword == curr_trigger {
         return (

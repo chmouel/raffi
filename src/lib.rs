@@ -138,6 +138,20 @@ impl Default for DevtoolsAddonConfig {
     }
 }
 
+/// Configuration for the inline world clock addon
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
+pub struct WorldClockAddonConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for WorldClockAddonConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 /// Configuration for the file browser addon
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
@@ -532,6 +546,8 @@ pub struct AddonsConfig {
     pub units: UnitsAddonConfig,
     #[serde(default)]
     pub color: ColorAddonConfig,
+    #[serde(default)]
+    pub world_clock: WorldClockAddonConfig,
     #[serde(default)]
     pub file_browser: FileBrowserAddonConfig,
     #[serde(default)]

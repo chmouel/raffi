@@ -47,6 +47,7 @@ use super::support::{
 use super::system::{filter_system_into, system_entries};
 use super::types::InlineProvider;
 use super::units::{try_parse_unit_conversion, units_inline_result};
+use super::world_clock::{current_time_inline_result, try_parse_time_query};
 use crate::ui::{get_mru_cache_path, get_snippet_mru_cache_path, FontSizes};
 use crate::{
     read_desktop_icon_map, read_icon_map, resolve_launcher_icon_path, AddonsConfig, RaffiConfig,
@@ -194,6 +195,9 @@ fn inline_provider(query: &str, addons: &AddonsConfig) -> Option<InlineProvider>
     }
     if addons.color.enabled && try_parse_color(query).is_some() {
         return Some(InlineProvider::Color);
+    }
+    if addons.world_clock.enabled && try_parse_time_query(query).is_some() {
+        return Some(InlineProvider::Time);
     }
     if addons.devtools.enabled {
         match try_parse_generator(query, addons.devtools.password_length()) {
@@ -829,6 +833,9 @@ impl LauncherApp {
             }
             Some(InlineProvider::Color) => {
                 try_parse_color(&query).map(|color| color_inline_result(&color))
+            }
+            Some(InlineProvider::Time) => {
+                try_parse_time_query(&query).map(|time| current_time_inline_result(&time))
             }
             Some(InlineProvider::Uuid | InlineProvider::Password) => {
                 try_parse_generator(&query, self.addons.devtools.password_length())
@@ -1634,6 +1641,9 @@ impl LauncherApp {
     pub(super) fn inline_copy_value(&self, index: usize) -> Option<String> {
         let inline = self.inline_result.as_ref()?;
         let row = inline.rows.get(index)?;
+        if row.copy_value.is_empty() {
+            return None;
+        }
         crate::debug_log!("inline: copying {:?} row {index}", inline.provider);
         let value = match &row.alt_copy_value {
             Some(alt) if self.view.current_modifiers.control() => alt,

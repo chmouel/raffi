@@ -1,0 +1,55 @@
+---
+title: World Clock
+description: See the time in another city or convert a time between time zones as you type
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Ask for the time somewhere else and Raffi shows it above your launchers. No
+keyword setup is needed:
+
+```text
+time tokyo                → 05:00, Sat 17 Oct   +1 day · Asia/Tokyo · JST UTC+09:00
+time in new york          → 16:00               America/New_York · EDT UTC-04:00
+now in paris              → 22:00               Europe/Paris · CEST UTC+02:00
+15:00 paris to nyc        → 09:00               15:00 Europe/Paris → America/New_York
+3pm london in tokyo       → 23:00               15:00 Europe/London → Asia/Tokyo
+```
+
+Press Enter to copy the time as shown, or Ctrl+Enter to copy a full timestamp
+such as `2026-10-17T05:00:00+09:00`. Copying needs `wl-copy`.
+
+<Aside type="note">
+The world clock is only available in native mode and reads the system time
+zone database, so the `tzdata` package must be installed. Without it Raffi
+shows "Time zone data not found (install tzdata)". It is on by default; set
+`addons.world_clock.enabled: false` to turn it off.
+</Aside>
+
+## Places
+
+A place is the city part of a time zone name, so `tokyo` finds `Asia/Tokyo`
+and `new york` finds `America/New_York`. Case does not matter and spaces stand
+in for underscores. The full name, such as `america/new_york`, works too. A few
+short names are built in: `nyc`, `sf`, `la`, `uk`, `utc`, `gmt`, plus some
+common cities that have no zone of their own, such as `boston`, `seattle`,
+`beijing` and `mumbai`.
+
+When a name matches several zones, for example `eastern`, you get one row per
+zone. An unknown place shows nothing, and words that merely start with `time`,
+like an app called `timeshift`, are left alone.
+
+## Converting a time
+
+Write the time, the place it is in, then `to` or `in` and the place you want.
+Times can be `15:00`, `9:30`, `3pm` or `3:30pm`. The time is taken as today in
+the first place.
+
+When the result falls on another day, the row shows the date and how many days
+away it is, from two days before to two days after. A time skipped by a
+daylight saving change, such as 02:30 on the night clocks go forward, moves
+forward to the next valid time and the row says so. A time that happens twice
+when clocks go back uses the first one.
+
+The current time is worked out as you type and does not keep ticking while the
+query stays the same.

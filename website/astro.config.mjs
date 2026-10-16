@@ -47,6 +47,7 @@ export default defineConfig({
             { label: 'Themes', slug: 'features/themes' },
             { label: 'Unit Conversion', slug: 'features/unit-conversion' },
             { label: 'Web Search', slug: 'features/web-search' },
+            { label: 'World Clock', slug: 'features/world-clock' },
           ],
         },
         {
