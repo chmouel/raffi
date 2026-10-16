@@ -31,10 +31,14 @@ impl SystemEntry {
                 .map(|argv| argv.join(" "))
                 .collect::<Vec<_>>()
                 .join("; "),
-            DeferredAction::Hypr(action) => format!("hyprctl eval '{}'", action.lua()),
+            // `hyprctl eval` with a Lua config, `hyprctl dispatch exit` otherwise.
+            DeferredAction::Hypr(HyprAction::Exit) => {
+                "Hyprland exit dispatcher via hyprctl".to_string()
+            }
             DeferredAction::NiriQuit => super::windows::NIRI_QUIT.join(" "),
             DeferredAction::SwayExit => super::windows::SWAY_EXIT.join(" "),
-            DeferredAction::HyprPaste(_)
+            DeferredAction::Hypr(_)
+            | DeferredAction::HyprPaste(_)
             | DeferredAction::Signal(_)
             | DeferredAction::Bluetooth(_) => String::new(),
         }

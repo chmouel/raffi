@@ -4160,6 +4160,14 @@ fn test_system_logout_default_follows_session() {
         logout(Some(Compositor::Hyprland), Some("3")),
         DeferredAction::Hypr(HyprAction::Exit)
     ));
+    let hyprland_logout = system_entries(&config, Some(Compositor::Hyprland), None, |_| true)
+        .into_iter()
+        .find(|entry| entry.id == crate::SystemCommand::Logout)
+        .unwrap();
+    assert_eq!(
+        hyprland_logout.command_line(),
+        "Hyprland exit dispatcher via hyprctl"
+    );
     assert!(matches!(
         logout(Some(Compositor::Niri), None),
         DeferredAction::NiriQuit
