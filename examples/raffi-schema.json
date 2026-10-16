@@ -38,6 +38,9 @@
         "calculator": {
           "$ref": "#/$defs/CalculatorAddonConfig"
         },
+        "clipboard": {
+          "$ref": "#/$defs/ClipboardAddonConfig"
+        },
         "currency": {
           "$ref": "#/$defs/CurrencyAddonConfig"
         },
@@ -46,6 +49,16 @@
         },
         "file_browser": {
           "$ref": "#/$defs/FileBrowserAddonConfig"
+        },
+        "keyword_min_chars": {
+          "description": "Characters to type before addon keywords are suggested (default: 3).\nA keyword typed in full is always suggested.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "default": null,
+          "minimum": 0
         },
         "script_filters": {
           "type": "array",
@@ -78,6 +91,80 @@
         }
       },
       "additionalProperties": false
+    },
+    "ClipboardAction": {
+      "description": "What the clipboard addon does with the selected history item",
+      "oneOf": [
+        {
+          "description": "Put the item back on the clipboard with all of its formats",
+          "type": "string",
+          "const": "copy"
+        },
+        {
+          "description": "Copy the item, then paste it into the window that had focus before\nRaffi opened (Hyprland only)",
+          "type": "string",
+          "const": "hypr_paste"
+        }
+      ]
+    },
+    "ClipboardAddonConfig": {
+      "description": "Configuration for the clipboard history addon (native UI only)",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Action on Enter (default: `copy`).",
+          "$ref": "#/$defs/ClipboardAction"
+        },
+        "backend": {
+          "$ref": "#/$defs/ClipboardBackend"
+        },
+        "enabled": {
+          "description": "Off by default; requires a running clipboard manager.",
+          "type": "boolean",
+          "default": false
+        },
+        "image_trigger": {
+          "description": "Keyword that opens the history showing only images (default: `clipimg`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "min_chars": {
+          "description": "Hide text entries shorter than this many characters, ignoring\nsurrounding whitespace (default: 3). Images and files are always shown.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "default": null,
+          "minimum": 0
+        },
+        "secondary_action": {
+          "description": "Action on Ctrl+Enter (default: `hypr_paste`).",
+          "$ref": "#/$defs/ClipboardAction"
+        },
+        "trigger": {
+          "description": "Keyword that opens the history (default: `clip`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "ClipboardBackend": {
+      "description": "Clipboard manager that stores the history browsed by the clipboard addon",
+      "oneOf": [
+        {
+          "description": "CopyQ, through its command line scripting API",
+          "type": "string",
+          "const": "copyq"
+        }
+      ]
     },
     "ClipboardHistory": {
       "description": "Clipboard manager used for `{clipboard:N}` snippet placeholders",

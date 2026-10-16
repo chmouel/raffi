@@ -1,4 +1,4 @@
-use super::app::{fido_updir, keyword_suggestions, route_query, QueryMode};
+use super::app::{fido_updir, keyword_suggestions, loggable_query, route_query, QueryMode};
 use super::help::{filter_help_entries, help_entries, HelpSection};
 use super::placeholders::Expanded;
 use super::preview::{
@@ -232,6 +232,11 @@ fn test_keyword_suggestions_prefix_match() {
         icon: None,
     });
 
+    // By default a short prefix suggests nothing, but a full keyword does.
+    assert!(keyword_suggestions("s", &addons).is_empty());
+    assert_eq!(keyword_suggestions("sn", &addons).len(), 1);
+
+    addons.keyword_min_chars = Some(1);
     let suggestions = keyword_suggestions("s", &addons);
     assert_eq!(suggestions.len(), 1);
     assert_eq!(suggestions[0].keyword, "sn");
@@ -309,10 +314,10 @@ fn test_keyword_suggestions_follow_routing_precedence() {
 #[test]
 fn test_keyword_suggestions_skip_disabled_emoji() {
     let mut addons = AddonsConfig::default();
-    assert_eq!(keyword_suggestions("em", &addons).len(), 1);
+    assert_eq!(keyword_suggestions("emo", &addons).len(), 1);
 
     addons.emoji.enabled = false;
-    assert!(keyword_suggestions("em", &addons).is_empty());
+    assert!(keyword_suggestions("emo", &addons).is_empty());
 }
 
 #[test]
@@ -941,7 +946,7 @@ fn test_tab_without_suggestions_is_a_no_op() {
 #[test]
 fn test_enter_on_keyword_suggestion_completes_it() {
     let mut app = test_app(snippet_addons());
-    let _ = app.update(Message::SearchChanged("s".into()));
+    let _ = app.update(Message::SearchChanged("sn".into()));
     assert_eq!(app.keyword_suggestions.len(), 1);
 
     let _ = app.update(Message::Submit);
@@ -2452,4 +2457,447 @@ fn test_backspace_updir_disabled_is_a_plain_delete() {
     assert_eq!(app.selected_index, 0);
 
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+fn clipboard_addons() -> AddonsConfig {
+    let mut addons = AddonsConfig::default();
+    addons.clipboard.enabled = true;
+    addons
+}
+
+fn clip(row: usize, id: &str, text: &str) -> super::clipboard::ClipItem {
+    super::clipboard::ClipItem {
+        row,
+        id: id.into(),
+        formats: vec!["text/plain".into()],
+        kind: super::clipboard::ItemKind::Text,
+        text_len: text.len(),
+        excerpt: text.into(),
+        tier: 0,
+        copied: None,
+    }
+}
+
+fn clip_page(
+    head: &str,
+    total: usize,
+    next: usize,
+    items: Vec<super::clipboard::ClipItem>,
+) -> super::clipboard::Page {
+    super::clipboard::Page {
+        tab: "&clipboard".into(),
+        total,
+        head: head.into(),
+        next,
+        stable: true,
+        items,
+    }
+}
+
+fn clip_text_preview(text: &str) -> super::clipboard::ClipPreview {
+    super::clipboard::ClipPreview {
+        kind: super::clipboard::ItemKind::Text,
+        formats: vec![("text/plain".into(), text.len())],
+        text: text.into(),
+        text_truncated: false,
+        image: None,
+        files: Vec::new(),
+    }
+}
+
+fn open_clipboard(app: &mut LauncherApp, query: &str) -> u64 {
+    let _ = app.update(Message::SearchChanged(query.into()));
+    assert!(app.clipboard.active);
+    app.clipboard.generation
+}
+
+#[test]
+fn test_clipboard_routing_and_suggestion() {
+    assert_eq!(
+        route_query("clip ", &AddonsConfig::default()),
+        QueryMode::Standard
+    );
+    let mut addons = clipboard_addons();
+    assert_eq!(
+        route_query("clip  two words ", &addons),
+        QueryMode::Clipboard {
+            query: "two words".into(),
+            images_only: false,
+        }
+    );
+    assert_eq!(route_query("clip", &addons), QueryMode::Standard);
+    assert_eq!(
+        route_query("clipimg cat", &addons),
+        QueryMode::Clipboard {
+            query: "cat".into(),
+            images_only: true,
+        }
+    );
+    let suggestions = keyword_suggestions("cli", &addons);
+    let keywords: Vec<_> = suggestions.iter().map(|s| s.keyword.as_str()).collect();
+    assert_eq!(keywords, vec!["clip", "clipimg"]);
+    assert_eq!(suggestions[0].icon.as_deref(), Some("copyq"));
+
+    addons.clipboard.trigger = Some("cb".into());
+    assert_eq!(
+        route_query("cb x", &addons),
+        QueryMode::Clipboard {
+            query: "x".into(),
+            images_only: false,
+        }
+    );
+    assert_eq!(route_query("clip x", &addons), QueryMode::Standard);
+    assert!(help_entries(&addons)
+        .iter()
+        .any(|entry| entry.title == "Clipboard history" && entry.trigger == "cb"));
+}
+
+#[test]
+fn test_clipboard_queries_stay_out_of_history_and_logs() {
+    let addons = clipboard_addons();
+    assert_eq!(
+        loggable_query("clip my password", &addons),
+        "clip <redacted>"
+    );
+    assert_eq!(loggable_query(" firefox ", &addons), "firefox");
+
+    let mut app = test_app(addons);
+    let before = app.history.items.clone();
+    open_clipboard(&mut app, "clip my password");
+    app.save_query_to_history();
+    assert_eq!(app.history.items, before);
+}
+
+#[test]
+fn test_clipboard_scan_pages_merge_and_ignore_stale_generations() {
+    let mut app = test_app(clipboard_addons());
+    let first = open_clipboard(&mut app, "clip ");
+    assert!(app.clipboard.loading);
+    assert_eq!(app.total_items(), 1, "status row while loading");
+    assert_eq!(app.clipboard.status(), "Loading clipboard history...");
+
+    let _ = app.update(Message::ClipboardPage(
+        first.wrapping_sub(1),
+        Ok(clip_page("h", 3, 3, vec![clip(0, "stale", "stale")])),
+    ));
+    assert!(app.clipboard.items.is_empty());
+
+    let _ = app.update(Message::ClipboardPage(
+        first,
+        Ok(clip_page(
+            "h",
+            3,
+            2,
+            vec![clip(0, "a", "alpha"), clip(1, "b", "beta")],
+        )),
+    ));
+    assert_eq!(app.clipboard.items.len(), 2);
+    assert!(app.clipboard.loading, "more rows to scan");
+    assert_eq!(app.clipboard.scanned, 2);
+
+    // A duplicate of an earlier item is listed once, at its newest row.
+    let _ = app.update(Message::ClipboardPage(
+        first,
+        Ok(clip_page("h", 3, 3, vec![clip(2, "a", "alpha")])),
+    ));
+    let rows: Vec<_> = app.clipboard.items.iter().map(|i| i.row).collect();
+    assert_eq!(rows, vec![0, 1]);
+    assert!(!app.clipboard.loading);
+    assert_eq!(app.total_items(), 2);
+
+    // Typing a new query starts a new scan; pages of the old one are dropped.
+    let second = open_clipboard(&mut app, "clip be");
+    assert_ne!(first, second);
+    let _ = app.update(Message::ClipboardPage(
+        first,
+        Ok(clip_page("h", 3, 3, vec![clip(0, "x", "x")])),
+    ));
+    assert_eq!(
+        app.clipboard.items.len(),
+        2,
+        "old items kept until new page"
+    );
+    let mut beta = clip(1, "b", "beta");
+    beta.tier = 0;
+    let mut alpha = clip(0, "a", "alphabet");
+    alpha.tier = 1;
+    let _ = app.update(Message::ClipboardPage(
+        second,
+        Ok(clip_page("h", 3, 3, vec![alpha, beta])),
+    ));
+    let ids: Vec<_> = app.clipboard.items.iter().map(|i| i.id.as_str()).collect();
+    assert_eq!(ids, vec!["b", "a"], "better match first");
+
+    let _ = app.update(Message::SearchChanged("fire".into()));
+    assert!(!app.clipboard.active);
+    assert!(app.clipboard.items.is_empty());
+}
+
+#[test]
+fn test_clipboard_scan_restarts_when_history_changes() {
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip ");
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page(
+            "h1",
+            4,
+            2,
+            vec![clip(0, "a", "a"), clip(1, "b", "b")],
+        )),
+    ));
+    // The newest item changed between pages: the scan starts over and the
+    // listed items stay visible meanwhile.
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page("h2", 5, 4, vec![clip(2, "c", "c")])),
+    ));
+    assert_ne!(app.clipboard.generation, generation);
+    assert!(app.clipboard.fresh);
+    assert_eq!(app.clipboard.items.len(), 2);
+
+    // A history that never settles ends in an error instead of looping.
+    for _ in 0..3 {
+        let mut page = clip_page("h", 1, 1, vec![clip(0, "z", "z")]);
+        page.stable = false;
+        let _ = app.update(Message::ClipboardPage(app.clipboard.generation, Ok(page)));
+    }
+    assert!(!app.clipboard.loading);
+    assert!(app.clipboard.error.as_ref().unwrap().contains("Ctrl+R"));
+
+    let _ = app.update(Message::ClipboardRefresh);
+    assert!(app.clipboard.loading);
+    assert!(app.clipboard.error.is_none());
+    assert_eq!(app.clipboard.restarts, 0);
+}
+
+#[test]
+fn test_clipboard_selection_follows_item_across_refresh() {
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip ");
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page(
+            "a",
+            3,
+            3,
+            vec![clip(0, "a", "a"), clip(1, "b", "b"), clip(2, "c", "c")],
+        )),
+    ));
+    let _ = app.update(Message::MoveDown);
+    assert_eq!(app.selected_index, 1);
+
+    let _ = app.update(Message::ClipboardRefresh);
+    let _ = app.update(Message::ClipboardPage(
+        app.clipboard.generation,
+        Ok(clip_page(
+            "n",
+            4,
+            4,
+            vec![
+                clip(0, "n", "new"),
+                clip(1, "a", "a"),
+                clip(2, "b", "b"),
+                clip(3, "c", "c"),
+            ],
+        )),
+    ));
+    assert_eq!(app.selected_index, 2, "still on item b");
+}
+
+#[test]
+fn test_clipboard_errors_show_as_status_row() {
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip ");
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Err("CopyQ is not running".into()),
+    ));
+    assert!(!app.clipboard.loading);
+    assert_eq!(app.total_items(), 1);
+    assert_eq!(app.clipboard.status(), "CopyQ is not running");
+    let _ = app.update(Message::Submit);
+    assert!(!app.clipboard.pending, "status row does nothing");
+    let preview = app.resolve_selected_preview().unwrap();
+    assert_eq!(preview.subtitle.as_deref(), Some("CopyQ is not running"));
+}
+
+#[test]
+fn test_clipboard_previews_are_bound_to_session_and_item() {
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip ");
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page(
+            "a",
+            2,
+            2,
+            vec![clip(0, "a", "a"), clip(1, "b", "b")],
+        )),
+    ));
+    assert_eq!(app.clipboard.preview_inflight.as_deref(), Some("a"));
+    let preview = app.resolve_selected_preview().unwrap();
+    assert!(matches!(
+        preview.bodies.first(),
+        Some(PreviewBody::Text { content, .. }) if content == "Loading preview..."
+    ));
+    assert!(preview
+        .metadata
+        .iter()
+        .any(|(key, value)| key == "Ctrl+I" && value == "Show only images"));
+    assert!(preview.metadata.iter().any(|(key, _)| key == "Ctrl+R"));
+
+    let session = app.clipboard.session;
+    let _ = app.update(Message::ClipboardPreview(
+        session.wrapping_sub(1),
+        "a".into(),
+        Ok(clip_text_preview("wrong")),
+    ));
+    assert!(app.clipboard.preview("a").is_none());
+
+    // The next preview is requested once the selected one arrives.
+    let _ = app.update(Message::MoveDown);
+    assert_eq!(app.clipboard.preview_inflight.as_deref(), Some("a"));
+    let _ = app.update(Message::ClipboardPreview(
+        session,
+        "a".into(),
+        Ok(clip_text_preview("alpha")),
+    ));
+    assert_eq!(app.clipboard.preview_inflight.as_deref(), Some("b"));
+    let _ = app.update(Message::ClipboardPreview(
+        session,
+        "b".into(),
+        Ok(clip_text_preview("beta\nsecond line")),
+    ));
+    let preview = app.resolve_selected_preview().unwrap();
+    assert!(matches!(
+        preview.bodies.first(),
+        Some(PreviewBody::Text { content, .. }) if content == "beta\nsecond line"
+    ));
+
+    let mut image = clip_text_preview("");
+    image.kind = super::clipboard::ItemKind::Image;
+    image.image = Some(Ok(super::clipboard::PreviewImage {
+        handle: iced::widget::image::Handle::from_bytes(vec![0u8; 4]),
+        mime: "image/png".into(),
+        width: 2,
+        height: 1,
+    }));
+    let _ = app.update(Message::ClipboardPreview(session, "b".into(), Ok(image)));
+    let preview = app.resolve_selected_preview().unwrap();
+    assert!(matches!(
+        preview.bodies.first(),
+        Some(PreviewBody::ImageData { .. })
+    ));
+
+    for index in 0..20 {
+        let _ = app.update(Message::ClipboardPreview(
+            session,
+            format!("other{index}"),
+            Ok(clip_text_preview("x")),
+        ));
+    }
+    assert!(app.clipboard.previews.len() <= 8);
+}
+
+#[test]
+fn test_clipboard_actions_are_captured_and_never_fall_back() {
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip ");
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page("a", 1, 1, vec![clip(0, "a", "a")])),
+    ));
+
+    // Ctrl+Enter pastes by default; without Hyprland it reports why and
+    // does not copy instead.
+    app.view.current_modifiers = iced::keyboard::Modifiers::CTRL;
+    let _ = app.update(Message::Submit);
+    assert!(!app.clipboard.pending);
+    assert!(app
+        .clipboard
+        .error
+        .as_ref()
+        .unwrap()
+        .contains("Hyprland session"));
+
+    app.hyprland = Some(Ok(super::hyprland::Hyprland::test_target()));
+    let _ = app.update(Message::Submit);
+    assert!(app.clipboard.pending);
+    assert!(app.clipboard.error.is_none());
+    let session = app.clipboard.session;
+
+    let _ = app.update(Message::ClipboardActionDone(
+        session.wrapping_sub(1),
+        Ok(Some(super::hyprland::Hyprland::test_target())),
+    ));
+    assert!(app.clipboard.pending, "late result from another session");
+    let _ = app.update(Message::ClipboardActionDone(
+        session,
+        Err("item is no longer in the clipboard history".into()),
+    ));
+    assert!(!app.clipboard.pending);
+    assert!(app.deferred_paste.lock().unwrap().is_none());
+    assert!(app.clipboard.error.as_ref().unwrap().contains("no longer"));
+
+    let _ = app.update(Message::Submit);
+    let _ = app.update(Message::ClipboardActionDone(
+        session,
+        Ok(Some(super::hyprland::Hyprland::test_target())),
+    ));
+    assert!(app.deferred_paste.lock().unwrap().is_some());
+
+    // Enter copies and leaves no paste behind.
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip ");
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page("a", 1, 1, vec![clip(0, "a", "a")])),
+    ));
+    let _ = app.update(Message::Submit);
+    assert!(app.clipboard.pending);
+    let _ = app.update(Message::ClipboardActionDone(
+        app.clipboard.session,
+        Ok(None),
+    ));
+    assert!(!app.clipboard.pending);
+    assert!(app.deferred_paste.lock().unwrap().is_none());
+}
+
+#[test]
+fn test_clipboard_images_only_keyword_and_toggle() {
+    let mut app = test_app(clipboard_addons());
+    open_clipboard(&mut app, "clip ");
+    assert!(!app.clipboard.images_only);
+
+    let generation = app.clipboard.generation;
+    let _ = app.update(Message::ClipboardToggleImages);
+    assert!(app.clipboard.images_only);
+    assert_ne!(
+        app.clipboard.generation, generation,
+        "rescans with the filter"
+    );
+    assert_eq!(app.clipboard.status(), "Searching clipboard images...");
+
+    // Typing keeps the Ctrl+I choice.
+    open_clipboard(&mut app, "clip cat");
+    assert!(app.clipboard.images_only);
+    let _ = app.update(Message::ClipboardPage(
+        app.clipboard.generation,
+        Ok(clip_page("h", 1, 1, Vec::new())),
+    ));
+    assert_eq!(app.clipboard.status(), "No clipboard images match");
+
+    // The images keyword starts filtered, and Ctrl+I shows everything again.
+    open_clipboard(&mut app, "clipimg ");
+    assert!(app.clipboard.images_only);
+    let _ = app.update(Message::ClipboardToggleImages);
+    assert!(!app.clipboard.images_only);
+    open_clipboard(&mut app, "clip ");
+    assert!(!app.clipboard.images_only);
+
+    let _ = app.update(Message::SearchChanged("fire".into()));
+    let _ = app.update(Message::ClipboardToggleImages);
+    assert!(!app.clipboard.active);
+    assert!(!app.clipboard.images_only);
 }

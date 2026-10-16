@@ -212,6 +212,15 @@ fn full_pane_image<'a>(path: &str, height: f32) -> Option<Element<'a, Message>> 
     })
 }
 
+/// Image decoded from memory, sized like [`full_pane_image`].
+fn memory_image<'a>(handle: iced::widget::image::Handle, height: f32) -> Element<'a, Message> {
+    image(handle)
+        .width(Length::Fill)
+        .height(Length::Fixed(height))
+        .content_fit(iced::ContentFit::Contain)
+        .into()
+}
+
 impl LauncherApp {
     /// Wrap the shared window chrome around an already built item list.
     fn shell<'a>(
@@ -550,7 +559,10 @@ impl LauncherApp {
         // Image previews fill the whole pane: the image is rendered first at the
         // full viewport size, and the header plus file info follow below the fold,
         // reachable by scrolling with Ctrl+J / Ctrl+K.
-        let image_first = matches!(data.bodies.first(), Some(PreviewBody::Image { .. }));
+        let image_first = matches!(
+            data.bodies.first(),
+            Some(PreviewBody::Image { .. } | PreviewBody::ImageData { .. })
+        );
         let viewport_height = self.preview_viewport_height();
 
         // Header: optional icon + title/subtitle + optional badge
@@ -604,10 +616,16 @@ impl LauncherApp {
         }
 
         if image_first {
-            if let Some(PreviewBody::Image { path }) = data.bodies.first() {
-                if let Some(el) = full_pane_image(path, viewport_height) {
-                    col = col.push(el);
+            match data.bodies.first() {
+                Some(PreviewBody::Image { path }) => {
+                    if let Some(el) = full_pane_image(path, viewport_height) {
+                        col = col.push(el);
+                    }
                 }
+                Some(PreviewBody::ImageData { handle }) => {
+                    col = col.push(memory_image(handle.clone(), viewport_height));
+                }
+                _ => {}
             }
         }
 
@@ -679,6 +697,9 @@ impl LauncherApp {
                     if let Some(el) = full_pane_image(&path, viewport_height) {
                         col = col.push(el);
                     }
+                }
+                PreviewBody::ImageData { handle } => {
+                    col = col.push(memory_image(handle, viewport_height));
                 }
                 PreviewBody::HeroGlyph { glyph } => {
                     col = col.push(
@@ -840,6 +861,7 @@ impl LauncherApp {
             || self.script_filter.help_message.is_some();
         let has_text_snippet = self.text_snippets.active || self.text_snippets.loading;
         let has_emoji = self.emoji.active;
+        let has_clipboard = self.clipboard.active;
         let has_file_browser = self.file_browser.active;
         let has_web_search = self.web_search.active.is_some();
         let has_currency = self.currency.result.is_some()
@@ -1137,6 +1159,61 @@ impl LauncherApp {
                     items_column = items_column.push(item_button);
                     special_item_idx += 1;
                 }
+            }
+        }
+
+        if self.clipboard.active {
+            let state = &self.clipboard;
+            if state.items.is_empty() {
+                let is_selected = self.selected_index == special_item_idx;
+                let status_row = Row::new()
+                    .spacing(16)
+                    .align_y(iced::Alignment::Center)
+                    .push(text(state.status()).size(fs.item).color(t.text_muted));
+                items_column = items_column.push(
+                    button(status_row)
+                        .padding(fs.item_padding)
+                        .width(Length::Fill)
+                        .style(item_button_style(t, is_selected, t.text_muted)),
+                );
+                special_item_idx += 1;
+            } else if let Some(error) = &state.error {
+                let error_row = Row::new()
+                    .spacing(16)
+                    .align_y(iced::Alignment::Center)
+                    .push(text(error.clone()).size(fs.item).color(t.text_muted));
+                items_column = items_column.push(
+                    button(error_row)
+                        .padding(fs.item_padding)
+                        .width(Length::Fill)
+                        .style(move |_theme, _status| button::Style {
+                            text_color: t.text_muted,
+                            border: iced::Border {
+                                radius: 8.0.into(),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        }),
+                );
+            }
+
+            for item in &state.items {
+                let is_selected = self.selected_index == special_item_idx;
+                let text_col = Column::new()
+                    .push(text(item.title()).size(fs.item).color(t.text_main))
+                    .push(text(item.subtitle()).size(fs.subtitle).color(t.text_muted));
+                let item_row = Row::new()
+                    .spacing(16)
+                    .align_y(iced::Alignment::Center)
+                    .push(text_col.width(Length::Fill));
+                items_column = items_column.push(
+                    button(item_row)
+                        .on_press(Message::ItemClicked(special_item_idx))
+                        .padding(fs.item_padding)
+                        .width(Length::Fill)
+                        .style(item_button_style(t, is_selected, t.text_main)),
+                );
+                special_item_idx += 1;
             }
         }
 
@@ -1452,6 +1529,7 @@ impl LauncherApp {
             && !has_script_filter
             && !has_text_snippet
             && !has_emoji
+            && !has_clipboard
             && !has_file_browser
             && !has_web_search
             && !has_fallbacks
@@ -1607,6 +1685,32 @@ impl LauncherApp {
                 .color(t.text_muted),
             );
         }
+        if self.clipboard.active {
+            if !hint_spans.is_empty() {
+                hint_spans.push(sep.clone());
+            }
+            if self.clipboard.loading && !self.clipboard.items.is_empty() {
+                hint_spans.push(
+                    span(format!(
+                        "scanning {}/{}",
+                        self.clipboard.scanned, self.clipboard.total
+                    ))
+                    .size(fs.hint)
+                    .color(t.text_muted),
+                );
+                hint_spans.push(sep.clone());
+            }
+            hint_spans.push(span("Ctrl+R").size(fs.hint).color(t.accent));
+            hint_spans.push(span(" refresh").size(fs.hint).color(t.text_muted));
+            hint_spans.push(sep.clone());
+            hint_spans.push(span("Ctrl+I").size(fs.hint).color(t.accent));
+            let images = if self.clipboard.images_only {
+                " all items"
+            } else {
+                " images only"
+            };
+            hint_spans.push(span(images).size(fs.hint).color(t.text_muted));
+        }
         if !hint_spans.is_empty() {
             hint_spans.push(sep.clone());
         }
@@ -1705,6 +1809,16 @@ impl LauncherApp {
                 modifiers,
                 ..
             }) if c.as_str() == "k" && modifiers.control() => Some(Message::PreviewScrollUp),
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Character(ref c),
+                modifiers,
+                ..
+            }) if c.as_str() == "r" && modifiers.control() => Some(Message::ClipboardRefresh),
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Character(ref c),
+                modifiers,
+                ..
+            }) if c.as_str() == "i" && modifiers.control() => Some(Message::ClipboardToggleImages),
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 Some(Message::MouseReleased)
             }

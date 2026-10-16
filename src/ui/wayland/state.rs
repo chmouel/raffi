@@ -154,6 +154,97 @@ impl TextSnippetState {
     }
 }
 
+/// Clipboard history browser. Items come from CopyQ page by page; each scan
+/// has its own generation so pages from an older scan are dropped.
+#[derive(Debug, Clone, Default)]
+pub(super) struct ClipboardState {
+    pub active: bool,
+    pub loading: bool,
+    pub generation: u64,
+    /// Bumped when the browser opens or closes, to drop late previews and
+    /// action results.
+    pub session: u64,
+    pub query: String,
+    /// List only image items.
+    pub images_only: bool,
+    /// Whether the images keyword opened the browser; Ctrl+I overrides
+    /// `images_only` until the keyword changes.
+    pub image_keyword: bool,
+    /// Tab, total row count and newest item seen by the current scan.
+    pub tab: String,
+    pub total: usize,
+    pub head: String,
+    /// Rows scanned so far by the current scan.
+    pub scanned: usize,
+    /// Sorted by match tier then row, one entry per item id.
+    pub items: Vec<super::clipboard::ClipItem>,
+    /// The next page starts a new scan and replaces `items`.
+    pub fresh: bool,
+    pub restarts: u32,
+    pub error: Option<String>,
+    /// Item id to keep selected while results move around.
+    pub follow: Option<String>,
+    /// Recent previews by item id, oldest first.
+    pub previews: Vec<(String, Result<super::clipboard::ClipPreview, String>)>,
+    pub preview_inflight: Option<String>,
+    /// An action is running; further activations are ignored.
+    pub pending: bool,
+}
+
+impl ClipboardState {
+    pub fn clear(&mut self) {
+        let generation = self.generation.wrapping_add(1);
+        let session = self.session.wrapping_add(1);
+        *self = Self {
+            generation,
+            session,
+            ..Self::default()
+        };
+    }
+
+    /// Rows the browser adds to the list: one status row while nothing is
+    /// listed.
+    pub fn row_count(&self) -> usize {
+        if !self.active {
+            0
+        } else {
+            self.items.len().max(1)
+        }
+    }
+
+    pub fn preview(&self, id: &str) -> Option<&Result<super::clipboard::ClipPreview, String>> {
+        self.previews
+            .iter()
+            .find(|(cached, _)| cached == id)
+            .map(|(_, preview)| preview)
+    }
+
+    /// Message shown in place of the list when it is empty.
+    pub fn status(&self) -> String {
+        if let Some(error) = &self.error {
+            error.clone()
+        } else if self.images_only {
+            if self.loading {
+                "Searching clipboard images...".into()
+            } else if self.query.is_empty() {
+                "No images in clipboard history".into()
+            } else {
+                "No clipboard images match".into()
+            }
+        } else if self.loading {
+            if self.query.is_empty() {
+                "Loading clipboard history...".into()
+            } else {
+                "Searching clipboard history...".into()
+            }
+        } else if self.query.is_empty() {
+            "Clipboard history is empty".into()
+        } else {
+            "No clipboard entries match".into()
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(super) struct WebSearchState {
     pub active: Option<WebSearchActiveState>,
@@ -334,6 +425,7 @@ pub(super) struct LauncherApp {
     pub view: ViewState,
     pub history: HistoryState,
     pub emoji: EmojiState,
+    pub clipboard: ClipboardState,
     pub fallbacks: Vec<ResolvedFallback>,
     pub keyword_suggestions: Vec<KeywordSuggestion>,
     pub help_entries: Vec<HelpEntry>,

@@ -1,6 +1,6 @@
 ---
 title: Addon Configuration
-description: Configuration reference for built-in addons (currency, calculator, file browser, script filters, web searches, text snippets)
+description: Configuration reference for built-in addons (currency, calculator, file browser, script filters, web searches, text snippets, clipboard history)
 ---
 
 import { Image } from 'astro:assets';
@@ -8,11 +8,12 @@ import keywordSuggestionScreenshot from '../../../assets/screenshots/keyword-sug
 import keywordHelpScreenshot from '../../../assets/screenshots/keyword-help.png';
 import emojiScreenshot from '../../../assets/screenshots/emoji-picker.png';
 
-The native UI includes several built-in addons that can be configured under the `addons` section of `raffi.yaml`. All addons are enabled by default.
+The native UI includes several built-in addons that can be configured under the `addons` section of `raffi.yaml`. All addons except the clipboard history browser are enabled by default.
 
 ## Keywords
 
-Script filters, web searches, text snippets, and the emoji picker are reached by
+Script filters, web searches, text snippets, the emoji picker, and the clipboard
+history browser are reached by
 typing their keyword followed by a space. Typing `sn` on its own searches your
 launchers as usual, while `sn ` enters the snippet source.
 
@@ -20,6 +21,15 @@ While you type a keyword, Raffi lists the matching keywords at the top of the
 results with a short description of what each one does. Pressing Enter or Tab on
 one of those rows completes your input to `sn ` and drops you into the addon, so
 you never have to remember the exact keyword.
+
+Suggestions start once you have typed three characters, so a single `s` keeps
+your launcher results uncluttered. A keyword typed in full, such as `sn`, is
+suggested right away. Change the threshold with `keyword_min_chars`:
+
+```yaml
+addons:
+  keyword_min_chars: 1   # suggest from the first character
+```
 
 The file browser (`/`, `~/`) and the currency converter (`$`) are prefix
 triggers rather than keywords, and are not affected.
@@ -826,6 +836,56 @@ addons:
           value: "https://github.com"
         - name: "Documentation"
           value: "https://docs.example.com"
+```
+
+## Clipboard History
+
+Browses the clipboard history stored by CopyQ. See
+[Clipboard History](/features/clipboard-history/) for setup and usage.
+
+### Configuration
+
+**`addons.clipboard.enabled`** `boolean` (default: `false`)
+
+Turns the clipboard browser on. CopyQ must be installed and running.
+
+**`addons.clipboard.trigger`** `string` (default: `clip`)
+
+Keyword that opens the history. Type it followed by a space.
+
+**`addons.clipboard.image_trigger`** `string` (default: `clipimg`)
+
+Keyword that opens the history showing only images. **Ctrl+I** switches
+between images only and all items in either case.
+
+**`addons.clipboard.min_chars`** `integer` (default: `3`)
+
+Hide text entries shorter than this many characters, not counting surrounding
+whitespace. `0` lists everything. Images and files are always listed.
+
+**`addons.clipboard.backend`** `string` (default: `copyq`)
+
+Clipboard manager to read from. `copyq` is the only supported value.
+
+**`addons.clipboard.action`** `string` (default: `copy`)
+
+What Enter does: `copy` puts the item back on the clipboard with all its
+formats, `hypr_paste` also pastes it into the previous window on Hyprland.
+
+**`addons.clipboard.secondary_action`** `string` (default: `hypr_paste`)
+
+What Ctrl+Enter does. Accepts the same values as `action`. Outside Hyprland a
+`hypr_paste` action shows an error and does not copy.
+
+### Example
+
+```yaml
+addons:
+  clipboard:
+    enabled: true
+    trigger: "cb"
+    action: hypr_paste
+    secondary_action: copy
 ```
 
 ## Complete Addon Example

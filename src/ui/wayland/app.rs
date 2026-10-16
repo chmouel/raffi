@@ -27,11 +27,11 @@ use super::snippets::{
     missing_clipboard, parse_snippet_file, snippet_mru_key,
 };
 use super::state::{
-    CachedRate, ClipboardData, CurrencyConversion, CurrencyConversionRequest, CurrencyResult,
-    CurrencyState, EmojiEntry, EmojiState, FallbackAction, FileBrowserState, HistoryState,
-    KeywordSuggestion, LauncherApp, Message, MultiCurrencyRequest, MultiCurrencyResult,
-    PendingSelection, ResolvedFallback, ScriptFilterResult, ScriptFilterState, SharedSelection,
-    TextSnippetState, ViewState, WebSearchActiveState, WebSearchState,
+    CachedRate, ClipboardData, ClipboardState, CurrencyConversion, CurrencyConversionRequest,
+    CurrencyResult, CurrencyState, EmojiEntry, EmojiState, FallbackAction, FileBrowserState,
+    HistoryState, KeywordSuggestion, LauncherApp, Message, MultiCurrencyRequest,
+    MultiCurrencyResult, PendingSelection, ResolvedFallback, ScriptFilterResult, ScriptFilterState,
+    SharedSelection, TextSnippetState, ViewState, WebSearchActiveState, WebSearchState,
 };
 use super::support::{
     fuzzy_match_configs, load_history, load_mru_map, mru_bounds, mru_sort_key, record_mru_use,
@@ -49,6 +49,7 @@ pub(super) enum QueryMode {
     ScriptFilter { config_index: usize, query: String },
     TextSnippet { config_index: usize, query: String },
     Emoji { query: String },
+    Clipboard { query: String, images_only: bool },
     WebSearch { config_index: usize, query: String },
     Standard,
 }
@@ -107,6 +108,28 @@ pub(super) fn fido_updir(old: &str, new: &str, home: &str) -> Option<(String, St
     Some((parent, left.to_string()))
 }
 
+/// The query as it may appear in debug logs: clipboard searches can contain
+/// copied secrets, so only their trigger is kept.
+/// Theme icon names for the clipboard keywords; rows show no icon when the
+/// theme lacks them.
+pub(super) const CLIPBOARD_ICON: &str = "copyq";
+pub(super) const CLIPBOARD_IMAGES_ICON: &str = "image-x-generic";
+
+pub(super) fn loggable_query(query: &str, addons: &AddonsConfig) -> String {
+    match route_query(query, addons) {
+        QueryMode::Clipboard { images_only, .. } => {
+            let clipboard = &addons.clipboard;
+            let trigger = if images_only {
+                clipboard.image_trigger()
+            } else {
+                clipboard.trigger()
+            };
+            format!("{trigger} <redacted>")
+        }
+        _ => query.trim().to_string(),
+    }
+}
+
 pub(super) fn route_query(query: &str, addons: &AddonsConfig) -> QueryMode {
     let input = keyword_input(query);
     let trimmed = input.trim_end();
@@ -162,6 +185,21 @@ pub(super) fn route_query(query: &str, addons: &AddonsConfig) -> QueryMode {
         }
     }
 
+    if addons.clipboard.enabled {
+        if let Some(query) = extract_keyword_query(input, addons.clipboard.trigger()) {
+            return QueryMode::Clipboard {
+                query,
+                images_only: false,
+            };
+        }
+        if let Some(query) = extract_keyword_query(input, addons.clipboard.image_trigger()) {
+            return QueryMode::Clipboard {
+                query,
+                images_only: true,
+            };
+        }
+    }
+
     if let Some((config_index, query)) =
         addons
             .web_searches
@@ -196,7 +234,11 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
     }
 
     let input_lower = input.to_lowercase();
-    let matches = |keyword: &str| keyword.to_lowercase().starts_with(&input_lower);
+    let long_enough = input.chars().count() >= addons.keyword_min_chars();
+    let matches = |keyword: &str| {
+        let keyword = keyword.to_lowercase();
+        keyword == input_lower || (long_enough && keyword.starts_with(&input_lower))
+    };
 
     let mut suggestions = Vec::new();
 
@@ -229,6 +271,21 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
                 icon: None,
             });
         }
+    }
+
+    if addons.clipboard.enabled && matches(addons.clipboard.trigger()) {
+        suggestions.push(KeywordSuggestion {
+            keyword: addons.clipboard.trigger().to_string(),
+            subtitle: "Browse clipboard history".to_string(),
+            icon: Some(CLIPBOARD_ICON.to_string()),
+        });
+    }
+    if addons.clipboard.enabled && matches(addons.clipboard.image_trigger()) {
+        suggestions.push(KeywordSuggestion {
+            keyword: addons.clipboard.image_trigger().to_string(),
+            subtitle: "Browse images in clipboard history".to_string(),
+            icon: Some(CLIPBOARD_IMAGES_ICON.to_string()),
+        });
     }
 
     for config in &addons.web_searches {
@@ -271,9 +328,12 @@ impl LauncherApp {
         fallback_paths: Vec<String>,
     ) -> (Self, Task<Message>) {
         crate::debug_log!(
-            "LauncherApp::new: configs={} no_icons={} sort_mode={sort_mode:?} initial_query={initial_query:?}",
+            "LauncherApp::new: configs={} no_icons={} sort_mode={sort_mode:?} initial_query={:?}",
             configs.len(),
-            no_icons
+            no_icons,
+            initial_query
+                .as_deref()
+                .map(|query| loggable_query(query, &addons))
         );
         let icon_map = if no_icons {
             HashMap::new()
@@ -367,6 +427,7 @@ impl LauncherApp {
                     ..Default::default()
                 },
                 emoji: EmojiState::default(),
+                clipboard: ClipboardState::default(),
                 fallbacks,
                 keyword_suggestions: Vec::new(),
                 help_entries: Vec::new(),
@@ -385,6 +446,12 @@ impl LauncherApp {
     }
 
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
+        let task = self.update_inner(message);
+        let preview = self.ensure_clipboard_preview();
+        Task::batch([task, preview])
+    }
+
+    fn update_inner(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::SearchChanged(query) => self.handle_search_changed(query),
             Message::MoveUp => self.move_selection(-1),
@@ -493,6 +560,18 @@ impl LauncherApp {
             Message::KeywordSuggestionSelected(index) => {
                 self.handle_keyword_suggestion_selected(index)
             }
+            Message::ClipboardPage(generation, result) => {
+                self.handle_clipboard_page(generation, result)
+            }
+            Message::ClipboardPreview(session, id, result) => {
+                self.handle_clipboard_preview(session, id, result)
+            }
+            Message::ClipboardSelected(index) => self.handle_clipboard_selected(index),
+            Message::ClipboardActionDone(session, result) => {
+                self.handle_clipboard_action_done(session, result)
+            }
+            Message::ClipboardRefresh => self.handle_clipboard_refresh(),
+            Message::ClipboardToggleImages => self.handle_clipboard_toggle_images(),
         }
     }
 
@@ -546,11 +625,20 @@ impl LauncherApp {
 
         self.view.refresh_ids();
 
-        let trimmed = query.trim();
         let mut tasks = Vec::new();
 
         let qmode = route_query(&query, &self.addons);
-        crate::debug_log!("route_query: query={trimmed:?} -> {qmode:?}");
+        crate::debug_log!(
+            "route_query: query={:?} -> {}",
+            loggable_query(&query, &self.addons),
+            match &qmode {
+                QueryMode::Clipboard { .. } => "Clipboard".to_string(),
+                other => format!("{other:?}"),
+            }
+        );
+        if !matches!(qmode, QueryMode::Clipboard { .. }) {
+            self.clipboard.clear();
+        }
         self.keyword_suggestions = if matches!(qmode, QueryMode::Standard) {
             keyword_suggestions(&query, &self.addons)
         } else {
@@ -609,6 +697,21 @@ impl LauncherApp {
                 self.text_snippets.clear();
                 self.handle_emoji_query(query, &mut tasks);
                 self.web_search.clear();
+            }
+            QueryMode::Clipboard { query, images_only } => {
+                self.file_browser.clear();
+                self.script_filter.clear();
+                self.text_snippets.clear();
+                self.emoji.clear();
+                self.web_search.clear();
+                self.currency.clear();
+                self.filtered_configs.clear();
+                self.calculator_result = None;
+                if let Some(drag) = &self.drag {
+                    drag.disarm();
+                }
+                self.handle_clipboard_query(query, images_only, &mut tasks);
+                return Task::batch(tasks);
             }
             QueryMode::WebSearch {
                 config_index,
@@ -1091,6 +1194,7 @@ impl LauncherApp {
             self.selected_index = 0;
         }
 
+        self.follow_clipboard_selection();
         self.refresh_file_preview_cache();
         self.view.preview_scrollable_id = super::state::ScrollableId::unique();
         self.snap_to_selection()
@@ -1151,6 +1255,14 @@ impl LauncherApp {
             let item_count = self.emoji.filtered.len();
             if item_count > 0 && index >= current_index && index < current_index + item_count {
                 return self.update(Message::EmojiSelected(index - current_index));
+            }
+            current_index += item_count;
+        }
+
+        if self.clipboard.active {
+            let item_count = self.clipboard.row_count();
+            if index >= current_index && index < current_index + item_count {
+                return self.update(Message::ClipboardSelected(index - current_index));
             }
             current_index += item_count;
         }
@@ -1855,6 +1967,7 @@ impl LauncherApp {
         if self.emoji.active {
             offset += self.emoji.filtered.len();
         }
+        offset += self.clipboard.row_count();
         if self.file_browser.active {
             offset += self.file_browser.entries.len();
         }
@@ -1884,6 +1997,7 @@ impl LauncherApp {
             || self.text_snippets.active
             || self.text_snippets.loading
             || self.emoji.active
+            || self.clipboard.active
             || self.file_browser.active
             || self.web_search.active.is_some()
     }
@@ -2020,6 +2134,7 @@ impl LauncherApp {
         self.script_filter.clear();
         self.text_snippets.clear();
         self.emoji.clear();
+        self.clipboard.clear();
         self.web_search.clear();
         self.file_browser.clear();
         // The browser is gone; a drag armed by a row press is stale.
@@ -2080,6 +2195,12 @@ impl LauncherApp {
     }
 
     pub(super) fn save_query_to_history(&mut self) {
+        if matches!(
+            route_query(&self.search_query, &self.addons),
+            QueryMode::Clipboard { .. }
+        ) {
+            return;
+        }
         let query = self.search_query.trim().to_string();
         if !query.is_empty() && self.history.max_items > 0 {
             self.history.items.retain(|item| item != &query);

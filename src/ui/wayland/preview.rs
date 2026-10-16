@@ -6,6 +6,7 @@ use std::path::Path;
 use chrono::{DateTime, Local};
 
 use super::browser::read_directory;
+use super::clipboard::{ClipItem, ItemKind};
 use super::help::HelpEntry;
 use super::snippets::SnippetIcon;
 use super::state::{
@@ -13,7 +14,7 @@ use super::state::{
     KeywordSuggestion, LauncherApp, MultiCurrencyResult, ResolvedFallback, WebSearchActiveState,
 };
 use super::types::{CalculatorResult, ScriptFilterItem, ScriptFilterResult};
-use crate::{AddonsConfig, RaffiConfig, TextSnippet};
+use crate::{AddonsConfig, ClipboardAction, RaffiConfig, TextSnippet};
 
 /// Maximum number of bytes read from a file when generating a text preview.
 pub(super) const MAX_FILE_PREVIEW_BYTES: usize = 8 * 1024;
@@ -45,6 +46,8 @@ pub(crate) enum PreviewBody {
     },
     /// Scaled image or SVG preview (for File Browser images or QuickLook image paths).
     Image { path: String },
+    /// Scaled image decoded from memory (for clipboard history images).
+    ImageData { handle: iced::widget::image::Handle },
     /// Giant centered glyph/emoji hero display.
     HeroGlyph { glyph: String },
     /// Large centered value display (for Calculator and Currency Converter).
@@ -307,7 +310,7 @@ fn resolve_local_preview_path(raw: &str) -> Option<String> {
     }
 }
 
-fn percent_decode_path(path: &str) -> Option<String> {
+pub(super) fn percent_decode_path(path: &str) -> Option<String> {
     let bytes = path.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
     let mut index = 0;
@@ -332,6 +335,13 @@ fn describe_action(action: &str) -> String {
         "insert" => "Type into focused app".to_string(),
         "hypr_paste" => "Paste into original window (Hyprland)".to_string(),
         custom => format!("Run `{custom}`"),
+    }
+}
+
+fn describe_clipboard_action(action: ClipboardAction) -> String {
+    match action {
+        ClipboardAction::Copy => "Copy with all formats".to_string(),
+        ClipboardAction::HyprPaste => describe_action("hypr_paste"),
     }
 }
 
@@ -403,6 +413,8 @@ impl LauncherApp {
         if self.emoji.active {
             current_index += self.emoji.filtered.len();
         }
+
+        current_index += self.clipboard.row_count();
 
         if self.file_browser.active {
             let count = self.file_browser.entries.len();
@@ -516,6 +528,25 @@ impl LauncherApp {
                 if let Some(entry) = self.emoji.data.get(emoji_idx) {
                     return Some(self.build_emoji_preview(entry));
                 }
+            }
+            current_index += count;
+        }
+
+        // 4b. Clipboard history
+        if self.clipboard.active {
+            let count = self.clipboard.row_count();
+            if index >= current_index && index < current_index + count {
+                return Some(match self.clipboard.items.get(index - current_index) {
+                    Some(item) => self.build_clipboard_preview(item),
+                    None => PreviewData {
+                        title: "Clipboard history".to_string(),
+                        subtitle: Some(self.clipboard.status()),
+                        badge: Some("Clipboard".to_string()),
+                        icon: None,
+                        bodies: Vec::new(),
+                        metadata: Vec::new(),
+                    },
+                });
             }
             current_index += count;
         }
@@ -996,6 +1027,106 @@ impl LauncherApp {
             bodies: vec![PreviewBody::HeroGlyph {
                 glyph: entry.value.clone(),
             }],
+            metadata,
+        }
+    }
+
+    fn build_clipboard_preview(&self, item: &ClipItem) -> PreviewData {
+        let mut bodies = Vec::new();
+        let mut metadata = vec![("Type".to_string(), item.kind.label().to_string())];
+        if let Some(time) = item.copied {
+            metadata.push(("Copied".to_string(), super::clipboard::full_copy_time(time)));
+        }
+        match self.clipboard.preview(&item.id) {
+            None => bodies.push(PreviewBody::Text {
+                heading: None,
+                content: "Loading preview...".to_string(),
+                truncated: false,
+            }),
+            Some(Err(error)) => bodies.push(PreviewBody::Text {
+                heading: Some("Preview unavailable".to_string()),
+                content: error.clone(),
+                truncated: false,
+            }),
+            Some(Ok(preview)) => {
+                match &preview.image {
+                    Some(Ok(image)) => {
+                        bodies.push(PreviewBody::ImageData {
+                            handle: image.handle.clone(),
+                        });
+                        metadata.push((
+                            "Dimensions".to_string(),
+                            format!("{} × {} px", image.width, image.height),
+                        ));
+                    }
+                    Some(Err(error)) => bodies.push(PreviewBody::Text {
+                        heading: Some("Image".to_string()),
+                        content: error.clone(),
+                        truncated: false,
+                    }),
+                    None => {}
+                }
+                if !preview.files.is_empty() {
+                    let content = preview
+                        .files
+                        .iter()
+                        .map(|file| match file.missing {
+                            Some(true) => format!("{} (missing)", file.name),
+                            _ => file.name.clone(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    bodies.push(PreviewBody::Text {
+                        heading: Some("Files".to_string()),
+                        content,
+                        truncated: false,
+                    });
+                } else if !preview.text.is_empty() {
+                    let heading = if preview.kind == ItemKind::Html {
+                        "Plain text"
+                    } else {
+                        "Text"
+                    };
+                    bodies.push(PreviewBody::Text {
+                        heading: Some(heading.to_string()),
+                        content: preview.text.clone(),
+                        truncated: preview.text_truncated,
+                    });
+                }
+                let formats = preview
+                    .formats
+                    .iter()
+                    .map(|(format, size)| format!("{format} ({})", format_byte_size(*size as u64)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                if !formats.is_empty() {
+                    metadata.push(("Formats".to_string(), formats));
+                }
+            }
+        }
+        let config = &self.addons.clipboard;
+        metadata.push((
+            "Enter".to_string(),
+            describe_clipboard_action(config.action),
+        ));
+        metadata.push((
+            "Ctrl+Enter".to_string(),
+            describe_clipboard_action(config.secondary_action),
+        ));
+        let images = if self.clipboard.images_only {
+            "Show all items"
+        } else {
+            "Show only images"
+        };
+        metadata.push(("Ctrl+I".to_string(), images.to_string()));
+        metadata.push(("Ctrl+R".to_string(), "Refresh the list".to_string()));
+
+        PreviewData {
+            title: item.title(),
+            subtitle: None,
+            badge: Some("Clipboard".to_string()),
+            icon: None,
+            bodies,
             metadata,
         }
     }

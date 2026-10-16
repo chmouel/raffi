@@ -63,6 +63,18 @@ Specify a custom configuration file:
 bind = $super, R, exec, (val=$(raffi -pI -c ~/.config/raffi/custom.yaml); [ -n "$val" ] && hyprctl dispatch exec "$val")
 ```
 
+### Clipboard History
+
+With the [clipboard browser](/features/clipboard-history/) enabled, bind a key
+that opens Raffi straight into it. Ctrl+Enter then pastes the chosen item into
+the window you were using:
+
+```ini
+bind = $super, V, exec, raffi -u native -i "clip "
+# Only images
+bind = $super SHIFT, V, exec, raffi -u native -i "clipimg "
+```
+
 ## Testing
 
 After adding the configuration:

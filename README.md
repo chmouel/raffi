@@ -2,33 +2,16 @@
 
 # Raffi Application Launcher
 
-Raffi is an application launcher designed to sit on top of Fuzzel, or, if preferred, operate using its own built‑in interface. It allows commands and scripts to be defined in a YAML configuration file, with support for icons, arguments, conditional visibility, and script execution through configurable interpreters.
+Raffi is an application launcher for Wayland. You define commands and scripts in a YAML file, with icons, arguments, conditions for when an entry shows up, and the interpreter each script runs with. Raffi shows them in its own native window, or in Fuzzel if you prefer.
 
 ## Documentation
 
-Primary documentation lives on the docs site:
+The full documentation is at <https://chmouel.github.io/raffi/>. Good places to start:
 
-- <https://chmouel.github.io/raffi/>
-
-Useful entry points:
-
-- Introduction: <https://chmouel.github.io/raffi/>
-- Installation: <https://chmouel.github.io/raffi/installation/>
-- Quick start: <https://chmouel.github.io/raffi/quickstart/>
-- Configuration overview: <https://chmouel.github.io/raffi/configuration/overview/>
-- Configuration reference: <https://chmouel.github.io/raffi/reference/yaml-schema/>
-- CLI options: <https://chmouel.github.io/raffi/reference/cli-options/>
-- UI modes: <https://chmouel.github.io/raffi/features/ui-modes/>
-- Themes: <https://chmouel.github.io/raffi/features/themes/>
-- Script filters: <https://chmouel.github.io/raffi/features/script-filters/>
-- Text snippets: <https://chmouel.github.io/raffi/features/text-snippets/>
-- Web search: <https://chmouel.github.io/raffi/features/web-search/>
-- Calculator: <https://chmouel.github.io/raffi/features/calculator/>
-- Currency converter: <https://chmouel.github.io/raffi/features/currency-converter/>
-- File browser: <https://chmouel.github.io/raffi/features/file-browser/>
-- Addon configuration: <https://chmouel.github.io/raffi/reference/addon-configuration/>
-- Window manager integration (Sway): <https://chmouel.github.io/raffi/integration/sway/>
-- Window manager integration (Hyprland): <https://chmouel.github.io/raffi/integration/hyprland/>
+- [Installation](https://chmouel.github.io/raffi/installation/)
+- [Quick start](https://chmouel.github.io/raffi/quickstart/)
+- [Configuration overview](https://chmouel.github.io/raffi/configuration/overview/)
+- [CLI options](https://chmouel.github.io/raffi/reference/cli-options/)
 
 ## Screenshot
 
@@ -38,9 +21,9 @@ Useful entry points:
 
 ## Installation
 
-Prebuilt binaries are available from the GitHub releases page. Download the archive or package suitable for your platform. Standard builds use the native interface by default; to use Fuzzel, install it and select it with `-u fuzzel` or `ui_type: fuzzel`.
+Prebuilt binaries and packages are on the [GitHub releases page](https://github.com/chmouel/raffi/releases). They use the native interface by default. To use Fuzzel instead, install it and pass `-u fuzzel` or set `ui_type: fuzzel`.
 
-On Arch Linux, Raffi can be installed from the AUR using a helper such as:
+On Arch Linux, install it from the AUR with a helper such as:
 
 ```sh
 yay -S raffi-bin
@@ -73,19 +56,17 @@ cd raffi
 cargo build --release
 ```
 
-If you only require Fuzzel integration and want a significantly smaller binary, build without the native UI:
+If you only use Fuzzel, you can build without the native UI:
 
 ```sh
 cargo build --release --no-default-features
 ```
 
-This reduces the binary from roughly 15 MB to around 1.1 MB by removing the iced GUI dependency.
-
-This minimal build also leaves out config validation (`--check-config` and the startup warnings about unknown keys). Add it back with `--features config-validation` at the cost of a few extra MB.
+The binary drops from about 15 MB to about 1.1 MB. This build also leaves out config validation (`--check-config` and the startup warnings about unknown keys); `--features config-validation` adds it back for a few MB.
 
 ## Usage
 
-Running `raffi` launches configured entries through the selected interface. If your config does not define any valid launchers yet, Raffi falls back to auto-detected desktop applications from your system's `.desktop` files.
+Run `raffi` to pick one of your configured entries. Without a config, or with no valid launchers in it, Raffi lists the desktop applications installed on your system.
 
 See the full CLI reference: <https://chmouel.github.io/raffi/reference/cli-options/>
 
@@ -110,15 +91,11 @@ See also: [Sway integration](https://chmouel.github.io/raffi/integration/sway/) 
 
 ## User Interfaces
 
-Raffi supports two interface modes:
+Raffi has two interfaces. The native one is the default: a built-in window with fuzzy search, keyboard navigation and themes. The other hands the list to the external Fuzzel launcher.
 
-- **Fuzzel** — uses the external Fuzzel launcher, integrates naturally with Wayland environments.
-- **Native** — built-in iced-based GUI with fuzzy search, keyboard navigation, and theme support.
+The native interface also comes with addons: a calculator, a currency converter, a file browser, an emoji and Nerd Fonts picker, script filters, web searches, text snippets and clipboard history (through CopyQ). A preview pane on the right shows details for the selected item; `Ctrl+P` toggles it. `Ctrl+/` lists every keyword and shortcut your config defines.
 
-The native interface includes built-in addons: calculator, currency converter, file browser (with drag-and-drop of files to other applications on Wayland), emoji/Nerd Fonts picker, script filters, web searches, and text snippets, along with an Alfred-style right-hand preview pane (**Ctrl+P** to toggle).
-Press **Ctrl+/** to list every keyword, trigger and keyboard shortcut available as configured.
-
-See: [UI modes](https://chmouel.github.io/raffi/features/ui-modes/) · [Themes](https://chmouel.github.io/raffi/features/themes/) · [Calculator](https://chmouel.github.io/raffi/features/calculator/) · [Currency converter](https://chmouel.github.io/raffi/features/currency-converter/) · [File browser](https://chmouel.github.io/raffi/features/file-browser/) · [Script filters](https://chmouel.github.io/raffi/features/script-filters/) · [Web search](https://chmouel.github.io/raffi/features/web-search/) · [Text snippets](https://chmouel.github.io/raffi/features/text-snippets/)
+See: [UI modes](https://chmouel.github.io/raffi/features/ui-modes/) · [Themes](https://chmouel.github.io/raffi/features/themes/) · [Calculator](https://chmouel.github.io/raffi/features/calculator/) · [Currency converter](https://chmouel.github.io/raffi/features/currency-converter/) · [File browser](https://chmouel.github.io/raffi/features/file-browser/) · [Script filters](https://chmouel.github.io/raffi/features/script-filters/) · [Web search](https://chmouel.github.io/raffi/features/web-search/) · [Text snippets](https://chmouel.github.io/raffi/features/text-snippets/) · [Clipboard history](https://chmouel.github.io/raffi/features/clipboard-history/)
 
 ## Configuration
 
@@ -135,9 +112,7 @@ launchers:
     description: Firefox browser with marionette enabled
 ```
 
-If you do not create a config yet, Raffi can still show installed desktop applications by scanning XDG application entries.
-
-For full configuration reference see the docs:
+The docs cover the rest of the configuration:
 
 - [Configuration overview](https://chmouel.github.io/raffi/configuration/overview/)
 - [Entries](https://chmouel.github.io/raffi/configuration/entries/)
@@ -150,9 +125,9 @@ For full configuration reference see the docs:
 
 ## Development
 
-Contributions are welcome. Issues, feature requests, and pull requests can be submitted via GitHub.
+Issues and pull requests are welcome on GitHub.
 
-To enable pre‑commit hooks that run `cargo clippy` before pushing:
+To run `cargo clippy` through pre-commit hooks before pushing:
 
 ```sh
 pip install pre-commit

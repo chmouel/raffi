@@ -2,7 +2,9 @@ mod actions;
 mod ansi;
 mod app;
 mod browser;
+mod clipboard;
 mod clipboard_history;
+mod clipboard_mode;
 mod currency;
 mod dnd;
 mod emoji;
@@ -75,10 +77,13 @@ fn run_wayland_ui(
     let selected_item: SharedSelection = Arc::new(Mutex::new(None));
     let selected_item_clone = selected_item.clone();
     let mut addons = addons.clone();
-    let hyprland =
+    let mut hyprland =
         hyprland::default_to_hypr_paste(&mut addons.text_snippets, hyprland::in_session(), || {
             hyprland::Hyprland::capture(&settings.terminal_classes)
         });
+    if hyprland.is_none() && addons.clipboard.uses_hypr_paste() && hyprland::in_session() {
+        hyprland = Some(hyprland::Hyprland::capture(&settings.terminal_classes));
+    }
     let deferred_paste = Arc::new(Mutex::new(None::<hyprland::Hyprland>));
     let deferred_paste_for_new = deferred_paste.clone();
 

@@ -212,12 +212,17 @@ impl Hyprland {
             .map_err(|error| format!("cannot subscribe to Hyprland focus events: {error}"))
     }
 
-    pub(super) fn prepare(&mut self, value: &str, restore_clipboard: bool) -> Result<(), String> {
-        validate_snippet(value)?;
+    /// Fail when the captured paste target window has closed.
+    pub(super) fn check_target(&self) -> Result<(), String> {
         self.eval(&format!(
             "assert(hl.get_window(\"address:{}\") ~= nil, \"paste target no longer exists\")",
             self.address
-        ))?;
+        ))
+    }
+
+    pub(super) fn prepare(&mut self, value: &str, restore_clipboard: bool) -> Result<(), String> {
+        validate_snippet(value)?;
+        self.check_target()?;
         self.restoration = if restore_clipboard {
             let mut command = Command::new("wl-paste");
             command.args(["--no-newline", "--type", "text"]);

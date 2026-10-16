@@ -1,0 +1,154 @@
+---
+title: Clipboard History
+description: Browse, preview and paste your CopyQ clipboard history from Raffi
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Raffi can browse the clipboard history kept by [CopyQ](https://hluk.github.io/CopyQ/).
+CopyQ records and stores the history. Raffi gives you a keyboard-driven list
+with search, previews, and copy or paste of any past item.
+
+<Aside type="note">
+The clipboard browser is only available in native mode and is off by default.
+</Aside>
+
+## Setup
+
+Install CopyQ and keep it running. Raffi talks to it through the `copyq`
+command, so the binary must be on your `PATH`. Raffi never reads CopyQ's
+files directly, and it does not record anything itself.
+
+Then enable the addon:
+
+```yaml
+addons:
+  clipboard:
+    enabled: true
+```
+
+Type `clip ` (with the trailing space) to open the history. Typing `cl` offers
+the keyword as a suggestion. To open it straight from a key binding, pass the
+keyword as the initial query:
+
+```sh
+raffi -u native -i "clip "
+```
+
+## Browsing and searching
+
+An empty query lists the whole history, newest first, in CopyQ's order. Words
+after the keyword filter it. Every word must appear somewhere in the item's
+text or file names, case-insensitively. Items that start with the exact phrase
+come first, then items containing the phrase, then items containing all the
+words in any order.
+
+Raffi reads the history in batches of 400 items, so large histories show
+results right away and the footer reads `scanning N/M` until the scan ends.
+Search covers the full text of every item, not only what fits in the row.
+
+Raffi browses the tab CopyQ uses for the clipboard (its `clipboard_tab`
+setting, or the first tab). If the history changes during a scan, Raffi starts
+the scan over. Press **Ctrl+R** to reload the list at any time.
+
+Text entries shorter than three characters, such as a stray `#` or a single
+letter, are hidden. Surrounding spaces and newlines don't count. Change the
+limit with `min_chars`, or set it to `0` to list everything. Images and files
+are always listed.
+
+## Copy times
+
+Each row shows when the item was copied: the time for today, the weekday for
+the past week, and the date for anything older. The preview pane shows the
+full date and time.
+
+CopyQ does not record copy times by default. Add the "Show Copy Time" command
+from the [CopyQ command examples](https://copyq.readthedocs.io/en/latest/command-examples.html#show-copy-time)
+or from [copyq-commands](https://github.com/hluk/copyq-commands/blob/master/commands/store-copy-time.ini)
+(in CopyQ, press F6 and paste it). Raffi reads the time from either version.
+Items copied before you add the command show no time.
+
+## Images only
+
+Press **Ctrl+I** to list only images, and again to list everything. You can
+also open the browser with only images by typing `clipimg ` (the
+`image_trigger` setting), or bind a key to it:
+
+```sh
+raffi -u native -i "clipimg "
+```
+
+Ctrl+I works there too, and your choice holds while you type. Search words
+still apply to images, though most images carry no text to match.
+
+## Previews
+
+Press **Ctrl+P** to toggle the preview pane. It shows:
+
+- multiline text, cut to the first 8 KiB or 100 lines
+- images, scaled to fit, with their pixel size
+- file lists, with missing files marked
+- the formats the item holds and their sizes
+
+Rich text (HTML) items preview as plain text. Raffi never renders HTML or loads
+remote content. Images larger than 32 MiB or 40 megapixels are not previewed,
+though you can still copy them.
+
+Previews stay in memory while the window is open and are never written to
+disk.
+
+## Actions
+
+| Key        | Default action | Description                                   |
+|------------|----------------|-----------------------------------------------|
+| Enter      | `copy`         | Put the item back on the clipboard            |
+| Ctrl+Enter | `hypr_paste`   | Copy, then paste into the window you came from |
+
+Change them with `action` and `secondary_action`. Both accept `copy` and
+`hypr_paste`.
+
+Copying goes through CopyQ, which publishes every format the item holds, so
+HTML keeps its formatting and images and file lists paste as such. Raffi checks
+that the clipboard holds the item before closing. If the item disappeared from
+the history since the list was loaded, Raffi shows an error and leaves the
+clipboard alone. CopyQ moves a copied item to the top of its history.
+
+`hypr_paste` needs Hyprland, as described in
+[Text Snippets](/features/text-snippets/#default-actions). Raffi remembers the
+window that had focus when it opened, copies the item, closes, and sends Ctrl+V
+(Ctrl+Shift+V in terminals) once that window has focus again. If that window
+closed, or you are not on Hyprland, Raffi shows an error and does not fall back
+to copying.
+
+## Privacy
+
+Clipboard queries are not saved in Raffi's search history. Debug logs show
+`clip <redacted>` in place of the query. Previews are discarded when the
+window closes.
+
+## Configuration
+
+```yaml
+addons:
+  clipboard:
+    enabled: true
+    trigger: clip
+    image_trigger: clipimg
+    min_chars: 3
+    backend: copyq
+    action: copy
+    secondary_action: hypr_paste
+```
+
+See the [addon reference](/reference/addon-configuration/#clipboard-history)
+for every field.
+
+## Troubleshooting
+
+"CopyQ is not running" means the `copyq` command could not reach the CopyQ
+server. Start CopyQ, then press **Ctrl+R**.
+
+"CopyQ is not installed" means Raffi could not find the `copyq` command.
+
+"Clipboard history kept changing" appears when items keep arriving during a
+scan. Press **Ctrl+R** to try again.

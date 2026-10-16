@@ -81,6 +81,27 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         });
     }
 
+    if addons.clipboard.enabled {
+        let trigger = addons.clipboard.trigger();
+        entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
+            trigger: trigger.to_string(),
+            title: "Clipboard history".to_string(),
+            usage: format!("{trigger} <text>"),
+            icon: Some(super::app::CLIPBOARD_ICON.to_string()),
+            completion: Some(format!("{trigger} ")),
+        });
+        let trigger = addons.clipboard.image_trigger();
+        entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
+            trigger: trigger.to_string(),
+            title: "Clipboard images".to_string(),
+            usage: format!("{trigger} <text>"),
+            icon: Some(super::app::CLIPBOARD_IMAGES_ICON.to_string()),
+            completion: Some(format!("{trigger} ")),
+        });
+    }
+
     for config in &addons.web_searches {
         entries.push(HelpEntry {
             section: HelpSection::KeywordsAndActions,
@@ -173,6 +194,18 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
                 "File browser: name, modified date, created date",
             ),
         ]);
+    }
+    if addons.clipboard.enabled {
+        entries.push(shortcut(
+            "Ctrl+R",
+            "Refresh clipboard history",
+            "Clipboard history: reload the list from the clipboard manager",
+        ));
+        entries.push(shortcut(
+            "Ctrl+I",
+            "Show only images",
+            "Clipboard history: switch between all items and images only",
+        ));
     }
     entries.extend([
         shortcut("Alt+P/N", "Search history", "Previous / next query"),

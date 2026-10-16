@@ -204,6 +204,22 @@ pub(crate) enum Message {
     EmojiDataLoaded(Vec<EmojiEntry>),
     FallbackSelected(usize),
     KeywordSuggestionSelected(usize),
+    /// A page of clipboard history for the scan with this generation.
+    ClipboardPage(u64, std::result::Result<super::clipboard::Page, String>),
+    /// Preview of the item with this id, for the given browser session.
+    ClipboardPreview(
+        u64,
+        String,
+        std::result::Result<super::clipboard::ClipPreview, String>,
+    ),
+    ClipboardSelected(usize),
+    /// A copy finished; carries the paste target when pasting.
+    ClipboardActionDone(
+        u64,
+        std::result::Result<Option<super::hyprland::Hyprland>, String>,
+    ),
+    ClipboardRefresh,
+    ClipboardToggleImages,
 }
 
 /// Clipboard text fetched for snippet previews. `None` or a missing history

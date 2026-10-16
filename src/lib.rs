@@ -281,6 +281,96 @@ pub struct TextSnippetSourceConfig {
     pub restore_clipboard: bool,
 }
 
+/// Clipboard manager that stores the history browsed by the clipboard addon
+#[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ClipboardBackend {
+    /// CopyQ, through its command line scripting API
+    #[default]
+    Copyq,
+}
+
+/// What the clipboard addon does with the selected history item
+#[derive(Deserialize, JsonSchema, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipboardAction {
+    /// Put the item back on the clipboard with all of its formats
+    Copy,
+    /// Copy the item, then paste it into the window that had focus before
+    /// Raffi opened (Hyprland only)
+    HyprPaste,
+}
+
+/// Configuration for the clipboard history addon (native UI only)
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
+pub struct ClipboardAddonConfig {
+    /// Off by default; requires a running clipboard manager.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Keyword that opens the history (default: `clip`).
+    #[serde(default)]
+    pub trigger: Option<String>,
+    /// Keyword that opens the history showing only images (default: `clipimg`).
+    #[serde(default)]
+    pub image_trigger: Option<String>,
+    /// Hide text entries shorter than this many characters, ignoring
+    /// surrounding whitespace (default: 3). Images and files are always shown.
+    #[serde(default)]
+    pub min_chars: Option<usize>,
+    #[serde(default)]
+    pub backend: ClipboardBackend,
+    /// Action on Enter (default: `copy`).
+    #[serde(default = "default_clipboard_action")]
+    pub action: ClipboardAction,
+    /// Action on Ctrl+Enter (default: `hypr_paste`).
+    #[serde(default = "default_clipboard_secondary_action")]
+    pub secondary_action: ClipboardAction,
+}
+
+fn default_clipboard_action() -> ClipboardAction {
+    ClipboardAction::Copy
+}
+
+fn default_clipboard_secondary_action() -> ClipboardAction {
+    ClipboardAction::HyprPaste
+}
+
+impl ClipboardAddonConfig {
+    pub fn trigger(&self) -> &str {
+        self.trigger.as_deref().unwrap_or("clip")
+    }
+
+    pub fn min_chars(&self) -> usize {
+        self.min_chars.unwrap_or(3)
+    }
+
+    pub fn image_trigger(&self) -> &str {
+        self.image_trigger.as_deref().unwrap_or("clipimg")
+    }
+
+    /// Whether either action needs the Hyprland paste target.
+    pub fn uses_hypr_paste(&self) -> bool {
+        self.enabled
+            && (self.action == ClipboardAction::HyprPaste
+                || self.secondary_action == ClipboardAction::HyprPaste)
+    }
+}
+
+impl Default for ClipboardAddonConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            trigger: None,
+            image_trigger: None,
+            min_chars: None,
+            backend: ClipboardBackend::default(),
+            action: default_clipboard_action(),
+            secondary_action: default_clipboard_secondary_action(),
+        }
+    }
+}
+
 /// Container for all addon configurations
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
@@ -294,11 +384,23 @@ pub struct AddonsConfig {
     #[serde(default)]
     pub emoji: EmojiAddonConfig,
     #[serde(default)]
+    pub clipboard: ClipboardAddonConfig,
+    #[serde(default)]
     pub script_filters: Vec<ScriptFilterConfig>,
     #[serde(default)]
     pub web_searches: Vec<WebSearchConfig>,
     #[serde(default)]
     pub text_snippets: Vec<TextSnippetSourceConfig>,
+    /// Characters to type before addon keywords are suggested (default: 3).
+    /// A keyword typed in full is always suggested.
+    #[serde(default)]
+    pub keyword_min_chars: Option<usize>,
+}
+
+impl AddonsConfig {
+    pub fn keyword_min_chars(&self) -> usize {
+        self.keyword_min_chars.unwrap_or(3)
+    }
 }
 
 fn default_true() -> bool {
@@ -3344,6 +3446,68 @@ mod tests {
                 "nerd_font".to_string()
             ])
         );
+    }
+
+    #[test]
+    fn test_clipboard_addon_config() {
+        let parse = |yaml: &str| {
+            let args = Args {
+                help: false,
+                version: false,
+                configfile: None,
+                print_only: false,
+                refresh_cache: false,
+                no_icons: true,
+                default_script_shell: None,
+                ui_type: None,
+                app_name: None,
+                initial_query: None,
+                theme: None,
+                schema: false,
+                check_config: false,
+                debug_file: None,
+            };
+            read_config_from_reader(Cursor::new(yaml), &args)
+        };
+
+        let defaults = parse("shell:\n  binary: sh\n").unwrap().addons.clipboard;
+        assert!(!defaults.enabled);
+        assert_eq!(defaults.trigger(), "clip");
+        assert_eq!(defaults.image_trigger(), "clipimg");
+        assert_eq!(defaults.min_chars(), 3);
+        assert_eq!(defaults.backend, ClipboardBackend::Copyq);
+        assert_eq!(defaults.action, ClipboardAction::Copy);
+        assert_eq!(defaults.secondary_action, ClipboardAction::HyprPaste);
+        assert!(!defaults.uses_hypr_paste());
+
+        let config = parse(
+            r#"
+addons:
+  clipboard:
+    enabled: true
+    trigger: cb
+    image_trigger: cbi
+    min_chars: 1
+    backend: copyq
+    action: hypr_paste
+    secondary_action: copy
+shell:
+  binary: sh
+"#,
+        )
+        .unwrap()
+        .addons
+        .clipboard;
+        assert!(config.enabled);
+        assert_eq!(config.trigger(), "cb");
+        assert_eq!(config.image_trigger(), "cbi");
+        assert_eq!(config.min_chars(), 1);
+        assert_eq!(config.action, ClipboardAction::HyprPaste);
+        assert_eq!(config.secondary_action, ClipboardAction::Copy);
+        assert!(config.uses_hypr_paste());
+
+        assert!(parse("addons:\n  clipboard:\n    action: insert\n").is_err());
+        assert!(parse("addons:\n  clipboard:\n    backend: cliphist\n").is_err());
     }
 
     #[test]
