@@ -1,0 +1,57 @@
+---
+title: Bluetooth
+description: Turn Bluetooth on and off and connect paired devices from Raffi
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Type `bt ` (with the trailing space) to see Bluetooth. The first row always
+turns Bluetooth on or off. When Bluetooth is on, your paired devices follow,
+each with its name, its address, its battery level when the device reports
+one, and whether it is connected. Connected devices have a check mark. When
+Bluetooth is off, only the first row is shown.
+
+Words after the keyword filter the devices, so `bt buds` or `bt keyboard`
+narrows the list. The first row stays in place whatever you type.
+
+<Aside type="note">
+The Bluetooth addon is only available in native mode and needs
+`bluetoothctl` from BlueZ. It is on by default. When `bluetoothctl` is not
+installed the list shows "bluetoothctl not found". It says so as well when
+there is no Bluetooth adapter, when the Bluetooth service can't be reached,
+and when no device is paired yet.
+</Aside>
+
+| Row          | Enter                                               |
+|--------------|-----------------------------------------------------|
+| First row    | Turn Bluetooth on, or off when pressed twice        |
+| A device     | Connect it, or disconnect it when pressed twice     |
+
+Connecting can take a few seconds. The row says "Connecting..." meanwhile,
+Raffi stays open, and the list refreshes once it is done. When an action
+fails, an error row appears at the top of the list. Set
+`close_on_action: true` to close Raffi after each action instead.
+
+The list is read within three seconds. A device that hasn't answered by then
+shows "State unknown" and can't be used until you open the list again.
+Pairing new devices is not supported; use your desktop's Bluetooth settings
+or `bluetoothctl` for that. Queries typed in this mode are not saved in the
+search history.
+
+To open the list from a key binding, pass the keyword as the initial query:
+
+```sh
+raffi -u native -i "bt "
+```
+
+## Configuration
+
+```yaml
+addons:
+  bluetooth:
+    trigger: "blue"
+    close_on_action: true
+```
+
+See the [addon reference](/reference/addon-configuration/#bluetooth) for
+every field.

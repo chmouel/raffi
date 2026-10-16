@@ -1,0 +1,14 @@
+Device 00:11:22:33:44:03 (random)
+	Name: Keyboard K3
+	Alias: Keyboard K3
+	Appearance: 0x03c1 (961)
+	Icon: input-keyboard
+	Paired: yes
+	Bonded: yes
+	Trusted: yes
+	Blocked: no
+	Connected: yes
+	LegacyPairing: no
+	CablePairing: no
+	UUID: Human Interface Device    (00001812-0000-1000-8000-00805f9b34fb)
+	Battery Percentage: 0x0f (15)

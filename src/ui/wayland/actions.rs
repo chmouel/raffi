@@ -193,6 +193,8 @@ pub(super) enum DeferredAction {
     HyprDispatchBatch(Vec<Vec<String>>),
     /// Signal a process after checking it is still the one listed.
     Signal(super::kill::SignalTarget),
+    /// `bluetoothctl` with these arguments, failing on the errors it prints.
+    Bluetooth(Vec<String>),
 }
 
 impl DeferredAction {
@@ -205,6 +207,7 @@ impl DeferredAction {
                 .iter()
                 .try_for_each(|args| super::hyprland::dispatch(args)),
             Self::Signal(target) => super::kill::send_signal(target),
+            Self::Bluetooth(args) => super::bluetooth::run_action(args),
         }
     }
 
@@ -214,6 +217,7 @@ impl DeferredAction {
             Self::Command(_) => "action",
             Self::HyprDispatch(_) | Self::HyprDispatchBatch(_) => "hyprctl dispatch",
             Self::Signal(_) => "kill",
+            Self::Bluetooth(_) => "bluetoothctl",
         }
     }
 
@@ -484,10 +488,24 @@ pub(super) fn kill_process_group(pgid: u32) {
 /// or when stdout exceeds `max_output` bytes, the whole process group is
 /// killed so that background children cannot keep the pipe open.
 pub(super) fn run_bounded(
-    mut command: Command,
+    command: Command,
     timeout: Duration,
     max_output: usize,
 ) -> Result<Vec<u8>, String> {
+    let (status, output) = run_bounded_status(command, timeout, max_output)?;
+    if !status.success() {
+        return Err(format!("exited with {status}"));
+    }
+    Ok(output)
+}
+
+/// `run_bounded` that also returns stdout when the command fails, with its
+/// exit status.
+pub(super) fn run_bounded_status(
+    mut command: Command,
+    timeout: Duration,
+    max_output: usize,
+) -> Result<(ExitStatus, Vec<u8>), String> {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -547,10 +565,7 @@ pub(super) fn run_bounded(
             Err(error) => return fail(&mut child, format!("cannot wait: {error}")),
         }
     };
-    if !status.success() {
-        return Err(format!("exited with {status}"));
-    }
-    Ok(output)
+    Ok((status, output))
 }
 
 /// Run `argv` in its own process group with `input` on stdin and return its

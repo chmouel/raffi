@@ -1250,6 +1250,8 @@ impl LauncherApp {
                 }
                 let subtitle = if let Some(reason) = &item.unavailable {
                     text(reason.clone()).size(fs.subtitle).color(t.text_muted)
+                } else if let Some(progress) = self.command_list_progress(item) {
+                    text(progress.to_string()).size(fs.subtitle).color(t.accent)
                 } else if let Some(verb) = self.command_list.armed_verb(item) {
                     text(format!("Press Enter again to {verb}"))
                         .size(fs.subtitle)

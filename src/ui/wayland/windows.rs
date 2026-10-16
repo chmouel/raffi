@@ -171,6 +171,7 @@ fn window_item(client: Client, target: Option<&str>) -> CommandItem {
             ]),
             confirm: None,
             keep_open: false,
+            progress: None,
         }
     });
     CommandItem {
@@ -185,6 +186,7 @@ fn window_item(client: Client, target: Option<&str>) -> CommandItem {
             action: DeferredAction::HyprDispatch(focus),
             confirm: None,
             keep_open: false,
+            progress: None,
         }),
         secondary,
         details,

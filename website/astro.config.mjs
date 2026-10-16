@@ -36,6 +36,7 @@ export default defineConfig({
           items: [
             { label: 'UI Modes', slug: 'features/ui-modes' },
             { label: 'Audio Switcher', slug: 'features/audio-switcher' },
+            { label: 'Bluetooth', slug: 'features/bluetooth' },
             { label: 'Calculator', slug: 'features/calculator' },
             { label: 'Clipboard History', slug: 'features/clipboard-history' },
             { label: 'Color Converter', slug: 'features/color-converter' },

@@ -173,6 +173,18 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         });
     }
 
+    if addons.bluetooth.enabled {
+        let trigger = addons.bluetooth.trigger();
+        entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
+            trigger: trigger.to_string(),
+            title: "Bluetooth".to_string(),
+            usage: format!("{trigger} <device>, Enter connects, or disconnects when pressed twice"),
+            icon: Some(super::app::BLUETOOTH_ICON.to_string()),
+            completion: Some(format!("{trigger} ")),
+        });
+    }
+
     if addons.devtools.enabled {
         let trigger = addons.devtools.trigger();
         entries.push(HelpEntry {

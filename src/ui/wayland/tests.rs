@@ -1603,6 +1603,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "media",
             "audio",
             "kill",
+            "bt",
             "dev",
             "math",
             "$",
@@ -1639,7 +1640,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
     assert_eq!(entries[1].icon.as_deref(), Some("gist-icon"));
     assert_eq!(entries[1].completion.as_deref(), Some("gist "));
     assert_eq!(entries[0].completion.as_deref(), Some("~/"));
-    assert_eq!(entries[11].completion, None);
+    assert_eq!(entries[12].completion, None);
     // Shortcut rows are informational: they never arm a keyword.
     for entry in entries
         .iter()
@@ -1661,6 +1662,7 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
     addons.media.enabled = false;
     addons.audio.enabled = false;
     addons.kill.enabled = false;
+    addons.bluetooth.enabled = false;
     addons.units.enabled = false;
     addons.color.enabled = false;
     addons.world_clock.enabled = false;
@@ -1716,6 +1718,7 @@ fn test_help_entries_skip_disabled_addons() {
     addons.media.enabled = false;
     addons.audio.enabled = false;
     addons.kill.enabled = false;
+    addons.bluetooth.enabled = false;
     addons.units.enabled = false;
     addons.color.enabled = false;
     addons.world_clock.enabled = false;
@@ -3526,6 +3529,13 @@ fn test_default_triggers_do_not_shadow_each_other_or_web_searches() {
             ..
         }
     ));
+    assert!(matches!(
+        route_query("bt x", &addons),
+        QueryMode::CommandList {
+            addon: CommandListAddon::Bluetooth,
+            ..
+        }
+    ));
 
     // A user web search keeps its keyword, and its suggestion comes first.
     addons.web_searches.push(WebSearchConfig {
@@ -4844,6 +4854,193 @@ fn test_kill_missing_program_and_history() {
     assert_eq!(app.command_list.status(), Some("kill not found"));
 
     let mut app = kill_app("kill firefox");
+    app.history.max_items = 10;
+    let before = app.history.items.clone();
+    app.save_query_to_history();
+    assert_eq!(app.history.items, before);
+}
+
+fn bluetooth_app(query: &str, powered: bool) -> LauncherApp {
+    let mut app = test_app(AddonsConfig::default());
+    app.history.max_items = 0;
+    let task = app.update(Message::SearchChanged(query.into()));
+    assert!(task.units() > 0, "the devices load");
+    assert_eq!(
+        app.command_list.status(),
+        Some("Loading Bluetooth devices...")
+    );
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(
+        generation,
+        Ok(super::bluetooth::fixture_items(powered)),
+    ));
+    app
+}
+
+fn select_identity(app: &mut LauncherApp, identity: &str) {
+    app.selected_index = app.command_list.position(identity).unwrap();
+}
+
+#[test]
+fn test_route_query_bluetooth_trigger() {
+    let mut addons = AddonsConfig::default();
+    assert_eq!(
+        route_query("bt buds", &addons),
+        QueryMode::CommandList {
+            addon: CommandListAddon::Bluetooth,
+            query: "buds".into()
+        }
+    );
+    assert!(classify_query("bt buds", &addons).sensitive);
+    assert_eq!(loggable_query("bt buds", &addons), "<redacted>");
+    assert_eq!(
+        keyword_suggestions("bt", &addons)[0].subtitle,
+        "Connect Bluetooth devices or turn Bluetooth on and off"
+    );
+
+    addons.bluetooth.enabled = false;
+    assert_eq!(route_query("bt buds", &addons), QueryMode::Standard);
+}
+
+#[test]
+fn test_bluetooth_connect_runs_at_once_and_shows_progress() {
+    let mut app = bluetooth_app("bt ", true);
+    assert_eq!(
+        command_list_titles(&app),
+        vec![
+            "Bluetooth is on",
+            "✓ Studio  Headphones",
+            "My Buds",
+            "✓ Keyboard K3"
+        ]
+    );
+    let identity = "device/00:11:22:33:44:02/connect".to_string();
+    select_identity(&mut app, &identity);
+    let task = app.update(Message::Submit);
+    assert!(task.units() > 0, "connecting runs in the background");
+    assert!(deferred_action(&app).is_none(), "Raffi stays open");
+    assert!(app.in_flight.is_pending("bluetooth", &identity));
+    let row = app.command_list.item(app.selected_index).unwrap().clone();
+    assert_eq!(app.command_list_progress(&row), Some("Connecting..."));
+    assert_eq!(app.update(Message::Submit).units(), 0, "no second connect");
+
+    let task = app.update(Message::CommandListActionDone(
+        CommandListAddon::Bluetooth,
+        app.command_list.session,
+        identity.clone(),
+        Ok(()),
+    ));
+    assert!(task.units() > 0, "the list refreshes");
+    assert!(!app.in_flight.is_pending("bluetooth", &identity));
+    assert_eq!(app.command_list_progress(&row), None);
+}
+
+#[test]
+fn test_bluetooth_disconnect_and_power_off_need_confirmation() {
+    for identity in ["device/00:11:22:33:44:01/disconnect", "adapter/power-off"] {
+        let mut app = bluetooth_app("bt ", true);
+        select_identity(&mut app, identity);
+
+        assert_eq!(app.update(Message::Submit).units(), 0);
+        assert!(app.command_list.armed.is_some());
+        assert_eq!(app.update(Message::SubmitRepeat).units(), 0);
+        assert!(!app.in_flight.is_pending("bluetooth", identity));
+
+        // Moving away resets the confirmation.
+        let _ = app.update(Message::SearchChanged("bt k".into()));
+        assert!(app.command_list.armed.is_none());
+        let _ = app.update(Message::SearchChanged("bt ".into()));
+        select_identity(&mut app, identity);
+
+        // A refresh replacing the list clears it too.
+        assert_eq!(app.update(Message::Submit).units(), 0);
+        app.command_list.begin_refresh();
+        let generation = app.command_list.generation;
+        let _ = app.update(Message::CommandListLoaded(
+            generation,
+            Ok(super::bluetooth::fixture_items(true)),
+        ));
+        assert!(app.command_list.armed.is_none());
+
+        assert_eq!(app.update(Message::Submit).units(), 0);
+        assert!(app.update(Message::Submit).units() > 0);
+        assert!(app.in_flight.is_pending("bluetooth", identity));
+    }
+}
+
+#[test]
+fn test_bluetooth_filter_keeps_the_power_row_first() {
+    let mut app = bluetooth_app("bt ", true);
+    let _ = app.update(Message::SearchChanged("bt buds".into()));
+    assert_eq!(
+        command_list_titles(&app),
+        vec!["Bluetooth is on", "My Buds"]
+    );
+    let _ = app.update(Message::SearchChanged("bt zzzz".into()));
+    assert_eq!(command_list_titles(&app), vec!["Bluetooth is on"]);
+}
+
+#[test]
+fn test_bluetooth_adapter_off_and_power_on() {
+    let mut app = bluetooth_app("bt buds", false);
+    assert_eq!(command_list_titles(&app), vec!["Bluetooth is off"]);
+    let task = app.update(Message::Submit);
+    assert!(task.units() > 0, "turning on needs no confirmation");
+    assert!(app.in_flight.is_pending("bluetooth", "adapter/power-on"));
+}
+
+#[test]
+fn test_bluetooth_failure_shows_an_error_row_and_refreshes() {
+    let mut app = bluetooth_app("bt ", true);
+    let identity = "device/00:11:22:33:44:02/connect".to_string();
+    select_identity(&mut app, &identity);
+    let _ = app.update(Message::Submit);
+    let task = app.update(Message::CommandListActionDone(
+        CommandListAddon::Bluetooth,
+        app.command_list.session,
+        identity,
+        Err("Failed to connect: org.bluez.Error.Failed".into()),
+    ));
+    assert!(task.units() > 0, "the list refreshes");
+    assert_eq!(
+        command_list_titles(&app)[0],
+        "My Buds failed: Failed to connect: org.bluez.Error.Failed"
+    );
+    assert_eq!(app.update(Message::ItemClicked(0)).units(), 0);
+}
+
+#[test]
+fn test_bluetooth_close_on_action_defers_the_action() {
+    let mut addons = AddonsConfig::default();
+    addons.bluetooth.close_on_action = true;
+    let mut app = test_app(addons);
+    let _ = app.update(Message::SearchChanged("bt ".into()));
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(
+        generation,
+        Ok(super::bluetooth::load_devices_with(
+            super::bluetooth::fixture_runner(true),
+            std::time::Duration::from_secs(3),
+            false,
+        )),
+    ));
+    select_identity(&mut app, "device/00:11:22:33:44:02/connect");
+    let _ = app.update(Message::Submit);
+    assert!(matches!(
+        deferred_action(&app),
+        Some(super::actions::DeferredAction::Bluetooth(args)) if args == ["connect", "00:11:22:33:44:02"]
+    ));
+}
+
+#[test]
+fn test_bluetooth_missing_program_and_history() {
+    let mut app = test_app(AddonsConfig::default());
+    app.program_exists = |program| program != "bluetoothctl";
+    let task = app.update(Message::SearchChanged("bt ".into()));
+    assert_eq!(task.units(), 0);
+    assert_eq!(app.command_list.status(), Some("bluetoothctl not found"));
+
+    let mut app = bluetooth_app("bt buds", true);
     app.history.max_items = 10;
     let before = app.history.items.clone();
     app.save_query_to_history();

@@ -1,0 +1,21 @@
+Controller 00:1A:7D:00:00:01 (public)
+	Manufacturer: 0x0002 (2)
+	Version: 0x0d (13)
+	Name: laptop
+	Alias: laptop
+	Class: 0x006c0104 (7078148)
+	Powered: yes
+	PowerState: on
+	Discoverable: no
+	DiscoverableTimeout: 0x000000b4 (180)
+	Pairable: yes
+	UUID: Audio Sink                (0000110b-0000-1000-8000-00805f9b34fb)
+	UUID: Audio Source              (0000110a-0000-1000-8000-00805f9b34fb)
+	Modalias: usb:v1D6Bp0246d0557
+	Discovering: no
+	Roles: central
+	Roles: peripheral
+Advertising Features:
+	ActiveInstances: 0x00 (0)
+	SupportedInstances: 0x0c (12)
+	SupportedIncludes: tx-power

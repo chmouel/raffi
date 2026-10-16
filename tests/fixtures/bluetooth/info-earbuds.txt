@@ -1,0 +1,15 @@
+Device 00:11:22:33:44:02 (public)
+	Name: Ear Buds
+	Alias: My Buds
+	Class: 0x00240404 (2360324)
+	Icon: audio-headset
+	Paired: yes
+	Bonded: yes
+	Trusted: yes
+	Blocked: no
+	Connected: no
+	LegacyPairing: no
+	CablePairing: no
+	UUID: Serial Port               (00001101-0000-1000-8000-00805f9b34fb)
+	UUID: Audio Sink                (0000110b-0000-1000-8000-00805f9b34fb)
+	UUID: Vendor specific           (66666666-6666-6666-6666-666666666666)

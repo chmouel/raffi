@@ -209,6 +209,7 @@ fn process_item(process: &Process) -> CommandItem {
         }),
         confirm: Some(format!("send {} to {}", signal.name(), process.name)),
         keep_open: true,
+        progress: None,
     };
     let mut icon_names = vec![process.program.clone()];
     if process.name != process.program {

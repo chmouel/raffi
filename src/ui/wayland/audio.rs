@@ -352,11 +352,13 @@ fn device_item(kind: Kind, device: &Device, is_default: bool, keep_open: bool) -
             action: DeferredAction::Command(set_default),
             confirm: None,
             keep_open,
+            progress: None,
         }),
         secondary: Some(CommandAction {
             action: DeferredAction::Command(toggle_mute),
             confirm: None,
             keep_open,
+            progress: None,
         }),
     }
 }

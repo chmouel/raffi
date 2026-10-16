@@ -27,7 +27,8 @@ impl SystemEntry {
             DeferredAction::HyprDispatch(args) => format!("hyprctl dispatch {}", args.join(" ")),
             DeferredAction::HyprPaste(_)
             | DeferredAction::HyprDispatchBatch(_)
-            | DeferredAction::Signal(_) => String::new(),
+            | DeferredAction::Signal(_)
+            | DeferredAction::Bluetooth(_) => String::new(),
         }
     }
 }
@@ -84,6 +85,7 @@ fn program(action: &DeferredAction) -> Option<&str> {
         DeferredAction::Command(argv) => argv.first().map(String::as_str),
         DeferredAction::HyprDispatch(_) | DeferredAction::HyprDispatchBatch(_) => Some("hyprctl"),
         DeferredAction::HyprPaste(_) | DeferredAction::Signal(_) => None,
+        DeferredAction::Bluetooth(_) => Some("bluetoothctl"),
     }
 }
 
@@ -147,6 +149,7 @@ impl SystemEntry {
                 action: self.action.clone(),
                 confirm: self.needs_confirmation().then(|| self.verb.to_string()),
                 keep_open: false,
+                progress: None,
             }),
             secondary: None,
             details: vec![

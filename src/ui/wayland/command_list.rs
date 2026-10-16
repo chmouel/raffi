@@ -18,6 +18,7 @@ pub(super) enum CommandListAddon {
     Media,
     Audio,
     Kill,
+    Bluetooth,
 }
 
 impl CommandListAddon {
@@ -29,6 +30,7 @@ impl CommandListAddon {
             Self::Media => "media",
             Self::Audio => "audio",
             Self::Kill => "kill",
+            Self::Bluetooth => "bluetooth",
         }
     }
 
@@ -39,6 +41,7 @@ impl CommandListAddon {
             Self::Media => "Media",
             Self::Audio => "Audio",
             Self::Kill => "Process",
+            Self::Bluetooth => "Bluetooth",
         }
     }
 
@@ -49,6 +52,7 @@ impl CommandListAddon {
             Self::Media => "Loading players...",
             Self::Audio => "Loading audio devices...",
             Self::Kill => "Loading processes...",
+            Self::Bluetooth => "Loading Bluetooth devices...",
         }
     }
 }
@@ -61,6 +65,9 @@ pub(super) struct CommandAction {
     pub confirm: Option<String>,
     /// Run right away with Raffi kept open, then reload the list.
     pub keep_open: bool,
+    /// Shown instead of the subtitle while the action runs with Raffi kept
+    /// open.
+    pub progress: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -343,6 +350,7 @@ pub(super) fn run_kept_open(action: &DeferredAction) -> Result<(), String> {
     let argv = match action {
         DeferredAction::Command(argv) => argv,
         DeferredAction::Signal(target) => return super::kill::send_signal(target),
+        DeferredAction::Bluetooth(args) => return super::bluetooth::run_action(args),
         _ => return Err("this action only runs after Raffi closes".to_string()),
     };
     let (program, args) = argv.split_first().ok_or("no command to run")?;

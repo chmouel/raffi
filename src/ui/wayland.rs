@@ -2,6 +2,7 @@ mod actions;
 mod ansi;
 mod app;
 mod audio;
+mod bluetooth;
 mod browser;
 mod clipboard;
 mod clipboard_history;

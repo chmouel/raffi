@@ -616,6 +616,16 @@ addons:
   #   enabled: true
   #   trigger: kill
 
+  # Bluetooth (native UI only, needs bluetoothctl). Type "bt " to list your
+  # paired devices under a row that turns Bluetooth on or off. Enter
+  # connects a device, or disconnects it when pressed twice. Turning
+  # Bluetooth off also needs a second Enter. Raffi stays open and refreshes
+  # the list.
+  # bluetooth:
+  #   enabled: true
+  #   trigger: bt
+  #   close_on_action: false
+
   # Unit conversion (native UI only). Type "10 km to mi", "70f to c" or
   # "5 GB in MB" without any keyword. Enter copies the number, Ctrl+Enter
   # copies it with the unit.

@@ -1,0 +1,3 @@
+Device 00:11:22:33:44:01 Studio  Headphones
+Device 00:11:22:33:44:02 Ear Buds
+Device 00:11:22:33:44:03 Keyboard K3

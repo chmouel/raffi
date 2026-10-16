@@ -1,6 +1,6 @@
 ---
 title: Addon Configuration
-description: Configuration reference for built-in addons (currency, calculator, unit conversion, color converter, world clock, developer tools, file browser, script filters, web searches, text snippets, clipboard history, system commands, window switcher, media controls, audio switcher, kill process)
+description: Configuration reference for built-in addons (currency, calculator, unit conversion, color converter, world clock, developer tools, file browser, script filters, web searches, text snippets, clipboard history, system commands, window switcher, media controls, audio switcher, kill process, Bluetooth)
 ---
 
 import { Image } from 'astro:assets';
@@ -13,7 +13,7 @@ The native UI includes several built-in addons that can be configured under the 
 ## Keywords
 
 Script filters, web searches, text snippets, the emoji picker, the clipboard
-history browser, system commands, the window switcher, media controls, the audio switcher, the process killer and developer tools are reached by
+history browser, system commands, the window switcher, media controls, the audio switcher, the process killer, Bluetooth and developer tools are reached by
 typing their keyword followed by a space. Typing `sn` on its own searches your
 launchers as usual, while `sn ` enters the snippet source.
 
@@ -1077,6 +1077,34 @@ addons:
     trigger: "pk"
 ```
 
+## Bluetooth
+
+Turns Bluetooth on and off and connects paired devices with `bluetoothctl`.
+See [Bluetooth](/features/bluetooth/) for usage.
+
+### Configuration
+
+**`addons.bluetooth.enabled`** `boolean` (default: `true`)
+
+**`addons.bluetooth.trigger`** `string` (default: `bt`)
+
+Keyword that opens the Bluetooth list. Type it followed by a space. Web
+searches with the same keyword take precedence.
+
+**`addons.bluetooth.close_on_action`** `boolean` (default: `false`)
+
+Close Raffi after an action. By default Raffi stays open and refreshes the
+list.
+
+### Example
+
+```yaml
+addons:
+  bluetooth:
+    trigger: "blue"
+    close_on_action: true
+```
+
 ## Developer Tools
 
 Lists base64, URL, hash, epoch, JSON and case transforms of the text typed
@@ -1151,6 +1179,11 @@ addons:
   kill:
     enabled: true
     trigger: "kill"
+
+  bluetooth:
+    enabled: true
+    trigger: "bt"
+    close_on_action: false
 
   file_browser:
     enabled: true

@@ -648,6 +648,37 @@ impl Default for KillAddonConfig {
     }
 }
 
+/// Configuration for the Bluetooth addon (native UI only)
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
+pub struct BluetoothAddonConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Keyword that opens the Bluetooth list (default: `bt`).
+    #[serde(default)]
+    pub trigger: Option<String>,
+    /// Close Raffi after an action instead of staying open and refreshing
+    /// the list (default: false).
+    #[serde(default)]
+    pub close_on_action: bool,
+}
+
+impl BluetoothAddonConfig {
+    pub fn trigger(&self) -> &str {
+        self.trigger.as_deref().unwrap_or("bt")
+    }
+}
+
+impl Default for BluetoothAddonConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            trigger: None,
+            close_on_action: false,
+        }
+    }
+}
+
 /// Container for all addon configurations
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
@@ -678,6 +709,8 @@ pub struct AddonsConfig {
     pub audio: AudioAddonConfig,
     #[serde(default)]
     pub kill: KillAddonConfig,
+    #[serde(default)]
+    pub bluetooth: BluetoothAddonConfig,
     #[serde(default)]
     pub devtools: DevtoolsAddonConfig,
     #[serde(default)]
@@ -3828,6 +3861,20 @@ shell:
             serde_yaml::from_str("enabled: false\ntrigger: w\n").unwrap();
         assert!(!config.enabled);
         assert_eq!(config.trigger(), "w");
+    }
+
+    #[test]
+    fn test_bluetooth_addon_config_parsing() {
+        let defaults = AddonsConfig::default().bluetooth;
+        assert!(defaults.enabled);
+        assert_eq!(defaults.trigger(), "bt");
+        assert!(!defaults.close_on_action);
+
+        let config: BluetoothAddonConfig =
+            serde_yaml::from_str("enabled: false\ntrigger: blue\nclose_on_action: true\n").unwrap();
+        assert!(!config.enabled);
+        assert_eq!(config.trigger(), "blue");
+        assert!(config.close_on_action);
     }
 
     #[test]

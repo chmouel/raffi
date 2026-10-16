@@ -38,6 +38,9 @@
         "audio": {
           "$ref": "#/$defs/AudioAddonConfig"
         },
+        "bluetooth": {
+          "$ref": "#/$defs/BluetoothAddonConfig"
+        },
         "calculator": {
           "$ref": "#/$defs/CalculatorAddonConfig"
         },
@@ -123,6 +126,30 @@
         },
         "trigger": {
           "description": "Keyword that opens the audio device list (default: `audio`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "BluetoothAddonConfig": {
+      "description": "Configuration for the Bluetooth addon (native UI only)",
+      "type": "object",
+      "properties": {
+        "close_on_action": {
+          "description": "Close Raffi after an action instead of staying open and refreshing\nthe list (default: false).",
+          "type": "boolean",
+          "default": false
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "trigger": {
+          "description": "Keyword that opens the Bluetooth list (default: `bt`).",
           "type": [
             "string",
             "null"

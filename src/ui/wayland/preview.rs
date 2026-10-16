@@ -596,7 +596,8 @@ impl LauncherApp {
             current_index += count;
         }
 
-        // 4c. Command lists (system commands, windows, media, audio, kill)
+        // 4c. Command lists (system commands, windows, media, audio, kill,
+        // Bluetooth)
         if self.command_list.is_active() {
             let count = self.command_list.row_count();
             if index >= current_index && index < current_index + count {
@@ -1659,6 +1660,23 @@ fn describe_addon_by_keyword(
                     "Press twice to send SIGKILL".to_string(),
                 ),
                 ("Requires".to_string(), "kill".to_string()),
+            ],
+        );
+    }
+
+    if addons.bluetooth.enabled && keyword == addons.bluetooth.trigger() {
+        return (
+            "Bluetooth".to_string(),
+            vec![
+                (
+                    "Enter".to_string(),
+                    "Connect a device, or press twice to disconnect it".to_string(),
+                ),
+                (
+                    "First row".to_string(),
+                    "Turn Bluetooth on, or press twice to turn it off".to_string(),
+                ),
+                ("Requires".to_string(), "bluetoothctl".to_string()),
             ],
         );
     }

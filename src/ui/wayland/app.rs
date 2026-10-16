@@ -309,6 +309,7 @@ pub(super) const WINDOWS_ICON: &str = "preferences-system-windows";
 pub(super) const MEDIA_ICON: &str = "multimedia-player";
 pub(super) const AUDIO_ICON: &str = "audio-speakers";
 pub(super) const KILL_ICON: &str = "utilities-system-monitor";
+pub(super) const BLUETOOTH_ICON: &str = "bluetooth-active";
 pub(super) const DEVTOOLS_ICON: &str = "utilities-terminal";
 
 /// The query as it may appear in debug logs: sensitive searches such as the
@@ -447,6 +448,15 @@ pub(super) fn route_query(query: &str, addons: &AddonsConfig) -> QueryMode {
         }
     }
 
+    if addons.bluetooth.enabled {
+        if let Some(query) = extract_keyword_query(input, addons.bluetooth.trigger()) {
+            return QueryMode::CommandList {
+                addon: CommandListAddon::Bluetooth,
+                query,
+            };
+        }
+    }
+
     if addons.devtools.enabled {
         if let Some(payload) = extract_raw_keyword_payload(input, addons.devtools.trigger()) {
             return QueryMode::Devtools { payload };
@@ -573,6 +583,14 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
             keyword: addons.kill.trigger().to_string(),
             subtitle: "Stop one of your processes".to_string(),
             icon: Some(KILL_ICON.to_string()),
+        });
+    }
+
+    if addons.bluetooth.enabled && matches(addons.bluetooth.trigger()) {
+        suggestions.push(KeywordSuggestion {
+            keyword: addons.bluetooth.trigger().to_string(),
+            subtitle: "Connect Bluetooth devices or turn Bluetooth on and off".to_string(),
+            icon: Some(BLUETOOTH_ICON.to_string()),
         });
     }
 
@@ -1584,7 +1602,24 @@ impl LauncherApp {
                 }
                 self.load_command_list(super::kill::load_processes, false)
             }
+            CommandListAddon::Bluetooth if !entered => Task::none(),
+            CommandListAddon::Bluetooth => {
+                if !(self.program_exists)("bluetoothctl") {
+                    self.command_list
+                        .set_notice("bluetoothctl not found".to_string());
+                    return Task::none();
+                }
+                self.load_bluetooth(false)
+            }
         }
+    }
+
+    fn load_bluetooth(&mut self, refresh: bool) -> Task<Message> {
+        let keep_open = !self.addons.bluetooth.close_on_action;
+        self.load_command_list(
+            move || Ok(super::bluetooth::load_devices(keep_open)),
+            refresh,
+        )
     }
 
     fn load_audio(&mut self, refresh: bool) -> Task<Message> {
@@ -1666,6 +1701,7 @@ impl LauncherApp {
                 CommandListAddon::Media => self.load_media(true),
                 CommandListAddon::Audio => self.load_audio(true),
                 CommandListAddon::Kill => self.load_command_list(super::kill::load_processes, true),
+                CommandListAddon::Bluetooth => self.load_bluetooth(true),
                 CommandListAddon::System | CommandListAddon::Windows => Task::none(),
             },
             Err(error) => {
@@ -1684,11 +1720,15 @@ impl LauncherApp {
                     .item(self.selected_index)
                     .map(|item| item.identity.clone());
                 // A failed signal usually means the process is gone or was
-                // replaced, so the list reloads under the error row.
-                let refresh = if addon == CommandListAddon::Kill {
-                    self.load_command_list(super::kill::load_processes, true)
-                } else {
-                    Task::none()
+                // replaced, and a timed out connection may still have
+                // changed the device, so the list reloads under the error
+                // row.
+                let refresh = match addon {
+                    CommandListAddon::Kill => {
+                        self.load_command_list(super::kill::load_processes, true)
+                    }
+                    CommandListAddon::Bluetooth => self.load_bluetooth(true),
+                    _ => Task::none(),
                 };
                 self.set_command_list_front(super::command_list::CommandItem::info(
                     "error",
@@ -1709,6 +1749,18 @@ impl LauncherApp {
             .iter()
             .find_map(|name| self.resolve_icon_name(name));
         self.command_list.show_error(item);
+    }
+
+    /// What `item` shows while its action runs with Raffi kept open.
+    pub(super) fn command_list_progress<'a>(
+        &self,
+        item: &'a super::command_list::CommandItem,
+    ) -> Option<&'a str> {
+        let addon = self.command_list.addon?;
+        if !self.in_flight.is_pending(addon.name(), &item.identity) {
+            return None;
+        }
+        item.primary.as_ref()?.progress.as_deref()
     }
 
     fn set_command_list_items(&mut self, mut items: Vec<super::command_list::CommandItem>) {
