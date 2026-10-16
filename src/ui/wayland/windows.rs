@@ -526,7 +526,7 @@ fn sway_windows<'a>(
     };
     if matches!(node.kind.as_str(), "con" | "floating_con")
         && node.pid.is_some()
-        && !node.app().0.is_empty()
+        && !(node.name.as_deref().unwrap_or_default().is_empty() && node.app().0.is_empty())
     {
         windows.push(SwayWindow {
             node,
@@ -1202,11 +1202,13 @@ mod tests {
             {"id":4,"type":"workspace","name":"2","focus":[6,5,7],"nodes":[
                 {"id":5,"type":"con","name":"no app","pid":10,"app_id":null,"nodes":[]},
                 {"id":6,"type":"con","name":null,"pid":11,"app_id":"foot"},
-                {"id":7,"type":"con","name":"split","nodes":[]}]}]}"#;
+                {"id":7,"type":"con","name":"split","nodes":[]},
+                {"id":8,"type":"con","name":"","pid":12,"app_id":""}]}]}"#;
         let items = sway_items(tree.as_bytes(), b"[]", 0).unwrap();
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].title, "foot");
+        let titles: Vec<&str> = items.iter().map(|item| item.title.as_str()).collect();
+        assert_eq!(titles, ["foot", "no app"]);
         assert_eq!(items[0].subtitle, "foot on workspace 2");
+        assert_eq!(items[1].subtitle, "Workspace 2");
         assert!(items[0].secondary.is_none(), "no focused workspace");
     }
 
