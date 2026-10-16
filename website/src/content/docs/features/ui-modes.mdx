@@ -278,11 +278,11 @@ general:
 
 ## Automatic Selection
 
-If no UI type is specified, Raffi automatically chooses:
+If no UI type is specified, Raffi selects:
 
-1. **Fuzzel mode** if `fuzzel` binary is found in PATH
-2. **Native mode** as fallback (if built with `wayland` feature)
+1. **Native mode** in builds with the `wayland` feature (the standard build)
+2. **Fuzzel mode** in Fuzzel-only builds, if `fuzzel` is available in `PATH`
 
 <Aside type="note">
-The `wayland` feature must be enabled at compile time for native mode support.
+Having Fuzzel installed does not change the default in a standard build. To use it, select `-u fuzzel` or set `general.ui_type: fuzzel`.
 </Aside>

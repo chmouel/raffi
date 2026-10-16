@@ -20,11 +20,11 @@ Command-line flags always override settings from the configuration file.
 
 All fields in the `general` section are optional.
 
-**`ui_type`** `string` (default: `fuzzel`)
+**`ui_type`** `string` (default: `native` in standard builds; `fuzzel` in Fuzzel-only builds)
 
 UI backend selection. Valid options:
-  - `fuzzel` - Uses external Fuzzel launcher (default)
-  - `native` - Uses built-in iced-based GUI
+  - `native` - Uses built-in iced-based GUI (default in standard builds)
+  - `fuzzel` - Uses external Fuzzel launcher
 
   Equivalent to `-u` or `--ui-type` flag.
 

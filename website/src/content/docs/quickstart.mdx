@@ -69,7 +69,7 @@ This guide will help you configure and launch your first application with Raffi.
 Raffi supports two interface modes:
 
 <Tabs>
-  <TabItem label="Fuzzel Mode (Default)">
+  <TabItem label="Fuzzel Mode">
     Fuzzel mode uses the external Fuzzel launcher for a minimal, Wayland-native experience.
 
     ### Install Fuzzel
@@ -101,12 +101,6 @@ Raffi supports two interface modes:
     ### Launch with Fuzzel
 
     ```bash
-    raffi
-    ```
-
-    Or explicitly specify Fuzzel mode:
-
-    ```bash
     raffi -u fuzzel
     ```
 
@@ -132,13 +126,13 @@ Raffi supports two interface modes:
     ```
   </TabItem>
 
-  <TabItem label="Native Mode">
+  <TabItem label="Native Mode (Default)">
     Native mode uses Raffi's built-in iced-based GUI with additional features like calculator, file browser, and more.
 
     ### Launch Native Interface
 
     ```bash
-    raffi -u native
+    raffi
     ```
 
     ### Choose a Theme
@@ -151,9 +145,9 @@ Raffi supports two interface modes:
     raffi -u native -t light
     ```
 
-    ### Set as Default
+    ### Make the Choice Explicit
 
-    To always use native mode, add this to your config:
+    The standard build already uses native mode by default. To pin that choice in your config:
 
     ```yaml
     general:

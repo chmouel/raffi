@@ -38,7 +38,7 @@ Useful entry points:
 
 ## Installation
 
-Prebuilt binaries are available from the GitHub releases page. Download the archive or package suitable for your platform. If you intend to use the default interface, Fuzzel must also be installed.
+Prebuilt binaries are available from the GitHub releases page. Download the archive or package suitable for your platform. Standard builds use the native interface by default; to use Fuzzel, install it and select it with `-u fuzzel` or `ui_type: fuzzel`.
 
 On Arch Linux, Raffi can be installed from the AUR using a helper such as:
 

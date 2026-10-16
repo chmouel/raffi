@@ -575,7 +575,10 @@ pub struct Args {
     pub no_icons: bool,
     #[options(help = "default shell when using scripts", short = "P")]
     pub default_script_shell: Option<String>,
-    #[options(help = "UI type to use: fuzzel, native (default: fuzzel)", short = "u")]
+    #[options(
+        help = "UI type to use: fuzzel, native (default: native; fuzzel-only builds use fuzzel)",
+        short = "u"
+    )]
     pub ui_type: Option<String>,
     #[options(help = "application ID for the native Linux window", no_short)]
     pub app_name: Option<String>,
@@ -1200,6 +1203,22 @@ fn find_binary(binary: &str) -> bool {
         .unwrap_or_default()
         .split(':')
         .any(|path| Path::new(&format!("{path}/{binary}")).exists())
+}
+
+#[cfg(feature = "wayland")]
+fn default_ui_type(_fuzzel_available: bool, _fallbacks_configured: bool) -> Result<UIType> {
+    Ok(UIType::Native)
+}
+
+#[cfg(not(feature = "wayland"))]
+fn default_ui_type(fuzzel_available: bool, fallbacks_configured: bool) -> Result<UIType> {
+    if fuzzel_available && !fallbacks_configured {
+        Ok(UIType::Fuzzel)
+    } else {
+        Err(anyhow::anyhow!(
+            "No UI backend available. Install 'fuzzel' or build with the 'wayland' feature."
+        ))
+    }
 }
 
 fn xdg_data_dirs() -> Vec<PathBuf> {
@@ -1962,23 +1981,17 @@ pub fn run(args: Args) -> Result<()> {
     debug_log!("config: theme={theme:?}");
 
     // Determine UI type
+    #[cfg(feature = "wayland")]
+    let fuzzel_available = false;
+    #[cfg(not(feature = "wayland"))]
+    let fuzzel_available = find_binary("fuzzel");
+
     let ui_type = if let Some(ui_type_str) = ui_type_str {
         ui_type_str
             .parse::<UIType>()
             .map_err(|e| anyhow::anyhow!(e))?
-    } else if find_binary("fuzzel") && general.fallbacks.is_empty() {
-        UIType::Fuzzel
     } else {
-        #[cfg(feature = "wayland")]
-        {
-            UIType::Native
-        }
-        #[cfg(not(feature = "wayland"))]
-        {
-            return Err(anyhow::anyhow!(
-                "No UI backend available. Install 'fuzzel' or build with the 'wayland' feature."
-            ));
-        }
+        default_ui_type(fuzzel_available, !general.fallbacks.is_empty())?
     };
 
     if ui_type == UIType::Fuzzel && !general.fallbacks.is_empty() {
@@ -2763,6 +2776,21 @@ mod tests {
                 "--verbose".to_string()
             ])
         );
+    }
+
+    #[cfg(feature = "wayland")]
+    #[test]
+    fn test_default_ui_type_prefers_native_over_fuzzel() {
+        assert_eq!(default_ui_type(true, false).unwrap(), UIType::Native);
+        assert_eq!(default_ui_type(true, true).unwrap(), UIType::Native);
+    }
+
+    #[cfg(not(feature = "wayland"))]
+    #[test]
+    fn test_default_ui_type_uses_fuzzel_without_native_support() {
+        assert_eq!(default_ui_type(true, false).unwrap(), UIType::Fuzzel);
+        assert!(default_ui_type(false, false).is_err());
+        assert!(default_ui_type(true, true).is_err());
     }
 
     #[test]
