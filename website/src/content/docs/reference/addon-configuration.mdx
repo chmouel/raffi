@@ -271,6 +271,17 @@ Reverse the active sort: Z to A, or oldest first for `modified`/`created`. Direc
 
 ```
 
+**`addons.file_browser.show`** `string` (default: `all`)
+
+Which entries the listing starts with: `all`, `files` or `directories` (`dirs` and `directory` work too). Cycle with Ctrl+. at runtime. When directories are hidden you can still type or Tab-complete a directory path to enter it.
+
+  ```yaml
+  addons:
+    file_browser:
+      show: files
+
+```
+
 **`addons.file_browser.backspace_updir`** `boolean` (default: `true`)
 
 When the input ends with `/`, Backspace jumps to the parent directory (like Emacs fido/ido mode) and selects the directory you left. Set to `false` for a plain delete.
@@ -315,6 +326,7 @@ Command that Ctrl+O uses to open the browsed directory. The directory is appende
 - Ctrl+H: Toggle hidden file visibility
 - Ctrl+O: Open the current directory in a file manager
 - Ctrl+S: Cycle the sort order (name, modified, created)
+- Ctrl+.: Cycle the listing between all entries, files only and directories only
 
 Directories are listed first in accent color.
 

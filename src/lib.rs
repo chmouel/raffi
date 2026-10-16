@@ -186,6 +186,10 @@ pub struct FileBrowserAddonConfig {
     /// Directories stay first and Ctrl+S keeps this setting.
     #[serde(default)]
     pub sort_reverse: bool,
+    /// Initial filter of the listing: `all`, `files` or `directories`;
+    /// Ctrl+. cycles through them.
+    #[serde(default)]
+    pub show: FileBrowserShow,
 }
 
 /// Order of file browser entries
@@ -221,6 +225,56 @@ impl FileBrowserSort {
     }
 }
 
+/// Which entries the file browser lists
+#[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FileBrowserShow {
+    /// Directories and files
+    #[default]
+    All,
+    /// Files only
+    Files,
+    /// Directories only (`dirs` and `directory` are accepted as aliases)
+    #[serde(alias = "dirs", alias = "directory")]
+    #[schemars(transform = accept_directories_aliases)]
+    Directories,
+}
+
+fn accept_directories_aliases(schema: &mut schemars::Schema) {
+    schema.remove("const");
+    schema.insert(
+        "enum".into(),
+        serde_json::json!(["directories", "dirs", "directory"]),
+    );
+}
+
+impl FileBrowserShow {
+    /// The mode after this one, wrapping around.
+    pub fn next(self) -> Self {
+        match self {
+            Self::All => Self::Files,
+            Self::Files => Self::Directories,
+            Self::Directories => Self::All,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Files => "files",
+            Self::Directories => "directories",
+        }
+    }
+
+    pub fn includes(self, is_dir: bool) -> bool {
+        match self {
+            Self::All => true,
+            Self::Files => !is_dir,
+            Self::Directories => is_dir,
+        }
+    }
+}
+
 impl FileBrowserAddonConfig {
     pub fn action(&self) -> &str {
         self.action.as_deref().unwrap_or("open")
@@ -242,6 +296,7 @@ impl Default for FileBrowserAddonConfig {
             file_manager: None,
             sort: FileBrowserSort::default(),
             sort_reverse: false,
+            show: FileBrowserShow::default(),
         }
     }
 }
@@ -3027,6 +3082,21 @@ mod tests {
     }
 
     #[test]
+    fn test_file_browser_show_parsing() {
+        let parse = |s: &str| serde_yaml::from_str::<FileBrowserShow>(s).unwrap();
+        assert_eq!(parse("all"), FileBrowserShow::All);
+        assert_eq!(parse("files"), FileBrowserShow::Files);
+        assert_eq!(parse("directories"), FileBrowserShow::Directories);
+        assert_eq!(parse("dirs"), FileBrowserShow::Directories);
+        assert_eq!(parse("directory"), FileBrowserShow::Directories);
+        assert!(serde_yaml::from_str::<FileBrowserShow>("links").is_err());
+        assert_eq!(FileBrowserAddonConfig::default().show, FileBrowserShow::All);
+        assert_eq!(FileBrowserShow::All.next(), FileBrowserShow::Files);
+        assert_eq!(FileBrowserShow::Files.next(), FileBrowserShow::Directories);
+        assert_eq!(FileBrowserShow::Directories.next(), FileBrowserShow::All);
+    }
+
+    #[test]
     fn test_text_snippet_action_parsing() {
         let yaml_config = r#"
         addons:
@@ -4405,6 +4475,19 @@ Icon=firefox
         assert!(has("/addons/calculator", "'foo'", 6), "{problems:?}");
         assert!(has("/launchers/ff", "'binnary'", 9), "{problems:?}");
         assert!(has("/launchers/ff/args", "array", 10), "{problems:?}");
+    }
+
+    #[test]
+    #[cfg(feature = "config-validation")]
+    fn test_validate_accepts_file_browser_show_aliases() {
+        for show in ["all", "files", "directories", "dirs", "directory"] {
+            let raw = yaml(&format!(
+                "version: 1\naddons:\n  file_browser:\n    show: {show}\n"
+            ));
+            assert_eq!(validate_config_value(&raw), Vec::<ConfigProblem>::new());
+        }
+        let raw = yaml("version: 1\naddons:\n  file_browser:\n    show: links\n");
+        assert_eq!(validate_config_value(&raw).len(), 1);
     }
 
     #[test]

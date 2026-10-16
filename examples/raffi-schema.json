@@ -429,6 +429,10 @@
           ],
           "default": null
         },
+        "show": {
+          "description": "Initial filter of the listing: `all`, `files` or `directories`;\nCtrl+. cycles through them.",
+          "$ref": "#/$defs/FileBrowserShow"
+        },
         "show_hidden": {
           "type": [
             "boolean",
@@ -447,6 +451,30 @@
         }
       },
       "additionalProperties": false
+    },
+    "FileBrowserShow": {
+      "description": "Which entries the file browser lists",
+      "oneOf": [
+        {
+          "description": "Directories and files",
+          "type": "string",
+          "const": "all"
+        },
+        {
+          "description": "Files only",
+          "type": "string",
+          "const": "files"
+        },
+        {
+          "description": "Directories only (`dirs` and `directory` are accepted as aliases)",
+          "type": "string",
+          "enum": [
+            "directories",
+            "dirs",
+            "directory"
+          ]
+        }
+      ]
     },
     "FileBrowserSort": {
       "description": "Order of file browser entries",

@@ -1225,6 +1225,104 @@ fn test_file_browser_cycle_sort_reorders_entries() {
 }
 
 #[test]
+fn test_file_browser_cycle_show_filters_entries() {
+    let dir = std::env::temp_dir().join(format!("raffi-fb-show-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    std::fs::create_dir_all(dir.join("nest").join("deep")).unwrap();
+    std::fs::write(dir.join("a.txt"), "").unwrap();
+    std::fs::write(dir.join("sub").join("inner.txt"), "").unwrap();
+    let root = format!("{}/", dir.display());
+    let names = |app: &LauncherApp| -> Vec<String> {
+        app.file_browser
+            .entries
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect()
+    };
+
+    let mut app = test_app(AddonsConfig::default());
+    let _ = app.update(Message::FileBrowserCycleShow);
+    assert_eq!(app.file_browser.show, crate::FileBrowserShow::All);
+
+    let _ = app.update(Message::SearchChanged(root.clone()));
+    assert_eq!(names(&app), vec!["nest", "sub", "a.txt"]);
+
+    let _ = app.update(Message::FileBrowserCycleShow);
+    let _ = app.update(Message::SearchChanged(root.clone()));
+    assert_eq!(app.file_browser.show, crate::FileBrowserShow::Files);
+    assert_eq!(names(&app), vec!["a.txt"]);
+    assert!(app.file_browser.error.is_none());
+
+    // Hidden directories can still be entered by typing or Tab-completing.
+    let _ = app.update(Message::SearchChanged(format!("{root}su")));
+    assert!(names(&app).is_empty());
+    assert!(app.file_browser.error.is_none());
+    let _ = app.update(Message::TabComplete);
+    assert_eq!(app.search_query, format!("{root}sub/"));
+    let _ = app.update(Message::SearchChanged(format!("{root}sub/")));
+    assert_eq!(names(&app), vec!["inner.txt"]);
+
+    let _ = app.update(Message::SearchChanged(format!("{root}nest/")));
+    assert!(names(&app).is_empty());
+    assert_eq!(
+        app.file_browser.error.as_deref(),
+        Some("No files here (Ctrl+. for directories)")
+    );
+
+    let _ = app.update(Message::FileBrowserCycleShow);
+    let _ = app.update(Message::SearchChanged(format!("{root}sub/")));
+    assert_eq!(app.file_browser.show, crate::FileBrowserShow::Directories);
+    assert!(names(&app).is_empty());
+    assert_eq!(
+        app.file_browser.error.as_deref(),
+        Some("No directories here (Ctrl+. to show all)")
+    );
+
+    // The mode survives leaving and re-entering the browser.
+    let _ = app.update(Message::SearchChanged(String::new()));
+    assert!(!app.file_browser.active);
+    let _ = app.update(Message::SearchChanged(root.clone()));
+    assert_eq!(app.file_browser.show, crate::FileBrowserShow::Directories);
+    assert_eq!(names(&app), vec!["nest", "sub"]);
+
+    let _ = app.update(Message::FileBrowserCycleShow);
+    let _ = app.update(Message::SearchChanged(root));
+    assert_eq!(app.file_browser.show, crate::FileBrowserShow::All);
+    assert_eq!(names(&app), vec!["nest", "sub", "a.txt"]);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_ctrl_period_maps_on_any_layout() {
+    use iced::keyboard::{Key, Modifiers};
+    let period = Key::Character(".".into());
+    let semicolon = Key::Character(";".into());
+
+    assert!(super::view::is_ctrl_period(
+        &period,
+        &period,
+        Modifiers::CTRL
+    ));
+    // Layouts where "." needs Shift report the unshifted key in `key`.
+    assert!(super::view::is_ctrl_period(
+        &semicolon,
+        &period,
+        Modifiers::CTRL | Modifiers::SHIFT
+    ));
+    assert!(!super::view::is_ctrl_period(
+        &period,
+        &period,
+        Modifiers::empty()
+    ));
+    assert!(!super::view::is_ctrl_period(
+        &semicolon,
+        &semicolon,
+        Modifiers::CTRL
+    ));
+}
+
+#[test]
 fn test_drag_events_drive_browser_dragging_state() {
     let mut app = browser_app_with_two_dirs();
     app.file_browser.pressed_row = Some(0);
@@ -1626,6 +1724,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "Ctrl+H",
             "Ctrl+O",
             "Ctrl+S",
+            "Ctrl+.",
             "Alt+P/N",
             "Tab",
             "Backspace",

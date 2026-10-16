@@ -452,6 +452,8 @@ pub(crate) enum Message {
     FileBrowserOpenFileManager,
     /// Switch the file browser to the next sort mode.
     FileBrowserCycleSort,
+    /// Cycle the file browser between all entries, files and directories.
+    FileBrowserCycleShow,
     ModifiersChanged(iced::keyboard::Modifiers),
     HistoryPrevious,
     HistoryNext,

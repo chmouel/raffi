@@ -321,6 +321,11 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
                 "Cycle sort order",
                 "File browser: name, modified date, created date",
             ),
+            shortcut(
+                "Ctrl+.",
+                "Cycle files/directories",
+                "File browser: all entries, files only, directories only",
+            ),
         ]);
     }
     if addons.clipboard.enabled {

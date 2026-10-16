@@ -1622,6 +1622,10 @@ fn describe_addon_by_keyword(
                     ),
                 ),
                 (
+                    "Show".to_string(),
+                    format!("{} (Ctrl+. cycles)", addons.file_browser.show.label()),
+                ),
+                (
                     "Enter".to_string(),
                     describe_file_action(addons.file_browser.action()),
                 ),

@@ -691,6 +691,7 @@ impl LauncherApp {
         let file_browser_show_hidden = addons.file_browser.show_hidden.unwrap_or(false);
         let file_browser_sort = addons.file_browser.sort;
         let file_browser_sort_reverse = addons.file_browser.sort_reverse;
+        let file_browser_show = addons.file_browser.show;
 
         let fallbacks = Self::resolve_fallbacks(&fallback_paths, &addons);
         let snippet_mru_path = get_snippet_mru_cache_path().ok();
@@ -733,6 +734,7 @@ impl LauncherApp {
                     show_hidden: file_browser_show_hidden,
                     sort: file_browser_sort,
                     sort_reverse: file_browser_sort_reverse,
+                    show: file_browser_show,
                     ..Default::default()
                 },
                 view: {
@@ -858,6 +860,7 @@ impl LauncherApp {
             Message::FileBrowserToggleHidden => self.handle_file_browser_toggle_hidden(),
             Message::FileBrowserOpenFileManager => self.handle_file_browser_open_file_manager(),
             Message::FileBrowserCycleSort => self.handle_file_browser_cycle_sort(),
+            Message::FileBrowserCycleShow => self.handle_file_browser_cycle_show(),
             Message::ModifiersChanged(modifiers) => {
                 if modifiers != self.view.current_modifiers {
                     self.command_list.armed = None;
@@ -1286,8 +1289,16 @@ impl LauncherApp {
             self.file_browser.all_entries = all_entries;
         }
 
+        let show = self.file_browser.show;
+        self.file_browser.hidden_match = None;
         if filter_text.is_empty() {
-            self.file_browser.entries = self.file_browser.all_entries.clone();
+            self.file_browser.entries = self
+                .file_browser
+                .all_entries
+                .iter()
+                .filter(|entry| show.includes(entry.is_dir))
+                .cloned()
+                .collect();
         } else {
             let matcher = SkimMatcherV2::default();
             let mut scored: Vec<(usize, i64)> = self
@@ -1302,10 +1313,26 @@ impl LauncherApp {
                 })
                 .collect();
             scored.sort_by_key(|b| std::cmp::Reverse(b.1));
-            self.file_browser.entries = scored
+            let (visible, hidden): (Vec<_>, Vec<_>) = scored
                 .into_iter()
                 .map(|(index, _)| self.file_browser.all_entries[index].clone())
-                .collect();
+                .partition(|entry| show.includes(entry.is_dir));
+            self.file_browser.entries = visible;
+            self.file_browser.hidden_match = hidden.into_iter().next();
+        }
+
+        if self.file_browser.error.is_none()
+            && filter_text.is_empty()
+            && self.file_browser.entries.is_empty()
+            && show != crate::FileBrowserShow::All
+            && Path::new(dir_path).is_dir()
+        {
+            self.file_browser.error = Some(match show {
+                crate::FileBrowserShow::Directories => {
+                    "No directories here (Ctrl+. to show all)".to_string()
+                }
+                _ => "No files here (Ctrl+. for directories)".to_string(),
+            });
         }
     }
 
@@ -2671,7 +2698,12 @@ impl LauncherApp {
         let entry_index = self
             .selected_index
             .saturating_sub(self.script_filter_offset());
-        if let Some(entry) = self.file_browser.entries.get(entry_index) {
+        let entry = if self.file_browser.entries.is_empty() {
+            self.file_browser.hidden_match.as_ref()
+        } else {
+            self.file_browser.entries.get(entry_index)
+        };
+        if let Some(entry) = entry {
             let new_query = if entry.is_dir {
                 format!("{}/", entry.full_path)
             } else {
@@ -2714,6 +2746,15 @@ impl LauncherApp {
                 self.file_browser.sort_reverse,
             );
         }
+        let query = self.search_query.clone();
+        Task::done(Message::SearchChanged(query))
+    }
+
+    fn handle_file_browser_cycle_show(&mut self) -> Task<Message> {
+        if !self.file_browser.active {
+            return Task::none();
+        }
+        self.file_browser.show = self.file_browser.show.next();
         let query = self.search_query.clone();
         Task::done(Message::SearchChanged(query))
     }

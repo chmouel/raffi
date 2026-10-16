@@ -108,6 +108,17 @@ fn item_row_style(
     }
 }
 
+/// Ctrl+. on any layout: iced reports the unshifted key in `key`, so a
+/// layout where "." needs Shift only shows it in `modified_key`.
+pub(super) fn is_ctrl_period(
+    key: &iced::keyboard::Key,
+    modified_key: &iced::keyboard::Key,
+    modifiers: iced::keyboard::Modifiers,
+) -> bool {
+    let is_period = |key: &iced::keyboard::Key| matches!(key, iced::keyboard::Key::Character(c) if c.as_str() == ".");
+    modifiers.control() && (is_period(key) || is_period(modified_key))
+}
+
 fn slim_scrollbar() -> scrollable::Direction {
     scrollable::Direction::Vertical(
         scrollable::Scrollbar::new()
@@ -1820,6 +1831,13 @@ impl LauncherApp {
                 .size(fs.hint)
                 .color(t.text_muted),
             );
+            hint_spans.push(sep.clone());
+            hint_spans.push(span("Ctrl+.").size(fs.hint).color(t.accent));
+            hint_spans.push(
+                span(format!(" show: {}", self.file_browser.show.label()))
+                    .size(fs.hint)
+                    .color(t.text_muted),
+            );
         }
         if self.clipboard.active {
             if !hint_spans.is_empty() {
@@ -1930,6 +1948,14 @@ impl LauncherApp {
                 modifiers,
                 ..
             }) if c.as_str() == "s" && modifiers.control() => Some(Message::FileBrowserCycleSort),
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                ref key,
+                ref modified_key,
+                modifiers,
+                ..
+            }) if is_ctrl_period(key, modified_key, modifiers) => {
+                Some(Message::FileBrowserCycleShow)
+            }
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Character(ref c),
                 modifiers,

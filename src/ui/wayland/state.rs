@@ -296,6 +296,12 @@ pub(super) struct FileBrowserState {
     pub sort: crate::FileBrowserSort,
     /// Flip the order of `sort` (from the `sort_reverse` setting).
     pub sort_reverse: bool,
+    /// Files/directories filter, cycled with Ctrl+.; survives leaving the
+    /// browser.
+    pub show: crate::FileBrowserShow,
+    /// Best match for the typed text among entries hidden by `show`, so Tab
+    /// can still complete it when no visible row matches.
+    pub hidden_match: Option<FileBrowserEntry>,
     pub current_dir: String,
     pub error: Option<String>,
     pub cached_preview: Option<InspectedFile>,
@@ -312,6 +318,7 @@ impl FileBrowserState {
     pub fn clear(&mut self) {
         self.entries.clear();
         self.all_entries.clear();
+        self.hidden_match = None;
         self.active = false;
         self.current_dir.clear();
         self.error = None;
