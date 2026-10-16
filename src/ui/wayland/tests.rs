@@ -2053,11 +2053,18 @@ fn test_window_resize_updates_preview_sizing() {
     assert_eq!(app.view.window_size, iced::Size::new(800.0, 600.0));
     // Default-font chrome is 178px, so a 600px window leaves a 422px viewport.
     assert_eq!(app.preview_viewport_height(), 422.0);
+    // Half of the 735px body row, less the pane's 32px of side padding.
+    assert_eq!(app.preview_viewport_width(), 335.5);
 
     // Resizing the window grows the full-pane image preview with it.
     let _ = app.update(Message::WindowResized(iced::Size::new(1200.0, 900.0)));
     assert_eq!(app.view.window_size.width, 1200.0);
     assert_eq!(app.preview_viewport_height(), 722.0);
+    assert_eq!(app.preview_viewport_width(), 535.5);
+
+    app.view.preview_style.width_fraction = 0.3;
+    // 30% of the 1135px row, less the same 32px.
+    assert_eq!(app.preview_viewport_width(), 308.5);
 
     let _ = app.update(Message::WindowResized(iced::Size::new(800.0, 400.0)));
     assert_eq!(app.preview_viewport_height(), 222.0);

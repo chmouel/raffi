@@ -2319,7 +2319,7 @@ impl LauncherApp {
             return Task::none();
         };
         let pane = (
-            (self.view.window_size.width * self.view.preview_style.width_fraction).round() as u32,
+            self.preview_viewport_width().round() as u32,
             self.preview_viewport_height().round() as u32,
         );
         let request = PreviewRequest::new(config, &self.script_filter.query, item, pane);

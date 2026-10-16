@@ -119,6 +119,19 @@ pub(super) fn is_ctrl_period(
     modifiers.control() && (is_period(key) || is_period(modified_key))
 }
 
+const PREVIEW_ROW_SPACING: f32 = 12.0;
+const PREVIEW_DIVIDER_WIDTH: f32 = 1.0;
+const PREVIEW_PANE_LEFT_PADDING: f32 = 14.0;
+const PREVIEW_PANE_RIGHT_PADDING: f32 = 12.0;
+const PREVIEW_CONTENT_RIGHT_PADDING: f32 = 6.0;
+
+/// `FillPortion` weights of the list and preview panes for `width_fraction`.
+fn preview_fill_portions(width_fraction: f32) -> (u16, u16) {
+    let right_portion = (width_fraction * 100.0).round().max(1.0) as u16;
+    let left_portion = 100u16.saturating_sub(right_portion).max(1);
+    (left_portion, right_portion)
+}
+
 fn slim_scrollbar() -> scrollable::Direction {
     scrollable::Direction::Vertical(
         scrollable::Scrollbar::new()
@@ -325,12 +338,10 @@ impl LauncherApp {
 
         let body_area: Element<'a, Message> =
             if let Some(preview_data) = self.resolve_selected_preview() {
-                let right_portion = (self.view.preview_style.width_fraction * 100.0)
-                    .round()
-                    .max(1.0) as u16;
-                let left_portion = (100u16).saturating_sub(right_portion).max(1);
+                let (left_portion, right_portion) =
+                    preview_fill_portions(self.view.preview_style.width_fraction);
                 let divider = container(Space::new())
-                    .width(Length::Fixed(1.0))
+                    .width(Length::Fixed(PREVIEW_DIVIDER_WIDTH))
                     .height(Length::Fill)
                     .style(move |_theme| container::Style {
                         background: Some(iced::Background::Color(iced::Color {
@@ -351,7 +362,7 @@ impl LauncherApp {
                     .height(Length::Fill);
 
                 Row::new()
-                    .spacing(12)
+                    .spacing(PREVIEW_ROW_SPACING)
                     .width(Length::Fill)
                     .height(Length::Fill)
                     .push(left_pane.width(Length::FillPortion(left_portion)))
@@ -537,6 +548,24 @@ impl LauncherApp {
             + fs.scroll_top_padding
             + 32.0;
         (self.view.window_size.height - chrome).max(160.0)
+    }
+
+    /// Width of the preview pane content, derived from the live window size
+    /// the same way the layout splits the body row between list and pane.
+    pub(super) fn preview_viewport_width(&self) -> f32 {
+        let fs = self.view.font_sizes;
+        let (left_portion, right_portion) =
+            preview_fill_portions(self.view.preview_style.width_fraction);
+        // The row loses the window padding, the gaps around the divider and
+        // the divider itself before the panes split the rest by portion.
+        let row = self.view.window_size.width
+            - fs.outer_padding * 2.0
+            - PREVIEW_ROW_SPACING * 2.0
+            - PREVIEW_DIVIDER_WIDTH;
+        let pane = row * f32::from(right_portion) / f32::from(left_portion + right_portion);
+        let chrome =
+            PREVIEW_PANE_LEFT_PADDING + PREVIEW_PANE_RIGHT_PADDING + PREVIEW_CONTENT_RIGHT_PADDING;
+        (pane - chrome).max(160.0)
     }
 
     /// Render the right-hand preview pane for `data`.
@@ -823,7 +852,7 @@ impl LauncherApp {
 
         let scroll = scrollable(col.padding(iced::Padding {
             top: 0.0,
-            right: 6.0,
+            right: PREVIEW_CONTENT_RIGHT_PADDING,
             bottom: 0.0,
             left: 0.0,
         }))
@@ -837,9 +866,9 @@ impl LauncherApp {
         container(scroll)
             .padding(iced::Padding {
                 top: 8.0,
-                right: 12.0,
+                right: PREVIEW_PANE_RIGHT_PADDING,
                 bottom: 8.0,
-                left: 14.0,
+                left: PREVIEW_PANE_LEFT_PADDING,
             })
             .width(Length::Fill)
             .height(Length::Fill)
