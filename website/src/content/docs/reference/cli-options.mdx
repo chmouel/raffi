@@ -118,6 +118,30 @@ Select the color theme for the native UI.
   raffi -u native -t tokyo-night
   ```
 
+## Window Geometry
+
+**`--width`** `number` (default: `general.window_width` or `800`)
+
+Set the native window width in pixels. Overrides `general.window_width`.
+
+
+**`--height`** `number` (default: `general.window_height` or `600`)
+
+Set the native window height in pixels. Overrides `general.window_height`.
+
+
+**`--x` and `--y`** `integers`
+
+Place the native window at exact Hyprland coordinates. Use both flags together.
+This is only supported in a Hyprland session with Hyprland 0.55 or later; Raffi
+will make its window floating for this launch. Other Wayland compositors control
+top-level window placement and do not support these flags. Using them with
+Fuzzel or outside Hyprland exits with an error.
+
+```bash
+raffi -u native --width 900 --height 600 --x 120 --y 80
+```
+
 
 ## Execution Options
 

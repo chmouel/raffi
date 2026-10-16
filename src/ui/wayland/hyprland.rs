@@ -1,8 +1,9 @@
 use std::io::{BufRead, BufReader};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::actions::{kill_process_group, run_bounded, validate_snippet};
@@ -10,6 +11,8 @@ use super::placeholders::MAX_VALUE;
 
 const TIMEOUT: Duration = Duration::from_secs(2);
 const RESTORE_DELAY: Duration = Duration::from_secs(1);
+const POSITION_TIMEOUT: Duration = Duration::from_secs(5);
+const POSITION_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(Clone)]
 struct ClipboardRestore {
@@ -135,15 +138,87 @@ pub(super) fn default_to_hypr_paste(
     (explicit || target.is_ok()).then_some(target)
 }
 
+pub(super) fn position_raffi_window(x: i32, y: i32, cancelled: &AtomicBool) -> Result<(), String> {
+    let instance = std::env::var("HYPRLAND_INSTANCE_SIGNATURE")
+        .map_err(|_| "window positioning requires a Hyprland session".to_string())?;
+    if !valid_instance_signature(&instance) {
+        return Err("invalid Hyprland instance signature".into());
+    }
+
+    position_window_with(
+        Path::new("hyprctl"),
+        &instance,
+        std::process::id(),
+        x,
+        y,
+        cancelled,
+    )
+}
+
+fn position_window_with(
+    program: &Path,
+    instance: &str,
+    pid: u32,
+    x: i32,
+    y: i32,
+    cancelled: &AtomicBool,
+) -> Result<(), String> {
+    let deadline = Instant::now() + POSITION_TIMEOUT;
+    loop {
+        if cancelled.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err("timed out waiting for Raffi's Hyprland window to open".into());
+        }
+
+        let clients = run_bounded(
+            hyprctl_command(program, instance, &["-j", "clients"]),
+            remaining.min(TIMEOUT),
+            1024 * 1024,
+        )
+        .map_err(|error| format!("hyprctl clients: {error}"))?;
+        let clients: Vec<serde_json::Value> = serde_json::from_slice(&clients)
+            .map_err(|_| "hyprctl returned invalid client data".to_string())?;
+
+        if let Some(address) = find_raffi_window_address(&clients, pid) {
+            if cancelled.load(Ordering::Relaxed) {
+                return Ok(());
+            }
+            let expression = position_expression(address, x, y);
+            let output = run_bounded(
+                hyprctl_command(program, instance, &["eval", &expression]),
+                TIMEOUT,
+                64 * 1024,
+            )
+            .map_err(|error| format!("hyprctl window position: {error}"))?;
+            return checked_reply_for(&output, "window positioning");
+        }
+
+        std::thread::sleep(POSITION_POLL_INTERVAL.min(remaining));
+    }
+}
+
+fn valid_instance_signature(instance: &str) -> bool {
+    !instance.is_empty()
+        && instance
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"_.-".contains(&byte))
+}
+
+fn hyprctl_command(program: &Path, instance: &str, args: &[&str]) -> Command {
+    let mut command = Command::new(program);
+    command.arg("-i").arg(instance).args(args);
+    command
+}
+
 impl Hyprland {
     pub(super) fn capture(terminal_classes: &[String]) -> Result<Self, String> {
         let instance = std::env::var("HYPRLAND_INSTANCE_SIGNATURE")
             .map_err(|_| "hypr_paste requires a Hyprland session".to_string())?;
-        if instance.is_empty()
-            || !instance
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b))
-        {
+        if !valid_instance_signature(&instance) {
             return Err("invalid Hyprland instance signature".into());
         }
         let runtime =
@@ -181,9 +256,7 @@ impl Hyprland {
     }
 
     fn command(&self, args: &[&str]) -> Command {
-        let mut command = Command::new(&self.program);
-        command.arg("-i").arg(&self.instance).args(args);
-        command
+        hyprctl_command(&self.program, &self.instance, args)
     }
 
     fn output(&self, args: &[&str]) -> Result<Vec<u8>, String> {
@@ -304,13 +377,35 @@ fn valid_address(address: &str) -> bool {
     })
 }
 
+fn find_raffi_window_address(clients: &[serde_json::Value], pid: u32) -> Option<&str> {
+    clients
+        .iter()
+        .find(|client| {
+            client.get("pid").and_then(serde_json::Value::as_u64) == Some(u64::from(pid))
+                && client.get("class").and_then(serde_json::Value::as_str)
+                    == Some("com.chmouel.raffi")
+        })
+        .and_then(|client| client.get("address").and_then(serde_json::Value::as_str))
+        .filter(|address| valid_address(address))
+}
+
+fn position_expression(address: &str, x: i32, y: i32) -> String {
+    format!(
+        "local w = hl.get_window(\"address:{address}\"); assert(w ~= nil, \"Raffi window disappeared\"); hl.dispatch(hl.dsp.window.float({{ action = \"set\", window = w }})); hl.dispatch(hl.dsp.window.move({{ x = {x}, y = {y}, window = w }}))"
+    )
+}
+
 fn checked_reply(output: &[u8]) -> Result<(), String> {
+    checked_reply_for(output, "paste operation")
+}
+
+fn checked_reply_for(output: &[u8], operation: &str) -> Result<(), String> {
     let reply = String::from_utf8_lossy(output);
     if reply.trim() == "ok" {
         Ok(())
     } else {
         Err(format!(
-            "Hyprland rejected the paste operation: {}",
+            "Hyprland rejected the {operation}: {}",
             reply.trim()
         ))
     }
@@ -525,6 +620,68 @@ printf '%s|' "$@" > "$OUT"
             assert!(!valid_address(address), "{address}");
         }
         assert!(valid_address("0xABC123"));
+    }
+
+    #[test]
+    fn test_position_target_uses_raffi_pid_and_class() {
+        let clients = vec![
+            serde_json::json!({"address": "0x1", "class": "com.chmouel.raffi", "pid": 1}),
+            serde_json::json!({"address": "0x2", "class": "firefox", "pid": 42}),
+            serde_json::json!({"address": "0x3", "class": "com.chmouel.raffi", "pid": 42}),
+        ];
+
+        assert_eq!(find_raffi_window_address(&clients, 42), Some("0x3"));
+    }
+
+    #[test]
+    fn test_position_expression_floats_and_moves_the_target_window() {
+        let expression = position_expression("0xABC123", -50, 75);
+
+        assert!(expression
+            .contains("hl.dispatch(hl.dsp.window.float({ action = \"set\", window = w }))"));
+        assert!(
+            expression.contains("hl.dispatch(hl.dsp.window.move({ x = -50, y = 75, window = w }))")
+        );
+        assert!(expression.contains("hl.get_window(\"address:0xABC123\")"));
+    }
+
+    #[test]
+    fn test_position_window_uses_hyprctl_for_raffi_pid() {
+        let dir = std::env::temp_dir().join(format!("raffi-position-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let program = dir.join("hyprctl");
+        let expression_file = dir.join("expression");
+        let clients = serde_json::json!([{
+            "address": "0xABC123",
+            "class": "com.chmouel.raffi",
+            "pid": std::process::id()
+        }]);
+        let script = format!(
+            "#!/bin/sh\n\
+             if [ \"$3\" = \"-j\" ]; then printf '%s' '{clients}'; \
+             elif [ \"$3\" = \"eval\" ]; then printf '%s' \"$4\" > '{}'; printf 'ok'; \
+             else exit 2; fi\n",
+            expression_file.display()
+        );
+        std::fs::write(&program, script).unwrap();
+        let mut permissions = std::fs::metadata(&program).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&program, permissions).unwrap();
+
+        position_window_with(
+            &program,
+            "test",
+            std::process::id(),
+            -50,
+            75,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+
+        let expression = std::fs::read_to_string(&expression_file).unwrap();
+        assert!(expression.contains("hl.get_window(\"address:0xABC123\")"));
+        assert!(expression.contains("x = -50, y = 75"));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

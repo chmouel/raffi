@@ -17,8 +17,8 @@ version: 1
 #   font_size: 20            # Base font size in px (default: 20). Other sizes and paddings
 #                            # scale proportionally (input=24, items=20, subtitles=14, hints=12)
 #   font_family: "Inter"     # Font family name (default: system sans-serif)
-#   window_width: 800        # Window width in pixels (default: 800)
-#   window_height: 600       # Window height in pixels (default: 600)
+#   window_width: 800        # Window width in pixels (default: 800; override with --width)
+#   window_height: 600       # Window height in pixels (default: 600; override with --height)
 #   padding: 20              # Outer window padding in pixels (default: 20, scales with font_size)
 #   show_preview: true       # Right-hand preview pane. Addons (snippets, files, script filters...)
 #                            # preview automatically; plain launchers only when this is true or the
