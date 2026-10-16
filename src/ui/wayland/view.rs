@@ -868,7 +868,10 @@ impl LauncherApp {
             || self.currency.loading
             || self.currency.multi_result.is_some()
             || self.currency.multi_loading;
-        let has_calculator = self.calculator_result.is_some();
+        let has_inline = self
+            .inline_result
+            .as_ref()
+            .is_some_and(|inline| !inline.rows.is_empty());
 
         let mut special_item_idx = 0;
 
@@ -1496,35 +1499,75 @@ impl LauncherApp {
             }
         }
 
-        if let Some(calc) = &self.calculator_result {
-            let result_str = if calc.result.fract() == 0.0 {
-                format!("{}", calc.result as i64)
-            } else {
-                format!("{}", calc.result)
-            };
+        if let Some(inline) = &self.inline_result {
+            for (idx, inline_row) in inline.rows.iter().enumerate() {
+                let is_selected = self.selected_index == special_item_idx;
+                let mut row = Row::new().spacing(16).align_y(iced::Alignment::Center);
+                if let Some(color) = inline_row.swatch {
+                    row = row.push(
+                        container(Space::new())
+                            .width(Length::Fixed(fs.item))
+                            .height(Length::Fixed(fs.item))
+                            .style(move |_theme| container::Style {
+                                background: Some(iced::Background::Color(color)),
+                                border: iced::Border {
+                                    color: t.border,
+                                    width: 1.0,
+                                    radius: 4.0.into(),
+                                },
+                                ..Default::default()
+                            }),
+                    );
+                }
+                row = row.push(
+                    text(inline_row.title.as_str())
+                        .size(fs.item)
+                        .color(t.accent),
+                );
+                if let Some(subtitle) = &inline_row.subtitle {
+                    row = row.push(
+                        text(subtitle.as_str())
+                            .size(fs.subtitle)
+                            .color(t.text_muted),
+                    );
+                }
 
-            let calc_text = format!("= {} = {}", calc.expression, result_str);
-            let is_selected = self.selected_index == special_item_idx;
-            let calc_row = Row::new()
+                let inline_button = button(row)
+                    .on_press(Message::InlineSelected(idx))
+                    .padding(fs.item_padding)
+                    .width(Length::Fill)
+                    .style(item_button_style(t, is_selected, t.accent));
+
+                items_column = items_column.push(inline_button);
+                special_item_idx += 1;
+            }
+        }
+
+        if let Some(error) = &self.inline_copy_error {
+            let error_row = Row::new()
                 .spacing(16)
                 .align_y(iced::Alignment::Center)
-                .push(text(calc_text).size(fs.item).color(t.accent));
-
-            let calc_button = button(calc_row)
-                .on_press(Message::CalculatorSelected)
-                .padding(fs.item_padding)
-                .width(Length::Fill)
-                .style(item_button_style(t, is_selected, t.accent));
-
-            items_column = items_column.push(calc_button);
-            special_item_idx += 1;
+                .push(text(error.as_str()).size(fs.item).color(t.text_muted));
+            items_column = items_column.push(
+                button(error_row)
+                    .padding(fs.item_padding)
+                    .width(Length::Fill)
+                    .style(move |_theme, _status| button::Style {
+                        text_color: t.text_muted,
+                        border: iced::Border {
+                            radius: 8.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }),
+            );
         }
 
         let has_fallbacks = self.fallback_count() > 0;
         let has_keyword_suggestions = !self.keyword_suggestions.is_empty();
 
         if self.filtered_configs.is_empty()
-            && !has_calculator
+            && !has_inline
             && !has_currency
             && !has_script_filter
             && !has_text_snippet

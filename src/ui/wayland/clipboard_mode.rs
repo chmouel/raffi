@@ -333,10 +333,10 @@ impl LauncherApp {
         state.pending = false;
         let outcome = result.and_then(|target| {
             if let Some(target) = target {
-                self.deferred_paste
+                self.deferred_action
                     .lock()
                     .map_err(|_| "cannot queue Hyprland paste".to_string())?
-                    .replace(target);
+                    .replace(super::actions::DeferredAction::HyprPaste(target));
             }
             Ok(())
         });

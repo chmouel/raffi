@@ -11,6 +11,31 @@ pub(crate) struct CalculatorResult {
     pub result: f64,
 }
 
+/// Parser that owns the inline result area for a standard-mode query.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InlineProvider {
+    Calculator,
+    Currency,
+}
+
+/// One row shown above the launchers; Enter copies `copy_value`, Ctrl+Enter
+/// `alt_copy_value` when set.
+#[derive(Debug, Clone)]
+pub(crate) struct InlineRow {
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub copy_value: String,
+    pub alt_copy_value: Option<String>,
+    pub swatch: Option<iced::Color>,
+    pub preview: Option<super::preview::PreviewData>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct InlineResult {
+    pub provider: InlineProvider,
+    pub rows: Vec<InlineRow>,
+}
+
 /// Currency conversion request parsed from user input.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CurrencyConversionRequest {
@@ -143,7 +168,10 @@ pub(crate) enum Message {
     Submit,
     Cancel,
     ItemClicked(usize),
-    CalculatorSelected,
+    InlineSelected(usize),
+    /// A checked copy of an inline or currency row started at the given
+    /// `inline_generation` finished.
+    InlineCopied(u64, std::result::Result<(), String>),
     CurrencyConversionResult(
         CurrencyConversionRequest,
         std::result::Result<CurrencyResult, String>,

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -400,6 +400,29 @@ pub(super) struct KeywordSuggestion {
     pub icon: Option<String>,
 }
 
+/// Actions still running, keyed by provider and target. Query and mode
+/// changes keep them so the same action cannot be submitted twice; only the
+/// action's completion releases it.
+#[derive(Debug, Default)]
+pub(super) struct InFlightActions {
+    keys: HashSet<(&'static str, String)>,
+}
+
+impl InFlightActions {
+    /// Mark the action as running; `false` when it already is.
+    pub fn begin(&mut self, provider: &'static str, target: &str) -> bool {
+        self.keys.insert((provider, target.to_string()))
+    }
+
+    pub fn finish(&mut self, provider: &'static str, target: &str) {
+        self.keys.remove(&(provider, target.to_string()));
+    }
+
+    pub fn is_pending(&self, provider: &'static str, target: &str) -> bool {
+        self.keys.contains(&(provider, target.to_string()))
+    }
+}
+
 pub(super) struct LauncherApp {
     pub configs: Vec<crate::RaffiConfig>,
     pub filtered_configs: Vec<usize>,
@@ -412,12 +435,22 @@ pub(super) struct LauncherApp {
     pub mru_map: HashMap<String, super::support::MruEntry>,
     pub sort_mode: crate::SortMode,
     pub addons: AddonsConfig,
-    pub calculator_result: Option<CalculatorResult>,
+    pub query_class: super::app::QueryClass,
+    pub inline_result: Option<super::types::InlineResult>,
     pub currency: CurrencyState,
     pub script_filter: ScriptFilterState,
     pub text_snippets: TextSnippetState,
     pub hyprland: Option<Result<super::hyprland::Hyprland, String>>,
-    pub deferred_paste: Arc<Mutex<Option<super::hyprland::Hyprland>>>,
+    pub deferred_action: Arc<Mutex<Option<super::actions::DeferredAction>>>,
+    pub in_flight: InFlightActions,
+    /// Bumped whenever the query or mode changes, so an inline copy that
+    /// completes afterwards is recognised as stale.
+    pub inline_generation: u64,
+    /// Shown below the inline rows when copying one of them failed.
+    pub inline_copy_error: Option<String>,
+    /// Clipboard command replacing the real copier in tests.
+    #[cfg(test)]
+    pub copier: Option<Vec<String>>,
     pub web_search: WebSearchState,
     pub file_browser: FileBrowserState,
     /// Wayland drag-and-drop source worker, if the UI runs on Wayland.

@@ -135,6 +135,27 @@ pub(super) fn default_to_hypr_paste(
     (explicit || target.is_ok()).then_some(target)
 }
 
+/// Run `hyprctl dispatch` with `args` in the current Hyprland session.
+pub(super) fn dispatch(args: &[String]) -> Result<(), String> {
+    let mut command = Command::new("hyprctl");
+    command.arg("dispatch").args(args);
+    let output =
+        run_bounded(command, TIMEOUT, 64 * 1024).map_err(|error| format!("hyprctl: {error}"))?;
+    checked_reply_for(&output, "dispatch")
+}
+
+/// Show `message` as a Hyprland notification; outside Hyprland it is only
+/// logged.
+pub(super) fn notify(message: &str) {
+    crate::debug_log!("notify: {message}");
+    if !in_session() {
+        return;
+    }
+    let mut command = Command::new("hyprctl");
+    command.args(["notify", "0", "5000", "rgb(ff5555)", message]);
+    let _ = run_bounded(command, TIMEOUT, 64 * 1024);
+}
+
 fn valid_instance_signature(instance: &str) -> bool {
     !instance.is_empty()
         && instance

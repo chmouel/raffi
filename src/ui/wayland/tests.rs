@@ -1,4 +1,6 @@
-use super::app::{fido_updir, keyword_suggestions, loggable_query, route_query, QueryMode};
+use super::app::{
+    classify_query, fido_updir, keyword_suggestions, loggable_query, route_query, QueryMode,
+};
 use super::help::{filter_help_entries, help_entries, HelpSection};
 use super::placeholders::Expanded;
 use super::preview::{
@@ -9,7 +11,7 @@ use super::state::{
     KeywordSuggestion, LauncherApp, Message, ScriptFilterResult,
 };
 use super::theme::ThemeColors;
-use super::types::{ScriptFilterItem, ScriptFilterItemText};
+use super::types::{InlineProvider, ScriptFilterItem, ScriptFilterItemText};
 use crate::ui::FontSizes;
 use crate::{
     AddonsConfig, RaffiConfig, ScriptFilterConfig, SortMode, TextSnippet, TextSnippetSourceConfig,
@@ -530,7 +532,7 @@ fn test_hypr_paste_preparation_tracks_selection_and_reports_errors() {
             session.wrapping_sub(1),
             Ok(super::hyprland::Hyprland::test_target()),
         ));
-        assert!(app.deferred_paste.lock().unwrap().is_none());
+        assert!(app.deferred_action.lock().unwrap().is_none());
         assert!(app.text_snippets.pending.is_some());
         let _ = app.update(Message::HyprPastePrepared(
             session,
@@ -539,7 +541,7 @@ fn test_hypr_paste_preparation_tracks_selection_and_reports_errors() {
         assert_eq!(app.text_snippets.error.as_deref(), Some("wl-copy failed"));
         assert!(app.text_snippets.active);
         assert!(app.text_snippets.pending.is_none());
-        assert!(app.deferred_paste.lock().unwrap().is_none());
+        assert!(app.deferred_action.lock().unwrap().is_none());
 
         let _ = app.update(Message::TextSnippetSelected(0));
         if placeholders {
@@ -555,7 +557,7 @@ fn test_hypr_paste_preparation_tracks_selection_and_reports_errors() {
             session,
             Ok(super::hyprland::Hyprland::test_target()),
         ));
-        assert!(app.deferred_paste.lock().unwrap().is_some());
+        assert!(app.deferred_action.lock().unwrap().is_some());
         assert!(app.text_snippets.pending.is_none());
     }
 }
@@ -629,7 +631,7 @@ fn test_hypr_paste_missing_session_and_late_results_do_not_queue_paste() {
         session,
         Ok(super::hyprland::Hyprland::test_target()),
     ));
-    assert!(app.deferred_paste.lock().unwrap().is_none());
+    assert!(app.deferred_action.lock().unwrap().is_none());
 }
 
 #[test]
@@ -1778,7 +1780,7 @@ fn test_help_list_filters_while_typing() {
     let _ = app.update(Message::SearchChanged("gist".into()));
     assert_eq!(app.total_items(), 1);
     assert!(app.filtered_configs.is_empty());
-    assert!(app.calculator_result.is_none());
+    assert!(app.inline_result.is_none());
 }
 
 #[test]
@@ -1839,10 +1841,12 @@ fn test_help_closes_on_toggle_and_cancel() {
 fn test_preview_scroll_messages_leave_state_unchanged() {
     let mut app = test_app(AddonsConfig::default());
     super::configure_preview_visibility(&mut app.view, Some(false));
-    app.calculator_result = Some(super::types::CalculatorResult {
-        expression: "1+1".into(),
-        result: 2.0,
-    });
+    app.inline_result = Some(super::support::calculator_inline_result(
+        &super::types::CalculatorResult {
+            expression: "1+1".into(),
+            result: 2.0,
+        },
+    ));
     assert!(!app.view.show_launcher_preview);
     assert!(app.view.show_preview);
 
@@ -1889,10 +1893,12 @@ fn test_toggle_preview_message() {
     assert!(app.view.show_launcher_preview);
 
     // Once something would show, Ctrl+P hides the pane entirely.
-    app.calculator_result = Some(super::types::CalculatorResult {
-        expression: "1+1".into(),
-        result: 2.0,
-    });
+    app.inline_result = Some(super::support::calculator_inline_result(
+        &super::types::CalculatorResult {
+            expression: "1+1".into(),
+            result: 2.0,
+        },
+    ));
     assert!(app.resolve_selected_preview().is_some());
     let _ = app.update(Message::TogglePreview);
     assert!(!app.view.show_preview);
@@ -2837,7 +2843,7 @@ fn test_clipboard_actions_are_captured_and_never_fall_back() {
         Err("item is no longer in the clipboard history".into()),
     ));
     assert!(!app.clipboard.pending);
-    assert!(app.deferred_paste.lock().unwrap().is_none());
+    assert!(app.deferred_action.lock().unwrap().is_none());
     assert!(app.clipboard.error.as_ref().unwrap().contains("no longer"));
 
     let _ = app.update(Message::Submit);
@@ -2845,7 +2851,7 @@ fn test_clipboard_actions_are_captured_and_never_fall_back() {
         session,
         Ok(Some(super::hyprland::Hyprland::test_target())),
     ));
-    assert!(app.deferred_paste.lock().unwrap().is_some());
+    assert!(app.deferred_action.lock().unwrap().is_some());
 
     // Enter copies and leaves no paste behind.
     let mut app = test_app(clipboard_addons());
@@ -2861,7 +2867,7 @@ fn test_clipboard_actions_are_captured_and_never_fall_back() {
         Ok(None),
     ));
     assert!(!app.clipboard.pending);
-    assert!(app.deferred_paste.lock().unwrap().is_none());
+    assert!(app.deferred_action.lock().unwrap().is_none());
 }
 
 #[test]
@@ -2900,4 +2906,262 @@ fn test_clipboard_images_only_keyword_and_toggle() {
     let _ = app.update(Message::ClipboardToggleImages);
     assert!(!app.clipboard.active);
     assert!(!app.clipboard.images_only);
+}
+
+#[test]
+fn test_classify_query() {
+    let addons = clipboard_addons();
+
+    let calc = classify_query("1+1", &addons);
+    assert_eq!(calc.mode, QueryMode::Standard);
+    assert_eq!(calc.inline_provider, Some(InlineProvider::Calculator));
+    assert!(!calc.sensitive);
+    assert_eq!(calc.loggable_query(" 1+1 ", &addons), "1+1");
+
+    assert_eq!(
+        classify_query("$10 to EUR", &addons).inline_provider,
+        Some(InlineProvider::Currency)
+    );
+
+    let plain = classify_query("firefox", &addons);
+    assert_eq!(plain.inline_provider, None);
+    assert!(!plain.sensitive);
+
+    // Inline parsers do not run inside the clipboard browser.
+    let clip = classify_query("clip 1+1 secret", &addons);
+    assert!(clip.sensitive);
+    assert_eq!(clip.inline_provider, None);
+    assert_eq!(
+        clip.loggable_query("clip 1+1 secret", &addons),
+        "clip <redacted>"
+    );
+    let debug = format!("{clip:?}");
+    assert!(!debug.contains("secret"), "{debug}");
+
+    let mut disabled = addons.clone();
+    disabled.calculator.enabled = false;
+    assert_eq!(classify_query("1+1", &disabled).inline_provider, None);
+}
+
+#[test]
+fn test_inline_rows_follow_the_query() {
+    let mut app = test_app(AddonsConfig::default());
+    let _ = app.update(Message::SearchChanged("1+1".into()));
+    let inline = app.inline_result.as_ref().expect("calculator row");
+    assert_eq!(inline.rows.len(), 1);
+    assert_eq!(inline.rows[0].title, "= 1+1 = 2");
+    assert_eq!(inline.rows[0].copy_value, "2");
+    assert_eq!(app.total_items(), 1);
+    assert!(app.resolve_selected_preview().is_some());
+
+    let _ = app.update(Message::SearchChanged("raffi-inline-transition".into()));
+    assert!(app.inline_result.is_none());
+    assert_eq!(app.total_items(), 0);
+    assert!(app.resolve_selected_preview().is_none());
+
+    // A stale calculator row would copy and save the query here.
+    let before = app.history.items.clone();
+    let _ = app.update(Message::Submit);
+    assert_eq!(app.history.items, before);
+}
+
+#[test]
+fn test_in_flight_actions_survive_query_and_mode_changes() {
+    let mut app = test_app(clipboard_addons());
+    assert!(app.in_flight.begin("bt", "AA:BB"));
+
+    let _ = app.update(Message::SearchChanged("clip x".into()));
+    let _ = app.update(Message::SearchChanged("firefox".into()));
+    let _ = app.update(Message::ToggleHelp);
+    let _ = app.update(Message::ToggleHelp);
+    assert!(app.in_flight.is_pending("bt", "AA:BB"));
+    assert!(!app.in_flight.begin("bt", "AA:BB"));
+    assert!(app.in_flight.begin("bt", "CC:DD"));
+
+    app.in_flight.finish("bt", "AA:BB");
+    assert!(!app.in_flight.is_pending("bt", "AA:BB"));
+    assert!(app.in_flight.is_pending("bt", "CC:DD"));
+    assert!(app.in_flight.begin("bt", "AA:BB"));
+}
+
+#[test]
+fn test_cancel_queues_no_deferred_action() {
+    let mut app = test_app(AddonsConfig::default());
+    let _ = app.update(Message::SearchChanged("1+1".into()));
+    let _ = app.update(Message::Cancel);
+    assert!(app.deferred_action.lock().unwrap().is_none());
+}
+
+fn failing_copier() -> Option<Vec<String>> {
+    Some(vec![
+        "sh".into(),
+        "-c".into(),
+        "cat >/dev/null; exit 1".into(),
+    ])
+}
+
+#[test]
+fn test_inline_copy_failure_keeps_launcher_open() {
+    let mut app = test_app(AddonsConfig::default());
+    app.copier = failing_copier();
+    let _ = app.update(Message::SearchChanged("1+1".into()));
+    let before = app.history.items.clone();
+
+    let _ = app.update(Message::Submit);
+    assert!(app.in_flight.is_pending("inline-copy", ""));
+    assert_eq!(app.update(Message::Submit).units(), 0);
+
+    let result = app.copy_job(app.inline_copy_value(0).unwrap())();
+    let task = app.update(Message::InlineCopied(app.inline_generation, result));
+    assert_eq!(task.units(), 0);
+    assert!(!app.in_flight.is_pending("inline-copy", ""));
+    assert_eq!(
+        app.inline_copy_error.as_deref(),
+        Some("Copy failed: sh failed (exit 1)")
+    );
+    // The error row is not selectable.
+    assert_eq!(app.total_items(), 1);
+    assert_eq!(app.history.items, before);
+
+    // Retrying clears the error and starts a new copy.
+    let _ = app.update(Message::Submit);
+    assert!(app.in_flight.is_pending("inline-copy", ""));
+    assert!(app.inline_copy_error.is_none());
+}
+
+#[test]
+fn test_inline_copy_uses_alt_value_with_ctrl() {
+    let mut app = test_app(AddonsConfig::default());
+    app.copier = Some(vec![
+        "sh".into(),
+        "-c".into(),
+        "test \"$(cat)\" = alt".into(),
+    ]);
+    app.inline_result = Some(super::types::InlineResult {
+        provider: InlineProvider::Calculator,
+        rows: vec![super::types::InlineRow {
+            title: "row".into(),
+            subtitle: None,
+            copy_value: "plain".into(),
+            alt_copy_value: Some("alt".into()),
+            swatch: None,
+            preview: None,
+        }],
+    });
+
+    assert!(app.copy_job(app.inline_copy_value(0).unwrap())().is_err());
+    app.view.current_modifiers = iced::keyboard::Modifiers::CTRL;
+    assert!(app.copy_job(app.inline_copy_value(0).unwrap())().is_ok());
+}
+
+#[test]
+fn test_stale_inline_copy_releases_guard_without_touching_new_query() {
+    let mut app = test_app(AddonsConfig::default());
+    app.history.max_items = 0;
+    let _ = app.update(Message::SearchChanged("1+1".into()));
+    let _ = app.update(Message::Submit);
+    let started = app.inline_generation;
+    let _ = app.update(Message::SearchChanged("2+2".into()));
+    assert!(app.in_flight.is_pending("inline-copy", ""));
+
+    let task = app.update(Message::InlineCopied(started, Err("boom".into())));
+    assert_eq!(task.units(), 0);
+    assert!(!app.in_flight.is_pending("inline-copy", ""));
+    assert!(app.inline_copy_error.is_none());
+
+    // A stale success neither closes Raffi nor saves the new query, even
+    // when the query returns to the one that started the copy.
+    let _ = app.update(Message::Submit);
+    let _ = app.update(Message::SearchChanged("1+1".into()));
+    let before = app.history.items.clone();
+    let task = app.update(Message::InlineCopied(started, Ok(())));
+    assert_eq!(task.units(), 0);
+    assert!(!app.in_flight.is_pending("inline-copy", ""));
+    assert_eq!(app.history.items, before);
+
+    // The current generation still closes Raffi.
+    let _ = app.update(Message::Submit);
+    let task = app.update(Message::InlineCopied(app.inline_generation, Ok(())));
+    assert!(task.units() > 0);
+}
+
+/// Submits the selected currency row with a failing copier, checks the
+/// error row, then that a retry clears it and starts a new copy.
+fn assert_currency_copy_failure_and_retry(app: &mut LauncherApp) {
+    app.copier = failing_copier();
+    let _ = app.update(Message::Submit);
+    assert!(app.in_flight.is_pending("inline-copy", ""));
+    assert_eq!(app.update(Message::Submit).units(), 0);
+
+    let result = app.copy_job("9.25".into())();
+    let task = app.update(Message::InlineCopied(app.inline_generation, result));
+    assert_eq!(task.units(), 0);
+    assert!(!app.in_flight.is_pending("inline-copy", ""));
+    assert_eq!(
+        app.inline_copy_error.as_deref(),
+        Some("Copy failed: sh failed (exit 1)")
+    );
+
+    let _ = app.update(Message::Submit);
+    assert!(app.in_flight.is_pending("inline-copy", ""));
+    assert!(app.inline_copy_error.is_none());
+}
+
+#[test]
+fn test_currency_copy_failure_keeps_launcher_open() {
+    let mut app = test_app(AddonsConfig::default());
+    app.currency.result = Some(CurrencyResult {
+        request: CurrencyConversionRequest {
+            amount: 10.0,
+            from_currency: "USD".into(),
+            to_currency: "EUR".into(),
+        },
+        converted_amount: 9.254,
+        rate: 0.9254,
+    });
+    assert_currency_copy_failure_and_retry(&mut app);
+}
+
+#[test]
+fn test_multi_currency_copy_failure_keeps_launcher_open() {
+    let mut app = test_app(AddonsConfig::default());
+    app.currency.multi_result = Some(super::types::MultiCurrencyResult {
+        amount: 10.0,
+        from_currency: "USD".into(),
+        conversions: vec![
+            super::types::CurrencyConversion {
+                to_currency: "EUR".into(),
+                converted_amount: 9.25,
+                rate: 0.925,
+            },
+            super::types::CurrencyConversion {
+                to_currency: "GBP".into(),
+                converted_amount: 7.891,
+                rate: 0.7891,
+            },
+        ],
+    });
+    app.selected_index = 1;
+    assert_currency_copy_failure_and_retry(&mut app);
+}
+
+#[test]
+fn test_calculator_owns_inline_area_over_currency() {
+    let mut addons = AddonsConfig::default();
+    addons.currency.trigger = Some("-".into());
+    assert!(super::currency::try_parse_multi_currency_conversion("-10", &[], "USD", "-").is_some());
+    assert_eq!(
+        classify_query("-10", &addons).inline_provider,
+        Some(InlineProvider::Calculator)
+    );
+
+    let mut app = test_app(addons);
+    let _ = app.update(Message::SearchChanged("-10".into()));
+    assert!(app.inline_result.is_some());
+    assert!(!app.currency.loading && app.currency.result.is_none());
+    assert!(!app.currency.multi_loading && app.currency.multi_result.is_none());
+    assert_eq!(app.total_items(), 1);
+
+    let _ = app.update(Message::SearchChanged("-".into()));
+    assert!(app.currency.help);
 }

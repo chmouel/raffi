@@ -1,12 +1,14 @@
-use std::io::Read;
+use std::io::{Read, Write};
 use std::os::unix::process::CommandExt;
-use std::process::{Command, Stdio};
-use std::sync::mpsc;
+use std::path::Path;
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::{mpsc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::placeholders::MAX_VALUE;
 
 const CLIPBOARD_TIMEOUT: Duration = Duration::from_secs(2);
+const DEFERRED_TIMEOUT: Duration = Duration::from_secs(2);
 /// Typing a key per character is slow and each press is a command argument, so
 /// keep caret movement for `{cursor}` within a sane bound.
 const MAX_CURSOR_MOVES: usize = 1000;
@@ -63,10 +65,6 @@ fn spawn_insert(value: &str, cursor_moves: usize) -> Result<(), String> {
 
 /// Copy a value to the clipboard using the first available tool.
 /// Fallback chain: wl-copy -> xclip -> xsel.
-pub(super) fn spawn_copy(value: &str) -> bool {
-    try_copy(value).is_ok()
-}
-
 fn try_copy(value: &str) -> Result<(), String> {
     let tool = find_tool(&["wl-copy", "xclip", "xsel"])
         .ok_or("cannot copy: install wl-clipboard, xclip or xsel")?;
@@ -86,6 +84,188 @@ fn try_copy(value: &str) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|error| format!("cannot run {tool}: {error}"))
+}
+
+/// Copy `text` and report whether the clipboard tool accepted it. The text
+/// goes through stdin only; the foreground process has to exit successfully
+/// within the clipboard timeout (wl-copy forks its owner before exiting).
+pub(super) fn copy_text_checked(text: &str) -> Result<(), String> {
+    let tool = find_tool(&["wl-copy", "xclip", "xsel"])
+        .ok_or("cannot copy: install wl-clipboard, xclip or xsel")?;
+    let argv: &[&str] = match tool {
+        "xclip" => &["xclip", "-selection", "clipboard"],
+        "xsel" => &["xsel", "--clipboard", "--input"],
+        _ => &["wl-copy"],
+    };
+    copy_with(argv, text, CLIPBOARD_TIMEOUT)
+}
+
+#[cfg(test)]
+pub(super) fn copy_text_with(argv: &[String], text: &str) -> Result<(), String> {
+    let argv: Vec<&str> = argv.iter().map(String::as_str).collect();
+    copy_with(&argv, text, CLIPBOARD_TIMEOUT)
+}
+
+fn copy_with(argv: &[&str], text: &str, timeout: Duration) -> Result<(), String> {
+    let (program, args) = argv.split_first().ok_or("no clipboard tool")?;
+    let name = program_name(program);
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()
+        .map_err(|error| format!("cannot start {name}: {error}"))?;
+    let deadline = Instant::now() + timeout;
+    let written = spawn_writer(&mut child, text.as_bytes().to_vec());
+    let status = match wait_until(&mut child, deadline) {
+        Ok(status) => status,
+        Err(error) => return Err(format!("{name} {error}")),
+    };
+    if !status.success() {
+        return Err(exit_error(name, status));
+    }
+    match written.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(format!("{name} did not read the text")),
+        Err(_) => {
+            kill_process_group(child.id());
+            Err(format!("{name} timed out reading the text"))
+        }
+    }
+}
+
+fn program_name(program: &str) -> &str {
+    Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(program)
+}
+
+fn exit_error(name: &str, status: ExitStatus) -> String {
+    match status.code() {
+        Some(code) => format!("{name} failed (exit {code})"),
+        None => format!("{name} failed (killed by a signal)"),
+    }
+}
+
+/// Feed `input` to the child's stdin from a thread and close it; the receiver
+/// gets whether everything was written. A child that stops reading early
+/// only breaks the pipe.
+fn spawn_writer(child: &mut Child, input: Vec<u8>) -> mpsc::Receiver<bool> {
+    let (sender, receiver) = mpsc::channel();
+    let stdin = child.stdin.take();
+    std::thread::spawn(move || {
+        let written = stdin.is_some_and(|mut stdin| stdin.write_all(&input).is_ok());
+        let _ = sender.send(written);
+    });
+    receiver
+}
+
+/// Wait for the child to exit until `deadline`; on timeout or a wait error
+/// kill its process group and reap it.
+fn wait_until(child: &mut Child, deadline: Instant) -> Result<ExitStatus, String> {
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            outcome => {
+                kill_process_group(child.id());
+                let _ = child.wait();
+                return Err(match outcome {
+                    Err(_) => "could not be waited for".into(),
+                    _ => "timed out".into(),
+                });
+            }
+        }
+    }
+}
+
+/// Something to run once the window has closed, so it acts on whatever had
+/// focus before Raffi opened.
+#[derive(Debug, Clone)]
+pub(super) enum DeferredAction {
+    HyprPaste(super::hyprland::Hyprland),
+    #[allow(dead_code)]
+    Command(Vec<String>),
+    #[allow(dead_code)]
+    HyprDispatch(Vec<String>),
+}
+
+impl DeferredAction {
+    fn run(&self) -> Result<(), String> {
+        match self {
+            Self::HyprPaste(target) => target.paste(),
+            Self::Command(argv) => run_detached(argv, DEFERRED_TIMEOUT),
+            Self::HyprDispatch(args) => super::hyprland::dispatch(args),
+        }
+    }
+
+    fn label(&self) -> &'static str {
+        match self {
+            Self::HyprPaste(_) => "hypr_paste",
+            Self::Command(_) => "action",
+            Self::HyprDispatch(_) => "hyprctl dispatch",
+        }
+    }
+
+    fn report(&self, error: &str) {
+        match self {
+            Self::HyprPaste(target) => target.notify_error(error),
+            _ => super::hyprland::notify(&format!("Raffi action failed: {error}")),
+        }
+    }
+}
+
+/// Run the queued action, if any, exactly once. Failures are notified and
+/// returned.
+pub(super) fn run_deferred(slot: &Mutex<Option<DeferredAction>>) -> Result<(), String> {
+    run_deferred_with(slot, DeferredAction::run, DeferredAction::report)
+}
+
+fn run_deferred_with(
+    slot: &Mutex<Option<DeferredAction>>,
+    run: impl FnOnce(&DeferredAction) -> Result<(), String>,
+    report: impl FnOnce(&DeferredAction, &str),
+) -> Result<(), String> {
+    let Some(action) = slot
+        .lock()
+        .map_err(|_| "cannot read pending action".to_string())?
+        .take()
+    else {
+        return Ok(());
+    };
+    run(&action).map_err(|error| {
+        report(&action, &error);
+        format!("{}: {error}", action.label())
+    })
+}
+
+/// Start `argv` in its own process group and fail if it exits unsuccessfully
+/// within `timeout`. A command still running then (a screen locker, an app)
+/// is left alone.
+fn run_detached(argv: &[String], timeout: Duration) -> Result<(), String> {
+    let (program, args) = argv.split_first().ok_or("no command to run")?;
+    let name = program_name(program);
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()
+        .map_err(|error| format!("cannot start {name}: {error}"))?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return Ok(()),
+            Ok(Some(status)) => return Err(exit_error(name, status)),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            Ok(None) => return Ok(()),
+            Err(_) => return Err(format!("{name} could not be waited for")),
+        }
+    }
 }
 
 fn spawn_custom_action(action: &str, value: &str) -> Result<(), String> {
@@ -261,6 +441,24 @@ enum ReadOutcome {
     Failed(String),
 }
 
+fn read_limited(reader: &mut impl Read, max_output: usize) -> ReadOutcome {
+    let mut output = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) => return ReadOutcome::Done(output),
+            Ok(count) => {
+                output.extend_from_slice(&chunk[..count]);
+                if output.len() > max_output {
+                    return ReadOutcome::Overflow;
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(error) => return ReadOutcome::Failed(error.to_string()),
+        }
+    }
+}
+
 pub(super) fn kill_process_group(pgid: u32) {
     let _ = Command::new("sh")
         .arg("-c")
@@ -301,22 +499,7 @@ pub(super) fn run_bounded(
     };
     let (sender, receiver) = mpsc::channel();
     std::thread::spawn(move || {
-        let mut output = Vec::new();
-        let mut chunk = [0u8; 8192];
-        let outcome = loop {
-            match stdout.read(&mut chunk) {
-                Ok(0) => break ReadOutcome::Done(output),
-                Ok(count) => {
-                    output.extend_from_slice(&chunk[..count]);
-                    if output.len() > max_output {
-                        break ReadOutcome::Overflow;
-                    }
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-                Err(error) => break ReadOutcome::Failed(error.to_string()),
-            }
-        };
-        let _ = sender.send(outcome);
+        let _ = sender.send(read_limited(&mut stdout, max_output));
     });
 
     let fail = |child: &mut std::process::Child, message: String| {
@@ -361,6 +544,100 @@ pub(super) fn run_bounded(
         return Err(format!("exited with {status}"));
     }
     Ok(output)
+}
+
+/// Run `argv` in its own process group with `input` on stdin and return its
+/// stdout.
+///
+/// stdin is fed from a writer thread while stdout and stderr are drained by
+/// their own reader threads, so neither a large input nor a chatty stderr can
+/// deadlock the child. stdout is capped at `max_output` bytes and stderr at
+/// `MAX_STDERR`; stderr is only drained, never kept. One deadline covers the
+/// whole run, and the child is killed and reaped on any failure. Errors name
+/// the program but never include its output or input, since a child can
+/// echo its input back.
+#[allow(dead_code)]
+pub(super) fn run_bounded_with_input(
+    argv: &[&str],
+    input: &[u8],
+    timeout: Duration,
+    max_output: usize,
+) -> Result<Vec<u8>, String> {
+    const MAX_STDERR: usize = 64 * 1024;
+    let (program, args) = argv.split_first().ok_or("no command to run")?;
+    let name = program_name(program);
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .map_err(|error| format!("cannot start {name}: {error}"))?;
+    let pgid = child.id();
+    let deadline = Instant::now() + timeout;
+    let fail = |child: &mut Child, message: String| {
+        kill_process_group(pgid);
+        let _ = child.wait();
+        Err(message)
+    };
+
+    let (Some(mut stdout), Some(mut stderr)) = (child.stdout.take(), child.stderr.take()) else {
+        return fail(&mut child, format!("cannot read {name} output"));
+    };
+    let _ = spawn_writer(&mut child, input.to_vec());
+    let (sender, receiver) = mpsc::channel();
+    let stdout_sender = sender.clone();
+    std::thread::spawn(move || {
+        let _ = stdout_sender.send((true, read_limited(&mut stdout, max_output)));
+    });
+    std::thread::spawn(move || {
+        let mut chunk = [0u8; 8192];
+        let mut total = 0usize;
+        let outcome = loop {
+            match stderr.read(&mut chunk) {
+                Ok(0) => break ReadOutcome::Done(Vec::new()),
+                Ok(count) => {
+                    total += count;
+                    if total > MAX_STDERR {
+                        break ReadOutcome::Overflow;
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(error) => break ReadOutcome::Failed(error.to_string()),
+            }
+        };
+        let _ = sender.send((false, outcome));
+    });
+
+    let mut output = None;
+    let mut stderr_open = true;
+    while output.is_none() || stderr_open {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        match receiver.recv_timeout(remaining) {
+            Ok((true, ReadOutcome::Done(bytes))) => output = Some(bytes),
+            Ok((false, ReadOutcome::Done(_))) => stderr_open = false,
+            Ok((true, ReadOutcome::Overflow)) => {
+                return fail(
+                    &mut child,
+                    format!("{name} output is larger than {} KiB", max_output / 1024),
+                )
+            }
+            Ok((false, ReadOutcome::Overflow)) => {
+                return fail(&mut child, format!("{name} wrote too much error output"))
+            }
+            Ok((_, ReadOutcome::Failed(_))) => {
+                return fail(&mut child, format!("cannot read {name} output"))
+            }
+            Err(_) => return fail(&mut child, format!("{name} timed out")),
+        }
+    }
+
+    let status = wait_until(&mut child, deadline).map_err(|error| format!("{name} {error}"))?;
+    if !status.success() {
+        return Err(exit_error(name, status));
+    }
+    Ok(output.unwrap_or_default())
 }
 
 /// Read the clipboard as text, trying wl-paste, xclip and xsel in turn.
@@ -628,6 +905,155 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.contains("cannot start"), "{error}");
+    }
+
+    #[test]
+    fn test_run_bounded_with_input_feeds_large_input() {
+        let input = vec![b'x'; 1024 * 1024];
+        let output =
+            run_bounded_with_input(&["wc", "-c"], &input, Duration::from_secs(5), 1024).unwrap();
+        assert_eq!(String::from_utf8_lossy(&output).trim(), "1048576");
+
+        let output =
+            run_bounded_with_input(&["cat"], &input, Duration::from_secs(5), 2 * 1024 * 1024)
+                .unwrap();
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn test_run_bounded_with_input_tolerates_child_exiting_early() {
+        let input = vec![b'y'; 1024 * 1024];
+        let output =
+            run_bounded_with_input(&["head", "-c1"], &input, Duration::from_secs(5), 1024).unwrap();
+        assert_eq!(output, b"y");
+    }
+
+    #[test]
+    fn test_run_bounded_with_input_errors_are_generic() {
+        let error = run_bounded_with_input(
+            &["sh", "-c", "cat >&2; cat; exit 1"],
+            b"secret",
+            Duration::from_secs(5),
+            1024,
+        )
+        .unwrap_err();
+        assert_eq!(error, "sh failed (exit 1)");
+
+        let error = run_bounded_with_input(
+            &["raffi-no-such-program"],
+            b"secret",
+            Duration::from_secs(1),
+            1024,
+        )
+        .unwrap_err();
+        assert!(
+            error.starts_with("cannot start raffi-no-such-program"),
+            "{error}"
+        );
+        assert!(!error.contains("secret"), "{error}");
+    }
+
+    #[test]
+    fn test_run_bounded_with_input_times_out() {
+        let started = Instant::now();
+        let error = run_bounded_with_input(&["sleep", "5"], b"", Duration::from_millis(200), 1024)
+            .unwrap_err();
+        assert_eq!(error, "sleep timed out");
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn test_run_bounded_with_input_stops_stdout_overflow() {
+        let started = Instant::now();
+        let error =
+            run_bounded_with_input(&["yes"], b"", Duration::from_secs(10), 4096).unwrap_err();
+        assert!(error.contains("larger than"), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn test_run_bounded_with_input_survives_stderr_flood() {
+        // A child that writes a lot to stderr before stdout must not block.
+        let output = run_bounded_with_input(
+            &["sh", "-c", "head -c 60000 /dev/zero >&2; cat"],
+            b"done",
+            Duration::from_secs(5),
+            1024,
+        )
+        .unwrap();
+        assert_eq!(output, b"done");
+
+        let started = Instant::now();
+        let error =
+            run_bounded_with_input(&["sh", "-c", "yes >&2"], b"", Duration::from_secs(10), 1024)
+                .unwrap_err();
+        assert_eq!(error, "sh wrote too much error output");
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn test_copy_with_checks_the_copier() {
+        copy_with(
+            &["sh", "-c", "test \"$(cat)\" = \"two words\""],
+            "two words",
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let error = copy_with(
+            &["sh", "-c", "cat >/dev/null; exit 1"],
+            "secret",
+            Duration::from_secs(5),
+        )
+        .unwrap_err();
+        assert_eq!(error, "sh failed (exit 1)");
+
+        let error = copy_with(&["sleep", "5"], "secret", Duration::from_millis(200)).unwrap_err();
+        assert_eq!(error, "sleep timed out");
+    }
+
+    #[test]
+    fn test_run_deferred_runs_once_and_reports_failures() {
+        let slot = Mutex::new(Some(DeferredAction::Command(vec!["true".into()])));
+        let mut reported = Vec::new();
+        run_deferred_with(&slot, DeferredAction::run, |_, error| {
+            reported.push(error.to_string())
+        })
+        .unwrap();
+        assert!(slot.lock().unwrap().is_none());
+
+        let mut runs = 0;
+        run_deferred_with(
+            &slot,
+            |_| {
+                runs += 1;
+                Ok(())
+            },
+            |_, error| reported.push(error.to_string()),
+        )
+        .unwrap();
+        assert_eq!(runs, 0);
+
+        *slot.lock().unwrap() = Some(DeferredAction::Command(vec!["false".into()]));
+        let error = run_deferred_with(&slot, DeferredAction::run, |_, error| {
+            reported.push(error.to_string())
+        })
+        .unwrap_err();
+        assert_eq!(error, "action: false failed (exit 1)");
+        assert_eq!(reported, vec!["false failed (exit 1)".to_string()]);
+        assert!(slot.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_run_detached_leaves_long_running_commands_alone() {
+        let started = Instant::now();
+        run_detached(&["sleep".into(), "1".into()], Duration::from_millis(100)).unwrap();
+        assert!(started.elapsed() < Duration::from_millis(900));
+        assert!(
+            run_detached(&["raffi-no-such-program".into()], DEFERRED_TIMEOUT)
+                .unwrap_err()
+                .starts_with("cannot start")
+        );
     }
 
     #[test]

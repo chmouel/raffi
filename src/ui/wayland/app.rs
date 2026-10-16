@@ -9,7 +9,8 @@ use iced::widget::scrollable::{self, AbsoluteOffset};
 use iced::Task;
 
 use super::actions::{
-    execute_action, execute_file_action, execute_snippet_action, open_in_file_manager, spawn_copy,
+    copy_text_checked, execute_action, execute_file_action, execute_snippet_action,
+    open_in_file_manager, DeferredAction,
 };
 use super::browser::read_directory;
 use super::currency::{
@@ -34,16 +35,17 @@ use super::state::{
     SharedSelection, TextSnippetState, ViewState, WebSearchActiveState, WebSearchState,
 };
 use super::support::{
-    fuzzy_match_configs, load_history, load_mru_map, mru_bounds, mru_sort_key, record_mru_use,
-    save_history, save_mru_map, try_evaluate_math,
+    calculator_inline_result, fuzzy_match_configs, load_history, load_mru_map, mru_bounds,
+    mru_sort_key, record_mru_use, save_history, save_mru_map, try_evaluate_math,
 };
+use super::types::InlineProvider;
 use crate::ui::{get_mru_cache_path, get_snippet_mru_cache_path, FontSizes};
 use crate::{
     read_desktop_icon_map, read_icon_map, resolve_launcher_icon_path, AddonsConfig, RaffiConfig,
     SortMode,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(super) enum QueryMode {
     FileBrowser { expanded: String, filter: String },
     ScriptFilter { config_index: usize, query: String },
@@ -53,6 +55,124 @@ pub(super) enum QueryMode {
     WebSearch { config_index: usize, query: String },
     Standard,
 }
+
+/// Debug output keeps the payload of sensitive modes out of logs.
+impl std::fmt::Debug for QueryMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FileBrowser { expanded, filter } => f
+                .debug_struct("FileBrowser")
+                .field("expanded", expanded)
+                .field("filter", filter)
+                .finish(),
+            Self::ScriptFilter {
+                config_index,
+                query,
+            } => f
+                .debug_struct("ScriptFilter")
+                .field("config_index", config_index)
+                .field("query", query)
+                .finish(),
+            Self::TextSnippet {
+                config_index,
+                query,
+            } => f
+                .debug_struct("TextSnippet")
+                .field("config_index", config_index)
+                .field("query", query)
+                .finish(),
+            Self::Emoji { query } => f.debug_struct("Emoji").field("query", query).finish(),
+            Self::Clipboard { images_only, .. } => f
+                .debug_struct("Clipboard")
+                .field("images_only", images_only)
+                .finish_non_exhaustive(),
+            Self::WebSearch {
+                config_index,
+                query,
+            } => f
+                .debug_struct("WebSearch")
+                .field("config_index", config_index)
+                .field("query", query)
+                .finish(),
+            Self::Standard => f.write_str("Standard"),
+        }
+    }
+}
+
+/// How a query is handled, worked out before anything filters or logs it.
+/// `sensitive` queries stay out of search history and debug logs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct QueryClass {
+    pub mode: QueryMode,
+    pub inline_provider: Option<InlineProvider>,
+    pub sensitive: bool,
+}
+
+impl Default for QueryClass {
+    fn default() -> Self {
+        Self {
+            mode: QueryMode::Standard,
+            inline_provider: None,
+            sensitive: false,
+        }
+    }
+}
+
+impl QueryClass {
+    /// The query as it may appear in debug logs.
+    pub(super) fn loggable_query(&self, query: &str, addons: &AddonsConfig) -> String {
+        match &self.mode {
+            QueryMode::Clipboard { images_only, .. } => {
+                let clipboard = &addons.clipboard;
+                let trigger = if *images_only {
+                    clipboard.image_trigger()
+                } else {
+                    clipboard.trigger()
+                };
+                format!("{trigger} <redacted>")
+            }
+            _ if self.sensitive => "<redacted>".to_string(),
+            _ => query.trim().to_string(),
+        }
+    }
+}
+
+pub(super) fn classify_query(query: &str, addons: &AddonsConfig) -> QueryClass {
+    let mode = route_query(query, addons);
+    let inline_provider = match mode {
+        QueryMode::FileBrowser { .. } | QueryMode::Clipboard { .. } => None,
+        _ => inline_provider(query, addons),
+    };
+    let sensitive = matches!(mode, QueryMode::Clipboard { .. });
+    QueryClass {
+        mode,
+        inline_provider,
+        sensitive,
+    }
+}
+
+/// The first inline parser matching `query`; it owns the inline result area.
+fn inline_provider(query: &str, addons: &AddonsConfig) -> Option<InlineProvider> {
+    if addons.calculator.enabled && try_evaluate_math(query).is_some() {
+        return Some(InlineProvider::Calculator);
+    }
+    let currency = &addons.currency;
+    if currency.enabled {
+        let trigger = currency.trigger.as_deref().unwrap_or("$");
+        let default_currency = currency.default_currency.as_deref().unwrap_or("USD");
+        let currencies = currency.currencies.as_deref().unwrap_or_default();
+        if try_parse_currency_conversion(query, default_currency, trigger).is_some()
+            || try_parse_multi_currency_conversion(query, currencies, default_currency, trigger)
+                .is_some()
+        {
+            return Some(InlineProvider::Currency);
+        }
+    }
+    None
+}
+
+/// `in_flight` provider for inline result copies.
+const INLINE_COPY: &str = "inline-copy";
 
 /// Pixels scrolled per Ctrl+J / Ctrl+K press in the preview pane.
 const PREVIEW_SCROLL_STEP: f32 = 120.0;
@@ -108,26 +228,15 @@ pub(super) fn fido_updir(old: &str, new: &str, home: &str) -> Option<(String, St
     Some((parent, left.to_string()))
 }
 
-/// The query as it may appear in debug logs: clipboard searches can contain
-/// copied secrets, so only their trigger is kept.
 /// Theme icon names for the clipboard keywords; rows show no icon when the
 /// theme lacks them.
 pub(super) const CLIPBOARD_ICON: &str = "copyq";
 pub(super) const CLIPBOARD_IMAGES_ICON: &str = "image-x-generic";
 
+/// The query as it may appear in debug logs: sensitive searches such as the
+/// clipboard can contain copied secrets, so only their trigger is kept.
 pub(super) fn loggable_query(query: &str, addons: &AddonsConfig) -> String {
-    match route_query(query, addons) {
-        QueryMode::Clipboard { images_only, .. } => {
-            let clipboard = &addons.clipboard;
-            let trigger = if images_only {
-                clipboard.image_trigger()
-            } else {
-                clipboard.trigger()
-            };
-            format!("{trigger} <redacted>")
-        }
-        _ => query.trim().to_string(),
-    }
+    classify_query(query, addons).loggable_query(query, addons)
 }
 
 pub(super) fn route_query(query: &str, addons: &AddonsConfig) -> QueryMode {
@@ -403,12 +512,18 @@ impl LauncherApp {
                 mru_map,
                 sort_mode,
                 addons,
-                calculator_result: None,
+                query_class: QueryClass::default(),
+                inline_result: None,
                 currency: CurrencyState::default(),
                 script_filter: ScriptFilterState::default(),
                 text_snippets,
                 hyprland: None,
-                deferred_paste: Default::default(),
+                deferred_action: Default::default(),
+                in_flight: Default::default(),
+                inline_generation: 0,
+                inline_copy_error: None,
+                #[cfg(test)]
+                copier: None,
                 web_search: WebSearchState::default(),
                 file_browser: FileBrowserState {
                     show_hidden: file_browser_show_hidden,
@@ -467,7 +582,10 @@ impl LauncherApp {
                 self.selected_index = index;
                 self.activate_index(index)
             }
-            Message::CalculatorSelected => self.handle_calculator_selected(),
+            Message::InlineSelected(index) => self.handle_inline_selected(index),
+            Message::InlineCopied(generation, result) => {
+                self.handle_inline_copied(generation, result)
+            }
             Message::CurrencyConversionResult(request, result) => {
                 self.handle_currency_conversion_result(request, result)
             }
@@ -608,12 +726,16 @@ impl LauncherApp {
             return Task::none();
         }
 
+        let class = classify_query(&query, &self.addons);
+        let log_query = class.loggable_query(&query, &self.addons);
         self.search_query = query.clone();
-        self.filter_items(&query);
-        self.calculator_result = if self.addons.calculator.enabled {
-            try_evaluate_math(&query)
-        } else {
-            None
+        self.invalidate_inline_copy();
+        self.filter_items(&query, &log_query);
+        self.inline_result = match class.inline_provider {
+            Some(InlineProvider::Calculator) => {
+                try_evaluate_math(&query).map(|calc| calculator_inline_result(&calc))
+            }
+            _ => None,
         };
         self.selected_index = 0;
 
@@ -627,15 +749,9 @@ impl LauncherApp {
 
         let mut tasks = Vec::new();
 
-        let qmode = route_query(&query, &self.addons);
-        crate::debug_log!(
-            "route_query: query={:?} -> {}",
-            loggable_query(&query, &self.addons),
-            match &qmode {
-                QueryMode::Clipboard { .. } => "Clipboard".to_string(),
-                other => format!("{other:?}"),
-            }
-        );
+        crate::debug_log!("route_query: query={log_query:?} -> {:?}", class.mode);
+        let qmode = class.mode.clone();
+        self.query_class = class;
         if !matches!(qmode, QueryMode::Clipboard { .. }) {
             self.clipboard.clear();
         }
@@ -648,7 +764,7 @@ impl LauncherApp {
             QueryMode::FileBrowser { expanded, filter } => {
                 self.handle_file_browser_query(&expanded, &filter);
                 self.filtered_configs.clear();
-                self.calculator_result = None;
+                self.inline_result = None;
                 self.script_filter.clear();
                 self.text_snippets.clear();
                 self.emoji.clear();
@@ -706,7 +822,7 @@ impl LauncherApp {
                 self.web_search.clear();
                 self.currency.clear();
                 self.filtered_configs.clear();
-                self.calculator_result = None;
+                self.inline_result = None;
                 if let Some(drag) = &self.drag {
                     drag.disarm();
                 }
@@ -762,7 +878,9 @@ impl LauncherApp {
             return Some(Task::batch(std::mem::take(tasks)));
         }
 
-        if !self.addons.currency.enabled {
+        if !self.addons.currency.enabled
+            || self.query_class.inline_provider != Some(InlineProvider::Currency)
+        {
             self.currency.clear();
             return None;
         }
@@ -1307,11 +1425,12 @@ impl LauncherApp {
             current_index += item_count;
         }
 
-        if self.calculator_result.is_some() {
-            if index == current_index {
-                return self.update(Message::CalculatorSelected);
+        if let Some(inline) = &self.inline_result {
+            let item_count = inline.rows.len();
+            if index >= current_index && index < current_index + item_count {
+                return self.update(Message::InlineSelected(index - current_index));
             }
-            current_index += 1;
+            current_index += item_count;
         }
 
         let config_index = index.saturating_sub(current_index);
@@ -1340,17 +1459,86 @@ impl LauncherApp {
         iced::exit()
     }
 
-    fn handle_calculator_selected(&mut self) -> Task<Message> {
-        if let Some(result) = &self.calculator_result {
-            let formatted = if result.result.fract() == 0.0 {
-                format!("{}", result.result as i64)
-            } else {
-                format!("{}", result.result)
-            };
-            spawn_copy(&formatted);
+    fn handle_inline_selected(&mut self, index: usize) -> Task<Message> {
+        let value = self.inline_copy_value(index);
+        self.start_checked_copy(value)
+    }
+
+    /// Value copied for inline row `index`, Ctrl picking `alt_copy_value`.
+    pub(super) fn inline_copy_value(&self, index: usize) -> Option<String> {
+        let inline = self.inline_result.as_ref()?;
+        let row = inline.rows.get(index)?;
+        crate::debug_log!("inline: copying {:?} row {index}", inline.provider);
+        let value = match &row.alt_copy_value {
+            Some(alt) if self.view.current_modifiers.control() => alt,
+            _ => &row.copy_value,
+        };
+        Some(value.clone())
+    }
+
+    /// Copies `value` off the UI thread; `Message::InlineCopied` closes
+    /// Raffi on success or shows an error row on failure.
+    fn start_checked_copy(&mut self, value: Option<String>) -> Task<Message> {
+        if self.in_flight.is_pending(INLINE_COPY, "") {
+            return Task::none();
         }
-        self.save_query_to_history();
-        iced::exit()
+        let Some(value) = value else {
+            return Task::none();
+        };
+        let copy = self.copy_job(value);
+        self.in_flight.begin(INLINE_COPY, "");
+        self.inline_copy_error = None;
+        let generation = self.inline_generation;
+        Task::perform(
+            async move {
+                let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                std::thread::spawn(move || {
+                    let _ = sender.send(copy());
+                });
+                receiver
+                    .await
+                    .unwrap_or_else(|_| Err("copy worker stopped unexpectedly".into()))
+            },
+            move |result| Message::InlineCopied(generation, result),
+        )
+    }
+
+    /// The blocking checked copy of `value`.
+    pub(super) fn copy_job(&self, value: String) -> Box<dyn FnOnce() -> Result<(), String> + Send> {
+        #[cfg(test)]
+        if let Some(argv) = self.copier.clone() {
+            return Box::new(move || super::actions::copy_text_with(&argv, &value));
+        }
+        Box::new(move || copy_text_checked(&value))
+    }
+
+    /// A query or mode change makes any running inline copy stale.
+    fn invalidate_inline_copy(&mut self) {
+        self.inline_generation += 1;
+        self.inline_copy_error = None;
+    }
+
+    /// A stale completion only releases the guard: it neither closes Raffi
+    /// nor touches the state of the current query.
+    fn handle_inline_copied(
+        &mut self,
+        generation: u64,
+        result: Result<(), String>,
+    ) -> Task<Message> {
+        self.in_flight.finish(INLINE_COPY, "");
+        if generation != self.inline_generation {
+            return Task::none();
+        }
+        match result {
+            Ok(()) => {
+                self.save_query_to_history();
+                iced::exit()
+            }
+            Err(error) => {
+                self.inline_copy_error = Some(format!("Copy failed: {error}"));
+                Task::none()
+            }
+        }
     }
 
     fn handle_currency_conversion_result(
@@ -1385,11 +1573,12 @@ impl LauncherApp {
     }
 
     fn handle_currency_result_copied(&mut self) -> Task<Message> {
-        if let Some(currency) = &self.currency.result {
-            spawn_copy(&format!("{:.2}", currency.converted_amount));
-        }
-        self.save_query_to_history();
-        iced::exit()
+        let value = self
+            .currency
+            .result
+            .as_ref()
+            .map(|currency| format!("{:.2}", currency.converted_amount));
+        self.start_checked_copy(value)
     }
 
     fn handle_multi_currency_conversion_result(
@@ -1422,13 +1611,13 @@ impl LauncherApp {
     }
 
     fn handle_multi_currency_result_copied(&mut self, index: usize) -> Task<Message> {
-        if let Some(result) = &self.currency.multi_result {
-            if let Some(conversion) = result.conversions.get(index) {
-                spawn_copy(&format!("{:.2}", conversion.converted_amount));
-            }
-        }
-        self.save_query_to_history();
-        iced::exit()
+        let value = self
+            .currency
+            .multi_result
+            .as_ref()
+            .and_then(|result| result.conversions.get(index))
+            .map(|conversion| format!("{:.2}", conversion.converted_amount));
+        self.start_checked_copy(value)
     }
 
     fn handle_script_filter_result(
@@ -1651,10 +1840,10 @@ impl LauncherApp {
         }
         state.pending = None;
         let outcome = result.and_then(|target| {
-            self.deferred_paste
+            self.deferred_action
                 .lock()
                 .map_err(|_| "cannot queue Hyprland paste".to_string())?
-                .replace(target);
+                .replace(DeferredAction::HyprPaste(target));
             Ok(())
         });
         match outcome {
@@ -1941,11 +2130,11 @@ impl LauncherApp {
         }
     }
 
-    pub(super) fn filter_items(&mut self, query: &str) {
+    pub(super) fn filter_items(&mut self, query: &str, log_query: &str) {
         if query.is_empty() {
             self.filtered_configs = (0..self.configs.len()).collect();
         } else {
-            self.filtered_configs = fuzzy_match_configs(&self.configs, query);
+            self.filtered_configs = fuzzy_match_configs(&self.configs, query, log_query);
         }
     }
 
@@ -1985,8 +2174,8 @@ impl LauncherApp {
         } else if let Some(result) = &self.currency.multi_result {
             offset += result.conversions.len();
         }
-        if self.calculator_result.is_some() {
-            offset += 1;
+        if let Some(inline) = &self.inline_result {
+            offset += inline.rows.len();
         }
         self.filtered_configs.len() + offset + self.fallback_count()
     }
@@ -2130,7 +2319,8 @@ impl LauncherApp {
         }
         self.filtered_configs.clear();
         self.keyword_suggestions.clear();
-        self.calculator_result = None;
+        self.inline_result = None;
+        self.invalidate_inline_copy();
         self.script_filter.clear();
         self.text_snippets.clear();
         self.emoji.clear();
@@ -2195,10 +2385,7 @@ impl LauncherApp {
     }
 
     pub(super) fn save_query_to_history(&mut self) {
-        if matches!(
-            route_query(&self.search_query, &self.addons),
-            QueryMode::Clipboard { .. }
-        ) {
+        if self.query_class.sensitive {
             return;
         }
         let query = self.search_query.trim().to_string();

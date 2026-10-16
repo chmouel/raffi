@@ -6,6 +6,7 @@ use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
 
 use super::state::CalculatorResult;
+use super::types::{InlineProvider, InlineResult, InlineRow};
 use crate::ui::get_history_cache_path;
 use crate::{RaffiConfig, SortMode};
 
@@ -71,7 +72,36 @@ pub(super) fn try_evaluate_math(query: &str) -> Option<CalculatorResult> {
     }
 }
 
-pub(super) fn fuzzy_match_configs(configs: &[RaffiConfig], query: &str) -> Vec<usize> {
+pub(super) fn format_calculator_value(result: f64) -> String {
+    if result.fract() == 0.0 {
+        format!("{}", result as i64)
+    } else {
+        format!("{result}")
+    }
+}
+
+pub(super) fn calculator_inline_result(calc: &CalculatorResult) -> InlineResult {
+    let value = format_calculator_value(calc.result);
+    InlineResult {
+        provider: InlineProvider::Calculator,
+        rows: vec![InlineRow {
+            title: format!("= {} = {value}", calc.expression),
+            subtitle: None,
+            copy_value: value,
+            alt_copy_value: None,
+            swatch: None,
+            preview: Some(super::preview::calculator_preview(calc)),
+        }],
+    }
+}
+
+/// `log_query` is what the debug log shows in place of `query`, so
+/// sensitive queries can be redacted.
+pub(super) fn fuzzy_match_configs(
+    configs: &[RaffiConfig],
+    query: &str,
+    log_query: &str,
+) -> Vec<usize> {
     let matcher = SkimMatcherV2::default();
     let mut matches: Vec<(usize, i64)> = configs
         .iter()
@@ -90,7 +120,7 @@ pub(super) fn fuzzy_match_configs(configs: &[RaffiConfig], query: &str) -> Vec<u
 
     matches.sort_by_key(|b| std::cmp::Reverse(b.1));
     let result: Vec<usize> = matches.into_iter().map(|(idx, _)| idx).collect();
-    crate::debug_log!("fuzzy_match: query={query:?} results={}", result.len());
+    crate::debug_log!("fuzzy_match: query={log_query:?} results={}", result.len());
     result
 }
 
@@ -276,20 +306,20 @@ mod tests {
             },
         ];
 
-        let results = fuzzy_match_configs(&configs, "Firefox");
+        let results = fuzzy_match_configs(&configs, "Firefox", "Firefox");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0], 0);
 
-        let results = fuzzy_match_configs(&configs, "fox");
+        let results = fuzzy_match_configs(&configs, "fox", "fox");
         assert!(results.contains(&0));
 
-        let results = fuzzy_match_configs(&configs, "chr");
+        let results = fuzzy_match_configs(&configs, "chr", "chr");
         assert!(results.contains(&1));
 
-        let results = fuzzy_match_configs(&configs, "od");
+        let results = fuzzy_match_configs(&configs, "od", "od");
         assert!(results.contains(&3));
 
-        let results = fuzzy_match_configs(&configs, "o");
+        let results = fuzzy_match_configs(&configs, "o", "o");
         assert!(results.len() >= 3);
         assert!(results.contains(&0));
         assert!(results.contains(&1));

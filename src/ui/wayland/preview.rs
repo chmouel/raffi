@@ -354,6 +354,43 @@ pub(super) fn describe_file_action(action: &str) -> String {
     }
 }
 
+pub(super) fn calculator_preview(calc: &CalculatorResult) -> PreviewData {
+    let result_str = super::support::format_calculator_value(calc.result);
+
+    let mut metadata = vec![
+        ("Expression".to_string(), calc.expression.clone()),
+        ("Decimal".to_string(), result_str.clone()),
+        ("Scientific".to_string(), format!("{:e}", calc.result)),
+    ];
+
+    if calc.result.fract() == 0.0
+        && calc.result >= (i64::MIN as f64)
+        && calc.result <= (i64::MAX as f64)
+    {
+        let int_val = calc.result as i64;
+        metadata.push(("Hexadecimal".to_string(), format!("0x{int_val:X}")));
+        metadata.push(("Octal".to_string(), format!("0o{int_val:o}")));
+        metadata.push(("Binary".to_string(), format!("0b{int_val:b}")));
+    }
+
+    metadata.push((
+        "Enter".to_string(),
+        format!("Copy {result_str} to clipboard"),
+    ));
+
+    PreviewData {
+        title: "Calculator".to_string(),
+        subtitle: None,
+        badge: Some("Math".to_string()),
+        icon: None,
+        bodies: vec![PreviewBody::HeroValue {
+            expression: Some(calc.expression.clone()),
+            value: result_str,
+        }],
+        metadata,
+    }
+}
+
 impl LauncherApp {
     /// Refresh the cached file preview whenever the selected File Browser item or
     /// Script Filter QuickLook file changes.
@@ -616,12 +653,13 @@ impl LauncherApp {
             current_index += count;
         }
 
-        // 8. Calculator
-        if let Some(calc) = &self.calculator_result {
-            if index == current_index {
-                return Some(self.build_calculator_preview(calc));
+        // 8. Inline results (calculator)
+        if let Some(inline) = &self.inline_result {
+            let count = inline.rows.len();
+            if index >= current_index && index < current_index + count {
+                return inline.rows[index - current_index].preview.clone();
             }
-            current_index += 1;
+            current_index += count;
         }
 
         // 9. Standard Launcher configs (disabled by default unless explicitly enabled
@@ -1265,47 +1303,6 @@ impl LauncherApp {
                     format!("Copy {:.2} to clipboard", selected.converted_amount),
                 ),
             ],
-        }
-    }
-
-    fn build_calculator_preview(&self, calc: &CalculatorResult) -> PreviewData {
-        let result_str = if calc.result.fract() == 0.0 {
-            format!("{}", calc.result as i64)
-        } else {
-            format!("{}", calc.result)
-        };
-
-        let mut metadata = vec![
-            ("Expression".to_string(), calc.expression.clone()),
-            ("Decimal".to_string(), result_str.clone()),
-            ("Scientific".to_string(), format!("{:e}", calc.result)),
-        ];
-
-        if calc.result.fract() == 0.0
-            && calc.result >= (i64::MIN as f64)
-            && calc.result <= (i64::MAX as f64)
-        {
-            let int_val = calc.result as i64;
-            metadata.push(("Hexadecimal".to_string(), format!("0x{int_val:X}")));
-            metadata.push(("Octal".to_string(), format!("0o{int_val:o}")));
-            metadata.push(("Binary".to_string(), format!("0b{int_val:b}")));
-        }
-
-        metadata.push((
-            "Enter".to_string(),
-            format!("Copy {result_str} to clipboard"),
-        ));
-
-        PreviewData {
-            title: "Calculator".to_string(),
-            subtitle: None,
-            badge: Some("Math".to_string()),
-            icon: None,
-            bodies: vec![PreviewBody::HeroValue {
-                expression: Some(calc.expression.clone()),
-                value: result_str,
-            }],
-            metadata,
         }
     }
 

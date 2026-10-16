@@ -84,8 +84,8 @@ fn run_wayland_ui(
     if hyprland.is_none() && addons.clipboard.uses_hypr_paste() && hyprland::in_session() {
         hyprland = Some(hyprland::Hyprland::capture(&settings.terminal_classes));
     }
-    let deferred_paste = Arc::new(Mutex::new(None::<hyprland::Hyprland>));
-    let deferred_paste_for_new = deferred_paste.clone();
+    let deferred_action = Arc::new(Mutex::new(None::<actions::DeferredAction>));
+    let deferred_action_for_new = deferred_action.clone();
 
     let configs_owned = configs.to_vec();
     let addons_owned = addons.clone();
@@ -151,7 +151,7 @@ fn run_wayland_ui(
             app.view.window_size = iced::Size::new(window_width, window_height);
             app.view.default_script_shell = default_script_shell.clone();
             app.hyprland = hyprland.clone();
-            app.deferred_paste = deferred_paste_for_new.clone();
+            app.deferred_action = deferred_action_for_new.clone();
             (app, task)
         },
         LauncherApp::update,
@@ -176,16 +176,7 @@ fn run_wayland_ui(
         return Err(anyhow::anyhow!("Failed to run UI: {:?}", error));
     }
 
-    if let Some(target) = deferred_paste
-        .lock()
-        .map_err(|_| anyhow::anyhow!("cannot read pending paste"))?
-        .take()
-    {
-        if let Err(error) = target.paste() {
-            target.notify_error(&error);
-            return Err(anyhow::anyhow!("hypr_paste: {error}"));
-        }
-    }
+    actions::run_deferred(&deferred_action).map_err(|error| anyhow::anyhow!(error))?;
 
     if let Ok(selected) = selected_item.lock() {
         if let Some(item) = selected.clone() {
