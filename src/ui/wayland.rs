@@ -114,7 +114,11 @@ fn run_wayland_ui(
         level: window::Level::AlwaysOnTop,
         #[cfg(target_os = "linux")]
         platform_specific: window::settings::PlatformSpecific {
-            application_id: "com.chmouel.raffi".to_string(),
+            application_id: settings
+                .app_name
+                .as_deref()
+                .unwrap_or("com.chmouel.raffi")
+                .to_string(),
             ..Default::default()
         },
         #[cfg(not(target_os = "linux"))]

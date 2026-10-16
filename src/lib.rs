@@ -502,6 +502,8 @@ pub struct Args {
     pub default_script_shell: Option<String>,
     #[options(help = "UI type to use: fuzzel, native (default: fuzzel)", short = "u")]
     pub ui_type: Option<String>,
+    #[options(help = "application ID for the native Linux window", no_short)]
+    pub app_name: Option<String>,
     #[options(help = "initial search query (native mode only)", short = "i")]
     pub initial_query: Option<String>,
     #[options(
@@ -1927,6 +1929,7 @@ pub fn run(args: Args) -> Result<()> {
     let ui_settings = ui::UISettings {
         no_icons,
         initial_query: args.initial_query.clone(),
+        app_name: args.app_name.clone(),
         theme,
         theme_colors: parsed_config.general.theme_colors.clone(),
         max_history,
@@ -2277,6 +2280,7 @@ mod tests {
             no_icons: true,
             default_script_shell: None,
             ui_type: None,
+            app_name: None,
             initial_query: None,
             theme: None,
             schema: false,
@@ -2331,6 +2335,7 @@ mod tests {
             no_icons: true,
             default_script_shell: None,
             ui_type: None,
+            app_name: None,
             initial_query: None,
             theme: None,
             schema: false,
@@ -2399,6 +2404,7 @@ mod tests {
             no_icons: true,
             default_script_shell: None,
             ui_type: None,
+            app_name: None,
             initial_query: None,
             theme: None,
             schema: false,
@@ -2454,6 +2460,7 @@ mod tests {
             no_icons: true,
             default_script_shell: None,
             ui_type: None,
+            app_name: None,
             initial_query: None,
             theme: None,
             schema: false,
@@ -2506,6 +2513,7 @@ mod tests {
             no_icons: true,
             default_script_shell: None,
             ui_type: None,
+            app_name: None,
             initial_query: None,
             theme: None,
             schema: false,
@@ -2684,6 +2692,7 @@ mod tests {
             no_icons: false,
             default_script_shell: None,
             ui_type: None,
+            app_name: None,
             initial_query: None,
             theme: None,
             schema: false,
@@ -2718,6 +2727,7 @@ mod tests {
             no_icons: false,
             default_script_shell: None,
             ui_type: None,
+            app_name: None,
             initial_query: None,
             theme: None,
             schema: false,
@@ -2771,6 +2781,7 @@ mod tests {
             no_icons: false,
             default_script_shell: None,
             ui_type: None,
+            app_name: None,
             initial_query: None,
             theme: None,
             schema: false,
@@ -2807,6 +2818,7 @@ mod tests {
             no_icons: false,
             default_script_shell: None,
             ui_type: None,
+            app_name: None,
             initial_query: None,
             theme: None,
             schema: false,
@@ -2839,6 +2851,7 @@ mod tests {
             no_icons: false,
             default_script_shell: None,
             ui_type: None,
+            app_name: None,
             initial_query: None,
             theme: None,
             schema: false,
@@ -2872,6 +2885,12 @@ mod tests {
                 "{flag} should not be accepted"
             );
         }
+    }
+
+    #[test]
+    fn test_app_name_flag_is_parsed() {
+        let args = Args::parse_args_default::<&str>(&["--app-name", "org.example.raffi"]).unwrap();
+        assert_eq!(args.app_name.as_deref(), Some("org.example.raffi"));
     }
 
     #[test]
@@ -2961,6 +2980,7 @@ mod tests {
             no_icons: true,
             default_script_shell: None,
             ui_type: None,
+            app_name: None,
             initial_query: None,
             theme: None,
             schema: false,
@@ -3022,6 +3042,7 @@ mod tests {
             no_icons: true,
             default_script_shell: None,
             ui_type: None,
+            app_name: None,
             initial_query: None,
             theme: None,
             schema: false,
@@ -3097,6 +3118,7 @@ mod tests {
             no_icons: true,
             default_script_shell: None,
             ui_type: None,
+            app_name: None,
             initial_query: None,
             theme: None,
             schema: false,
@@ -3137,6 +3159,7 @@ mod tests {
             no_icons: true,
             default_script_shell: None,
             ui_type: None,
+            app_name: None,
             initial_query: None,
             theme: None,
             schema: false,
@@ -3173,6 +3196,7 @@ mod tests {
             no_icons: true,
             default_script_shell: None,
             ui_type: None,
+            app_name: None,
             initial_query: None,
             theme: None,
             schema: false,
@@ -3217,6 +3241,7 @@ mod tests {
             no_icons: true,
             default_script_shell: None,
             ui_type: None,
+            app_name: None,
             initial_query: None,
             theme: None,
             schema: false,
@@ -3259,6 +3284,7 @@ mod tests {
             no_icons: true,
             default_script_shell: None,
             ui_type: None,
+            app_name: None,
             initial_query: None,
             theme: None,
             schema: false,
@@ -3300,6 +3326,7 @@ mod tests {
             no_icons: true,
             default_script_shell: None,
             ui_type: None,
+            app_name: None,
             initial_query: None,
             theme: None,
             schema: false,

@@ -74,6 +74,7 @@ impl FontSizes {
 pub struct UISettings {
     pub no_icons: bool,
     pub initial_query: Option<String>,
+    pub app_name: Option<String>,
     pub theme: ThemeMode,
     pub theme_colors: Option<ThemeColorsConfig>,
     pub max_history: u32,
@@ -95,6 +96,7 @@ impl Default for UISettings {
         Self {
             no_icons: false,
             initial_query: None,
+            app_name: None,
             theme: ThemeMode::Dark,
             theme_colors: None,
             max_history: 10,

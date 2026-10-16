@@ -69,6 +69,14 @@ Select the user interface backend.
   raffi -u native
   ```
 
+**`--app-name`** `string` (default: `com.chmouel.raffi`)
+
+Set the application ID reported for the native window on Linux. This is useful for targeting the window with compositor or window-manager rules. It has no effect when using Fuzzel.
+
+  ```bash
+  raffi -u native --app-name org.example.raffi
+  ```
+
 
 **`-I, --no-icons`** `boolean` (default: `false`)
 
