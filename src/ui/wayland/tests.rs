@@ -1,6 +1,7 @@
 use super::actions::DeferredAction;
 use super::app::{
-    classify_query, fido_updir, keyword_suggestions, loggable_query, route_query, QueryMode,
+    classify_query, fido_updir, is_single_insert, keyword_suggestions, loggable_query, route_query,
+    QueryMode,
 };
 use super::command_list::CommandListAddon;
 use super::help::{filter_help_entries, help_entries, HelpSection};
@@ -1220,6 +1221,42 @@ fn test_file_browser_cycle_sort_reorders_entries() {
     let _ = app.update(Message::FileBrowserCycleSort);
     assert_eq!(app.file_browser.sort, crate::FileBrowserSort::Name);
     assert_eq!(names(&app), vec!["a.txt", "b.txt"]);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_is_single_insert() {
+    assert!(is_single_insert("abc", "abc.", '.'));
+    assert!(is_single_insert("abc", "a.bc", '.'));
+    assert!(is_single_insert("", ".", '.'));
+    assert!(is_single_insert("a.", "a..", '.'));
+    assert!(is_single_insert("é", ".é", '.'));
+    assert!(!is_single_insert("abc", "abc", '.'));
+    assert!(!is_single_insert("abc", "abcx", '.'));
+    assert!(!is_single_insert("abc", "ab.", '.'));
+    assert!(!is_single_insert("abc", "abc..", '.'));
+}
+
+#[test]
+fn test_file_browser_ctrl_period_does_not_type_a_period() {
+    let dir = std::env::temp_dir().join(format!("raffi-fb-ctrl-period-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let root = format!("{}/", dir.display());
+
+    let mut app = test_app(AddonsConfig::default());
+    let _ = app.update(Message::SearchChanged(root.clone()));
+    assert!(app.file_browser.active);
+
+    let _ = app.update(Message::ModifiersChanged(iced::keyboard::Modifiers::CTRL));
+    let _ = app.update(Message::SearchChanged(format!("{root}.")));
+    let _ = app.update(Message::FileBrowserCycleShow);
+    assert_eq!(app.search_query, root);
+    assert_eq!(app.file_browser.show, crate::FileBrowserShow::Files);
+
+    let _ = app.update(Message::ModifiersChanged(iced::keyboard::Modifiers::empty()));
+    let _ = app.update(Message::SearchChanged(format!("{root}.")));
+    assert_eq!(app.search_query, format!("{root}."));
 
     let _ = std::fs::remove_dir_all(&dir);
 }

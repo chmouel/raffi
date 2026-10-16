@@ -283,6 +283,19 @@ fn expand_file_browser_query(trimmed: &str) -> String {
     }
 }
 
+/// Whether `new` is `old` with exactly one `c` inserted somewhere.
+pub(super) fn is_single_insert(old: &str, new: &str, c: char) -> bool {
+    if new.len() != old.len() + c.len_utf8() {
+        return false;
+    }
+    let prefix = old
+        .char_indices()
+        .zip(new.chars())
+        .find(|((_, a), b)| a != b)
+        .map_or(old.len(), |((i, _), _)| i);
+    new[prefix..].starts_with(c) && new[prefix + c.len_utf8()..] == old[prefix..]
+}
+
 /// Fido/ido-style "go up a directory": when `new` is `old` with its trailing
 /// `/` deleted, return the parent directory query (with a trailing `/`) and
 /// the name of the directory that was left. `~/` goes up to the parent of
@@ -929,6 +942,14 @@ impl LauncherApp {
 
     fn handle_search_changed(&mut self, query: String) -> Task<Message> {
         if self.view.current_modifiers.alt() && !self.history.search_in_progress {
+            return Task::none();
+        }
+        // Ctrl+. cycles the file browser filter, but the text input still
+        // types the ".", since only control characters are skipped there.
+        if self.view.current_modifiers.control()
+            && self.file_browser.active
+            && is_single_insert(&self.search_query, &query, '.')
+        {
             return Task::none();
         }
 
