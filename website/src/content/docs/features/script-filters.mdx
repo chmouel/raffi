@@ -363,7 +363,7 @@ The `title` and `subtitle` fields support ANSI color codes for colored text:
 ```
 
 <Aside type="tip">
-The [pr.py script from alfred-pr-workflow](https://gitlab.com/chmouel/alfred-pr-workflow) uses colors to display pull request states.
+The [GitHub pull requests script](#github-pull-requests) uses colors to display the CI state of each pull request.
 </Aside>
 
 ## Examples
@@ -393,23 +393,51 @@ tz New York
 
 <Image src={scriptFilterPrScreenshot} alt="GitHub PR browser" width={800} />
 
+The [`scripts/github/pr.py`](https://github.com/chmouel/raffi/blob/main/scripts/github/pr.py) script in the repository lists open pull requests with their CI status, using the [GitHub CLI](https://cli.github.com).
+
+Install the script:
+
+```bash
+mkdir -p ~/.config/raffi/scripts/github
+cp scripts/github/pr.py ~/.config/raffi/scripts/github/pr.py
+chmod +x ~/.config/raffi/scripts/github/pr.py
+```
+
+Configure the filter:
+
 ```yaml raffi.yaml
 script_filters:
   - name: "Pull Requests"
     keyword: "pr"
-    command: "gh-pr-script"
-    args: ["-j"]
+    command: "~/.config/raffi/scripts/github/pr.py"
     icon: "github"
     action: "xdg-open {value}"
+    secondary_action: "copy"
 ```
 
 Usage:
 
 ```text
-pr my-project
-# Lists pull requests for my-project
-# Press Enter to open PR in browser
+pr
+# Lists your open pull requests across all repositories
+pr owner/repo login
+# Lists open pull requests of owner/repo matching "login"
+# Enter: open the pull request in the browser
+# Ctrl+Enter: copy its URL
 ```
+
+Add `args: ["--repo", "owner/repo"]` to give a repository its own keyword, and
+`ALIAS_<name>` variables in `env` for short repository names.
+
+Each pull request shows the avatar of its repository owner, cached under
+`~/.cache/raffi/github-avatars/`. With the preview pane open, the selected pull
+request shows its branches, review state, labels, checks and its description
+with the markdown rendered in colour. It refreshes every 20 seconds while a
+check is still running.
+
+See the script's
+[README](https://github.com/chmouel/raffi/blob/main/scripts/github/README.md)
+for all options.
 
 ### Bookmark Manager
 

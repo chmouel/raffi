@@ -481,6 +481,25 @@ addons:
     #   action: 'herdr agent focus "$RAFFI_VALUE"'
     # For compositor-specific window focus commands, see scripts/herdr/README.md.
 
+    # GitHub pull requests with CI status. Install scripts/github/pr.py first.
+    # "pr" lists your open pull requests, "pr owner/repo" those of a repository.
+    # The preview pane shows checks, review state and description.
+    # See scripts/github/README.md for aliases and settings.
+    # - name: "Pull Requests"
+    #   keyword: "pr"
+    #   command: "~/.config/raffi/scripts/github/pr.py"
+    #   icon: "github"
+    #   action: "xdg-open {value}"
+    #   secondary_action: "copy"
+    # One keyword per repository, the typed text only filters:
+    # - name: "Raffi Pull Requests"
+    #   keyword: "rafpr"
+    #   command: "~/.config/raffi/scripts/github/pr.py"
+    #   args: ["--repo", "chmouel/raffi"]
+    #   icon: "github"
+    #   action: "xdg-open {value}"
+    #   secondary_action: "copy"
+
   # text_snippets:
   #   - name: "Emails"
   #     keyword: "em"
