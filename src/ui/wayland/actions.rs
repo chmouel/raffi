@@ -188,6 +188,11 @@ fn wait_until(child: &mut Child, deadline: Instant) -> Result<ExitStatus, String
 pub(super) enum DeferredAction {
     HyprPaste(super::hyprland::Hyprland),
     Command(Vec<String>),
+    /// Commands run in order, each to completion, stopping at the first
+    /// failure.
+    CommandBatch(Vec<Vec<String>>),
+    /// Quit niri, ending the session.
+    NiriQuit,
     Hypr(super::hyprland::HyprAction),
     /// Signal a process after checking it is still the one listed.
     Signal(super::kill::SignalTarget),
@@ -200,6 +205,8 @@ impl DeferredAction {
         match self {
             Self::HyprPaste(target) => target.paste(),
             Self::Command(argv) => run_detached(argv, DEFERRED_TIMEOUT),
+            Self::CommandBatch(commands) => run_batch(commands, DEFERRED_TIMEOUT),
+            Self::NiriQuit => super::windows::niri_quit(),
             Self::Hypr(action) => action.run(),
             Self::Signal(target) => super::kill::send_signal(target),
             Self::Bluetooth(args) => super::bluetooth::run_action(args),
@@ -209,7 +216,8 @@ impl DeferredAction {
     fn label(&self) -> &'static str {
         match self {
             Self::HyprPaste(_) => "hypr_paste",
-            Self::Command(_) => "action",
+            Self::Command(_) | Self::CommandBatch(_) => "action",
+            Self::NiriQuit => "niri",
             Self::Hypr(_) => "hyprctl",
             Self::Signal(_) => "kill",
             Self::Bluetooth(_) => "bluetoothctl",
@@ -272,6 +280,24 @@ fn run_detached(argv: &[String], timeout: Duration) -> Result<(), String> {
             Err(_) => return Err(format!("{name} could not be waited for")),
         }
     }
+}
+
+/// Run `commands` in order, each to completion within `timeout`, stopping at
+/// the first failure.
+fn run_batch(commands: &[Vec<String>], timeout: Duration) -> Result<(), String> {
+    commands.iter().try_for_each(|argv| {
+        let (program, args) = argv.split_first().ok_or("no command to run")?;
+        let name = program_name(program);
+        let mut command = Command::new(program);
+        command.args(args);
+        let (status, _) = run_bounded_status(command, timeout, 64 * 1024)
+            .map_err(|error| format!("{name}: {error}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(exit_error(name, status))
+        }
+    })
 }
 
 fn spawn_custom_action(action: &str, value: &str) -> Result<(), String> {
@@ -1058,6 +1084,30 @@ mod tests {
         assert_eq!(error, "action: false failed (exit 1)");
         assert_eq!(reported, vec!["false failed (exit 1)".to_string()]);
         assert!(slot.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_run_batch_stops_at_first_failure_or_timeout() {
+        let argv = |args: &[&str]| args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
+        run_batch(&[argv(&["true"]), argv(&["true"])], DEFERRED_TIMEOUT).unwrap();
+        assert_eq!(
+            run_batch(
+                &[argv(&["false"]), argv(&["raffi-no-such-program"])],
+                DEFERRED_TIMEOUT
+            )
+            .unwrap_err(),
+            "false failed (exit 1)"
+        );
+        let started = Instant::now();
+        assert_eq!(
+            run_batch(
+                &[argv(&["sleep", "5"]), argv(&["raffi-no-such-program"])],
+                Duration::from_millis(100)
+            )
+            .unwrap_err(),
+            "sleep: timed out after 0.1s"
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 
     #[test]

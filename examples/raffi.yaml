@@ -466,6 +466,15 @@ addons:
     #   action: "xdg-open {value}"
     #   secondary_action: "copy"
 
+    # Herdr agent sessions. Install scripts/herdr/herdr_filter.py first.
+    # - name: "Herdr Agents"
+    #   keyword: "herdr"
+    #   command: "~/.config/raffi/scripts/herdr/herdr_filter.py"
+    #   action: >-
+    #     if command -v wm-jumpapp >/dev/null 2>&1; then
+    #     terminal="$HERDR_TERMINAL"; [ -n "$terminal" ] || terminal=kitty;
+    #     wm-jumpapp "$terminal"; fi; herdr agent focus "$RAFFI_VALUE"
+
   # text_snippets:
   #   - name: "Emails"
   #     keyword: "em"
@@ -586,9 +595,9 @@ addons:
   #     lock: [hyprlock]
   #   hide: [hibernate]
 
-  # Window switcher (native UI only, Hyprland). Type "win " to list open
-  # windows, most recently used first. Enter focuses the window, Ctrl+Enter
-  # moves it to the current workspace and focuses it.
+  # Window switcher (native UI only, Hyprland or niri). Type "win " to list
+  # open windows, most recently used first. Enter focuses the window,
+  # Ctrl+Enter moves it to the current workspace and focuses it.
   # windows:
   #   enabled: true
   #   trigger: win

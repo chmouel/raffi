@@ -18,6 +18,7 @@ use super::theme::ThemeColors;
 use super::types::{
     InlineProvider, InlineResult, InlineRow, ScriptFilterItem, ScriptFilterItemText,
 };
+use super::windows::Compositor;
 use crate::ui::FontSizes;
 use crate::{
     AddonsConfig, RaffiConfig, ScriptFilterConfig, SortMode, TextSnippet, TextSnippetSourceConfig,
@@ -3692,7 +3693,7 @@ fn test_system_commands_overrides_and_hide() {
     addons.system.commands.logout = Some(vec!["my-logout".into()]);
     addons.system.hide = vec![crate::SystemCommand::Hibernate];
 
-    let entries = system_entries(&addons.system, true, None, |_| true);
+    let entries = system_entries(&addons.system, Some(Compositor::Hyprland), None, |_| true);
     let ids: Vec<crate::SystemCommand> = entries.iter().map(|entry| entry.id).collect();
     use crate::SystemCommand::*;
     assert_eq!(ids, vec![Lock, Logout, Reboot, Shutdown]);
@@ -3710,19 +3711,30 @@ fn test_system_commands_overrides_and_hide() {
 #[test]
 fn test_system_logout_default_follows_session() {
     let config = crate::SystemAddonConfig::default();
-    let logout = |hyprland, session| {
-        system_entries(&config, hyprland, session, |_| true)
+    let logout = |compositor, session| {
+        system_entries(&config, compositor, session, |_| true)
             .into_iter()
             .find(|entry| entry.id == crate::SystemCommand::Logout)
             .unwrap()
             .action
     };
     assert!(matches!(
-        logout(true, Some("3")),
+        logout(Some(Compositor::Hyprland), Some("3")),
         DeferredAction::Hypr(HyprAction::Exit)
     ));
     assert!(matches!(
-        logout(false, Some("3")),
+        logout(Some(Compositor::Niri), None),
+        DeferredAction::NiriQuit
+    ));
+    let niri_logout = system_entries(&config, Some(Compositor::Niri), None, |program| {
+        program != "niri"
+    })
+    .into_iter()
+    .find(|entry| entry.id == crate::SystemCommand::Logout)
+    .unwrap();
+    assert_eq!(niri_logout.missing.as_deref(), Some("niri"));
+    assert!(matches!(
+        logout(None, Some("3")),
         DeferredAction::Command(argv) if argv == ["loginctl", "terminate-session", "3"]
     ));
 }
@@ -3746,7 +3758,7 @@ fn test_system_queries_stay_out_of_history_and_logs() {
 fn test_system_missing_program_is_not_actionable() {
     let mut addons = AddonsConfig::default();
     addons.system.commands.lock = Some(vec!["no-such-locker".into()]);
-    let entries = system_entries(&addons.system, false, Some("2"), |program| {
+    let entries = system_entries(&addons.system, None, Some("2"), |program| {
         program != "no-such-locker"
     });
     let lock = entries
@@ -3796,7 +3808,7 @@ fn test_system_click_elsewhere_cancels_confirmation() {
 #[test]
 fn test_system_logout_without_session_is_not_actionable() {
     let config = crate::SystemAddonConfig::default();
-    let logout = system_entries(&config, false, None, |_| true)
+    let logout = system_entries(&config, None, None, |_| true)
         .into_iter()
         .find(|entry| entry.id == crate::SystemCommand::Logout)
         .unwrap();
@@ -3804,7 +3816,7 @@ fn test_system_logout_without_session_is_not_actionable() {
 
     let mut config = crate::SystemAddonConfig::default();
     config.commands.logout = Some(vec!["uwsm".into(), "stop".into()]);
-    let logout = system_entries(&config, false, None, |_| true)
+    let logout = system_entries(&config, None, None, |_| true)
         .into_iter()
         .find(|entry| entry.id == crate::SystemCommand::Logout)
         .unwrap();
@@ -3824,12 +3836,12 @@ const WINDOW_CLIENTS: &str = r#"[
 
 fn window_fixture() -> Vec<super::command_list::CommandItem> {
     let monitors = br#"[{"focused": true, "activeWorkspace": {"id": 2, "name": "2"}}]"#;
-    super::windows::window_items(WINDOW_CLIENTS.as_bytes(), monitors, 1).unwrap()
+    super::windows::hyprland_items(WINDOW_CLIENTS.as_bytes(), monitors, 1).unwrap()
 }
 
 fn windows_app() -> LauncherApp {
     let mut app = test_app(AddonsConfig::default());
-    app.in_hyprland = || true;
+    app.compositor = || Some(Compositor::Hyprland);
     app.history.max_items = 0;
     app
 }
@@ -3910,12 +3922,16 @@ fn test_windows_ctrl_enter_brings_window_here() {
 #[test]
 fn test_windows_status_rows_are_not_actionable() {
     let mut app = windows_app();
-    app.in_hyprland = || false;
+    app.compositor = || None;
     let task = app.update(Message::SearchChanged("win ".into()));
-    assert_eq!(task.units(), 0, "nothing is loaded outside Hyprland");
+    assert_eq!(
+        task.units(),
+        0,
+        "nothing is loaded without a supported compositor"
+    );
     assert_eq!(
         app.command_list.status(),
-        Some("Window switching needs Hyprland")
+        Some("Window switching needs Hyprland or niri")
     );
     assert_eq!(app.total_items(), 1);
     let _ = app.update(Message::Submit);
@@ -3925,6 +3941,12 @@ fn test_windows_status_rows_are_not_actionable() {
     app.program_exists = |program| program != "hyprctl";
     let _ = app.update(Message::SearchChanged("win ".into()));
     assert_eq!(app.command_list.status(), Some("hyprctl not found"));
+
+    let mut app = windows_app();
+    app.compositor = || Some(Compositor::Niri);
+    app.program_exists = |program| program != "niri";
+    let _ = app.update(Message::SearchChanged("win ".into()));
+    assert_eq!(app.command_list.status(), Some("niri not found"));
 
     let mut app = windows_app();
     let _ = app.update(Message::SearchChanged("win ".into()));

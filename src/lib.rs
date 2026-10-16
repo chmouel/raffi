@@ -477,7 +477,8 @@ pub struct SystemCommandsConfig {
     #[serde(default)]
     pub hibernate: Option<Vec<String>>,
     /// Default: Hyprland's exit dispatcher on Hyprland (through `hyprctl eval`
-    /// with a Lua config, `hyprctl dispatch exit` otherwise), otherwise
+    /// with a Lua config, `hyprctl dispatch exit` otherwise),
+    /// `niri msg action quit --skip-confirmation` on niri, otherwise
     /// `loginctl terminate-session $XDG_SESSION_ID`.
     #[serde(default)]
     pub logout: Option<Vec<String>>,
@@ -535,7 +536,8 @@ impl Default for SystemAddonConfig {
     }
 }
 
-/// Configuration for the Hyprland window switcher addon (native UI only)
+/// Configuration for the window switcher addon for Hyprland and niri (native
+/// UI only)
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct WindowsAddonConfig {

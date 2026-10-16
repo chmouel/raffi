@@ -260,11 +260,15 @@ fn lua_quote(value: &str) -> String {
 /// logged.
 pub(super) fn notify(message: &str) {
     crate::debug_log!("notify: {message}");
-    if !in_session() {
-        return;
-    }
-    let mut command = Command::new("hyprctl");
-    command.args(["notify", "0", "5000", "rgb(ff5555)", message]);
+    let command = if in_session() {
+        let mut command = Command::new("hyprctl");
+        command.args(["notify", "0", "5000", "rgb(ff5555)", message]);
+        command
+    } else {
+        let mut command = Command::new("notify-send");
+        command.args(["--app-name=Raffi", "--urgency=critical", "Raffi", message]);
+        command
+    };
     let _ = run_bounded(command, TIMEOUT, 64 * 1024);
 }
 

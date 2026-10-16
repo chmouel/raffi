@@ -131,7 +131,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             section: HelpSection::KeywordsAndActions,
             trigger: trigger.to_string(),
             title: "Window switcher".to_string(),
-            usage: format!("{trigger} <title or class>, Ctrl+Enter brings it here"),
+            usage: format!("{trigger} <title or app>, Ctrl+Enter brings it here"),
             icon: Some(super::app::WINDOWS_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
         });

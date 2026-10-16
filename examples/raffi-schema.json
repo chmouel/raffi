@@ -968,7 +968,7 @@
           }
         },
         "logout": {
-          "description": "Default: Hyprland's exit dispatcher on Hyprland (through `hyprctl eval`\nwith a Lua config, `hyprctl dispatch exit` otherwise), otherwise\n`loginctl terminate-session $XDG_SESSION_ID`.",
+          "description": "Default: Hyprland's exit dispatcher on Hyprland (through `hyprctl eval`\nwith a Lua config, `hyprctl dispatch exit` otherwise),\n`niri msg action quit --skip-confirmation` on niri, otherwise\n`loginctl terminate-session $XDG_SESSION_ID`.",
           "type": [
             "array",
             "null"
@@ -1226,7 +1226,7 @@
       ]
     },
     "WindowsAddonConfig": {
-      "description": "Configuration for the Hyprland window switcher addon (native UI only)",
+      "description": "Configuration for the window switcher addon for Hyprland and niri (native\nUI only)",
       "type": "object",
       "properties": {
         "enabled": {

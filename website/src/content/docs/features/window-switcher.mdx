@@ -1,20 +1,22 @@
 ---
 title: Window Switcher
-description: Jump to any open Hyprland window from Raffi
+description: Jump to any open window on Hyprland or niri from Raffi
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
 Type `win ` (with the trailing space) to list the open windows, the most
-recently used first. Each row shows the window title, its class and its
-workspace, with the application icon when one is found. Words after the
-keyword filter the list by title or class, so `win fire` finds Firefox.
+recently used first. Each row shows the window title, its application (the
+class on Hyprland, the app ID on niri) and its workspace, with the
+application icon when one is found. Words after the keyword filter the list
+by title or application, so `win fire` finds Firefox.
 
 <Aside type="note">
-The window switcher is only available in native mode and needs Hyprland
-(it reads the windows with `hyprctl`). It is on by default. In another
-session the list shows "Window switching needs Hyprland", and when
-`hyprctl` is not installed it shows "hyprctl not found".
+The window switcher is only available in native mode and needs Hyprland or
+niri. It reads the windows with `hyprctl` or `niri msg`, and is on by
+default. In another session the list shows "Window switching needs Hyprland
+or niri", and when the tool is missing it shows, for example, "niri not
+found".
 </Aside>
 
 | Key        | Action                                                  |
@@ -22,12 +24,27 @@ session the list shows "Window switching needs Hyprland", and when
 | Enter      | Focus the window, switching to its workspace            |
 | Ctrl+Enter | Move the window to the current workspace and focus it   |
 
-Raffi closes first, then asks Hyprland to switch. If the window has closed
-in the meantime, Raffi reports the error as a Hyprland notification.
+Raffi closes first, then asks the compositor to switch. If that fails,
+Raffi reports the error as a notification (with `notify-send` outside
+Hyprland).
+
+## Hyprland
 
 On Hyprland 0.55 or later with a Lua config, Raffi sends the action with
 `hyprctl eval`. Older versions and hyprlang configs do not support that, so
-Raffi falls back to `hyprctl dispatch`.
+Raffi falls back to `hyprctl dispatch`. If the window has closed in the
+meantime, Raffi reports it.
+
+## niri
+
+Raffi runs `niri msg action focus-window` and, for Ctrl+Enter,
+`niri msg action move-window-to-workspace` before focusing. It targets the
+focused workspace by name when it has one. Otherwise it uses the workspace
+index, and first moves a window from another monitor to the focused one,
+because niri reads an index on the window's own monitor. The list follows
+the focus history on niri versions that report it, and puts the focused
+window first on older ones. niri ignores a window that has closed in the
+meantime, so nothing happens then.
 
 Raffi's own window is left out of the list. Queries typed in this mode are
 not saved in the search history.

@@ -1,6 +1,7 @@
 use super::actions::DeferredAction;
 use super::command_list::{CommandAction, CommandItem};
 use super::hyprland::HyprAction;
+use super::windows::Compositor;
 use crate::{SystemAddonConfig, SystemCommand};
 
 /// One row of the system commands list.
@@ -25,7 +26,13 @@ impl SystemEntry {
     pub fn command_line(&self) -> String {
         match &self.action {
             DeferredAction::Command(argv) => argv.join(" "),
+            DeferredAction::CommandBatch(commands) => commands
+                .iter()
+                .map(|argv| argv.join(" "))
+                .collect::<Vec<_>>()
+                .join("; "),
             DeferredAction::Hypr(action) => format!("hyprctl eval '{}'", action.lua()),
+            DeferredAction::NiriQuit => super::windows::NIRI_QUIT.join(" "),
             DeferredAction::HyprPaste(_)
             | DeferredAction::Signal(_)
             | DeferredAction::Bluetooth(_) => String::new(),
@@ -62,19 +69,26 @@ const ENTRIES: [(SystemCommand, &str, &str, &str); 6] = [
     ),
 ];
 
-fn default_action(id: SystemCommand, hyprland: bool, session_id: Option<&str>) -> DeferredAction {
+fn default_action(
+    id: SystemCommand,
+    compositor: Option<Compositor>,
+    session_id: Option<&str>,
+) -> DeferredAction {
     let argv =
         |args: &[&str]| DeferredAction::Command(args.iter().map(|s| s.to_string()).collect());
     match id {
         SystemCommand::Lock => argv(&["loginctl", "lock-session"]),
         SystemCommand::Suspend => argv(&["systemctl", "suspend"]),
         SystemCommand::Hibernate => argv(&["systemctl", "hibernate"]),
-        SystemCommand::Logout if hyprland => DeferredAction::Hypr(HyprAction::Exit),
-        SystemCommand::Logout => {
-            let mut args = vec!["loginctl", "terminate-session"];
-            args.extend(session_id);
-            argv(&args)
-        }
+        SystemCommand::Logout => match compositor {
+            Some(Compositor::Hyprland) => DeferredAction::Hypr(HyprAction::Exit),
+            Some(Compositor::Niri) => DeferredAction::NiriQuit,
+            None => {
+                let mut args = vec!["loginctl", "terminate-session"];
+                args.extend(session_id);
+                argv(&args)
+            }
+        },
         SystemCommand::Reboot => argv(&["systemctl", "reboot"]),
         SystemCommand::Shutdown => argv(&["systemctl", "poweroff"]),
     }
@@ -83,17 +97,19 @@ fn default_action(id: SystemCommand, hyprland: bool, session_id: Option<&str>) -
 fn program(action: &DeferredAction) -> Option<&str> {
     match action {
         DeferredAction::Command(argv) => argv.first().map(String::as_str),
+        DeferredAction::CommandBatch(commands) => commands.first()?.first().map(String::as_str),
         DeferredAction::Hypr(_) => Some("hyprctl"),
+        DeferredAction::NiriQuit => Some("niri"),
         DeferredAction::HyprPaste(_) | DeferredAction::Signal(_) => None,
         DeferredAction::Bluetooth(_) => Some("bluetoothctl"),
     }
 }
 
-/// The visible entries for `config`. `hyprland` and `session_id` pick the
+/// The visible entries for `config`. `compositor` and `session_id` pick the
 /// default log out command; `exists` reports whether a program is installed.
 pub(super) fn system_entries(
     config: &SystemAddonConfig,
-    hyprland: bool,
+    compositor: Option<Compositor>,
     session_id: Option<&str>,
     exists: impl Fn(&str) -> bool,
 ) -> Vec<SystemEntry> {
@@ -104,10 +120,12 @@ pub(super) fn system_entries(
             let (action, overridden) = match config.commands.get(id) {
                 Some(argv) if argv.is_empty() => return None,
                 Some(argv) => (DeferredAction::Command(argv.clone()), true),
-                None => (default_action(id, hyprland, session_id), false),
+                None => (default_action(id, compositor, session_id), false),
             };
-            let no_session =
-                id == SystemCommand::Logout && !overridden && !hyprland && session_id.is_none();
+            let no_session = id == SystemCommand::Logout
+                && !overridden
+                && compositor.is_none()
+                && session_id.is_none();
             let missing = if no_session {
                 Some("XDG_SESSION_ID".to_string())
             } else {

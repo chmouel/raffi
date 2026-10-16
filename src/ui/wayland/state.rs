@@ -481,8 +481,8 @@ pub(super) struct LauncherApp {
     pub copier: Option<Vec<String>>,
     /// Reports whether a program is installed; replaced in tests.
     pub program_exists: fn(&str) -> bool,
-    /// Reports whether Raffi runs inside Hyprland; replaced in tests.
-    pub in_hyprland: fn() -> bool,
+    /// Detects the compositor Raffi runs in; replaced in tests.
+    pub compositor: fn() -> Option<super::windows::Compositor>,
     pub web_search: WebSearchState,
     pub file_browser: FileBrowserState,
     /// Wayland drag-and-drop source worker, if the UI runs on Wayland.

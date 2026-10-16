@@ -721,7 +721,7 @@ impl LauncherApp {
                 #[cfg(test)]
                 copier: None,
                 program_exists: crate::find_binary,
-                in_hyprland: super::hyprland::in_session,
+                compositor: super::windows::Compositor::current,
                 web_search: WebSearchState::default(),
                 file_browser: FileBrowserState {
                     show_hidden: file_browser_show_hidden,
@@ -1553,7 +1553,7 @@ impl LauncherApp {
                 let session_id = std::env::var("XDG_SESSION_ID").ok();
                 let items = system_entries(
                     &self.addons.system,
-                    (self.in_hyprland)(),
+                    (self.compositor)(),
                     session_id.as_deref().filter(|id| !id.is_empty()),
                     self.program_exists,
                 )
@@ -1565,17 +1565,17 @@ impl LauncherApp {
             }
             CommandListAddon::Windows if !entered => Task::none(),
             CommandListAddon::Windows => {
-                if !(self.in_hyprland)() {
+                let Some(compositor) = (self.compositor)() else {
                     self.command_list
-                        .set_notice("Window switching needs Hyprland".to_string());
+                        .set_notice("Window switching needs Hyprland or niri".to_string());
+                    return Task::none();
+                };
+                if !(self.program_exists)(compositor.program()) {
+                    self.command_list
+                        .set_notice(format!("{} not found", compositor.program()));
                     return Task::none();
                 }
-                if !(self.program_exists)("hyprctl") {
-                    self.command_list
-                        .set_notice("hyprctl not found".to_string());
-                    return Task::none();
-                }
-                self.load_command_list(super::windows::load_windows, false)
+                self.load_command_list(move || compositor.load_windows(), false)
             }
             CommandListAddon::Media if !entered => Task::none(),
             CommandListAddon::Media => {
