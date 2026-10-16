@@ -189,6 +189,8 @@ pub(super) enum DeferredAction {
     HyprPaste(super::hyprland::Hyprland),
     Command(Vec<String>),
     HyprDispatch(Vec<String>),
+    /// Several dispatches run in order, stopping at the first failure.
+    HyprDispatchBatch(Vec<Vec<String>>),
 }
 
 impl DeferredAction {
@@ -197,6 +199,9 @@ impl DeferredAction {
             Self::HyprPaste(target) => target.paste(),
             Self::Command(argv) => run_detached(argv, DEFERRED_TIMEOUT),
             Self::HyprDispatch(args) => super::hyprland::dispatch(args),
+            Self::HyprDispatchBatch(batch) => batch
+                .iter()
+                .try_for_each(|args| super::hyprland::dispatch(args)),
         }
     }
 
@@ -204,7 +209,7 @@ impl DeferredAction {
         match self {
             Self::HyprPaste(_) => "hypr_paste",
             Self::Command(_) => "action",
-            Self::HyprDispatch(_) => "hyprctl dispatch",
+            Self::HyprDispatch(_) | Self::HyprDispatchBatch(_) => "hyprctl dispatch",
         }
     }
 

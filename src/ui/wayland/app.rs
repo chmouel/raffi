@@ -14,6 +14,7 @@ use super::actions::{
 };
 use super::browser::read_directory;
 use super::color::{color_inline_result, try_parse_color};
+use super::command_list::{CommandListAddon, Selection};
 use super::currency::{
     fetch_exchange_rate, fetch_multi_exchange_rates, is_currency_help_query,
     try_parse_currency_conversion, try_parse_multi_currency_conversion,
@@ -37,14 +38,13 @@ use super::state::{
     CurrencyResult, CurrencyState, DevtoolsState, EmojiEntry, EmojiState, FallbackAction,
     FileBrowserState, HistoryState, KeywordSuggestion, LauncherApp, Message, MultiCurrencyRequest,
     MultiCurrencyResult, PendingSelection, ResolvedFallback, ScriptFilterResult, ScriptFilterState,
-    SharedSelection, SystemState, TextSnippetState, ViewState, WebSearchActiveState,
-    WebSearchState,
+    SharedSelection, TextSnippetState, ViewState, WebSearchActiveState, WebSearchState,
 };
 use super::support::{
     calculator_inline_result, fuzzy_match_configs, load_history, load_mru_map, mru_bounds,
     mru_sort_key, record_mru_use, save_history, save_mru_map, try_evaluate_math,
 };
-use super::system::{filter_system_into, system_entries};
+use super::system::system_entries;
 use super::types::InlineProvider;
 use super::units::{try_parse_unit_conversion, units_inline_result};
 use super::world_clock::{current_time_inline_result, try_parse_time_query};
@@ -56,14 +56,36 @@ use crate::{
 
 #[derive(Clone, PartialEq, Eq)]
 pub(super) enum QueryMode {
-    FileBrowser { expanded: String, filter: String },
-    ScriptFilter { config_index: usize, query: String },
-    TextSnippet { config_index: usize, query: String },
-    Emoji { query: String },
-    Clipboard { query: String, images_only: bool },
-    WebSearch { config_index: usize, query: String },
-    System { query: String },
-    Devtools { payload: String },
+    FileBrowser {
+        expanded: String,
+        filter: String,
+    },
+    ScriptFilter {
+        config_index: usize,
+        query: String,
+    },
+    TextSnippet {
+        config_index: usize,
+        query: String,
+    },
+    Emoji {
+        query: String,
+    },
+    Clipboard {
+        query: String,
+        images_only: bool,
+    },
+    WebSearch {
+        config_index: usize,
+        query: String,
+    },
+    CommandList {
+        addon: CommandListAddon,
+        query: String,
+    },
+    Devtools {
+        payload: String,
+    },
     Standard,
 }
 
@@ -105,7 +127,10 @@ impl std::fmt::Debug for QueryMode {
                 .field("config_index", config_index)
                 .field("query", query)
                 .finish(),
-            Self::System { .. } => f.debug_struct("System").finish_non_exhaustive(),
+            Self::CommandList { addon, .. } => f
+                .debug_struct("CommandList")
+                .field("addon", addon)
+                .finish_non_exhaustive(),
             Self::Devtools { .. } => f.debug_struct("Devtools").finish_non_exhaustive(),
             Self::Standard => f.write_str("Standard"),
         }
@@ -155,13 +180,13 @@ pub(super) fn classify_query(query: &str, addons: &AddonsConfig) -> QueryClass {
     let inline_provider = match mode {
         QueryMode::FileBrowser { .. }
         | QueryMode::Clipboard { .. }
-        | QueryMode::System { .. }
+        | QueryMode::CommandList { .. }
         | QueryMode::Devtools { .. } => None,
         _ => inline_provider(query, addons),
     };
     let sensitive = matches!(
         mode,
-        QueryMode::Clipboard { .. } | QueryMode::System { .. } | QueryMode::Devtools { .. }
+        QueryMode::Clipboard { .. } | QueryMode::CommandList { .. } | QueryMode::Devtools { .. }
     ) || matches!(
         inline_provider,
         Some(InlineProvider::Uuid | InlineProvider::Password)
@@ -280,6 +305,7 @@ pub(super) fn fido_updir(old: &str, new: &str, home: &str) -> Option<(String, St
 pub(super) const CLIPBOARD_ICON: &str = "copyq";
 pub(super) const CLIPBOARD_IMAGES_ICON: &str = "image-x-generic";
 pub(super) const SYSTEM_ICON: &str = "system-shutdown";
+pub(super) const WINDOWS_ICON: &str = "preferences-system-windows";
 pub(super) const DEVTOOLS_ICON: &str = "utilities-terminal";
 
 /// The query as it may appear in debug logs: sensitive searches such as the
@@ -375,7 +401,19 @@ pub(super) fn route_query(query: &str, addons: &AddonsConfig) -> QueryMode {
 
     if addons.system.enabled {
         if let Some(query) = extract_keyword_query(input, addons.system.trigger()) {
-            return QueryMode::System { query };
+            return QueryMode::CommandList {
+                addon: CommandListAddon::System,
+                query,
+            };
+        }
+    }
+
+    if addons.windows.enabled {
+        if let Some(query) = extract_keyword_query(input, addons.windows.trigger()) {
+            return QueryMode::CommandList {
+                addon: CommandListAddon::Windows,
+                query,
+            };
         }
     }
 
@@ -473,6 +511,14 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
             keyword: addons.system.trigger().to_string(),
             subtitle: "Lock, suspend, log out, reboot or shut down".to_string(),
             icon: Some(SYSTEM_ICON.to_string()),
+        });
+    }
+
+    if addons.windows.enabled && matches(addons.windows.trigger()) {
+        suggestions.push(KeywordSuggestion {
+            keyword: addons.windows.trigger().to_string(),
+            subtitle: "Switch to an open window".to_string(),
+            icon: Some(WINDOWS_ICON.to_string()),
         });
     }
 
@@ -584,6 +630,7 @@ impl LauncherApp {
                 selected_index: 0,
                 selected_item,
                 icon_map,
+                desktop_icon_map,
                 no_icons,
                 launcher_icon_paths,
                 mru_map,
@@ -602,6 +649,7 @@ impl LauncherApp {
                 #[cfg(test)]
                 copier: None,
                 program_exists: crate::find_binary,
+                in_hyprland: super::hyprland::in_session,
                 web_search: WebSearchState::default(),
                 file_browser: FileBrowserState {
                     show_hidden: file_browser_show_hidden,
@@ -620,7 +668,7 @@ impl LauncherApp {
                     ..Default::default()
                 },
                 emoji: EmojiState::default(),
-                system: SystemState::default(),
+                command_list: Default::default(),
                 devtools: DevtoolsState::default(),
                 clipboard: ClipboardState::default(),
                 fallbacks,
@@ -652,7 +700,7 @@ impl LauncherApp {
             Message::MoveUp => self.move_selection(-1),
             Message::MoveDown => self.move_selection(1),
             Message::Submit => self.activate_index(self.selected_index),
-            Message::SubmitRepeat if self.system.active => Task::none(),
+            Message::SubmitRepeat if self.command_list.is_active() => Task::none(),
             Message::SubmitRepeat => self.activate_index(self.selected_index),
             Message::Cancel => {
                 if self.view.help_active {
@@ -662,7 +710,7 @@ impl LauncherApp {
             }
             Message::ItemClicked(index) => {
                 if index != self.selected_index {
-                    self.system.armed = None;
+                    self.command_list.armed = None;
                 }
                 self.selected_index = index;
                 self.activate_index(index)
@@ -728,7 +776,7 @@ impl LauncherApp {
             Message::FileBrowserCycleSort => self.handle_file_browser_cycle_sort(),
             Message::ModifiersChanged(modifiers) => {
                 if modifiers != self.view.current_modifiers {
-                    self.system.armed = None;
+                    self.command_list.armed = None;
                 }
                 self.view.current_modifiers = modifiers;
                 Task::none()
@@ -762,7 +810,10 @@ impl LauncherApp {
             Message::HelpEntrySelected(index) => self.handle_help_entry_selected(index),
             Message::EmojiDataLoaded(data) => self.handle_emoji_data_loaded(data),
             Message::EmojiSelected(index) => self.handle_emoji_selected(index),
-            Message::SystemSelected(index) => self.handle_system_selected(index),
+            Message::CommandListSelected(index) => self.handle_command_list_selected(index),
+            Message::CommandListLoaded(generation, result) => {
+                self.handle_command_list_loaded(generation, result)
+            }
             Message::DevtoolsSelected(index) => self.handle_devtools_selected(index),
             Message::DevtoolsHashes(generation, rows) => {
                 self.handle_devtools_hashes(generation, rows)
@@ -861,8 +912,12 @@ impl LauncherApp {
         if !matches!(qmode, QueryMode::Clipboard { .. }) {
             self.clipboard.clear();
         }
-        // Rebuilt for every system query too, which also disarms it.
-        self.system.clear();
+        // Staying in the same command list keeps its loaded items.
+        if !matches!(&qmode, QueryMode::CommandList { addon, .. }
+            if self.command_list.addon == Some(*addon))
+        {
+            self.command_list.clear();
+        }
         self.devtools.clear();
         self.keyword_suggestions = if matches!(qmode, QueryMode::Standard) {
             keyword_suggestions(&query, &self.addons)
@@ -938,7 +993,7 @@ impl LauncherApp {
                 self.handle_clipboard_query(query, images_only, &mut tasks);
                 return Task::batch(tasks);
             }
-            QueryMode::System { query } => {
+            QueryMode::CommandList { addon, query } => {
                 self.file_browser.clear();
                 self.script_filter.clear();
                 self.text_snippets.clear();
@@ -950,7 +1005,7 @@ impl LauncherApp {
                 if let Some(drag) = &self.drag {
                     drag.disarm();
                 }
-                self.handle_system_query(&query);
+                tasks.push(self.handle_command_list_query(addon, query));
                 return Task::batch(tasks);
             }
             QueryMode::Devtools { payload } => {
@@ -1409,21 +1464,105 @@ impl LauncherApp {
         );
     }
 
-    fn handle_system_query(&mut self, query: &str) {
-        let session_id = std::env::var("XDG_SESSION_ID").ok();
-        self.system.active = true;
-        self.system.entries = system_entries(
-            &self.addons.system,
-            super::hyprland::in_session(),
-            session_id.as_deref().filter(|id| !id.is_empty()),
-            self.program_exists,
-        );
-        filter_system_into(
-            &self.system.entries,
-            query,
-            &self.system.matcher,
-            &mut self.system.filtered,
-        );
+    /// Show `addon`'s list filtered by `query`. System entries are rebuilt
+    /// for every query; windows load once when the mode is entered.
+    fn handle_command_list_query(
+        &mut self,
+        addon: CommandListAddon,
+        query: String,
+    ) -> Task<Message> {
+        let entered = self.command_list.enter(addon);
+        self.command_list.set_query(query);
+        match addon {
+            CommandListAddon::System => {
+                let session_id = std::env::var("XDG_SESSION_ID").ok();
+                let items = system_entries(
+                    &self.addons.system,
+                    (self.in_hyprland)(),
+                    session_id.as_deref().filter(|id| !id.is_empty()),
+                    self.program_exists,
+                )
+                .iter()
+                .map(|entry| entry.to_item())
+                .collect();
+                self.set_command_list_items(items);
+                Task::none()
+            }
+            CommandListAddon::Windows if !entered => Task::none(),
+            CommandListAddon::Windows => {
+                if !(self.in_hyprland)() {
+                    self.command_list
+                        .set_notice("Window switching needs Hyprland".to_string());
+                    return Task::none();
+                }
+                if !(self.program_exists)("hyprctl") {
+                    self.command_list
+                        .set_notice("hyprctl not found".to_string());
+                    return Task::none();
+                }
+                self.load_command_list(super::windows::load_windows)
+            }
+        }
+    }
+
+    /// Run `load` off the UI thread; its result is dropped if the list has
+    /// moved on by then.
+    fn load_command_list(
+        &mut self,
+        load: fn() -> Result<Vec<super::command_list::CommandItem>, String>,
+    ) -> Task<Message> {
+        let generation = self.command_list.begin_load();
+        Task::perform(
+            async move {
+                let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                std::thread::spawn(move || {
+                    let _ = sender.send(load());
+                });
+                receiver
+                    .await
+                    .unwrap_or_else(|_| Err("loading stopped unexpectedly".to_string()))
+            },
+            move |result| Message::CommandListLoaded(generation, result),
+        )
+    }
+
+    fn handle_command_list_loaded(
+        &mut self,
+        generation: u64,
+        result: Result<Vec<super::command_list::CommandItem>, String>,
+    ) -> Task<Message> {
+        if !self.command_list.is_current(generation) {
+            return Task::none();
+        }
+        match result {
+            Ok(items) => self.set_command_list_items(items),
+            Err(error) => {
+                crate::debug_log!("command list: load failed: {error}");
+                self.command_list.set_notice(error);
+            }
+        }
+        self.selected_index = 0;
+        Task::none()
+    }
+
+    fn set_command_list_items(&mut self, mut items: Vec<super::command_list::CommandItem>) {
+        for item in &mut items {
+            item.icon = item
+                .icon_names
+                .iter()
+                .find_map(|name| self.resolve_icon_name(name));
+        }
+        self.command_list.set_items(items);
+    }
+
+    /// A theme icon path for `name`, directly or through the desktop entry
+    /// of the executable with that name.
+    fn resolve_icon_name(&self, name: &str) -> Option<String> {
+        self.icon_map.get(name).cloned().or_else(|| {
+            self.desktop_icon_map
+                .get(name)
+                .and_then(|icon| crate::resolve_icon_reference(icon, &self.icon_map))
+        })
     }
 
     fn handle_web_search_query(&mut self, config_index: usize, query: String) {
@@ -1468,7 +1607,7 @@ impl LauncherApp {
             self.selected_index = 0;
         }
 
-        self.system.armed = None;
+        self.command_list.armed = None;
         self.follow_clipboard_selection();
         self.refresh_file_preview_cache();
         self.view.preview_scrollable_id = super::state::ScrollableId::unique();
@@ -1542,10 +1681,10 @@ impl LauncherApp {
             current_index += item_count;
         }
 
-        if self.system.active {
-            let item_count = self.system.filtered.len();
+        if self.command_list.is_active() {
+            let item_count = self.command_list.row_count();
             if index >= current_index && index < current_index + item_count {
-                return self.update(Message::SystemSelected(index - current_index));
+                return self.update(Message::CommandListSelected(index - current_index));
             }
             current_index += item_count;
         }
@@ -2294,34 +2433,30 @@ impl LauncherApp {
         iced::exit()
     }
 
-    /// Runs the entry after Raffi closes. Entries other than lock need a
-    /// second Enter on the same entry with the same modifiers.
-    fn handle_system_selected(&mut self, index: usize) -> Task<Message> {
-        let Some(entry) = self
-            .system
-            .filtered
-            .get(index)
-            .and_then(|&entry_index| self.system.entries.get(entry_index))
-        else {
+    /// Runs the item's action after Raffi closes. Actions needing
+    /// confirmation run on a second Enter on the same target with the same
+    /// modifiers.
+    fn handle_command_list_selected(&mut self, row: usize) -> Task<Message> {
+        let Some(addon) = self.command_list.addon else {
             return Task::none();
         };
-        if entry.missing.is_some() {
-            self.system.armed = None;
-            return Task::none();
+        match self.command_list.select(row, self.view.current_modifiers) {
+            Selection::Ignore => Task::none(),
+            Selection::Armed => {
+                crate::debug_log!("{}: arming confirmation", addon.name());
+                Task::none()
+            }
+            Selection::Run(action, identity) => {
+                if !self.in_flight.begin(addon.name(), &identity) {
+                    return Task::none();
+                }
+                crate::debug_log!("{}: running {identity} after close", addon.name());
+                if let Ok(mut slot) = self.deferred_action.lock() {
+                    *slot = Some(action);
+                }
+                iced::exit()
+            }
         }
-        let identity = (entry.id, self.view.current_modifiers);
-        if entry.needs_confirmation() && self.system.armed != Some(identity) {
-            crate::debug_log!("system: arming {:?}", entry.id);
-            self.system.armed = Some(identity);
-            return Task::none();
-        }
-        crate::debug_log!("system: running {:?} after close", entry.id);
-        let action = entry.action.clone();
-        self.system.armed = None;
-        if let Ok(mut slot) = self.deferred_action.lock() {
-            *slot = Some(action);
-        }
-        iced::exit()
     }
 
     /// Builds the transform rows at once; hashes follow after a short
@@ -2450,9 +2585,7 @@ impl LauncherApp {
             offset += self.emoji.filtered.len();
         }
         offset += self.clipboard.row_count();
-        if self.system.active {
-            offset += self.system.filtered.len();
-        }
+        offset += self.command_list.row_count();
         if self.devtools.active {
             offset += self.devtools.rows.len();
         }
@@ -2486,7 +2619,7 @@ impl LauncherApp {
             || self.text_snippets.loading
             || self.emoji.active
             || self.clipboard.active
-            || self.system.active
+            || self.command_list.is_active()
             || self.devtools.active
             || self.file_browser.active
             || self.web_search.active.is_some()
@@ -2626,7 +2759,7 @@ impl LauncherApp {
         self.text_snippets.clear();
         self.emoji.clear();
         self.clipboard.clear();
-        self.system.clear();
+        self.command_list.clear();
         self.devtools.clear();
         self.web_search.clear();
         self.file_browser.clear();

@@ -586,6 +586,13 @@ addons:
   #     lock: [hyprlock]
   #   hide: [hibernate]
 
+  # Window switcher (native UI only, Hyprland). Type "win " to list open
+  # windows, most recently used first. Enter focuses the window, Ctrl+Enter
+  # moves it to the current workspace and focuses it.
+  # windows:
+  #   enabled: true
+  #   trigger: win
+
   # Unit conversion (native UI only). Type "10 km to mi", "70f to c" or
   # "5 GB in MB" without any keyword. Enter copies the number, Ctrl+Enter
   # copies it with the unit.

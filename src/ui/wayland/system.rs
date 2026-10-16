@@ -1,7 +1,5 @@
-use fuzzy_matcher::skim::SkimMatcherV2;
-use fuzzy_matcher::FuzzyMatcher;
-
 use super::actions::DeferredAction;
+use super::command_list::{CommandAction, CommandItem};
 use crate::{SystemAddonConfig, SystemCommand};
 
 /// One row of the system commands list.
@@ -27,7 +25,7 @@ impl SystemEntry {
         match &self.action {
             DeferredAction::Command(argv) => argv.join(" "),
             DeferredAction::HyprDispatch(args) => format!("hyprctl dispatch {}", args.join(" ")),
-            DeferredAction::HyprPaste(_) => String::new(),
+            DeferredAction::HyprPaste(_) | DeferredAction::HyprDispatchBatch(_) => String::new(),
         }
     }
 }
@@ -82,7 +80,7 @@ fn default_action(id: SystemCommand, hyprland: bool, session_id: Option<&str>) -
 fn program(action: &DeferredAction) -> Option<&str> {
     match action {
         DeferredAction::Command(argv) => argv.first().map(String::as_str),
-        DeferredAction::HyprDispatch(_) => Some("hyprctl"),
+        DeferredAction::HyprDispatch(_) | DeferredAction::HyprDispatchBatch(_) => Some("hyprctl"),
         DeferredAction::HyprPaste(_) => None,
     }
 }
@@ -125,26 +123,33 @@ pub(super) fn system_entries(
         .collect()
 }
 
-pub(super) fn filter_system_into(
-    entries: &[SystemEntry],
-    query: &str,
-    matcher: &SkimMatcherV2,
-    out: &mut Vec<usize>,
-) {
-    out.clear();
-    if query.is_empty() {
-        out.extend(0..entries.len());
-        return;
+impl SystemEntry {
+    pub fn to_item(&self) -> CommandItem {
+        let enter = if self.needs_confirmation() {
+            format!("Press twice to {}", self.verb)
+        } else {
+            format!("{} the session", self.title)
+        };
+        CommandItem {
+            title: self.title.to_string(),
+            subtitle: self.command_line(),
+            match_text: self.title.to_string(),
+            icon_names: vec![self.icon.to_string()],
+            icon: None,
+            identity: format!("{:?}", self.id).to_lowercase(),
+            unavailable: self
+                .missing
+                .as_ref()
+                .map(|program| format!("{program} not found")),
+            primary: CommandAction {
+                action: self.action.clone(),
+                confirm: self.needs_confirmation().then(|| self.verb.to_string()),
+            },
+            secondary: None,
+            details: vec![
+                ("Command".to_string(), self.command_line()),
+                ("Enter".to_string(), enter),
+            ],
+        }
     }
-    let mut scored: Vec<(usize, i64)> = entries
-        .iter()
-        .enumerate()
-        .filter_map(|(index, entry)| {
-            matcher
-                .fuzzy_match(entry.title, query)
-                .map(|score| (index, score))
-        })
-        .collect();
-    scored.sort_by_key(|&(_, score)| std::cmp::Reverse(score));
-    out.extend(scored.iter().map(|&(index, _)| index));
 }

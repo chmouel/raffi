@@ -171,7 +171,7 @@ pub(crate) enum Message {
     MoveUp,
     MoveDown,
     Submit,
-    /// Enter held down; never confirms an armed system command.
+    /// Enter held down; never confirms an armed command list action.
     SubmitRepeat,
     Cancel,
     ItemClicked(usize),
@@ -237,7 +237,12 @@ pub(crate) enum Message {
     HelpEntrySelected(usize),
     EmojiSelected(usize),
     EmojiDataLoaded(Vec<EmojiEntry>),
-    SystemSelected(usize),
+    CommandListSelected(usize),
+    /// Items loaded for the command list with this generation.
+    CommandListLoaded(
+        u64,
+        std::result::Result<Vec<super::command_list::CommandItem>, String>,
+    ),
     DevtoolsSelected(usize),
     /// Hash rows computed for the `dev` query with this generation.
     DevtoolsHashes(u64, Vec<super::devtools::DevRow>),

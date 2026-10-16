@@ -534,6 +534,32 @@ impl Default for SystemAddonConfig {
     }
 }
 
+/// Configuration for the Hyprland window switcher addon (native UI only)
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
+pub struct WindowsAddonConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Keyword that opens the window list (default: `win`).
+    #[serde(default)]
+    pub trigger: Option<String>,
+}
+
+impl WindowsAddonConfig {
+    pub fn trigger(&self) -> &str {
+        self.trigger.as_deref().unwrap_or("win")
+    }
+}
+
+impl Default for WindowsAddonConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            trigger: None,
+        }
+    }
+}
+
 /// Container for all addon configurations
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
@@ -556,6 +582,8 @@ pub struct AddonsConfig {
     pub clipboard: ClipboardAddonConfig,
     #[serde(default)]
     pub system: SystemAddonConfig,
+    #[serde(default)]
+    pub windows: WindowsAddonConfig,
     #[serde(default)]
     pub devtools: DevtoolsAddonConfig,
     #[serde(default)]
@@ -3694,6 +3722,18 @@ shell:
             serde_yaml::from_str("trigger: tx\npassword_length: 500\n").unwrap();
         assert_eq!(config.trigger(), "tx");
         assert_eq!(config.password_length(), 128);
+    }
+
+    #[test]
+    fn test_windows_addon_config_parsing() {
+        let defaults = AddonsConfig::default().windows;
+        assert!(defaults.enabled);
+        assert_eq!(defaults.trigger(), "win");
+
+        let config: WindowsAddonConfig =
+            serde_yaml::from_str("enabled: false\ntrigger: w\n").unwrap();
+        assert!(!config.enabled);
+        assert_eq!(config.trigger(), "w");
     }
 
     #[test]

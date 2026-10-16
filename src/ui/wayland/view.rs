@@ -1221,36 +1221,46 @@ impl LauncherApp {
             }
         }
 
-        if self.system.active {
-            for &entry_idx in &self.system.filtered {
-                let Some(entry) = self.system.entries.get(entry_idx) else {
+        if let Some(status) = self.command_list.status() {
+            let is_selected = self.selected_index == special_item_idx;
+            let status_row = Row::new()
+                .spacing(16)
+                .align_y(iced::Alignment::Center)
+                .push(text(status.to_string()).size(fs.item).color(t.text_muted));
+            items_column = items_column.push(
+                button(status_row)
+                    .padding(fs.item_padding)
+                    .width(Length::Fill)
+                    .style(item_button_style(t, is_selected, t.text_muted)),
+            );
+            special_item_idx += 1;
+        } else if self.command_list.is_active() {
+            for row in 0..self.command_list.row_count() {
+                let Some(item) = self.command_list.item(row) else {
                     continue;
                 };
                 let is_selected = self.selected_index == special_item_idx;
-                let armed = self.system.armed.is_some_and(|(id, _)| id == entry.id);
                 let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
-                if let Some(icon) = self
-                    .icon_map
-                    .get(entry.icon)
+                if let Some(icon) = item
+                    .icon
+                    .as_deref()
                     .and_then(|path| icon_element(Path::new(path), 40.0))
                 {
                     item_row = item_row.push(icon);
                 }
-                let subtitle = if let Some(program) = &entry.missing {
-                    text(format!("{program} not found"))
-                        .size(fs.subtitle)
-                        .color(t.text_muted)
-                } else if armed {
-                    text(format!("Press Enter again to {}", entry.verb))
+                let subtitle = if let Some(reason) = &item.unavailable {
+                    text(reason.clone()).size(fs.subtitle).color(t.text_muted)
+                } else if let Some(verb) = self.command_list.armed_verb(item) {
+                    text(format!("Press Enter again to {verb}"))
                         .size(fs.subtitle)
                         .color(t.accent)
                 } else {
-                    text(entry.command_line())
+                    text(item.subtitle.clone())
                         .size(fs.subtitle)
                         .color(t.text_muted)
                 };
                 let text_col = Column::new()
-                    .push(text(entry.title).size(fs.item).color(t.text_main))
+                    .push(text(item.title.clone()).size(fs.item).color(t.text_main))
                     .push(subtitle);
                 item_row = item_row.push(text_col.width(Length::Fill));
                 items_column = items_column.push(
@@ -1652,7 +1662,7 @@ impl LauncherApp {
             && !has_text_snippet
             && !has_emoji
             && !has_clipboard
-            && self.system.filtered.is_empty()
+            && self.command_list.row_count() == 0
             && self.devtools.rows.is_empty()
             && !has_file_browser
             && !has_web_search

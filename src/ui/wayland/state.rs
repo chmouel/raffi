@@ -369,26 +369,6 @@ impl EmojiState {
 }
 
 #[derive(Default)]
-pub(super) struct SystemState {
-    pub active: bool,
-    pub entries: Vec<super::system::SystemEntry>,
-    pub filtered: Vec<usize>,
-    pub matcher: SkimMatcherV2,
-    /// Entry and modifiers armed by a first Enter; a second Enter with the
-    /// same pair runs it.
-    pub armed: Option<(crate::SystemCommand, iced::keyboard::Modifiers)>,
-}
-
-impl SystemState {
-    pub fn clear(&mut self) {
-        self.active = false;
-        self.entries.clear();
-        self.filtered.clear();
-        self.armed = None;
-    }
-}
-
-#[derive(Default)]
 pub(super) struct DevtoolsState {
     pub active: bool,
     pub rows: Vec<super::devtools::DevRow>,
@@ -476,6 +456,8 @@ pub(super) struct LauncherApp {
     pub selected_index: usize,
     pub selected_item: SharedSelection,
     pub icon_map: HashMap<String, String>,
+    /// Desktop entry icons keyed by executable name.
+    pub desktop_icon_map: HashMap<String, String>,
     pub no_icons: bool,
     pub launcher_icon_paths: Vec<Option<String>>,
     pub mru_map: HashMap<String, super::support::MruEntry>,
@@ -499,6 +481,8 @@ pub(super) struct LauncherApp {
     pub copier: Option<Vec<String>>,
     /// Reports whether a program is installed; replaced in tests.
     pub program_exists: fn(&str) -> bool,
+    /// Reports whether Raffi runs inside Hyprland; replaced in tests.
+    pub in_hyprland: fn() -> bool,
     pub web_search: WebSearchState,
     pub file_browser: FileBrowserState,
     /// Wayland drag-and-drop source worker, if the UI runs on Wayland.
@@ -506,7 +490,7 @@ pub(super) struct LauncherApp {
     pub view: ViewState,
     pub history: HistoryState,
     pub emoji: EmojiState,
-    pub system: SystemState,
+    pub command_list: super::command_list::CommandListState,
     pub devtools: DevtoolsState,
     pub clipboard: ClipboardState,
     pub fallbacks: Vec<ResolvedFallback>,

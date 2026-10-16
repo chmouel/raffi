@@ -125,6 +125,18 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         });
     }
 
+    if addons.windows.enabled {
+        let trigger = addons.windows.trigger();
+        entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
+            trigger: trigger.to_string(),
+            title: "Window switcher".to_string(),
+            usage: format!("{trigger} <title or class>, Ctrl+Enter brings it here"),
+            icon: Some(super::app::WINDOWS_ICON.to_string()),
+            completion: Some(format!("{trigger} ")),
+        });
+    }
+
     if addons.devtools.enabled {
         let trigger = addons.devtools.trigger();
         entries.push(HelpEntry {

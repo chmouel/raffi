@@ -2,6 +2,7 @@ use super::actions::DeferredAction;
 use super::app::{
     classify_query, fido_updir, keyword_suggestions, loggable_query, route_query, QueryMode,
 };
+use super::command_list::CommandListAddon;
 use super::help::{filter_help_entries, help_entries, HelpSection};
 use super::placeholders::Expanded;
 use super::preview::{
@@ -1598,6 +1599,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "emoji",
             "gh",
             "sys",
+            "win",
             "dev",
             "math",
             "$",
@@ -1634,7 +1636,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
     assert_eq!(entries[1].icon.as_deref(), Some("gist-icon"));
     assert_eq!(entries[1].completion.as_deref(), Some("gist "));
     assert_eq!(entries[0].completion.as_deref(), Some("~/"));
-    assert_eq!(entries[7].completion, None);
+    assert_eq!(entries[8].completion, None);
     // Shortcut rows are informational: they never arm a keyword.
     for entry in entries
         .iter()
@@ -1652,6 +1654,7 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
     addons.currency.enabled = false;
     addons.file_browser.enabled = false;
     addons.system.enabled = false;
+    addons.windows.enabled = false;
     addons.units.enabled = false;
     addons.color.enabled = false;
     addons.world_clock.enabled = false;
@@ -1703,6 +1706,7 @@ fn test_help_entries_skip_disabled_addons() {
     addons.currency.enabled = false;
     addons.file_browser.enabled = false;
     addons.system.enabled = false;
+    addons.windows.enabled = false;
     addons.units.enabled = false;
     addons.color.enabled = false;
     addons.world_clock.enabled = false;
@@ -3404,7 +3408,7 @@ fn test_status_inline_row_is_not_copied() {
 fn open_system(app: &mut LauncherApp, query: &str) {
     app.history.max_items = 0;
     let _ = app.update(Message::SearchChanged(query.into()));
-    assert!(app.system.active);
+    assert_eq!(app.command_list.addon, Some(CommandListAddon::System));
 }
 
 fn deferred_argv(app: &LauncherApp) -> Option<Vec<String>> {
@@ -3414,11 +3418,11 @@ fn deferred_argv(app: &LauncherApp) -> Option<Vec<String>> {
     }
 }
 
-fn system_titles(app: &LauncherApp) -> Vec<&'static str> {
-    app.system
+fn command_list_titles(app: &LauncherApp) -> Vec<&str> {
+    app.command_list
         .filtered
         .iter()
-        .map(|&index| app.system.entries[index].title)
+        .map(|&index| app.command_list.items[index].title.as_str())
         .collect()
 }
 
@@ -3428,13 +3432,15 @@ fn test_route_query_system_trigger() {
     assert_eq!(route_query("sys", &addons), QueryMode::Standard);
     assert_eq!(
         route_query("sys ", &addons),
-        QueryMode::System {
+        QueryMode::CommandList {
+            addon: CommandListAddon::System,
             query: String::new()
         }
     );
     assert_eq!(
         route_query(" sys reb", &addons),
-        QueryMode::System {
+        QueryMode::CommandList {
+            addon: CommandListAddon::System,
             query: "reb".into()
         }
     );
@@ -3443,7 +3449,10 @@ fn test_route_query_system_trigger() {
     assert_eq!(route_query("sys reb", &addons), QueryMode::Standard);
     assert!(matches!(
         route_query("power reb", &addons),
-        QueryMode::System { .. }
+        QueryMode::CommandList {
+            addon: CommandListAddon::System,
+            ..
+        }
     ));
 
     addons.system.enabled = false;
@@ -3475,7 +3484,17 @@ fn test_default_triggers_do_not_shadow_each_other_or_web_searches() {
     ));
     assert!(matches!(
         route_query("sys x", &addons),
-        QueryMode::System { .. }
+        QueryMode::CommandList {
+            addon: CommandListAddon::System,
+            ..
+        }
+    ));
+    assert!(matches!(
+        route_query("win x", &addons),
+        QueryMode::CommandList {
+            addon: CommandListAddon::Windows,
+            ..
+        }
     ));
 
     // A user web search keeps its keyword, and its suggestion comes first.
@@ -3507,7 +3526,7 @@ fn test_system_list_filters_entries() {
     let mut app = test_app(AddonsConfig::default());
     open_system(&mut app, "sys ");
     assert_eq!(
-        system_titles(&app),
+        command_list_titles(&app),
         vec![
             "Lock",
             "Suspend",
@@ -3522,13 +3541,13 @@ fn test_system_list_filters_entries() {
     assert_eq!(app.fallback_count(), 0);
 
     open_system(&mut app, "sys reb");
-    assert_eq!(system_titles(&app), vec!["Reboot"]);
+    assert_eq!(command_list_titles(&app), vec!["Reboot"]);
     open_system(&mut app, "sys zzz");
     assert_eq!(app.total_items(), 0);
 
     let _ = app.update(Message::SearchChanged("firefox".into()));
-    assert!(!app.system.active);
-    assert!(app.system.entries.is_empty());
+    assert!(!app.command_list.is_active());
+    assert!(app.command_list.items.is_empty());
 }
 
 #[test]
@@ -3550,7 +3569,7 @@ fn test_system_power_actions_need_a_second_enter() {
 
     let task = app.update(Message::Submit);
     assert_eq!(task.units(), 0);
-    assert!(app.system.armed.is_some());
+    assert!(app.command_list.armed.is_some());
     assert!(app.deferred_action.lock().unwrap().is_none());
 
     let task = app.update(Message::Submit);
@@ -3570,32 +3589,35 @@ fn test_system_confirmation_resets_on_selection_query_and_modifiers() {
     let _ = app.update(Message::Submit);
     let _ = app.update(Message::MoveDown);
     let _ = app.update(Message::MoveUp);
-    assert!(app.system.armed.is_none());
+    assert!(app.command_list.armed.is_none());
     let _ = app.update(Message::Submit);
-    assert!(app.system.armed.is_some());
+    assert!(app.command_list.armed.is_some());
 
     let _ = app.update(Message::SearchChanged("sys re".into()));
-    assert!(app.system.armed.is_none());
+    assert!(app.command_list.armed.is_none());
     let _ = app.update(Message::Submit);
 
     let _ = app.update(Message::ModifiersChanged(iced::keyboard::Modifiers::CTRL));
-    assert!(app.system.armed.is_none());
+    assert!(app.command_list.armed.is_none());
     let _ = app.update(Message::Submit);
     let _ = app.update(Message::ModifiersChanged(iced::keyboard::Modifiers::empty()));
     let _ = app.update(Message::Submit);
-    assert!(app.system.armed.is_some());
+    assert!(app.command_list.armed.is_some());
 
     // Clicking another row arms that row instead of running the first.
     let _ = app.update(Message::SearchChanged("sys ".into()));
     let _ = app.update(Message::ItemClicked(4));
     let _ = app.update(Message::ItemClicked(5));
     assert_eq!(
-        app.system.armed.map(|(id, _)| id),
-        Some(crate::SystemCommand::Shutdown)
+        app.command_list
+            .armed
+            .as_ref()
+            .map(|armed| armed.identity.as_str()),
+        Some("shutdown")
     );
 
     let _ = app.update(Message::ToggleHelp);
-    assert!(app.system.armed.is_none());
+    assert!(app.command_list.armed.is_none());
     assert!(app.deferred_action.lock().unwrap().is_none());
 }
 
@@ -3712,22 +3734,22 @@ fn test_system_click_elsewhere_cancels_confirmation() {
     app.program_exists = |program| program != "no-such-locker";
     open_system(&mut app, "sys ");
     let position = |app: &LauncherApp, id| {
-        app.system
+        app.command_list
             .filtered
             .iter()
-            .position(|&index| app.system.entries[index].id == id)
+            .position(|&index| app.command_list.items[index].identity == id)
             .unwrap()
     };
-    let reboot = position(&app, crate::SystemCommand::Reboot);
-    let lock = position(&app, crate::SystemCommand::Lock);
+    let reboot = position(&app, "reboot");
+    let lock = position(&app, "lock");
 
     let _ = app.update(Message::ItemClicked(reboot));
-    assert!(app.system.armed.is_some());
+    assert!(app.command_list.armed.is_some());
     let _ = app.update(Message::ItemClicked(lock));
-    assert!(app.system.armed.is_none());
+    assert!(app.command_list.armed.is_none());
     let _ = app.update(Message::ItemClicked(reboot));
     assert_eq!(deferred_argv(&app), None);
-    assert!(app.system.armed.is_some());
+    assert!(app.command_list.armed.is_some());
 }
 
 #[test]
@@ -3746,6 +3768,170 @@ fn test_system_logout_without_session_is_not_actionable() {
         .find(|entry| entry.id == crate::SystemCommand::Logout)
         .unwrap();
     assert!(logout.missing.is_none());
+}
+
+const WINDOW_CLIENTS: &str = r#"[
+    {"address": "0xa1", "mapped": true, "hidden": false,
+     "workspace": {"id": 3, "name": "3"}, "class": "firefox",
+     "title": "Mozilla Firefox", "initialClass": "firefox", "pid": 100,
+     "focusHistoryID": 2},
+    {"address": "0xb2", "mapped": true, "hidden": false,
+     "workspace": {"id": 1, "name": "1"}, "class": "kitty",
+     "title": "notes", "initialClass": "kitty", "pid": 101,
+     "focusHistoryID": 1}
+]"#;
+
+fn window_fixture() -> Vec<super::command_list::CommandItem> {
+    let monitors = br#"[{"focused": true, "activeWorkspace": {"id": 2, "name": "2"}}]"#;
+    super::windows::window_items(WINDOW_CLIENTS.as_bytes(), monitors, 1).unwrap()
+}
+
+fn windows_app() -> LauncherApp {
+    let mut app = test_app(AddonsConfig::default());
+    app.in_hyprland = || true;
+    app.history.max_items = 0;
+    app
+}
+
+fn deferred_action(app: &LauncherApp) -> Option<DeferredAction> {
+    app.deferred_action.lock().unwrap().clone()
+}
+
+#[test]
+fn test_route_query_windows_trigger() {
+    let mut addons = AddonsConfig::default();
+    assert_eq!(
+        route_query("win fire", &addons),
+        QueryMode::CommandList {
+            addon: CommandListAddon::Windows,
+            query: "fire".into()
+        }
+    );
+    assert!(classify_query("win fire", &addons).sensitive);
+    assert_eq!(loggable_query("win fire", &addons), "<redacted>");
+    assert_eq!(
+        keyword_suggestions("win", &addons)[0].subtitle,
+        "Switch to an open window"
+    );
+
+    addons.windows.enabled = false;
+    assert_eq!(route_query("win fire", &addons), QueryMode::Standard);
+}
+
+#[test]
+fn test_windows_load_then_filter_and_focus() {
+    let mut app = windows_app();
+    let task = app.update(Message::SearchChanged("win ".into()));
+    assert!(task.units() > 0, "the window list loads");
+    assert_eq!(app.command_list.status(), Some("Loading windows..."));
+    assert_eq!(app.total_items(), 1);
+    let _ = app.update(Message::Submit);
+    assert!(deferred_action(&app).is_none());
+
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(window_fixture())));
+    assert_eq!(command_list_titles(&app), vec!["notes", "Mozilla Firefox"]);
+
+    // Narrowing the query filters the loaded list without loading again.
+    let task = app.update(Message::SearchChanged("win fire".into()));
+    assert_eq!(task.units(), 0);
+    assert_eq!(app.command_list.generation, generation);
+    assert_eq!(command_list_titles(&app), vec!["Mozilla Firefox"]);
+
+    let task = app.update(Message::Submit);
+    assert!(task.units() > 0, "Raffi closes");
+    assert!(matches!(
+        deferred_action(&app),
+        Some(DeferredAction::HyprDispatch(args)) if args == ["focuswindow", "address:0xa1"]
+    ));
+    let before = app.history.items.clone();
+    app.history.max_items = 10;
+    app.save_query_to_history();
+    assert_eq!(app.history.items, before);
+}
+
+#[test]
+fn test_windows_ctrl_enter_brings_window_here() {
+    let mut app = windows_app();
+    let _ = app.update(Message::SearchChanged("win notes".into()));
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(window_fixture())));
+    let _ = app.update(Message::ModifiersChanged(iced::keyboard::Modifiers::CTRL));
+    let task = app.update(Message::Submit);
+    assert!(task.units() > 0, "Raffi closes without confirmation");
+    let Some(DeferredAction::HyprDispatchBatch(batch)) = deferred_action(&app) else {
+        panic!("expected a dispatch batch");
+    };
+    assert_eq!(
+        batch,
+        vec![
+            vec![
+                "movetoworkspacesilent".to_string(),
+                "2,address:0xb2".to_string()
+            ],
+            vec!["focuswindow".to_string(), "address:0xb2".to_string()],
+        ]
+    );
+}
+
+#[test]
+fn test_windows_status_rows_are_not_actionable() {
+    let mut app = windows_app();
+    app.in_hyprland = || false;
+    let task = app.update(Message::SearchChanged("win ".into()));
+    assert_eq!(task.units(), 0, "nothing is loaded outside Hyprland");
+    assert_eq!(
+        app.command_list.status(),
+        Some("Window switching needs Hyprland")
+    );
+    assert_eq!(app.total_items(), 1);
+    let _ = app.update(Message::Submit);
+    assert!(deferred_action(&app).is_none());
+
+    let mut app = windows_app();
+    app.program_exists = |program| program != "hyprctl";
+    let _ = app.update(Message::SearchChanged("win ".into()));
+    assert_eq!(app.command_list.status(), Some("hyprctl not found"));
+
+    let mut app = windows_app();
+    let _ = app.update(Message::SearchChanged("win ".into()));
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(
+        generation,
+        Err("hyprctl: timed out after 2s".into()),
+    ));
+    assert_eq!(
+        app.command_list.status(),
+        Some("hyprctl: timed out after 2s")
+    );
+    let _ = app.update(Message::Submit);
+    assert!(deferred_action(&app).is_none());
+}
+
+#[test]
+fn test_windows_stale_load_is_dropped() {
+    let mut app = windows_app();
+    let _ = app.update(Message::SearchChanged("win ".into()));
+    let stale = app.command_list.generation;
+
+    // Leaving the mode drops the pending load.
+    let _ = app.update(Message::SearchChanged("firefox".into()));
+    let _ = app.update(Message::CommandListLoaded(stale, Ok(window_fixture())));
+    assert!(!app.command_list.is_active());
+    assert!(app.command_list.items.is_empty());
+
+    // Coming back starts a new load; the old result still does not apply.
+    let _ = app.update(Message::SearchChanged("win ".into()));
+    assert_ne!(app.command_list.generation, stale);
+    let _ = app.update(Message::CommandListLoaded(stale, Ok(window_fixture())));
+    assert!(app.command_list.loading);
+    assert!(app.command_list.items.is_empty());
+
+    // A list from another addon does not take the result either.
+    let current = app.command_list.generation;
+    let _ = app.update(Message::SearchChanged("sys ".into()));
+    let _ = app.update(Message::CommandListLoaded(current, Ok(window_fixture())));
+    assert_eq!(command_list_titles(&app)[0], "Lock");
 }
 
 fn launcher_names(app: &LauncherApp) -> Vec<String> {

@@ -90,6 +90,9 @@
             "$ref": "#/$defs/WebSearchConfig"
           }
         },
+        "windows": {
+          "$ref": "#/$defs/WindowsAddonConfig"
+        },
         "world_clock": {
           "$ref": "#/$defs/WorldClockAddonConfig"
         }
@@ -1118,6 +1121,25 @@
         "keyword",
         "url"
       ]
+    },
+    "WindowsAddonConfig": {
+      "description": "Configuration for the Hyprland window switcher addon (native UI only)",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "trigger": {
+          "description": "Keyword that opens the window list (default: `win`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
     },
     "WorldClockAddonConfig": {
       "description": "Configuration for the inline world clock addon",

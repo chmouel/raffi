@@ -1,0 +1,46 @@
+---
+title: Window Switcher
+description: Jump to any open Hyprland window from Raffi
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Type `win ` (with the trailing space) to list the open windows, the most
+recently used first. Each row shows the window title, its class and its
+workspace, with the application icon when one is found. Words after the
+keyword filter the list by title or class, so `win fire` finds Firefox.
+
+<Aside type="note">
+The window switcher is only available in native mode and needs Hyprland
+(it reads the windows with `hyprctl`). It is on by default. In another
+session the list shows "Window switching needs Hyprland", and when
+`hyprctl` is not installed it shows "hyprctl not found".
+</Aside>
+
+| Key        | Action                                                  |
+|------------|---------------------------------------------------------|
+| Enter      | Focus the window, switching to its workspace            |
+| Ctrl+Enter | Move the window to the current workspace and focus it   |
+
+Raffi closes first, then asks Hyprland to switch. If the window has closed
+in the meantime, Raffi reports the error as a Hyprland notification.
+
+Raffi's own window is left out of the list. Queries typed in this mode are
+not saved in the search history.
+
+To open the list from a key binding, pass the keyword as the initial query:
+
+```sh
+raffi -u native -i "win "
+```
+
+## Configuration
+
+```yaml
+addons:
+  windows:
+    trigger: "w"
+```
+
+See the [addon reference](/reference/addon-configuration/#window-switcher)
+for every field.

@@ -329,7 +329,7 @@ impl Hyprland {
     }
 }
 
-fn valid_address(address: &str) -> bool {
+pub(super) fn valid_address(address: &str) -> bool {
     address.strip_prefix("0x").is_some_and(|digits| {
         !digits.is_empty()
             && digits.bytes().all(|b| b.is_ascii_hexdigit())

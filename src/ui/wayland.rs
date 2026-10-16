@@ -6,6 +6,7 @@ mod clipboard;
 mod clipboard_history;
 mod clipboard_mode;
 mod color;
+mod command_list;
 mod currency;
 mod devtools;
 mod dnd;
@@ -23,6 +24,7 @@ mod theme;
 mod types;
 mod units;
 mod view;
+mod windows;
 mod world_clock;
 
 #[cfg(test)]

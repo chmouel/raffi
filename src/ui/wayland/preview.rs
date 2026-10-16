@@ -7,6 +7,7 @@ use chrono::{DateTime, Local};
 
 use super::browser::read_directory;
 use super::clipboard::{ClipItem, ItemKind};
+use super::command_list::CommandItem;
 use super::devtools::DevRow;
 use super::help::HelpEntry;
 use super::snippets::SnippetIcon;
@@ -14,7 +15,6 @@ use super::state::{
     CurrencyConversion, CurrencyResult, EmojiEntry, FallbackAction, FileBrowserEntry,
     KeywordSuggestion, LauncherApp, MultiCurrencyResult, ResolvedFallback, WebSearchActiveState,
 };
-use super::system::SystemEntry;
 use super::types::{CalculatorResult, ScriptFilterItem, ScriptFilterResult};
 use crate::{AddonsConfig, ClipboardAction, RaffiConfig, TextSnippet};
 
@@ -455,9 +455,7 @@ impl LauncherApp {
 
         current_index += self.clipboard.row_count();
 
-        if self.system.active {
-            current_index += self.system.filtered.len();
-        }
+        current_index += self.command_list.row_count();
 
         if self.devtools.active {
             current_index += self.devtools.rows.len();
@@ -598,12 +596,14 @@ impl LauncherApp {
             current_index += count;
         }
 
-        // 4c. System commands
-        if self.system.active {
-            let count = self.system.filtered.len();
+        // 4c. Command lists (system commands, windows)
+        if self.command_list.is_active() {
+            let count = self.command_list.row_count();
             if index >= current_index && index < current_index + count {
-                let entry = &self.system.entries[self.system.filtered[index - current_index]];
-                return Some(self.build_system_preview(entry));
+                return self
+                    .command_list
+                    .item(index - current_index)
+                    .map(|item| self.build_command_list_preview(item));
             }
             current_index += count;
         }
@@ -1062,26 +1062,17 @@ impl LauncherApp {
         }
     }
 
-    fn build_system_preview(&self, entry: &SystemEntry) -> PreviewData {
-        let enter = if entry.needs_confirmation() {
-            format!("Press twice to {}", entry.verb)
-        } else {
-            format!("{} the session", entry.title)
-        };
+    fn build_command_list_preview(&self, item: &CommandItem) -> PreviewData {
         PreviewData {
-            title: entry.title.to_string(),
+            title: item.title.clone(),
             subtitle: None,
-            badge: Some("System".to_string()),
-            icon: self
-                .icon_map
-                .get(entry.icon)
-                .cloned()
-                .map(PreviewIcon::File),
+            badge: self
+                .command_list
+                .addon
+                .map(|addon| addon.badge().to_string()),
+            icon: item.icon.clone().map(PreviewIcon::File),
             bodies: Vec::new(),
-            metadata: vec![
-                ("Command".to_string(), entry.command_line()),
-                ("Enter".to_string(), enter),
-            ],
+            metadata: item.details.clone(),
         }
     }
 
@@ -1608,6 +1599,20 @@ fn describe_addon_by_keyword(
                 "Enter".to_string(),
                 "Run; every entry but Lock asks for a second Enter".to_string(),
             )],
+        );
+    }
+
+    if addons.windows.enabled && keyword == addons.windows.trigger() {
+        return (
+            "Window Switcher".to_string(),
+            vec![
+                ("Enter".to_string(), "Focus the window".to_string()),
+                (
+                    "Ctrl+Enter".to_string(),
+                    "Move it to the current workspace and focus it".to_string(),
+                ),
+                ("Requires".to_string(), "Hyprland".to_string()),
+            ],
         );
     }
 

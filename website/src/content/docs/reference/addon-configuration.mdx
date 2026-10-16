@@ -1,6 +1,6 @@
 ---
 title: Addon Configuration
-description: Configuration reference for built-in addons (currency, calculator, unit conversion, color converter, world clock, developer tools, file browser, script filters, web searches, text snippets, clipboard history, system commands)
+description: Configuration reference for built-in addons (currency, calculator, unit conversion, color converter, world clock, developer tools, file browser, script filters, web searches, text snippets, clipboard history, system commands, window switcher)
 ---
 
 import { Image } from 'astro:assets';
@@ -13,7 +13,7 @@ The native UI includes several built-in addons that can be configured under the 
 ## Keywords
 
 Script filters, web searches, text snippets, the emoji picker, the clipboard
-history browser, system commands and developer tools are reached by
+history browser, system commands, the window switcher and developer tools are reached by
 typing their keyword followed by a space. Typing `sn` on its own searches your
 launchers as usual, while `sn ` enters the snippet source.
 
@@ -977,6 +977,28 @@ addons:
     hide: [hibernate]
 ```
 
+## Window Switcher
+
+Lists the open Hyprland windows and focuses the one you pick. See
+[Window Switcher](/features/window-switcher/) for usage.
+
+### Configuration
+
+**`addons.windows.enabled`** `boolean` (default: `true`)
+
+**`addons.windows.trigger`** `string` (default: `win`)
+
+Keyword that opens the list. Type it followed by a space. Web searches with
+the same keyword take precedence.
+
+### Example
+
+```yaml
+addons:
+  windows:
+    trigger: "w"
+```
+
 ## Developer Tools
 
 Lists base64, URL, hash, epoch, JSON and case transforms of the text typed
@@ -1033,6 +1055,10 @@ addons:
     enabled: true
     trigger: "dev"
     password_length: 20
+
+  windows:
+    enabled: true
+    trigger: "win"
 
   file_browser:
     enabled: true
