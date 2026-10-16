@@ -308,6 +308,7 @@ pub(super) const SYSTEM_ICON: &str = "system-shutdown";
 pub(super) const WINDOWS_ICON: &str = "preferences-system-windows";
 pub(super) const MEDIA_ICON: &str = "multimedia-player";
 pub(super) const AUDIO_ICON: &str = "audio-speakers";
+pub(super) const KILL_ICON: &str = "utilities-system-monitor";
 pub(super) const DEVTOOLS_ICON: &str = "utilities-terminal";
 
 /// The query as it may appear in debug logs: sensitive searches such as the
@@ -437,6 +438,15 @@ pub(super) fn route_query(query: &str, addons: &AddonsConfig) -> QueryMode {
         }
     }
 
+    if addons.kill.enabled {
+        if let Some(query) = extract_keyword_query(input, addons.kill.trigger()) {
+            return QueryMode::CommandList {
+                addon: CommandListAddon::Kill,
+                query,
+            };
+        }
+    }
+
     if addons.devtools.enabled {
         if let Some(payload) = extract_raw_keyword_payload(input, addons.devtools.trigger()) {
             return QueryMode::Devtools { payload };
@@ -555,6 +565,14 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
             keyword: addons.audio.trigger().to_string(),
             subtitle: "Switch or mute audio outputs and inputs".to_string(),
             icon: Some(AUDIO_ICON.to_string()),
+        });
+    }
+
+    if addons.kill.enabled && matches(addons.kill.trigger()) {
+        suggestions.push(KeywordSuggestion {
+            keyword: addons.kill.trigger().to_string(),
+            subtitle: "Stop one of your processes".to_string(),
+            icon: Some(KILL_ICON.to_string()),
         });
     }
 
@@ -1558,6 +1576,14 @@ impl LauncherApp {
                 }
                 self.load_audio(false)
             }
+            CommandListAddon::Kill if !entered => Task::none(),
+            CommandListAddon::Kill => {
+                if !(self.program_exists)("kill") {
+                    self.command_list.set_notice("kill not found".to_string());
+                    return Task::none();
+                }
+                self.load_command_list(super::kill::load_processes, false)
+            }
         }
     }
 
@@ -1639,6 +1665,7 @@ impl LauncherApp {
             Ok(()) => match addon {
                 CommandListAddon::Media => self.load_media(true),
                 CommandListAddon::Audio => self.load_audio(true),
+                CommandListAddon::Kill => self.load_command_list(super::kill::load_processes, true),
                 CommandListAddon::System | CommandListAddon::Windows => Task::none(),
             },
             Err(error) => {
@@ -1656,6 +1683,13 @@ impl LauncherApp {
                     .command_list
                     .item(self.selected_index)
                     .map(|item| item.identity.clone());
+                // A failed signal usually means the process is gone or was
+                // replaced, so the list reloads under the error row.
+                let refresh = if addon == CommandListAddon::Kill {
+                    self.load_command_list(super::kill::load_processes, true)
+                } else {
+                    Task::none()
+                };
                 self.set_command_list_front(super::command_list::CommandItem::info(
                     "error",
                     error,
@@ -1664,7 +1698,7 @@ impl LauncherApp {
                 if let Some(row) = selected.and_then(|id| self.command_list.position(&id)) {
                     self.selected_index = row;
                 }
-                Task::none()
+                refresh
             }
         }
     }

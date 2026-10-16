@@ -14,6 +14,7 @@ mod dnd;
 mod emoji;
 mod help;
 mod hyprland;
+mod kill;
 mod media;
 mod placeholders;
 mod preview;

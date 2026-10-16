@@ -622,6 +622,32 @@ impl Default for AudioAddonConfig {
     }
 }
 
+/// Configuration for the kill process addon (native UI only)
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
+pub struct KillAddonConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Keyword that opens the process list (default: `kill`).
+    #[serde(default)]
+    pub trigger: Option<String>,
+}
+
+impl KillAddonConfig {
+    pub fn trigger(&self) -> &str {
+        self.trigger.as_deref().unwrap_or("kill")
+    }
+}
+
+impl Default for KillAddonConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            trigger: None,
+        }
+    }
+}
+
 /// Container for all addon configurations
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
@@ -650,6 +676,8 @@ pub struct AddonsConfig {
     pub media: MediaAddonConfig,
     #[serde(default)]
     pub audio: AudioAddonConfig,
+    #[serde(default)]
+    pub kill: KillAddonConfig,
     #[serde(default)]
     pub devtools: DevtoolsAddonConfig,
     #[serde(default)]
@@ -3800,6 +3828,17 @@ shell:
             serde_yaml::from_str("enabled: false\ntrigger: w\n").unwrap();
         assert!(!config.enabled);
         assert_eq!(config.trigger(), "w");
+    }
+
+    #[test]
+    fn test_kill_addon_config_parsing() {
+        let defaults = AddonsConfig::default().kill;
+        assert!(defaults.enabled);
+        assert_eq!(defaults.trigger(), "kill");
+
+        let config: KillAddonConfig = serde_yaml::from_str("enabled: false\ntrigger: k\n").unwrap();
+        assert!(!config.enabled);
+        assert_eq!(config.trigger(), "k");
     }
 
     #[test]

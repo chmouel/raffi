@@ -1,0 +1,11 @@
+Name:	gone
+Umask:	0022
+State:	S
+Tgid:	1
+Pid:	1
+Uid:	1000	1000	1000	1000
+Gid:	1000	1000	1000	1000
+VmPeak:	   99999 kB
+VmRSS:	    1024 kB
+RssAnon:	     100 kB
+Threads:	1

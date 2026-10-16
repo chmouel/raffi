@@ -25,7 +25,9 @@ impl SystemEntry {
         match &self.action {
             DeferredAction::Command(argv) => argv.join(" "),
             DeferredAction::HyprDispatch(args) => format!("hyprctl dispatch {}", args.join(" ")),
-            DeferredAction::HyprPaste(_) | DeferredAction::HyprDispatchBatch(_) => String::new(),
+            DeferredAction::HyprPaste(_)
+            | DeferredAction::HyprDispatchBatch(_)
+            | DeferredAction::Signal(_) => String::new(),
         }
     }
 }
@@ -81,7 +83,7 @@ fn program(action: &DeferredAction) -> Option<&str> {
     match action {
         DeferredAction::Command(argv) => argv.first().map(String::as_str),
         DeferredAction::HyprDispatch(_) | DeferredAction::HyprDispatchBatch(_) => Some("hyprctl"),
-        DeferredAction::HyprPaste(_) => None,
+        DeferredAction::HyprPaste(_) | DeferredAction::Signal(_) => None,
     }
 }
 

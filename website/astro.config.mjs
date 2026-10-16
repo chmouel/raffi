@@ -42,6 +42,7 @@ export default defineConfig({
             { label: 'Currency Converter', slug: 'features/currency-converter' },
             { label: 'Developer Tools', slug: 'features/developer-tools' },
             { label: 'File Browser', slug: 'features/file-browser' },
+            { label: 'Kill Process', slug: 'features/kill-process' },
             { label: 'Media Controls', slug: 'features/media-controls' },
             { label: 'Script Filters', slug: 'features/script-filters' },
             { label: 'System Commands', slug: 'features/system-commands' },

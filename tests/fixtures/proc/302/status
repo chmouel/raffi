@@ -1,0 +1,8 @@
+Name:	kworker/0:1
+Umask:	0022
+State:	I
+Tgid:	1
+Pid:	1
+Uid:	1000	1000	1000	1000
+Gid:	1000	1000	1000	1000
+Threads:	1

@@ -69,6 +69,9 @@
           "default": null,
           "minimum": 0
         },
+        "kill": {
+          "$ref": "#/$defs/KillAddonConfig"
+        },
         "media": {
           "$ref": "#/$defs/MediaAddonConfig"
         },
@@ -560,6 +563,25 @@
             "null"
           ],
           "format": "float",
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "KillAddonConfig": {
+      "description": "Configuration for the kill process addon (native UI only)",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "trigger": {
+          "description": "Keyword that opens the process list (default: `kill`).",
+          "type": [
+            "string",
+            "null"
+          ],
           "default": null
         }
       },

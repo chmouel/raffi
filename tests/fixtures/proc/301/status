@@ -1,0 +1,8 @@
+Name:	defunct
+Umask:	0022
+State:	Z
+Tgid:	1
+Pid:	1
+Uid:	1000	1000	1000	1000
+Gid:	1000	1000	1000	1000
+Threads:	1

@@ -1602,6 +1602,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "win",
             "media",
             "audio",
+            "kill",
             "dev",
             "math",
             "$",
@@ -1638,7 +1639,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
     assert_eq!(entries[1].icon.as_deref(), Some("gist-icon"));
     assert_eq!(entries[1].completion.as_deref(), Some("gist "));
     assert_eq!(entries[0].completion.as_deref(), Some("~/"));
-    assert_eq!(entries[10].completion, None);
+    assert_eq!(entries[11].completion, None);
     // Shortcut rows are informational: they never arm a keyword.
     for entry in entries
         .iter()
@@ -1659,6 +1660,7 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
     addons.windows.enabled = false;
     addons.media.enabled = false;
     addons.audio.enabled = false;
+    addons.kill.enabled = false;
     addons.units.enabled = false;
     addons.color.enabled = false;
     addons.world_clock.enabled = false;
@@ -1713,6 +1715,7 @@ fn test_help_entries_skip_disabled_addons() {
     addons.windows.enabled = false;
     addons.media.enabled = false;
     addons.audio.enabled = false;
+    addons.kill.enabled = false;
     addons.units.enabled = false;
     addons.color.enabled = false;
     addons.world_clock.enabled = false;
@@ -3516,6 +3519,13 @@ fn test_default_triggers_do_not_shadow_each_other_or_web_searches() {
             ..
         }
     ));
+    assert!(matches!(
+        route_query("kill x", &addons),
+        QueryMode::CommandList {
+            addon: CommandListAddon::Kill,
+            ..
+        }
+    ));
 
     // A user web search keeps its keyword, and its suggestion comes first.
     addons.web_searches.push(WebSearchConfig {
@@ -4700,4 +4710,142 @@ fn test_devtools_hash_errors_are_rows_without_the_input() {
     app.selected_index = index;
     let _ = app.update(Message::Submit);
     assert!(!app.in_flight.is_pending("inline-copy", ""));
+}
+
+fn kill_app(query: &str) -> LauncherApp {
+    let mut app = test_app(AddonsConfig::default());
+    app.history.max_items = 0;
+    let task = app.update(Message::SearchChanged(query.into()));
+    assert!(task.units() > 0, "the processes load");
+    assert_eq!(app.command_list.status(), Some("Loading processes..."));
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(
+        generation,
+        Ok(super::kill::fixture_items()),
+    ));
+    app
+}
+
+#[test]
+fn test_route_query_kill_trigger() {
+    let mut addons = AddonsConfig::default();
+    assert_eq!(
+        route_query("kill firefox", &addons),
+        QueryMode::CommandList {
+            addon: CommandListAddon::Kill,
+            query: "firefox".into()
+        }
+    );
+    assert!(classify_query("kill firefox", &addons).sensitive);
+    assert_eq!(loggable_query("kill firefox", &addons), "<redacted>");
+    assert_eq!(
+        keyword_suggestions("kill", &addons)[0].subtitle,
+        "Stop one of your processes"
+    );
+
+    addons.kill.enabled = false;
+    assert_eq!(route_query("kill firefox", &addons), QueryMode::Standard);
+}
+
+#[test]
+fn test_kill_rows_sorted_by_memory_and_filtered() {
+    let mut app = kill_app("kill ");
+    assert_eq!(
+        command_list_titles(&app),
+        vec!["firefox", "bash", "a) b (c"]
+    );
+    let _ = app.update(Message::SearchChanged("kill odd tool".into()));
+    assert_eq!(command_list_titles(&app), vec!["a) b (c"]);
+    let _ = app.update(Message::SearchChanged("kill 202".into()));
+    assert_eq!(selected_identity(&app), "202/7000");
+}
+
+#[test]
+fn test_kill_needs_confirmation_bound_to_process_and_signal() {
+    let mut app = kill_app("kill firefox");
+    let identity = "201/6000".to_string();
+
+    // A first Enter only arms SIGTERM; Ctrl+Enter then arms SIGKILL instead.
+    assert_eq!(app.update(Message::Submit).units(), 0);
+    assert!(app.command_list.armed.is_some());
+    let _ = app.update(Message::ModifiersChanged(iced::keyboard::Modifiers::CTRL));
+    assert!(app.command_list.armed.is_none());
+    assert_eq!(app.update(Message::Submit).units(), 0);
+    assert_eq!(
+        app.command_list.armed.as_ref().map(|armed| armed.modifiers),
+        Some(iced::keyboard::Modifiers::CTRL)
+    );
+    assert_eq!(app.update(Message::SubmitRepeat).units(), 0);
+    assert!(!app.in_flight.is_pending("kill", &identity));
+
+    // A refresh replacing the list clears the confirmation.
+    app.command_list.begin_refresh();
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(
+        generation,
+        Ok(super::kill::fixture_items()),
+    ));
+    assert!(app.command_list.armed.is_none());
+
+    assert_eq!(app.update(Message::Submit).units(), 0);
+    let task = app.update(Message::Submit);
+    assert!(task.units() > 0, "the signal is sent in the background");
+    assert!(deferred_action(&app).is_none(), "Raffi stays open");
+    assert!(app.in_flight.is_pending("kill", &identity));
+    assert_eq!(app.update(Message::Submit).units(), 0);
+    assert_eq!(app.update(Message::Submit).units(), 0);
+
+    let task = app.update(Message::CommandListActionDone(
+        CommandListAddon::Kill,
+        app.command_list.session,
+        identity.clone(),
+        Ok(()),
+    ));
+    assert!(task.units() > 0, "the list refreshes");
+    assert!(!app.in_flight.is_pending("kill", &identity));
+}
+
+#[test]
+fn test_kill_failure_shows_an_error_row_and_refreshes() {
+    let mut app = kill_app("kill ");
+    let identity = "201/6000".to_string();
+    let _ = app.update(Message::Submit);
+    let _ = app.update(Message::Submit);
+    let task = app.update(Message::CommandListActionDone(
+        CommandListAddon::Kill,
+        app.command_list.session,
+        identity,
+        Err("process 201 has exited".into()),
+    ));
+    assert!(task.units() > 0, "the list refreshes");
+    assert_eq!(
+        command_list_titles(&app)[0],
+        "firefox failed: process 201 has exited"
+    );
+
+    // The refresh no longer lists the process; the error stays on top.
+    let mut items = super::kill::fixture_items();
+    items.remove(0);
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(items)));
+    assert_eq!(
+        command_list_titles(&app),
+        vec!["firefox failed: process 201 has exited", "bash", "a) b (c"]
+    );
+    assert_eq!(app.update(Message::ItemClicked(0)).units(), 0);
+}
+
+#[test]
+fn test_kill_missing_program_and_history() {
+    let mut app = test_app(AddonsConfig::default());
+    app.program_exists = |program| program != "kill";
+    let task = app.update(Message::SearchChanged("kill ".into()));
+    assert_eq!(task.units(), 0);
+    assert_eq!(app.command_list.status(), Some("kill not found"));
+
+    let mut app = kill_app("kill firefox");
+    app.history.max_items = 10;
+    let before = app.history.items.clone();
+    app.save_query_to_history();
+    assert_eq!(app.history.items, before);
 }

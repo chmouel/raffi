@@ -596,7 +596,7 @@ impl LauncherApp {
             current_index += count;
         }
 
-        // 4c. Command lists (system commands, windows, media, audio)
+        // 4c. Command lists (system commands, windows, media, audio, kill)
         if self.command_list.is_active() {
             let count = self.command_list.row_count();
             if index >= current_index && index < current_index + count {
@@ -1642,6 +1642,23 @@ fn describe_addon_by_keyword(
                     "Mute or unmute the device".to_string(),
                 ),
                 ("Requires".to_string(), "pactl".to_string()),
+            ],
+        );
+    }
+
+    if addons.kill.enabled && keyword == addons.kill.trigger() {
+        return (
+            "Kill Process".to_string(),
+            vec![
+                (
+                    "Enter".to_string(),
+                    "Press twice to send SIGTERM".to_string(),
+                ),
+                (
+                    "Ctrl+Enter".to_string(),
+                    "Press twice to send SIGKILL".to_string(),
+                ),
+                ("Requires".to_string(), "kill".to_string()),
             ],
         );
     }

@@ -1,0 +1,61 @@
+---
+title: Kill Process
+description: Stop your own processes from Raffi with SIGTERM or SIGKILL
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+:::caution
+The safety check is best effort. Right before sending a signal, Raffi reads
+the process again and refuses if it has exited, was replaced by another
+process with the same pid, or now belongs to another user. There is still a
+short gap between that check and the signal, so in rare cases a process that
+took over the same pid in that gap could receive the signal instead.
+:::
+
+Type `kill ` (with the trailing space) to list your processes, the ones using
+the most memory first. Each row shows the process name, then its pid, its
+memory use and its command line. Only processes running as your user are
+listed. Raffi itself and the program that started it are left out, and so are
+kernel threads and processes that have already exited.
+
+Words after the keyword filter the list by name, pid or command line, so
+`kill firefox` or `kill 4242` narrows it down.
+
+<Aside type="note">
+The process list is only available in native mode and on Linux, since it reads
+`/proc`. It needs the `kill` command, and shows "kill not found" when it is
+missing. It is on by default.
+</Aside>
+
+| Key        | Action                                    |
+|------------|-------------------------------------------|
+| Enter      | Press twice to send SIGTERM (ask to quit) |
+| Ctrl+Enter | Press twice to send SIGKILL (force quit)  |
+
+Both signals need a second press on the same process with the same key. The
+first press shows "Press Enter again to send SIGTERM to ..." on the row.
+Moving the selection, typing, changing the modifier or a list refresh cancels
+it, and holding Enter down does not count as a second press.
+
+Raffi stays open after a signal and refreshes the list. When a process is
+gone, was replaced, or can't be signalled, an error row appears at the top of
+the list and the list refreshes. Queries typed in this mode are not saved in
+the search history.
+
+To open the list from a key binding, pass the keyword as the initial query:
+
+```sh
+raffi -u native -i "kill "
+```
+
+## Configuration
+
+```yaml
+addons:
+  kill:
+    trigger: "pk"
+```
+
+See the [addon reference](/reference/addon-configuration/#kill-process)
+for every field.

@@ -161,6 +161,18 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         });
     }
 
+    if addons.kill.enabled {
+        let trigger = addons.kill.trigger();
+        entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
+            trigger: trigger.to_string(),
+            title: "Kill process".to_string(),
+            usage: format!("{trigger} <name>, Enter twice sends SIGTERM, Ctrl+Enter twice SIGKILL"),
+            icon: Some(super::app::KILL_ICON.to_string()),
+            completion: Some(format!("{trigger} ")),
+        });
+    }
+
     if addons.devtools.enabled {
         let trigger = addons.devtools.trigger();
         entries.push(HelpEntry {

@@ -1,6 +1,6 @@
 ---
 title: Addon Configuration
-description: Configuration reference for built-in addons (currency, calculator, unit conversion, color converter, world clock, developer tools, file browser, script filters, web searches, text snippets, clipboard history, system commands, window switcher, media controls, audio switcher)
+description: Configuration reference for built-in addons (currency, calculator, unit conversion, color converter, world clock, developer tools, file browser, script filters, web searches, text snippets, clipboard history, system commands, window switcher, media controls, audio switcher, kill process)
 ---
 
 import { Image } from 'astro:assets';
@@ -13,7 +13,7 @@ The native UI includes several built-in addons that can be configured under the 
 ## Keywords
 
 Script filters, web searches, text snippets, the emoji picker, the clipboard
-history browser, system commands, the window switcher, media controls, the audio switcher and developer tools are reached by
+history browser, system commands, the window switcher, media controls, the audio switcher, the process killer and developer tools are reached by
 typing their keyword followed by a space. Typing `sn` on its own searches your
 launchers as usual, while `sn ` enters the snippet source.
 
@@ -1055,6 +1055,28 @@ addons:
     close_on_action: true
 ```
 
+## Kill Process
+
+Stops your own processes with `kill`.
+See [Kill Process](/features/kill-process/) for usage.
+
+### Configuration
+
+**`addons.kill.enabled`** `boolean` (default: `true`)
+
+**`addons.kill.trigger`** `string` (default: `kill`)
+
+Keyword that opens the process list. Type it followed by a space. Web searches
+with the same keyword take precedence.
+
+### Example
+
+```yaml
+addons:
+  kill:
+    trigger: "pk"
+```
+
 ## Developer Tools
 
 Lists base64, URL, hash, epoch, JSON and case transforms of the text typed
@@ -1125,6 +1147,10 @@ addons:
     enabled: true
     trigger: "audio"
     close_on_action: false
+
+  kill:
+    enabled: true
+    trigger: "kill"
 
   file_browser:
     enabled: true

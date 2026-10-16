@@ -17,6 +17,7 @@ pub(super) enum CommandListAddon {
     Windows,
     Media,
     Audio,
+    Kill,
 }
 
 impl CommandListAddon {
@@ -27,6 +28,7 @@ impl CommandListAddon {
             Self::Windows => "windows",
             Self::Media => "media",
             Self::Audio => "audio",
+            Self::Kill => "kill",
         }
     }
 
@@ -36,6 +38,7 @@ impl CommandListAddon {
             Self::Windows => "Window",
             Self::Media => "Media",
             Self::Audio => "Audio",
+            Self::Kill => "Process",
         }
     }
 
@@ -45,6 +48,7 @@ impl CommandListAddon {
             Self::Windows => "Loading windows...",
             Self::Media => "Loading players...",
             Self::Audio => "Loading audio devices...",
+            Self::Kill => "Loading processes...",
         }
     }
 }
@@ -336,8 +340,10 @@ impl CommandListState {
 /// Run a command action while Raffi stays open. Blocking: run it off the UI
 /// thread.
 pub(super) fn run_kept_open(action: &DeferredAction) -> Result<(), String> {
-    let DeferredAction::Command(argv) = action else {
-        return Err("this action only runs after Raffi closes".to_string());
+    let argv = match action {
+        DeferredAction::Command(argv) => argv,
+        DeferredAction::Signal(target) => return super::kill::send_signal(target),
+        _ => return Err("this action only runs after Raffi closes".to_string()),
     };
     let (program, args) = argv.split_first().ok_or("no command to run")?;
     let mut command = Command::new(program);

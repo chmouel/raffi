@@ -191,6 +191,8 @@ pub(super) enum DeferredAction {
     HyprDispatch(Vec<String>),
     /// Several dispatches run in order, stopping at the first failure.
     HyprDispatchBatch(Vec<Vec<String>>),
+    /// Signal a process after checking it is still the one listed.
+    Signal(super::kill::SignalTarget),
 }
 
 impl DeferredAction {
@@ -202,6 +204,7 @@ impl DeferredAction {
             Self::HyprDispatchBatch(batch) => batch
                 .iter()
                 .try_for_each(|args| super::hyprland::dispatch(args)),
+            Self::Signal(target) => super::kill::send_signal(target),
         }
     }
 
@@ -210,6 +213,7 @@ impl DeferredAction {
             Self::HyprPaste(_) => "hypr_paste",
             Self::Command(_) => "action",
             Self::HyprDispatch(_) | Self::HyprDispatchBatch(_) => "hyprctl dispatch",
+            Self::Signal(_) => "kill",
         }
     }
 
