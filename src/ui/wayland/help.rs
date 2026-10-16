@@ -91,14 +91,14 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         });
     }
 
-    entries.extend(keyboard_shortcut_entries());
+    entries.extend(keyboard_shortcut_entries(addons));
 
     entries
 }
 
 /// Informational rows listing the global keyboard shortcuts, shown after the
 /// keyword rows. They cannot be armed, so Enter and Tab do nothing on them.
-fn keyboard_shortcut_entries() -> Vec<HelpEntry> {
+fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
     let shortcut = |trigger: &str, title: &str, usage: &str| HelpEntry {
         trigger: trigger.to_string(),
         title: title.to_string(),
@@ -107,7 +107,7 @@ fn keyboard_shortcut_entries() -> Vec<HelpEntry> {
         completion: None,
     };
 
-    vec![
+    let mut entries = vec![
         shortcut(
             "↑/↓",
             "Navigate results",
@@ -139,6 +139,15 @@ fn keyboard_shortcut_entries() -> Vec<HelpEntry> {
             "Complete selection",
             "Completes the keyword or file browser path",
         ),
+    ];
+    if addons.file_browser.enabled && addons.file_browser.backspace_updir {
+        entries.push(shortcut(
+            "Backspace",
+            "Parent directory",
+            "File browser: on a trailing / goes up one directory",
+        ));
+    }
+    entries.extend([
         shortcut("Ctrl+/", "Keyword and shortcut help", "Opens this list"),
         shortcut("Esc", "Close help or quit", "Closes help, otherwise exits"),
         shortcut(
@@ -151,7 +160,8 @@ fn keyboard_shortcut_entries() -> Vec<HelpEntry> {
             "Secondary action",
             "Runs the addon's secondary action; file browser copies the path",
         ),
-    ]
+    ]);
+    entries
 }
 
 /// Return the indices of the help rows matching `query`.

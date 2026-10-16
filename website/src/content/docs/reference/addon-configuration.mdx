@@ -184,6 +184,17 @@ Show hidden files by default.
 
 ```
 
+**`addons.file_browser.backspace_updir`** `boolean` (default: `true`)
+
+When the input ends with `/`, Backspace jumps to the parent directory (like Emacs fido/ido mode) and selects the directory you left. Set to `false` for a plain delete.
+
+  ```yaml
+  addons:
+    file_browser:
+      backspace_updir: false
+
+```
+
 ### Usage
 
 - Type `/` to browse from root
@@ -192,6 +203,7 @@ Show hidden files by default.
 - Enter: Navigate into directory or open file
 - Alt+Enter: Copy file/directory path to clipboard
 - Tab: Autocomplete selected entry into search bar
+- Backspace on a trailing `/`: Go up to the parent directory
 - Ctrl+H: Toggle hidden file visibility
 
 Directories are listed first in accent color.

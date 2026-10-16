@@ -190,6 +190,11 @@
       "description": "Configuration for the file browser addon",
       "type": "object",
       "properties": {
+        "backspace_updir": {
+          "description": "Backspace on a trailing `/` jumps to the parent directory, like\nEmacs fido/ido mode.",
+          "type": "boolean",
+          "default": true
+        },
         "enabled": {
           "type": "boolean",
           "default": true

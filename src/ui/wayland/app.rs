@@ -83,6 +83,29 @@ fn expand_file_browser_query(trimmed: &str) -> String {
     }
 }
 
+/// Fido/ido-style "go up a directory": when `new` is `old` with its trailing
+/// `/` deleted, return the parent directory query (with a trailing `/`) and
+/// the name of the directory that was left. `~/` goes up to the parent of
+/// `home`; deleting the root `/` is left alone.
+pub(super) fn fido_updir(old: &str, new: &str, home: &str) -> Option<(String, String)> {
+    if old.strip_suffix('/') != Some(new) {
+        return None;
+    }
+    let dir = new.trim_start();
+    let (parent, left) = if dir == "~" {
+        let home = home.trim_end_matches('/');
+        let slash = home.rfind('/')?;
+        (home[..=slash].to_string(), &home[slash + 1..])
+    } else {
+        let slash = dir.rfind('/')?;
+        (dir[..=slash].to_string(), &dir[slash + 1..])
+    };
+    if left.is_empty() {
+        return None;
+    }
+    Some((parent, left.to_string()))
+}
+
 pub(super) fn route_query(query: &str, addons: &AddonsConfig) -> QueryMode {
     let input = keyword_input(query);
     let trimmed = input.trim_end();
@@ -470,6 +493,25 @@ impl LauncherApp {
             return Task::none();
         }
 
+        let updir = if self.addons.file_browser.enabled
+            && self.addons.file_browser.backspace_updir
+            && self.file_browser.active
+            && !self.history.search_in_progress
+            && !self.view.help_active
+        {
+            fido_updir(
+                &self.search_query,
+                &query,
+                &std::env::var("HOME").unwrap_or_default(),
+            )
+        } else {
+            None
+        };
+        let (query, left_dir) = match updir {
+            Some((parent, left)) => (parent, Some(left)),
+            None => (query, None),
+        };
+
         self.history.search_in_progress = false;
 
         if self.view.help_active {
@@ -516,7 +558,21 @@ impl LauncherApp {
                 self.emoji.clear();
                 self.web_search.clear();
                 self.currency.clear();
+                let Some(left_dir) = left_dir else {
+                    self.refresh_file_preview_cache();
+                    return Task::batch(tasks);
+                };
+                if let Some(position) = self
+                    .file_browser
+                    .entries
+                    .iter()
+                    .position(|entry| entry.is_dir && entry.name == left_dir)
+                {
+                    self.selected_index = self.script_filter_offset() + position;
+                }
                 self.refresh_file_preview_cache();
+                tasks.push(move_cursor_to_end(self.view.search_input_id.clone()));
+                tasks.push(self.snap_to_selection());
                 return Task::batch(tasks);
             }
             QueryMode::ScriptFilter {
@@ -999,7 +1055,11 @@ impl LauncherApp {
 
         self.refresh_file_preview_cache();
         self.view.preview_scrollable_id = super::state::ScrollableId::unique();
+        self.snap_to_selection()
+    }
 
+    fn snap_to_selection(&self) -> Task<Message> {
+        let total = self.total_items();
         if total > 1 {
             let offset = self.selected_index as f32 / (total - 1) as f32;
             snap_to(

@@ -528,3 +528,11 @@ addons:
       keyword: "gh"
       url: "https://github.com/search?q={query}&type=repositories"
       icon: "github"
+
+  # File browser: type "/" or "~/" to browse. Backspace on a trailing "/" jumps
+  # to the parent directory (like Emacs fido/ido mode); set backspace_updir to
+  # false for a plain delete.
+  # file_browser:
+  #   enabled: true
+  #   show_hidden: false
+  #   backspace_updir: true

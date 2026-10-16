@@ -1,4 +1,4 @@
-use super::app::{keyword_suggestions, route_query, QueryMode};
+use super::app::{fido_updir, keyword_suggestions, route_query, QueryMode};
 use super::help::{filter_help_entries, help_entries};
 use super::placeholders::Expanded;
 use super::preview::{
@@ -1442,6 +1442,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "Ctrl+H",
             "Alt+P/N",
             "Tab",
+            "Backspace",
             "Ctrl+/",
             "Esc",
             "Enter",
@@ -2180,4 +2181,84 @@ fn test_inspect_path_text_binary_truncation_and_directory() {
     assert_eq!(format_byte_size(2048), "2.0 KiB");
 
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn test_fido_updir_goes_to_parent_directory() {
+    let home = "/home/user";
+    assert_eq!(
+        fido_updir("/usr/share/doc/", "/usr/share/doc", home),
+        Some(("/usr/share/".into(), "doc".into()))
+    );
+    assert_eq!(
+        fido_updir("/usr/", "/usr", home),
+        Some(("/".into(), "usr".into()))
+    );
+    assert_eq!(
+        fido_updir("~/Documents/", "~/Documents", home),
+        Some(("~/".into(), "Documents".into()))
+    );
+    assert_eq!(
+        fido_updir("~/", "~", home),
+        Some(("/home/".into(), "user".into()))
+    );
+}
+
+#[test]
+fn test_fido_updir_leaves_other_edits_alone() {
+    let home = "/home/user";
+    // Deleting the root slash is a plain delete.
+    assert_eq!(fido_updir("/", "", home), None);
+    // Deleting a filter character, not the trailing slash.
+    assert_eq!(fido_updir("/usr/sh", "/usr/s", home), None);
+    // Typing rather than deleting.
+    assert_eq!(fido_updir("/usr", "/usr/", home), None);
+    // A doubled slash collapses normally.
+    assert_eq!(fido_updir("/usr//", "/usr/", home), None);
+}
+
+fn updir_test_dir() -> std::path::PathBuf {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("raffi-updir-test-{unique}"));
+    for name in ["alpha", "beta", "gamma"] {
+        std::fs::create_dir_all(dir.join(name)).unwrap();
+    }
+    dir
+}
+
+#[test]
+fn test_backspace_on_trailing_slash_goes_up_and_selects_previous_dir() {
+    let dir = updir_test_dir();
+    let base = dir.to_string_lossy().into_owned();
+    let mut app = test_app(AddonsConfig::default());
+
+    let _ = app.update(Message::SearchChanged(format!("{base}/gamma/")));
+    assert!(app.file_browser.active);
+    let _ = app.update(Message::SearchChanged(format!("{base}/gamma")));
+
+    assert_eq!(app.search_query, format!("{base}/"));
+    let selected = &app.file_browser.entries[app.selected_index];
+    assert_eq!(selected.name, "gamma");
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn test_backspace_updir_disabled_is_a_plain_delete() {
+    let dir = updir_test_dir();
+    let base = dir.to_string_lossy().into_owned();
+    let mut addons = AddonsConfig::default();
+    addons.file_browser.backspace_updir = false;
+    let mut app = test_app(addons);
+
+    let _ = app.update(Message::SearchChanged(format!("{base}/gamma/")));
+    let _ = app.update(Message::SearchChanged(format!("{base}/gamma")));
+
+    assert_eq!(app.search_query, format!("{base}/gamma"));
+    assert_eq!(app.selected_index, 0);
+
+    std::fs::remove_dir_all(&dir).unwrap();
 }

@@ -81,6 +81,10 @@ pub struct FileBrowserAddonConfig {
     pub enabled: bool,
     #[serde(default)]
     pub show_hidden: Option<bool>,
+    /// Backspace on a trailing `/` jumps to the parent directory, like
+    /// Emacs fido/ido mode.
+    #[serde(default = "default_true")]
+    pub backspace_updir: bool,
 }
 
 impl Default for FileBrowserAddonConfig {
@@ -88,6 +92,7 @@ impl Default for FileBrowserAddonConfig {
         Self {
             enabled: true,
             show_hidden: None,
+            backspace_updir: true,
         }
     }
 }

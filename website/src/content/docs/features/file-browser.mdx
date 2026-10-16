@@ -54,6 +54,7 @@ Start the file browser by typing one of these prefixes:
 | **Enter** | Navigate into directory OR open file with `xdg-open` |
 | **Alt+Enter** | Copy file/directory path to clipboard |
 | **Tab** | Autocomplete selected entry into search bar |
+| **Backspace** | On a trailing `/`, go up to the parent directory |
 | **Ctrl+H** | Toggle hidden file visibility |
 | **Ctrl+J** / **Ctrl+K** | Scroll the right-hand preview pane down / up |
 | **Ctrl+P** | Toggle right-hand file/directory/image preview pane |
@@ -154,6 +155,15 @@ Hidden files start with a dot (`.`), like `.bashrc`, `.config`, etc.
 [Enter] → Shows contents of Documents/
 ```
 
+### Go Up a Directory
+
+With the input ending in `/`, press **Backspace** to jump to the parent directory. The directory you came from stays selected, so **Enter** takes you straight back.
+
+```text Example
+~/Projects/myapp/src/
+[Backspace] → Input becomes: ~/Projects/myapp/  (src/ selected)
+```
+
 ### Copy Path
 
 1. Navigate to file or directory
@@ -211,6 +221,7 @@ addons:
   file_browser:
     enabled: true
     show_hidden: false
+    backspace_updir: true
 ```
 
 ### Configuration Options
@@ -223,6 +234,11 @@ Enable or disable the file browser addon
 **`show_hidden`** `boolean` (default: `false`)
 
 Show hidden files (dotfiles) by default. Can be toggled at runtime with Ctrl+H.
+
+
+**`backspace_updir`** `boolean` (default: `true`)
+
+When the input ends with `/`, Backspace jumps to the parent directory instead of deleting the slash, like Emacs fido/ido mode. The directory you just left is selected in the parent listing. On `~/` it goes up to the parent of your home directory, and on `/` it is a plain delete. Set to `false` to make Backspace always delete one character.
 
 
 ### Disable File Browser
