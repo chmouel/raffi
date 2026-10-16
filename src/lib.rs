@@ -504,14 +504,6 @@ pub struct Args {
     pub ui_type: Option<String>,
     #[options(help = "initial search query (native mode only)", short = "i")]
     pub initial_query: Option<String>,
-    #[options(help = "native window width in pixels", no_short)]
-    pub width: Option<f32>,
-    #[options(help = "native window height in pixels", no_short)]
-    pub height: Option<f32>,
-    #[options(help = "Hyprland window x coordinate (use with --y)", no_short)]
-    pub x: Option<i32>,
-    #[options(help = "Hyprland window y coordinate (use with --x)", no_short)]
-    pub y: Option<i32>,
     #[options(
         help = "theme: dark, light, catppuccin, catppuccin-latte, tokyo-night, nord, gruvbox, dracula, rose-pine, kanagawa (default: dark)",
         short = "t"
@@ -528,34 +520,11 @@ pub struct Args {
     pub debug_file: Option<String>,
 }
 
-fn validate_cli_window_dimensions(args: &Args) -> Result<()> {
-    for (name, value) in [("--width", args.width), ("--height", args.height)] {
-        if value.is_some_and(|value| !value.is_finite() || value <= 0.0) {
-            anyhow::bail!("{name} must be a finite positive number");
-        }
-    }
-    Ok(())
-}
-
-fn resolve_window_dimensions(args: &Args, general: &GeneralConfig) -> (f32, f32) {
+fn resolve_window_dimensions(general: &GeneralConfig) -> (f32, f32) {
     (
-        args.width.or(general.window_width).unwrap_or(800.0),
-        args.height.or(general.window_height).unwrap_or(600.0),
+        general.window_width.unwrap_or(800.0),
+        general.window_height.unwrap_or(600.0),
     )
-}
-
-fn resolve_window_position(args: &Args, ui_type: &UIType) -> Result<Option<(i32, i32)>> {
-    let position = match (args.x, args.y) {
-        (None, None) => None,
-        (Some(x), Some(y)) => Some((x, y)),
-        _ => anyhow::bail!("--x and --y must be used together"),
-    };
-
-    if position.is_some() && ui_type == &UIType::Fuzzel {
-        anyhow::bail!("--x and --y require --ui-type native in a Hyprland session");
-    }
-
-    Ok(position)
 }
 
 /// A trait for checking environment variables.
@@ -1937,9 +1906,6 @@ pub fn run(args: Args) -> Result<()> {
 
     debug_log!("config: ui_type={ui_type:?}");
 
-    validate_cli_window_dimensions(&args)?;
-    let window_position = resolve_window_position(&args, &ui_type)?;
-
     // Determine max history size
     let max_history = general.max_history.unwrap_or(10);
 
@@ -1955,7 +1921,7 @@ pub fn run(args: Args) -> Result<()> {
         font_sizes.outer_padding = padding;
     }
 
-    let (window_width, window_height) = resolve_window_dimensions(&args, general);
+    let (window_width, window_height) = resolve_window_dimensions(general);
 
     // Build UI settings
     let ui_settings = ui::UISettings {
@@ -1968,7 +1934,6 @@ pub fn run(args: Args) -> Result<()> {
         font_family: general.font_family.clone(),
         window_width,
         window_height,
-        window_position,
         sort_mode: general.sort_mode.clone(),
         fallbacks: general.fallbacks.clone(),
         clipboard_history: general.clipboard_history,
@@ -1979,11 +1944,10 @@ pub fn run(args: Args) -> Result<()> {
     };
 
     debug_log!(
-        "ui: settings: no_icons={} window={}x{} position={:?} max_history={} sort_mode={:?}",
+        "ui: settings: no_icons={} window={}x{} max_history={} sort_mode={:?}",
         ui_settings.no_icons,
         ui_settings.window_width,
         ui_settings.window_height,
-        ui_settings.window_position,
         ui_settings.max_history,
         ui_settings.sort_mode
     );
@@ -2318,7 +2282,6 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
-            ..Default::default()
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.entries.len(), 2);
@@ -2373,7 +2336,6 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
-            ..Default::default()
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -2442,7 +2404,6 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
-            ..Default::default()
         };
         let env_provider = MockEnvProvider {
             vars: {
@@ -2498,7 +2459,6 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
-            ..Default::default()
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -2551,7 +2511,6 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
-            ..Default::default()
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -2730,7 +2689,6 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
-            ..Default::default()
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -2765,7 +2723,6 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
-            ..Default::default()
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -2819,7 +2776,6 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
-            ..Default::default()
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -2856,7 +2812,6 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
-            ..Default::default()
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.general.font_size, Some(16.0));
@@ -2889,74 +2844,34 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
-            ..Default::default()
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.general.theme, Some("light".to_string()));
     }
 
     #[test]
-    fn test_window_cli_overrides_config_dimensions() {
-        let args =
-            Args::parse_args_default::<&str>(&["--width", "900", "--x=-50", "--y=75"]).unwrap();
+    fn test_config_window_dimensions_are_used() {
         let general = GeneralConfig {
             window_width: Some(700.0),
             window_height: Some(450.0),
             ..Default::default()
         };
 
-        assert_eq!(resolve_window_dimensions(&args, &general), (900.0, 450.0));
-        assert_eq!(args.x, Some(-50));
-        assert_eq!(args.y, Some(75));
-        validate_cli_window_dimensions(&args).unwrap();
-    }
-
-    #[test]
-    fn test_window_cli_rejects_invalid_dimensions_and_incomplete_position() {
-        let args = Args {
-            width: Some(f32::INFINITY),
-            x: Some(10),
-            ..Default::default()
-        };
-
-        assert!(validate_cli_window_dimensions(&args).is_err());
+        assert_eq!(resolve_window_dimensions(&general), (700.0, 450.0));
         assert_eq!(
-            resolve_window_position(&args, &UIType::Fuzzel)
-                .unwrap_err()
-                .to_string(),
-            "--x and --y must be used together"
+            resolve_window_dimensions(&GeneralConfig::default()),
+            (800.0, 600.0)
         );
     }
 
     #[test]
-    fn test_window_cli_rejects_position_with_fuzzel() {
-        let args = Args {
-            x: Some(10),
-            y: Some(20),
-            ..Default::default()
-        };
-
-        assert_eq!(
-            resolve_window_position(&args, &UIType::Fuzzel)
-                .unwrap_err()
-                .to_string(),
-            "--x and --y require --ui-type native in a Hyprland session"
-        );
-    }
-
-    #[cfg(feature = "wayland")]
-    #[test]
-    fn test_window_cli_position_is_available_for_native_ui() {
-        let args = Args {
-            x: Some(10),
-            y: Some(20),
-            ..Default::default()
-        };
-
-        assert_eq!(
-            resolve_window_position(&args, &UIType::Native).unwrap(),
-            Some((10, 20))
-        );
+    fn test_window_geometry_flags_are_not_accepted() {
+        for flag in ["--width", "--height", "--x", "--y"] {
+            assert!(
+                Args::parse_args_default::<&str>(&[flag, "100"]).is_err(),
+                "{flag} should not be accepted"
+            );
+        }
     }
 
     #[test]
@@ -3051,7 +2966,6 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
-            ..Default::default()
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -3113,7 +3027,6 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
-            ..Default::default()
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -3189,7 +3102,6 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
-            ..Default::default()
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -3230,7 +3142,6 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
-            ..Default::default()
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert!(parsed_config.addons.text_snippets.is_empty());
@@ -3267,7 +3178,6 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
-            ..Default::default()
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -3312,7 +3222,6 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
-            ..Default::default()
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -3355,7 +3264,6 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
-            ..Default::default()
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -3397,7 +3305,6 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
-            ..Default::default()
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 

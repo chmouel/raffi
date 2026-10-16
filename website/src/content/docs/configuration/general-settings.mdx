@@ -10,7 +10,7 @@ import fallbacksScreenshot from '../../../assets/screenshots/fallbacks.png';
 
 ## Overview
 
-The `general` section in your configuration file sets persistent defaults for Raffi's appearance and behavior. These settings are equivalent to command-line flags but are applied automatically on every launch.
+The `general` section in your configuration file sets persistent defaults for Raffi's appearance and behavior. Command-line flags override config values when a setting has a corresponding flag.
 
 <Aside type="note">
 Command-line flags always override settings from the configuration file.
@@ -208,14 +208,10 @@ Font family name (e.g., `"Inter"`, `"Fira Sans"`, `"Roboto"`).
 
 Launcher window width in pixels (native mode only).
 
-  Can be overridden for one launch with `--width`.
-
 
 **`window_height`** `number` (default: `600`)
 
 Launcher window height in pixels (native mode only).
-
-  Can be overridden for one launch with `--height`.
 
 
 **`padding`** `number` (default: `20`)
@@ -223,14 +219,6 @@ Launcher window height in pixels (native mode only).
 Outer window padding in pixels.
 
   When not set, padding scales automatically with `font_size`.
-
-## Window Position
-
-Window position is not a YAML setting. In a Hyprland session, pass `--x` and
-`--y` together to set the native window's coordinates for one launch. Raffi
-floats its window when these flags are used. Absolute top-level window
-positioning is compositor-controlled on standard Wayland, so these flags are
-available only with Hyprland 0.55 or later and the native UI.
 
 
 ## Theme Colors
@@ -321,7 +309,7 @@ general:
 ## Command-Line Override
 
 The following general settings can be overridden with command-line flags.
-`clipboard_history` and `terminal_classes` have no flag and can only be set in the configuration file.
+`window_width`, `window_height`, `clipboard_history`, and `terminal_classes` have no flag and can only be set in the configuration file.
 
 ```bash
 # Override UI type
@@ -332,12 +320,6 @@ raffi --theme light
 
 # Disable icons
 raffi --no-icons
-
-# Override native window size
-raffi -u native --width 900 --height 600
-
-# Position the native window in Hyprland
-raffi -u native --x 120 --y 80
 
 # Set custom script shell
 raffi --default-script-shell /bin/zsh

@@ -23,10 +23,7 @@ mod tests;
 
 use anyhow::Result;
 use iced::window;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
-};
+use std::sync::{Arc, Mutex};
 
 use super::{UISettings, UI};
 use crate::{AddonsConfig, RaffiConfig};
@@ -59,12 +56,6 @@ fn run_wayland_ui(
     addons: &AddonsConfig,
     settings: &UISettings,
 ) -> Result<String> {
-    if settings.window_position.is_some() && !hyprland::in_session() {
-        return Err(anyhow::anyhow!(
-            "--x and --y are only supported in a Hyprland session"
-        ));
-    }
-
     crate::debug_log!(
         "wayland: starting UI: {}x{} theme={:?} sort_mode={:?} no_icons={} max_history={}",
         settings.window_width,
@@ -170,25 +161,10 @@ fn run_wayland_ui(
         });
     }
 
-    let positioning_cancelled = Arc::new(AtomicBool::new(false));
-    let positioning_task = settings.window_position.map(|(x, y)| {
-        let cancelled = Arc::clone(&positioning_cancelled);
-        std::thread::spawn(move || hyprland::position_raffi_window(x, y, &cancelled))
-    });
-
     let result = app.run();
-    positioning_cancelled.store(true, Ordering::Relaxed);
-    let positioning_result = positioning_task.map(|task| match task.join() {
-        Ok(result) => result.map_err(|error| anyhow::anyhow!(error)),
-        Err(_) => Err(anyhow::anyhow!("Hyprland positioning task panicked")),
-    });
 
     if let Err(error) = result {
         return Err(anyhow::anyhow!("Failed to run UI: {:?}", error));
-    }
-
-    if let Some(result) = positioning_result {
-        result.map_err(|error| anyhow::anyhow!("Failed to position window: {error}"))?;
     }
 
     if let Some(target) = deferred_paste
