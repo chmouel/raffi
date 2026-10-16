@@ -283,13 +283,18 @@ must check `RAFFI_PREVIEW` first, or the filter needs `dynamic_preview: false`.
 </Aside>
 
 Scripts that ignore `RAFFI_PREVIEW` keep working. Raffi waits for the first
-preview run of a script filter to answer before starting another. If a
-successful run prints
-something other than a preview object (for example the usual
-`{"items": [...]}` or invalid JSON), Raffi stops asking that script filter for
-the rest of the session and uses the item's `preview` field. A failed run
-(non-zero exit or timeout) keeps the last preview on screen, adds a `Preview`
-row with the error, and is retried the next time the item is selected.
+preview run of a script filter to answer before starting another. Any JSON
+object without an `items` key is a preview object, so `{}` is an empty
+preview. If the first run fails, times out, or prints something other than a
+preview object (for example the usual `{"items": [...]}` or text that is not
+JSON), Raffi stops asking that script filter for the rest of the session and
+uses the item's `preview` field.
+
+Once a script filter has printed a preview object, even one Raffi cannot read
+(such as a field with the wrong type), errors are shown instead: a failed run
+(non-zero exit or timeout) or an unreadable preview object keeps the last
+preview on screen, adds a `Preview` row with the error, and is retried the
+next time the item is selected.
 
 ### Preview Object
 

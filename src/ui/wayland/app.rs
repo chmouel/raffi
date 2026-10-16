@@ -2318,10 +2318,9 @@ impl LauncherApp {
             self.script_filter.preview_probing.remove(&config_index);
             return Task::none();
         };
-        let size = self.view.window_size;
         let pane = (
-            (size.width * self.view.preview_style.width_fraction).round() as u32,
-            size.height.round() as u32,
+            (self.view.window_size.width * self.view.preview_style.width_fraction).round() as u32,
+            self.preview_viewport_height().round() as u32,
         );
         let request = PreviewRequest::new(config, &self.script_filter.query, item, pane);
         execute_script_filter_preview(request, generation, config_index, index)
@@ -2332,12 +2331,16 @@ impl LauncherApp {
         generation: u64,
         config_index: usize,
         index: usize,
-        result: std::result::Result<Option<super::types::PreparedPreview>, String>,
+        result: std::result::Result<
+            Option<super::types::PreparedPreview>,
+            super::types::ScriptFilterPreviewError,
+        >,
     ) -> Task<Message> {
+        use super::types::ScriptFilterPreviewError;
         // Whether the script speaks the protocol holds even for stale replies.
         let was_probing = self.script_filter.preview_probing.remove(&config_index);
         match &result {
-            Ok(Some(_)) => {
+            Ok(Some(_)) | Err(ScriptFilterPreviewError::Invalid(_)) => {
                 self.script_filter.preview_supported.insert(config_index);
             }
             Ok(None) => {
@@ -2345,7 +2348,18 @@ impl LauncherApp {
                 self.script_filter.preview_unsupported.insert(config_index);
                 return Task::none();
             }
-            Err(_) => {}
+            // A legacy script may be slow or fail when run for a preview;
+            // re-running it on every selection would only repeat that.
+            Err(ScriptFilterPreviewError::Run(error))
+                if !self.script_filter.preview_supported.contains(&config_index) =>
+            {
+                crate::debug_log!(
+                    "script_filter: first preview run failed ({error}), disabling dynamic preview"
+                );
+                self.script_filter.preview_unsupported.insert(config_index);
+                return Task::none();
+            }
+            Err(ScriptFilterPreviewError::Run(_)) => {}
         }
         if generation != self.script_filter.preview_generation {
             // Requests made while the probe ran were skipped; retry the current one.
@@ -2368,6 +2382,7 @@ impl LauncherApp {
             }
             Ok(None) => return Task::none(),
             Err(error) => {
+                let error = error.into_message();
                 crate::debug_log!("script_filter: preview failed: {error}");
                 let entry = self.script_filter.previews.entry(index).or_default();
                 entry.error = Some(error);

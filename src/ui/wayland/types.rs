@@ -139,10 +139,22 @@ pub(crate) struct RawPreviewSpec {
     dynamic: Option<bool>,
 }
 
-/// Top-level keys that make a JSON object a preview response.
-pub(crate) const PREVIEW_SPEC_KEYS: &[&str] = &[
-    "title", "subtitle", "badge", "icon", "text", "image", "sections", "metadata", "refresh",
-];
+/// Why a `RAFFI_PREVIEW=1` run gave no preview.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ScriptFilterPreviewError {
+    /// The script failed, timed out or could not be started.
+    Run(String),
+    /// The script answered with a preview object that cannot be read.
+    Invalid(String),
+}
+
+impl ScriptFilterPreviewError {
+    pub(crate) fn into_message(self) -> String {
+        match self {
+            Self::Run(message) | Self::Invalid(message) => message,
+        }
+    }
+}
 
 /// Shortest allowed auto-refresh interval for dynamic previews.
 pub(crate) const MIN_PREVIEW_REFRESH: Duration = Duration::from_millis(500);
@@ -415,7 +427,7 @@ pub(crate) enum Message {
         u64,
         usize,
         usize,
-        std::result::Result<Option<PreparedPreview>, String>,
+        std::result::Result<Option<PreparedPreview>, ScriptFilterPreviewError>,
     ),
     TextSnippetCommandResult(u64, std::result::Result<Vec<TextSnippet>, String>),
     TextSnippetSelected(usize),

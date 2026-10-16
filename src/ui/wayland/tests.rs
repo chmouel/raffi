@@ -2502,7 +2502,9 @@ fn test_dynamic_preview_replaces_static_preview_and_reports_errors() {
         generation,
         0,
         0,
-        Err("timed out after 3s".into()),
+        Err(super::types::ScriptFilterPreviewError::Run(
+            "timed out after 3s".into(),
+        )),
     ));
     let preview = app.resolve_selected_preview().expect("preview");
     assert_eq!(preview.title, "Dynamic title");
@@ -2593,6 +2595,58 @@ fn test_dynamic_preview_cache_skips_rerun_unless_refreshing() {
     let _ = app.request_script_filter_preview();
     assert_ne!(app.script_filter.preview_generation, before);
     assert!(app.script_filter.previews.contains_key(&0));
+}
+
+#[test]
+fn test_dynamic_preview_first_run_failure_disables_it_without_an_error_row() {
+    let mut app = dynamic_preview_app(vec![plain_item("one")]);
+    let _ = app.request_script_filter_preview();
+    let generation = app.script_filter.preview_generation;
+    let _ = app.update(Message::ScriptFilterPreviewDue(generation, 0));
+    assert!(app.script_filter.preview_probing.contains(&0));
+
+    let _ = app.update(Message::ScriptFilterPreview(
+        generation,
+        0,
+        0,
+        Err(super::types::ScriptFilterPreviewError::Run(
+            "timed out after 3s".into(),
+        )),
+    ));
+    assert!(app.script_filter.preview_unsupported.contains(&0));
+    assert!(app.script_filter.previews.is_empty());
+    assert_eq!(app.dynamic_preview_target(), None);
+    let preview = app.resolve_selected_preview().expect("preview");
+    assert!(!preview.metadata.iter().any(|(k, _)| k == "Preview"));
+    assert!(matches!(
+        preview.bodies.as_slice(),
+        [PreviewBody::AnsiText { content, .. }] if content == "static body"
+    ));
+}
+
+#[test]
+fn test_dynamic_preview_unreadable_first_answer_shows_the_error() {
+    let mut app = dynamic_preview_app(vec![plain_item("one")]);
+    let _ = app.request_script_filter_preview();
+    let generation = app.script_filter.preview_generation;
+    let _ = app.update(Message::ScriptFilterPreviewDue(generation, 0));
+
+    let _ = app.update(Message::ScriptFilterPreview(
+        generation,
+        0,
+        0,
+        Err(super::types::ScriptFilterPreviewError::Invalid(
+            "Invalid preview: bad title".into(),
+        )),
+    ));
+    assert!(app.script_filter.preview_supported.contains(&0));
+    assert!(!app.script_filter.preview_unsupported.contains(&0));
+    assert_eq!(app.dynamic_preview_target(), Some(0));
+    let preview = app.resolve_selected_preview().expect("preview");
+    assert!(preview
+        .metadata
+        .iter()
+        .any(|(k, v)| k == "Preview" && v == "Invalid preview: bad title"));
 }
 
 #[test]

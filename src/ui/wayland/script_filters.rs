@@ -8,7 +8,7 @@ use iced::Task;
 use serde::Deserialize;
 
 use super::state::{Message, ScriptFilterResult};
-use super::types::{PreparedPreview, RawPreviewSpec, ScriptFilterItem, PREVIEW_SPEC_KEYS};
+use super::types::{PreparedPreview, RawPreviewSpec, ScriptFilterItem, ScriptFilterPreviewError};
 
 /// Longest a `RAFFI_PREVIEW=1` run may take before it is killed.
 const PREVIEW_TIMEOUT: Duration = Duration::from_secs(3);
@@ -95,17 +95,24 @@ pub(super) fn execute_script_filter(
     )
 }
 
-/// Parse the output of a `RAFFI_PREVIEW=1` run. `None` means the script does
-/// not speak the preview protocol: the output is not JSON, is an item list,
-/// or has none of the preview fields.
-pub(super) fn parse_preview_response(stdout: &[u8]) -> Option<PreparedPreview> {
-    let value: serde_json::Value = serde_json::from_slice(stdout).ok()?;
-    let object = value.as_object()?;
-    if object.contains_key("items") || !PREVIEW_SPEC_KEYS.iter().any(|k| object.contains_key(*k)) {
-        return None;
+/// Parse the output of a `RAFFI_PREVIEW=1` run. `Ok(None)` means the script
+/// does not speak the preview protocol: the output is not a JSON object or is
+/// an item list. Any other object is a preview, `{}` an empty one.
+pub(super) fn parse_preview_response(
+    stdout: &[u8],
+) -> Result<Option<PreparedPreview>, ScriptFilterPreviewError> {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(stdout) else {
+        return Ok(None);
+    };
+    if !value
+        .as_object()
+        .is_some_and(|object| !object.contains_key("items"))
+    {
+        return Ok(None);
     }
-    let spec: RawPreviewSpec = serde_json::from_value(value).ok()?;
-    Some(spec.into())
+    let spec: RawPreviewSpec = serde_json::from_value(value)
+        .map_err(|error| ScriptFilterPreviewError::Invalid(format!("Invalid preview: {error}")))?;
+    Ok(Some(spec.into()))
 }
 
 /// Everything needed to run one dynamic preview of a Script Filter item.
@@ -143,7 +150,7 @@ impl PreviewRequest {
         }
     }
 
-    fn run(self) -> Result<Option<PreparedPreview>, String> {
+    fn run(self) -> Result<Option<PreparedPreview>, ScriptFilterPreviewError> {
         crate::debug_log!(
             "script_filter: preview command={:?} value={:?}",
             self.command,
@@ -151,8 +158,9 @@ impl PreviewRequest {
         );
         let mut command = Command::new(&self.command);
         command.args(&self.args).arg(&self.query).envs(&self.env);
-        let output = super::actions::run_bounded(command, PREVIEW_TIMEOUT, MAX_PREVIEW_OUTPUT)?;
-        Ok(parse_preview_response(&output))
+        let output = super::actions::run_bounded(command, PREVIEW_TIMEOUT, MAX_PREVIEW_OUTPUT)
+            .map_err(ScriptFilterPreviewError::Run)?;
+        parse_preview_response(&output)
     }
 }
 
@@ -169,9 +177,11 @@ pub(super) fn execute_script_filter_preview(
             std::thread::spawn(move || {
                 let _ = sender.send(request.run());
             });
-            receiver
-                .await
-                .unwrap_or_else(|_| Err("preview worker stopped".into()))
+            receiver.await.unwrap_or_else(|_| {
+                Err(ScriptFilterPreviewError::Run(
+                    "preview worker stopped".into(),
+                ))
+            })
         },
         move |result| Message::ScriptFilterPreview(generation, config_index, index, result),
     )
@@ -214,7 +224,9 @@ pub(super) fn schedule_script_filter_preview(
 
 #[cfg(test)]
 mod tests {
-    use super::super::types::{PreparedPreviewBody, ScriptFilterPreview};
+    use super::super::types::{
+        PreparedPreview, PreparedPreviewBody, ScriptFilterPreview, ScriptFilterPreviewError,
+    };
     use super::{parse_preview_response, parse_script_filter_output, sleep_unless_superseded};
     use std::sync::atomic::AtomicU64;
     use std::time::{Duration, Instant};
@@ -233,18 +245,26 @@ mod tests {
 
     #[test]
     fn test_preview_refresh_is_clamped() {
-        let huge = parse_preview_response(br#"{"text":"x","refresh":1e100}"#).unwrap();
+        let huge = parse_preview_response(br#"{"text":"x","refresh":1e100}"#)
+            .unwrap()
+            .unwrap();
         assert_eq!(huge.refresh, Some(Duration::from_secs(3600)));
-        let tiny = parse_preview_response(br#"{"text":"x","refresh":0.01}"#).unwrap();
+        let tiny = parse_preview_response(br#"{"text":"x","refresh":0.01}"#)
+            .unwrap()
+            .unwrap();
         assert_eq!(tiny.refresh, Some(Duration::from_millis(500)));
     }
 
     #[test]
     fn test_preview_explicit_empty_sections_replace_body() {
-        let empty = parse_preview_response(br#"{"text":"ignored","sections":[]}"#).unwrap();
+        let empty = parse_preview_response(br#"{"text":"ignored","sections":[]}"#)
+            .unwrap()
+            .unwrap();
         assert!(empty.bodies.is_empty());
         assert!(empty.replaces_body);
-        let header_only = parse_preview_response(br#"{"title":"t"}"#).unwrap();
+        let header_only = parse_preview_response(br#"{"title":"t"}"#)
+            .unwrap()
+            .unwrap();
         assert!(!header_only.replaces_body);
     }
 
@@ -363,7 +383,9 @@ mod tests {
             "text": "ignored when sections are set",
             "refresh": 0.1
         }"#;
-        let preview = parse_preview_response(stdout).expect("preview response");
+        let preview = parse_preview_response(stdout)
+            .unwrap()
+            .expect("preview response");
         assert_eq!(
             preview.refresh,
             Some(super::super::types::MIN_PREVIEW_REFRESH)
@@ -384,11 +406,43 @@ mod tests {
 
     #[test]
     fn test_parse_preview_response_rejects_non_preview_output() {
-        assert!(parse_preview_response(br#"{"items":[{"title":"x"}]}"#).is_none());
-        assert!(parse_preview_response(br#"{"unrelated":1}"#).is_none());
-        assert!(parse_preview_response(b"plain text").is_none());
-        assert!(parse_preview_response(br#"["text"]"#).is_none());
-        assert!(parse_preview_response(br#"{"text":"ok"}"#).is_some());
+        for stdout in [
+            &br#"{"items":[{"title":"x"}]}"#[..],
+            b"plain text",
+            br#"["text"]"#,
+        ] {
+            assert_eq!(parse_preview_response(stdout), Ok(None));
+        }
+        assert!(parse_preview_response(br#"{"text":"ok"}"#)
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn test_parse_preview_response_any_object_without_items_is_a_preview() {
+        let empty = parse_preview_response(b"{}")
+            .unwrap()
+            .expect("empty preview");
+        assert_eq!(
+            empty,
+            PreparedPreview {
+                dynamic: true,
+                ..PreparedPreview::default()
+            }
+        );
+        assert!(parse_preview_response(br#"{"unrelated":1}"#)
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn test_parse_preview_response_reports_unreadable_preview_objects() {
+        match parse_preview_response(br#"{"title":5}"#) {
+            Err(ScriptFilterPreviewError::Invalid(message)) => {
+                assert!(message.starts_with("Invalid preview: "), "{message}");
+            }
+            other => panic!("unexpected result: {other:?}"),
+        }
     }
 
     #[test]
