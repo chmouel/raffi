@@ -1,6 +1,6 @@
 ---
 title: Addon Configuration
-description: Configuration reference for built-in addons (currency, calculator, unit conversion, color converter, world clock, developer tools, file browser, script filters, web searches, text snippets, clipboard history, system commands, window switcher)
+description: Configuration reference for built-in addons (currency, calculator, unit conversion, color converter, world clock, developer tools, file browser, script filters, web searches, text snippets, clipboard history, system commands, window switcher, media controls)
 ---
 
 import { Image } from 'astro:assets';
@@ -13,7 +13,7 @@ The native UI includes several built-in addons that can be configured under the 
 ## Keywords
 
 Script filters, web searches, text snippets, the emoji picker, the clipboard
-history browser, system commands, the window switcher and developer tools are reached by
+history browser, system commands, the window switcher, media controls and developer tools are reached by
 typing their keyword followed by a space. Typing `sn` on its own searches your
 launchers as usual, while `sn ` enters the snippet source.
 
@@ -999,6 +999,34 @@ addons:
     trigger: "w"
 ```
 
+## Media Controls
+
+Plays, pauses, skips or stops the running media players through `playerctl`.
+See [Media Controls](/features/media-controls/) for usage.
+
+### Configuration
+
+**`addons.media.enabled`** `boolean` (default: `true`)
+
+**`addons.media.trigger`** `string` (default: `media`)
+
+Keyword that opens the controls. Type it followed by a space. Web searches
+with the same keyword take precedence.
+
+**`addons.media.close_on_action`** `boolean` (default: `false`)
+
+Close Raffi after an action. By default Raffi stays open and refreshes the
+list, so you can press Next several times in a row.
+
+### Example
+
+```yaml
+addons:
+  media:
+    trigger: "mu"
+    close_on_action: true
+```
+
 ## Developer Tools
 
 Lists base64, URL, hash, epoch, JSON and case transforms of the text typed
@@ -1059,6 +1087,11 @@ addons:
   windows:
     enabled: true
     trigger: "win"
+
+  media:
+    enabled: true
+    trigger: "media"
+    close_on_action: false
 
   file_browser:
     enabled: true

@@ -560,6 +560,37 @@ impl Default for WindowsAddonConfig {
     }
 }
 
+/// Configuration for the media controls addon (native UI only)
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
+pub struct MediaAddonConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Keyword that opens the media controls (default: `media`).
+    #[serde(default)]
+    pub trigger: Option<String>,
+    /// Close Raffi after an action instead of staying open and refreshing
+    /// the list (default: false).
+    #[serde(default)]
+    pub close_on_action: bool,
+}
+
+impl MediaAddonConfig {
+    pub fn trigger(&self) -> &str {
+        self.trigger.as_deref().unwrap_or("media")
+    }
+}
+
+impl Default for MediaAddonConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            trigger: None,
+            close_on_action: false,
+        }
+    }
+}
+
 /// Container for all addon configurations
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
@@ -584,6 +615,8 @@ pub struct AddonsConfig {
     pub system: SystemAddonConfig,
     #[serde(default)]
     pub windows: WindowsAddonConfig,
+    #[serde(default)]
+    pub media: MediaAddonConfig,
     #[serde(default)]
     pub devtools: DevtoolsAddonConfig,
     #[serde(default)]
@@ -3734,6 +3767,19 @@ shell:
             serde_yaml::from_str("enabled: false\ntrigger: w\n").unwrap();
         assert!(!config.enabled);
         assert_eq!(config.trigger(), "w");
+    }
+
+    #[test]
+    fn test_media_addon_config_parsing() {
+        let defaults = AddonsConfig::default().media;
+        assert!(defaults.enabled);
+        assert_eq!(defaults.trigger(), "media");
+        assert!(!defaults.close_on_action);
+
+        let config: MediaAddonConfig =
+            serde_yaml::from_str("trigger: mu\nclose_on_action: true\n").unwrap();
+        assert_eq!(config.trigger(), "mu");
+        assert!(config.close_on_action);
     }
 
     #[test]

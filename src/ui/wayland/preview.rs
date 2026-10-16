@@ -596,7 +596,7 @@ impl LauncherApp {
             current_index += count;
         }
 
-        // 4c. Command lists (system commands, windows)
+        // 4c. Command lists (system commands, windows, media)
         if self.command_list.is_active() {
             let count = self.command_list.row_count();
             if index >= current_index && index < current_index + count {
@@ -1612,6 +1612,19 @@ fn describe_addon_by_keyword(
                     "Move it to the current workspace and focus it".to_string(),
                 ),
                 ("Requires".to_string(), "Hyprland".to_string()),
+            ],
+        );
+    }
+
+    if addons.media.enabled && keyword == addons.media.trigger() {
+        return (
+            "Media Controls".to_string(),
+            vec![
+                (
+                    "Enter".to_string(),
+                    "Play, pause, skip or stop the player".to_string(),
+                ),
+                ("Requires".to_string(), "playerctl".to_string()),
             ],
         );
     }

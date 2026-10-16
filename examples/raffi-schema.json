@@ -66,6 +66,9 @@
           "default": null,
           "minimum": 0
         },
+        "media": {
+          "$ref": "#/$defs/MediaAddonConfig"
+        },
         "script_filters": {
           "type": "array",
           "items": {
@@ -530,6 +533,30 @@
             "null"
           ],
           "format": "float",
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "MediaAddonConfig": {
+      "description": "Configuration for the media controls addon (native UI only)",
+      "type": "object",
+      "properties": {
+        "close_on_action": {
+          "description": "Close Raffi after an action instead of staying open and refreshing\nthe list (default: false).",
+          "type": "boolean",
+          "default": false
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "trigger": {
+          "description": "Keyword that opens the media controls (default: `media`).",
+          "type": [
+            "string",
+            "null"
+          ],
           "default": null
         }
       },

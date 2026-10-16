@@ -1,0 +1,55 @@
+---
+title: Media Controls
+description: Play, pause and skip tracks in any media player from Raffi
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Type `media ` (with the trailing space) to control the media players that
+are running, such as Spotify, mpv or a browser playing a video. Each player
+gets a header showing what is playing, its artist, whether it is playing or
+paused and the player name. Below it are four rows: Play or Pause, Next,
+Previous and Stop.
+
+Words after the keyword filter the rows by action or player name, so
+`media next` lists the Next row of every player and `media spotify` keeps
+only Spotify.
+
+<Aside type="note">
+Media controls are only available in native mode and need
+[playerctl](https://github.com/altdesktop/playerctl), which talks to any
+player supporting MPRIS. They are on by default. When `playerctl` is not
+installed the list shows "playerctl not found", and with no player running
+it shows "No media players running".
+</Aside>
+
+| Key   | Action                                    |
+|-------|-------------------------------------------|
+| Enter | Run the selected action on its player     |
+
+Raffi stays open after an action and refreshes the list, keeping the same
+row selected, so you can press Enter on Next several times in a row. When an
+action fails, an error row appears at the top of the list. Set
+`close_on_action: true` to close Raffi after each action instead.
+
+The header rows only show information and do nothing when selected. Queries
+typed in this mode are not saved in the search history.
+
+To open the controls from a key binding, pass the keyword as the initial
+query:
+
+```sh
+raffi -u native -i "media "
+```
+
+## Configuration
+
+```yaml
+addons:
+  media:
+    trigger: "mu"
+    close_on_action: true
+```
+
+See the [addon reference](/reference/addon-configuration/#media-controls)
+for every field.

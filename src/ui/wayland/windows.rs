@@ -170,6 +170,7 @@ fn window_item(client: Client, target: Option<&str>) -> CommandItem {
                 focus.clone(),
             ]),
             confirm: None,
+            keep_open: false,
         }
     });
     CommandItem {
@@ -180,10 +181,11 @@ fn window_item(client: Client, target: Option<&str>) -> CommandItem {
         icon: None,
         identity: client.address,
         unavailable: None,
-        primary: CommandAction {
+        primary: Some(CommandAction {
             action: DeferredAction::HyprDispatch(focus),
             confirm: None,
-        },
+            keep_open: false,
+        }),
         secondary,
         details,
     }
@@ -264,7 +266,7 @@ mod tests {
         let items = window_items(CLIENTS.as_bytes(), ACTIVE.as_bytes(), 4242).unwrap();
         let firefox = &items[1];
         assert!(matches!(
-            &firefox.primary.action,
+            &firefox.primary.as_ref().unwrap().action,
             DeferredAction::HyprDispatch(args) if args == &["focuswindow", "address:0x1a"]
         ));
         let secondary = firefox.secondary.as_ref().unwrap();
@@ -275,7 +277,7 @@ mod tests {
                 vec!["focuswindow".to_string(), "address:0x1a".to_string()],
             ]
         ));
-        assert!(firefox.primary.confirm.is_none() && secondary.confirm.is_none());
+        assert!(firefox.primary.as_ref().unwrap().confirm.is_none() && secondary.confirm.is_none());
     }
 
     #[test]

@@ -1600,6 +1600,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "gh",
             "sys",
             "win",
+            "media",
             "dev",
             "math",
             "$",
@@ -1636,7 +1637,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
     assert_eq!(entries[1].icon.as_deref(), Some("gist-icon"));
     assert_eq!(entries[1].completion.as_deref(), Some("gist "));
     assert_eq!(entries[0].completion.as_deref(), Some("~/"));
-    assert_eq!(entries[8].completion, None);
+    assert_eq!(entries[9].completion, None);
     // Shortcut rows are informational: they never arm a keyword.
     for entry in entries
         .iter()
@@ -1655,6 +1656,7 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
     addons.file_browser.enabled = false;
     addons.system.enabled = false;
     addons.windows.enabled = false;
+    addons.media.enabled = false;
     addons.units.enabled = false;
     addons.color.enabled = false;
     addons.world_clock.enabled = false;
@@ -1707,6 +1709,7 @@ fn test_help_entries_skip_disabled_addons() {
     addons.file_browser.enabled = false;
     addons.system.enabled = false;
     addons.windows.enabled = false;
+    addons.media.enabled = false;
     addons.units.enabled = false;
     addons.color.enabled = false;
     addons.world_clock.enabled = false;
@@ -3496,6 +3499,13 @@ fn test_default_triggers_do_not_shadow_each_other_or_web_searches() {
             ..
         }
     ));
+    assert!(matches!(
+        route_query("media x", &addons),
+        QueryMode::CommandList {
+            addon: CommandListAddon::Media,
+            ..
+        }
+    ));
 
     // A user web search keeps its keyword, and its suggestion comes first.
     addons.web_searches.push(WebSearchConfig {
@@ -3932,6 +3942,292 @@ fn test_windows_stale_load_is_dropped() {
     let _ = app.update(Message::SearchChanged("sys ".into()));
     let _ = app.update(Message::CommandListLoaded(current, Ok(window_fixture())));
     assert_eq!(command_list_titles(&app)[0], "Lock");
+}
+
+const MEDIA_METADATA: &str =
+    "\u{1e}spotify\u{1f}spotify\u{1f}Playing\u{1f}Song\u{1f}Band\u{1f}Album\n\
+    \u{1e}mpv\u{1f}mpv\u{1f}Paused\u{1f}clip.mkv\u{1f}\u{1f}\n";
+
+fn media_fixture(keep_open: bool) -> Vec<super::command_list::CommandItem> {
+    super::media::media_items(&super::media::parse_metadata(MEDIA_METADATA), keep_open)
+}
+
+fn media_app(query: &str) -> LauncherApp {
+    let mut app = test_app(AddonsConfig::default());
+    app.history.max_items = 0;
+    let task = app.update(Message::SearchChanged(query.into()));
+    assert!(task.units() > 0, "the players load");
+    assert_eq!(app.command_list.status(), Some("Loading players..."));
+    let generation = app.command_list.generation;
+    let keep_open = !app.addons.media.close_on_action;
+    let _ = app.update(Message::CommandListLoaded(
+        generation,
+        Ok(media_fixture(keep_open)),
+    ));
+    app
+}
+
+fn selected_identity(app: &LauncherApp) -> String {
+    app.command_list
+        .item(app.selected_index)
+        .unwrap()
+        .identity
+        .clone()
+}
+
+#[test]
+fn test_route_query_media_trigger() {
+    let mut addons = AddonsConfig::default();
+    assert_eq!(
+        route_query("media next", &addons),
+        QueryMode::CommandList {
+            addon: CommandListAddon::Media,
+            query: "next".into()
+        }
+    );
+    assert!(classify_query("media next", &addons).sensitive);
+    assert_eq!(loggable_query("media next", &addons), "<redacted>");
+    assert_eq!(
+        keyword_suggestions("media", &addons)[0].subtitle,
+        "Play, pause or skip in media players"
+    );
+
+    addons.media.enabled = false;
+    assert_eq!(route_query("media next", &addons), QueryMode::Standard);
+}
+
+#[test]
+fn test_media_filter_matches_actions_and_players() {
+    let mut app = media_app("media ");
+    assert_eq!(
+        command_list_titles(&app),
+        vec![
+            "Song · Band",
+            "Pause",
+            "Next",
+            "Previous",
+            "Stop",
+            "clip.mkv",
+            "Play",
+            "Next",
+            "Previous",
+            "Stop"
+        ]
+    );
+    // The header can't be activated.
+    let _ = app.update(Message::Submit);
+    assert!(!app.in_flight.is_pending("media", "spotify"));
+    assert!(deferred_action(&app).is_none());
+
+    let _ = app.update(Message::SearchChanged("media mpv next".into()));
+    assert_eq!(command_list_titles(&app)[0], "Next");
+    assert_eq!(selected_identity(&app), "mpv/next");
+
+    let _ = app.update(Message::SearchChanged("media spotify".into()));
+    assert!(command_list_titles(&app).contains(&"Song · Band"));
+    assert!(!command_list_titles(&app).contains(&"clip.mkv"));
+}
+
+#[test]
+fn test_media_action_keeps_raffi_open_and_refreshes() {
+    let mut app = media_app("media mpv next");
+    assert_eq!(selected_identity(&app), "mpv/next");
+
+    let task = app.update(Message::Submit);
+    assert!(task.units() > 0, "the action runs in the background");
+    assert!(deferred_action(&app).is_none(), "Raffi stays open");
+    assert!(app.in_flight.is_pending("media", "mpv/next"));
+    // Pressing Enter again while it runs does not stack another run.
+    let task = app.update(Message::Submit);
+    assert_eq!(task.units(), 0);
+
+    let generation = app.command_list.generation;
+    let task = app.update(Message::CommandListActionDone(
+        CommandListAddon::Media,
+        app.command_list.session,
+        "mpv/next".into(),
+        Ok(()),
+    ));
+    assert!(task.units() > 0, "the list refreshes");
+    assert!(!app.in_flight.is_pending("media", "mpv/next"));
+    assert_ne!(app.command_list.generation, generation);
+    assert!(
+        app.command_list.status().is_none(),
+        "rows stay while refreshing"
+    );
+    assert_eq!(selected_identity(&app), "mpv/next");
+
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(
+        generation,
+        Ok(media_fixture(true)),
+    ));
+    assert!(!app.command_list.refreshing);
+    assert_eq!(selected_identity(&app), "mpv/next");
+    let task = app.update(Message::Submit);
+    assert!(task.units() > 0, "Next can be pressed again");
+
+    let before = app.history.items.clone();
+    app.history.max_items = 10;
+    app.save_query_to_history();
+    assert_eq!(app.history.items, before);
+}
+
+#[test]
+fn test_media_action_failure_shows_an_error_row() {
+    let mut app = media_app("media mpv next");
+    let _ = app.update(Message::Submit);
+    let task = app.update(Message::CommandListActionDone(
+        CommandListAddon::Media,
+        app.command_list.session,
+        "mpv/next".into(),
+        Err("playerctl: exited with exit status: 1".into()),
+    ));
+    assert_eq!(task.units(), 0, "nothing reloads after a failure");
+    assert!(!app.in_flight.is_pending("media", "mpv/next"));
+    assert_eq!(
+        command_list_titles(&app)[0],
+        "Next failed: playerctl: exited with exit status: 1"
+    );
+    assert_eq!(selected_identity(&app), "mpv/next");
+
+    // The error row itself does nothing.
+    app.selected_index = 0;
+    let task = app.update(Message::Submit);
+    assert_eq!(task.units(), 0);
+}
+
+#[test]
+fn test_media_action_finishing_after_leaving_changes_nothing() {
+    let mut app = media_app("media mpv next");
+    let session = app.command_list.session;
+    let _ = app.update(Message::Submit);
+    let _ = app.update(Message::SearchChanged("sys ".into()));
+    let generation = app.command_list.generation;
+    let task = app.update(Message::CommandListActionDone(
+        CommandListAddon::Media,
+        session,
+        "mpv/next".into(),
+        Err("boom".into()),
+    ));
+    assert_eq!(task.units(), 0);
+    assert!(!app.in_flight.is_pending("media", "mpv/next"));
+    assert_eq!(app.command_list.addon, Some(CommandListAddon::System));
+    assert_eq!(app.command_list.generation, generation);
+    assert_eq!(command_list_titles(&app)[0], "Lock");
+
+    // Reopening the controls before it finishes does not let it in either.
+    let mut app = media_app("media mpv next");
+    let session = app.command_list.session;
+    let _ = app.update(Message::Submit);
+    let _ = app.update(Message::SearchChanged("firefox".into()));
+    let mut reopened = media_app_reopen(app);
+    let generation = reopened.command_list.generation;
+    for result in [Ok(()), Err("boom".to_string())] {
+        let task = reopened.update(Message::CommandListActionDone(
+            CommandListAddon::Media,
+            session,
+            "mpv/next".into(),
+            result,
+        ));
+        assert_eq!(task.units(), 0);
+    }
+    assert!(!reopened.in_flight.is_pending("media", "mpv/next"));
+    assert_eq!(reopened.command_list.generation, generation);
+    assert!(!command_list_titles(&reopened).contains(&"Next failed: boom"));
+}
+
+fn media_app_reopen(mut app: LauncherApp) -> LauncherApp {
+    let _ = app.update(Message::SearchChanged("media ".into()));
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(
+        generation,
+        Ok(media_fixture(true)),
+    ));
+    app
+}
+
+#[test]
+fn test_media_failure_survives_a_refresh_started_before_it() {
+    let mut app = media_app("media mpv");
+    let session = app.command_list.session;
+    let _ = app.update(Message::CommandListActionDone(
+        CommandListAddon::Media,
+        session,
+        "mpv/next".into(),
+        Ok(()),
+    ));
+    let refresh = app.command_list.generation;
+    let _ = app.update(Message::CommandListActionDone(
+        CommandListAddon::Media,
+        session,
+        "mpv/stop".into(),
+        Err("boom".into()),
+    ));
+    assert_eq!(command_list_titles(&app)[0], "Stop failed: boom");
+    let _ = app.update(Message::CommandListLoaded(refresh, Ok(media_fixture(true))));
+    let titles = command_list_titles(&app);
+    assert_eq!(titles[0], "Stop failed: boom");
+    assert_eq!(titles.iter().filter(|t| t.contains("failed")).count(), 1);
+
+    // A later success clears it once its refresh lands.
+    let _ = app.update(Message::CommandListActionDone(
+        CommandListAddon::Media,
+        session,
+        "mpv/next".into(),
+        Ok(()),
+    ));
+    let refresh = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(refresh, Ok(media_fixture(true))));
+    assert!(!command_list_titles(&app)[0].contains("failed"));
+}
+
+#[test]
+fn test_media_close_on_action_runs_after_close() {
+    let mut addons = AddonsConfig::default();
+    addons.media.close_on_action = true;
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+    let _ = app.update(Message::SearchChanged("media spotify pause".into()));
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(
+        generation,
+        Ok(media_fixture(false)),
+    ));
+    assert_eq!(selected_identity(&app), "spotify/play-pause");
+    let task = app.update(Message::Submit);
+    assert!(task.units() > 0, "Raffi closes");
+    assert_eq!(
+        deferred_argv(&app),
+        Some(vec![
+            "playerctl".to_string(),
+            "-p".to_string(),
+            "spotify".to_string(),
+            "play-pause".to_string()
+        ])
+    );
+}
+
+#[test]
+fn test_media_missing_playerctl_and_no_players() {
+    let mut app = test_app(AddonsConfig::default());
+    app.program_exists = |program| program != "playerctl";
+    let task = app.update(Message::SearchChanged("media ".into()));
+    assert_eq!(task.units(), 0);
+    assert_eq!(app.command_list.status(), Some("playerctl not found"));
+    let _ = app.update(Message::Submit);
+    assert!(deferred_action(&app).is_none());
+
+    let mut app = test_app(AddonsConfig::default());
+    let _ = app.update(Message::SearchChanged("media next".into()));
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(
+        generation,
+        Ok(super::media::media_items(&[], true)),
+    ));
+    assert_eq!(command_list_titles(&app), vec!["No media players running"]);
+    let task = app.update(Message::Submit);
+    assert_eq!(task.units(), 0);
 }
 
 fn launcher_names(app: &LauncherApp) -> Vec<String> {

@@ -141,10 +141,11 @@ impl SystemEntry {
                 .missing
                 .as_ref()
                 .map(|program| format!("{program} not found")),
-            primary: CommandAction {
+            primary: Some(CommandAction {
                 action: self.action.clone(),
                 confirm: self.needs_confirmation().then(|| self.verb.to_string()),
-            },
+                keep_open: false,
+            }),
             secondary: None,
             details: vec![
                 ("Command".to_string(), self.command_line()),

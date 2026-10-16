@@ -306,6 +306,7 @@ pub(super) const CLIPBOARD_ICON: &str = "copyq";
 pub(super) const CLIPBOARD_IMAGES_ICON: &str = "image-x-generic";
 pub(super) const SYSTEM_ICON: &str = "system-shutdown";
 pub(super) const WINDOWS_ICON: &str = "preferences-system-windows";
+pub(super) const MEDIA_ICON: &str = "multimedia-player";
 pub(super) const DEVTOOLS_ICON: &str = "utilities-terminal";
 
 /// The query as it may appear in debug logs: sensitive searches such as the
@@ -417,6 +418,15 @@ pub(super) fn route_query(query: &str, addons: &AddonsConfig) -> QueryMode {
         }
     }
 
+    if addons.media.enabled {
+        if let Some(query) = extract_keyword_query(input, addons.media.trigger()) {
+            return QueryMode::CommandList {
+                addon: CommandListAddon::Media,
+                query,
+            };
+        }
+    }
+
     if addons.devtools.enabled {
         if let Some(payload) = extract_raw_keyword_payload(input, addons.devtools.trigger()) {
             return QueryMode::Devtools { payload };
@@ -519,6 +529,14 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
             keyword: addons.windows.trigger().to_string(),
             subtitle: "Switch to an open window".to_string(),
             icon: Some(WINDOWS_ICON.to_string()),
+        });
+    }
+
+    if addons.media.enabled && matches(addons.media.trigger()) {
+        suggestions.push(KeywordSuggestion {
+            keyword: addons.media.trigger().to_string(),
+            subtitle: "Play, pause or skip in media players".to_string(),
+            icon: Some(MEDIA_ICON.to_string()),
         });
     }
 
@@ -813,6 +831,9 @@ impl LauncherApp {
             Message::CommandListSelected(index) => self.handle_command_list_selected(index),
             Message::CommandListLoaded(generation, result) => {
                 self.handle_command_list_loaded(generation, result)
+            }
+            Message::CommandListActionDone(addon, session, identity, result) => {
+                self.handle_command_list_action_done(addon, session, identity, result)
             }
             Message::DevtoolsSelected(index) => self.handle_devtools_selected(index),
             Message::DevtoolsHashes(generation, rows) => {
@@ -1500,18 +1521,37 @@ impl LauncherApp {
                         .set_notice("hyprctl not found".to_string());
                     return Task::none();
                 }
-                self.load_command_list(super::windows::load_windows)
+                self.load_command_list(super::windows::load_windows, false)
+            }
+            CommandListAddon::Media if !entered => Task::none(),
+            CommandListAddon::Media => {
+                if !(self.program_exists)("playerctl") {
+                    self.command_list
+                        .set_notice("playerctl not found".to_string());
+                    return Task::none();
+                }
+                self.load_media(false)
             }
         }
     }
 
+    fn load_media(&mut self, refresh: bool) -> Task<Message> {
+        let keep_open = !self.addons.media.close_on_action;
+        self.load_command_list(move || super::media::load_players(keep_open), refresh)
+    }
+
     /// Run `load` off the UI thread; its result is dropped if the list has
-    /// moved on by then.
+    /// moved on by then. A refresh keeps the current rows until it lands.
     fn load_command_list(
         &mut self,
-        load: fn() -> Result<Vec<super::command_list::CommandItem>, String>,
+        load: impl FnOnce() -> Result<Vec<super::command_list::CommandItem>, String> + Send + 'static,
+        refresh: bool,
     ) -> Task<Message> {
-        let generation = self.command_list.begin_load();
+        let generation = if refresh {
+            self.command_list.begin_refresh()
+        } else {
+            self.command_list.begin_load()
+        };
         Task::perform(
             async move {
                 let (sender, receiver) = iced::futures::channel::oneshot::channel();
@@ -1534,6 +1574,10 @@ impl LauncherApp {
         if !self.command_list.is_current(generation) {
             return Task::none();
         }
+        let selected = self
+            .command_list
+            .item(self.selected_index)
+            .map(|item| item.identity.clone());
         match result {
             Ok(items) => self.set_command_list_items(items),
             Err(error) => {
@@ -1541,8 +1585,64 @@ impl LauncherApp {
                 self.command_list.set_notice(error);
             }
         }
-        self.selected_index = 0;
+        self.selected_index = selected
+            .and_then(|identity| self.command_list.position(&identity))
+            .unwrap_or(0);
         Task::none()
+    }
+
+    /// Release the action's guard, then refresh its list, or show the error
+    /// above it, unless the user has moved on to another list.
+    fn handle_command_list_action_done(
+        &mut self,
+        addon: CommandListAddon,
+        session: u64,
+        identity: String,
+        result: Result<(), String>,
+    ) -> Task<Message> {
+        self.in_flight.finish(addon.name(), &identity);
+        if self.command_list.addon != Some(addon) || self.command_list.session != session {
+            return Task::none();
+        }
+        match result {
+            Ok(()) => match addon {
+                CommandListAddon::Media => self.load_media(true),
+                CommandListAddon::System | CommandListAddon::Windows => Task::none(),
+            },
+            Err(error) => {
+                crate::debug_log!("{}: action failed: {error}", addon.name());
+                let error = match self
+                    .command_list
+                    .items
+                    .iter()
+                    .find(|item| item.identity == identity)
+                {
+                    Some(item) => format!("{} failed: {error}", item.title),
+                    None => error,
+                };
+                let selected = self
+                    .command_list
+                    .item(self.selected_index)
+                    .map(|item| item.identity.clone());
+                self.set_command_list_front(super::command_list::CommandItem::info(
+                    "error",
+                    error,
+                    "dialog-error",
+                ));
+                if let Some(row) = selected.and_then(|id| self.command_list.position(&id)) {
+                    self.selected_index = row;
+                }
+                Task::none()
+            }
+        }
+    }
+
+    fn set_command_list_front(&mut self, mut item: super::command_list::CommandItem) {
+        item.icon = item
+            .icon_names
+            .iter()
+            .find_map(|name| self.resolve_icon_name(name));
+        self.command_list.show_error(item);
     }
 
     fn set_command_list_items(&mut self, mut items: Vec<super::command_list::CommandItem>) {
@@ -2446,9 +2546,28 @@ impl LauncherApp {
                 crate::debug_log!("{}: arming confirmation", addon.name());
                 Task::none()
             }
-            Selection::Run(action, identity) => {
+            Selection::Run(action, identity, keep_open) => {
                 if !self.in_flight.begin(addon.name(), &identity) {
                     return Task::none();
+                }
+                if keep_open {
+                    crate::debug_log!("{}: running {identity}", addon.name());
+                    let session = self.command_list.session;
+                    return Task::perform(
+                        async move {
+                            let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                            std::thread::spawn(move || {
+                                let _ = sender.send(super::command_list::run_kept_open(&action));
+                            });
+                            let result = receiver
+                                .await
+                                .unwrap_or_else(|_| Err("action stopped unexpectedly".to_string()));
+                            (identity, result)
+                        },
+                        move |(identity, result)| {
+                            Message::CommandListActionDone(addon, session, identity, result)
+                        },
+                    );
                 }
                 crate::debug_log!("{}: running {identity} after close", addon.name());
                 if let Ok(mut slot) = self.deferred_action.lock() {

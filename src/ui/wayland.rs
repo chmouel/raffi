@@ -13,6 +13,7 @@ mod dnd;
 mod emoji;
 mod help;
 mod hyprland;
+mod media;
 mod placeholders;
 mod preview;
 mod script_filters;

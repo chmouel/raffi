@@ -243,6 +243,14 @@ pub(crate) enum Message {
         u64,
         std::result::Result<Vec<super::command_list::CommandItem>, String>,
     ),
+    /// An action run with Raffi kept open finished for this target, in the
+    /// list session it started from.
+    CommandListActionDone(
+        super::command_list::CommandListAddon,
+        u64,
+        String,
+        std::result::Result<(), String>,
+    ),
     DevtoolsSelected(usize),
     /// Hash rows computed for the `dev` query with this generation.
     DevtoolsHashes(u64, Vec<super::devtools::DevRow>),

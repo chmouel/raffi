@@ -593,6 +593,14 @@ addons:
   #   enabled: true
   #   trigger: win
 
+  # Media controls (native UI only, needs playerctl). Type "media " to play,
+  # pause, skip or stop any running media player. Raffi stays open and
+  # refreshes after each action unless close_on_action is true.
+  # media:
+  #   enabled: true
+  #   trigger: media
+  #   close_on_action: false
+
   # Unit conversion (native UI only). Type "10 km to mi", "70f to c" or
   # "5 GB in MB" without any keyword. Enter copies the number, Ctrl+Enter
   # copies it with the unit.

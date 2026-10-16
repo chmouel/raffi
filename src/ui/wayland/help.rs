@@ -137,6 +137,18 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         });
     }
 
+    if addons.media.enabled {
+        let trigger = addons.media.trigger();
+        entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
+            trigger: trigger.to_string(),
+            title: "Media controls".to_string(),
+            usage: format!("{trigger} <action or player>, Enter plays, pauses or skips"),
+            icon: Some(super::app::MEDIA_ICON.to_string()),
+            completion: Some(format!("{trigger} ")),
+        });
+    }
+
     if addons.devtools.enabled {
         let trigger = addons.devtools.trigger();
         entries.push(HelpEntry {
