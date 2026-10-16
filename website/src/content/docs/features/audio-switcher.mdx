@@ -1,0 +1,53 @@
+---
+title: Audio Switcher
+description: Pick the default speaker or microphone and mute devices from Raffi
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Type `audio ` (with the trailing space) to list your sound devices. Outputs,
+such as speakers and headphones, come first under an "Outputs" header, then
+inputs such as microphones under "Inputs". Each row shows the device name,
+its port, its volume and its internal name. The current default device has a
+check mark and says "Default", and a muted device says "Muted". Monitor
+sources, which only echo an output, are left out.
+
+Words after the keyword filter the devices, so `audio headphones` or
+`audio razer` narrows the list, and `audio inputs` shows the microphones.
+
+<Aside type="note">
+The audio switcher is only available in native mode and needs `pactl`,
+which works with PulseAudio and with PipeWire through `pipewire-pulse`. It is
+on by default. When `pactl` is not installed the list shows "pactl not
+found". When the sound server can't be reached, an error row says so.
+</Aside>
+
+| Key        | Action                                     |
+|------------|--------------------------------------------|
+| Enter      | Make the selected device the default       |
+| Ctrl+Enter | Mute or unmute the selected device         |
+
+Raffi stays open after an action and refreshes the list, keeping the same
+device selected. When an action fails, an error row appears at the top of the
+list. Set `close_on_action: true` to close Raffi after each action instead.
+
+The header rows only show information and do nothing when selected. Queries
+typed in this mode are not saved in the search history.
+
+To open the list from a key binding, pass the keyword as the initial query:
+
+```sh
+raffi -u native -i "audio "
+```
+
+## Configuration
+
+```yaml
+addons:
+  audio:
+    trigger: "snd"
+    close_on_action: true
+```
+
+See the [addon reference](/reference/addon-configuration/#audio-switcher)
+for every field.

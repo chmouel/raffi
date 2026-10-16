@@ -1,6 +1,7 @@
 mod actions;
 mod ansi;
 mod app;
+mod audio;
 mod browser;
 mod clipboard;
 mod clipboard_history;

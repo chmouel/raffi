@@ -1601,6 +1601,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "sys",
             "win",
             "media",
+            "audio",
             "dev",
             "math",
             "$",
@@ -1637,7 +1638,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
     assert_eq!(entries[1].icon.as_deref(), Some("gist-icon"));
     assert_eq!(entries[1].completion.as_deref(), Some("gist "));
     assert_eq!(entries[0].completion.as_deref(), Some("~/"));
-    assert_eq!(entries[9].completion, None);
+    assert_eq!(entries[10].completion, None);
     // Shortcut rows are informational: they never arm a keyword.
     for entry in entries
         .iter()
@@ -1657,6 +1658,7 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
     addons.system.enabled = false;
     addons.windows.enabled = false;
     addons.media.enabled = false;
+    addons.audio.enabled = false;
     addons.units.enabled = false;
     addons.color.enabled = false;
     addons.world_clock.enabled = false;
@@ -1710,6 +1712,7 @@ fn test_help_entries_skip_disabled_addons() {
     addons.system.enabled = false;
     addons.windows.enabled = false;
     addons.media.enabled = false;
+    addons.audio.enabled = false;
     addons.units.enabled = false;
     addons.color.enabled = false;
     addons.world_clock.enabled = false;
@@ -3506,6 +3509,13 @@ fn test_default_triggers_do_not_shadow_each_other_or_web_searches() {
             ..
         }
     ));
+    assert!(matches!(
+        route_query("audio x", &addons),
+        QueryMode::CommandList {
+            addon: CommandListAddon::Audio,
+            ..
+        }
+    ));
 
     // A user web search keeps its keyword, and its suggestion comes first.
     addons.web_searches.push(WebSearchConfig {
@@ -4228,6 +4238,182 @@ fn test_media_missing_playerctl_and_no_players() {
     assert_eq!(command_list_titles(&app), vec!["No media players running"]);
     let task = app.update(Message::Submit);
     assert_eq!(task.units(), 0);
+}
+
+fn audio_app(query: &str) -> LauncherApp {
+    let mut app = test_app(AddonsConfig::default());
+    app.history.max_items = 0;
+    let task = app.update(Message::SearchChanged(query.into()));
+    assert!(task.units() > 0, "the devices load");
+    assert_eq!(app.command_list.status(), Some("Loading audio devices..."));
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(
+        generation,
+        Ok(super::audio::fixture_items(true)),
+    ));
+    app
+}
+
+#[test]
+fn test_route_query_audio_trigger() {
+    let mut addons = AddonsConfig::default();
+    assert_eq!(
+        route_query("audio razer", &addons),
+        QueryMode::CommandList {
+            addon: CommandListAddon::Audio,
+            query: "razer".into()
+        }
+    );
+    assert!(classify_query("audio razer", &addons).sensitive);
+    assert_eq!(loggable_query("audio razer", &addons), "<redacted>");
+    assert_eq!(
+        keyword_suggestions("audio", &addons)[0].subtitle,
+        "Switch or mute audio outputs and inputs"
+    );
+
+    addons.audio.enabled = false;
+    assert_eq!(route_query("audio razer", &addons), QueryMode::Standard);
+}
+
+#[test]
+fn test_audio_rows_and_filtering() {
+    let mut app = audio_app("audio ");
+    assert_eq!(
+        command_list_titles(&app),
+        vec![
+            "Outputs",
+            "Ryzen HD Audio Controller Pro",
+            "✓ Razer Seiren V2 Pro Analog Stereo",
+            "WH-1000XM4",
+            "Inputs",
+            "Ryzen HD Audio Controller Pro",
+            "✓ Razer Seiren V2 Pro Mono",
+        ]
+    );
+    // Headers can't be activated.
+    let task = app.update(Message::Submit);
+    assert_eq!(task.units(), 0);
+    assert!(deferred_action(&app).is_none());
+
+    let _ = app.update(Message::SearchChanged("audio headphones".into()));
+    assert_eq!(command_list_titles(&app), vec!["WH-1000XM4"]);
+    let _ = app.update(Message::SearchChanged("audio microphone razer".into()));
+    assert_eq!(
+        selected_identity(&app),
+        format!("source/{}", super::audio::DEFAULT_SOURCE)
+    );
+    for (query, header, kind) in [
+        ("audio inputs", "Inputs", "source/"),
+        ("audio outputs", "Outputs", "sink/"),
+    ] {
+        let _ = app.update(Message::SearchChanged(query.into()));
+        assert_eq!(command_list_titles(&app)[0], header);
+        let count = if kind == "sink/" { 3 } else { 2 };
+        for &index in &app.command_list.filtered[1..=count] {
+            assert!(
+                app.command_list.items[index].identity.starts_with(kind),
+                "{query}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_audio_actions_keep_raffi_open_and_refresh_on_the_same_device() {
+    let mut app = audio_app("audio ");
+    app.selected_index = 3;
+    let identity = "sink/bluez_output.00_11_22_33_44_55.1".to_string();
+    assert_eq!(selected_identity(&app), identity);
+
+    let task = app.update(Message::Submit);
+    assert!(task.units() > 0, "the action runs in the background");
+    assert!(deferred_action(&app).is_none(), "Raffi stays open");
+    assert!(app.in_flight.is_pending("audio", &identity));
+    let task = app.update(Message::Submit);
+    assert_eq!(task.units(), 0, "no second run while one is pending");
+
+    let task = app.update(Message::CommandListActionDone(
+        CommandListAddon::Audio,
+        app.command_list.session,
+        identity.clone(),
+        Ok(()),
+    ));
+    assert!(task.units() > 0, "the list refreshes");
+    assert!(!app.in_flight.is_pending("audio", &identity));
+    assert!(app.command_list.status().is_none());
+
+    // The refreshed list moved the device; the selection follows it.
+    let mut items = super::audio::fixture_items(true);
+    let moved = items.remove(3);
+    items.insert(1, moved);
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(items)));
+    assert_eq!(app.selected_index, 1);
+    assert_eq!(selected_identity(&app), identity);
+
+    app.view.current_modifiers = iced::keyboard::Modifiers::CTRL;
+    let task = app.update(Message::Submit);
+    assert!(
+        task.units() > 0,
+        "Ctrl+Enter toggles mute in the background"
+    );
+    assert!(deferred_action(&app).is_none());
+}
+
+#[test]
+fn test_audio_action_failure_shows_an_error_row() {
+    let mut app = audio_app("audio wh-1000");
+    let identity = "sink/bluez_output.00_11_22_33_44_55.1".to_string();
+    let _ = app.update(Message::Submit);
+    let task = app.update(Message::CommandListActionDone(
+        CommandListAddon::Audio,
+        app.command_list.session,
+        identity.clone(),
+        Err("pactl: exited with exit status: 1".into()),
+    ));
+    assert_eq!(task.units(), 0);
+    assert_eq!(
+        command_list_titles(&app)[0],
+        "WH-1000XM4 failed: pactl: exited with exit status: 1"
+    );
+    assert_eq!(selected_identity(&app), identity);
+}
+
+#[test]
+fn test_audio_close_on_action_runs_after_close() {
+    let mut addons = AddonsConfig::default();
+    addons.audio.close_on_action = true;
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+    let _ = app.update(Message::SearchChanged("audio wh-1000".into()));
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(
+        generation,
+        Ok(super::audio::fixture_items(false)),
+    ));
+    app.view.current_modifiers = iced::keyboard::Modifiers::CTRL;
+    let task = app.update(Message::Submit);
+    assert!(task.units() > 0, "Raffi closes");
+    assert_eq!(
+        deferred_argv(&app),
+        Some(vec![
+            "pactl".to_string(),
+            "set-sink-mute".to_string(),
+            "bluez_output.00_11_22_33_44_55.1".to_string(),
+            "toggle".to_string()
+        ])
+    );
+}
+
+#[test]
+fn test_audio_missing_pactl() {
+    let mut app = test_app(AddonsConfig::default());
+    app.program_exists = |program| program != "pactl";
+    let task = app.update(Message::SearchChanged("audio ".into()));
+    assert_eq!(task.units(), 0);
+    assert_eq!(app.command_list.status(), Some("pactl not found"));
+    let _ = app.update(Message::Submit);
+    assert!(deferred_action(&app).is_none());
 }
 
 fn launcher_names(app: &LauncherApp) -> Vec<String> {

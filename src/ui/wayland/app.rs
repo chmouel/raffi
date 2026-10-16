@@ -307,6 +307,7 @@ pub(super) const CLIPBOARD_IMAGES_ICON: &str = "image-x-generic";
 pub(super) const SYSTEM_ICON: &str = "system-shutdown";
 pub(super) const WINDOWS_ICON: &str = "preferences-system-windows";
 pub(super) const MEDIA_ICON: &str = "multimedia-player";
+pub(super) const AUDIO_ICON: &str = "audio-speakers";
 pub(super) const DEVTOOLS_ICON: &str = "utilities-terminal";
 
 /// The query as it may appear in debug logs: sensitive searches such as the
@@ -427,6 +428,15 @@ pub(super) fn route_query(query: &str, addons: &AddonsConfig) -> QueryMode {
         }
     }
 
+    if addons.audio.enabled {
+        if let Some(query) = extract_keyword_query(input, addons.audio.trigger()) {
+            return QueryMode::CommandList {
+                addon: CommandListAddon::Audio,
+                query,
+            };
+        }
+    }
+
     if addons.devtools.enabled {
         if let Some(payload) = extract_raw_keyword_payload(input, addons.devtools.trigger()) {
             return QueryMode::Devtools { payload };
@@ -537,6 +547,14 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
             keyword: addons.media.trigger().to_string(),
             subtitle: "Play, pause or skip in media players".to_string(),
             icon: Some(MEDIA_ICON.to_string()),
+        });
+    }
+
+    if addons.audio.enabled && matches(addons.audio.trigger()) {
+        suggestions.push(KeywordSuggestion {
+            keyword: addons.audio.trigger().to_string(),
+            subtitle: "Switch or mute audio outputs and inputs".to_string(),
+            icon: Some(AUDIO_ICON.to_string()),
         });
     }
 
@@ -1532,7 +1550,20 @@ impl LauncherApp {
                 }
                 self.load_media(false)
             }
+            CommandListAddon::Audio if !entered => Task::none(),
+            CommandListAddon::Audio => {
+                if !(self.program_exists)("pactl") {
+                    self.command_list.set_notice("pactl not found".to_string());
+                    return Task::none();
+                }
+                self.load_audio(false)
+            }
         }
+    }
+
+    fn load_audio(&mut self, refresh: bool) -> Task<Message> {
+        let keep_open = !self.addons.audio.close_on_action;
+        self.load_command_list(move || Ok(super::audio::load_devices(keep_open)), refresh)
     }
 
     fn load_media(&mut self, refresh: bool) -> Task<Message> {
@@ -1607,6 +1638,7 @@ impl LauncherApp {
         match result {
             Ok(()) => match addon {
                 CommandListAddon::Media => self.load_media(true),
+                CommandListAddon::Audio => self.load_audio(true),
                 CommandListAddon::System | CommandListAddon::Windows => Task::none(),
             },
             Err(error) => {

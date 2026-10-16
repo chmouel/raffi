@@ -596,7 +596,7 @@ impl LauncherApp {
             current_index += count;
         }
 
-        // 4c. Command lists (system commands, windows, media)
+        // 4c. Command lists (system commands, windows, media, audio)
         if self.command_list.is_active() {
             let count = self.command_list.row_count();
             if index >= current_index && index < current_index + count {
@@ -1625,6 +1625,23 @@ fn describe_addon_by_keyword(
                     "Play, pause, skip or stop the player".to_string(),
                 ),
                 ("Requires".to_string(), "playerctl".to_string()),
+            ],
+        );
+    }
+
+    if addons.audio.enabled && keyword == addons.audio.trigger() {
+        return (
+            "Audio Devices".to_string(),
+            vec![
+                (
+                    "Enter".to_string(),
+                    "Make the device the default".to_string(),
+                ),
+                (
+                    "Ctrl+Enter".to_string(),
+                    "Mute or unmute the device".to_string(),
+                ),
+                ("Requires".to_string(), "pactl".to_string()),
             ],
         );
     }

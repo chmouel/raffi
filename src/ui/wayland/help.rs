@@ -149,6 +149,18 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         });
     }
 
+    if addons.audio.enabled {
+        let trigger = addons.audio.trigger();
+        entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
+            trigger: trigger.to_string(),
+            title: "Audio devices".to_string(),
+            usage: format!("{trigger} <device>, Enter sets the default, Ctrl+Enter mutes"),
+            icon: Some(super::app::AUDIO_ICON.to_string()),
+            completion: Some(format!("{trigger} ")),
+        });
+    }
+
     if addons.devtools.enabled {
         let trigger = addons.devtools.trigger();
         entries.push(HelpEntry {

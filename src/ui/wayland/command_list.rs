@@ -16,6 +16,7 @@ pub(super) enum CommandListAddon {
     System,
     Windows,
     Media,
+    Audio,
 }
 
 impl CommandListAddon {
@@ -25,6 +26,7 @@ impl CommandListAddon {
             Self::System => "system",
             Self::Windows => "windows",
             Self::Media => "media",
+            Self::Audio => "audio",
         }
     }
 
@@ -33,6 +35,7 @@ impl CommandListAddon {
             Self::System => "System",
             Self::Windows => "Window",
             Self::Media => "Media",
+            Self::Audio => "Audio",
         }
     }
 
@@ -41,6 +44,7 @@ impl CommandListAddon {
             Self::System => "Loading...",
             Self::Windows => "Loading windows...",
             Self::Media => "Loading players...",
+            Self::Audio => "Loading audio devices...",
         }
     }
 }

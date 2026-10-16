@@ -591,6 +591,37 @@ impl Default for MediaAddonConfig {
     }
 }
 
+/// Configuration for the audio device switcher addon (native UI only)
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
+pub struct AudioAddonConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Keyword that opens the audio device list (default: `audio`).
+    #[serde(default)]
+    pub trigger: Option<String>,
+    /// Close Raffi after an action instead of staying open and refreshing
+    /// the list (default: false).
+    #[serde(default)]
+    pub close_on_action: bool,
+}
+
+impl AudioAddonConfig {
+    pub fn trigger(&self) -> &str {
+        self.trigger.as_deref().unwrap_or("audio")
+    }
+}
+
+impl Default for AudioAddonConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            trigger: None,
+            close_on_action: false,
+        }
+    }
+}
+
 /// Container for all addon configurations
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
@@ -617,6 +648,8 @@ pub struct AddonsConfig {
     pub windows: WindowsAddonConfig,
     #[serde(default)]
     pub media: MediaAddonConfig,
+    #[serde(default)]
+    pub audio: AudioAddonConfig,
     #[serde(default)]
     pub devtools: DevtoolsAddonConfig,
     #[serde(default)]
@@ -3767,6 +3800,19 @@ shell:
             serde_yaml::from_str("enabled: false\ntrigger: w\n").unwrap();
         assert!(!config.enabled);
         assert_eq!(config.trigger(), "w");
+    }
+
+    #[test]
+    fn test_audio_addon_config_parsing() {
+        let defaults = AddonsConfig::default().audio;
+        assert!(defaults.enabled);
+        assert_eq!(defaults.trigger(), "audio");
+        assert!(!defaults.close_on_action);
+
+        let config: AudioAddonConfig =
+            serde_yaml::from_str("trigger: snd\nclose_on_action: true\n").unwrap();
+        assert_eq!(config.trigger(), "snd");
+        assert!(config.close_on_action);
     }
 
     #[test]

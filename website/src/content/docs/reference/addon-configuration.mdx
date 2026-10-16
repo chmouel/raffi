@@ -1,6 +1,6 @@
 ---
 title: Addon Configuration
-description: Configuration reference for built-in addons (currency, calculator, unit conversion, color converter, world clock, developer tools, file browser, script filters, web searches, text snippets, clipboard history, system commands, window switcher, media controls)
+description: Configuration reference for built-in addons (currency, calculator, unit conversion, color converter, world clock, developer tools, file browser, script filters, web searches, text snippets, clipboard history, system commands, window switcher, media controls, audio switcher)
 ---
 
 import { Image } from 'astro:assets';
@@ -13,7 +13,7 @@ The native UI includes several built-in addons that can be configured under the 
 ## Keywords
 
 Script filters, web searches, text snippets, the emoji picker, the clipboard
-history browser, system commands, the window switcher, media controls and developer tools are reached by
+history browser, system commands, the window switcher, media controls, the audio switcher and developer tools are reached by
 typing their keyword followed by a space. Typing `sn` on its own searches your
 launchers as usual, while `sn ` enters the snippet source.
 
@@ -1027,6 +1027,34 @@ addons:
     close_on_action: true
 ```
 
+## Audio Switcher
+
+Sets the default output or input and mutes devices through `pactl`.
+See [Audio Switcher](/features/audio-switcher/) for usage.
+
+### Configuration
+
+**`addons.audio.enabled`** `boolean` (default: `true`)
+
+**`addons.audio.trigger`** `string` (default: `audio`)
+
+Keyword that opens the device list. Type it followed by a space. Web searches
+with the same keyword take precedence.
+
+**`addons.audio.close_on_action`** `boolean` (default: `false`)
+
+Close Raffi after an action. By default Raffi stays open and refreshes the
+list.
+
+### Example
+
+```yaml
+addons:
+  audio:
+    trigger: "snd"
+    close_on_action: true
+```
+
 ## Developer Tools
 
 Lists base64, URL, hash, epoch, JSON and case transforms of the text typed
@@ -1091,6 +1119,11 @@ addons:
   media:
     enabled: true
     trigger: "media"
+    close_on_action: false
+
+  audio:
+    enabled: true
+    trigger: "audio"
     close_on_action: false
 
   file_browser:

@@ -35,6 +35,9 @@
       "description": "Container for all addon configurations",
       "type": "object",
       "properties": {
+        "audio": {
+          "$ref": "#/$defs/AudioAddonConfig"
+        },
         "calculator": {
           "$ref": "#/$defs/CalculatorAddonConfig"
         },
@@ -98,6 +101,30 @@
         },
         "world_clock": {
           "$ref": "#/$defs/WorldClockAddonConfig"
+        }
+      },
+      "additionalProperties": false
+    },
+    "AudioAddonConfig": {
+      "description": "Configuration for the audio device switcher addon (native UI only)",
+      "type": "object",
+      "properties": {
+        "close_on_action": {
+          "description": "Close Raffi after an action instead of staying open and refreshing\nthe list (default: false).",
+          "type": "boolean",
+          "default": false
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "trigger": {
+          "description": "Keyword that opens the audio device list (default: `audio`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false
