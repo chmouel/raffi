@@ -341,6 +341,64 @@ pw github
 # Press Enter to copy password
 ```
 
+### Herdr Agent Sessions
+
+The [Herdr filter script](https://github.com/chmouel/raffi/tree/main/scripts/herdr)
+lists Herdr agents and filters them by agent type, status, project directory, or
+terminal title. Select a result to focus that agent's pane.
+
+Install the script:
+
+```bash
+mkdir -p ~/.config/raffi/scripts/herdr
+cp scripts/herdr/herdr_filter.py ~/.config/raffi/scripts/herdr/herdr_filter.py
+chmod +x ~/.config/raffi/scripts/herdr/herdr_filter.py
+```
+
+Configure the filter:
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Herdr Agents"
+      keyword: "herdr"
+      command: "~/.config/raffi/scripts/herdr/herdr_filter.py"
+      action: 'herdr agent focus "$RAFFI_VALUE"'
+```
+
+To raise the terminal window before focusing the Herdr pane, replace the action
+with the matching command below. Change `kitty` to your terminal's class or app
+ID:
+
+Hyprland:
+
+```yaml
+action: >-
+  hyprctl dispatch focuswindow class:kitty;
+  herdr agent focus "$RAFFI_VALUE"
+```
+
+Sway:
+
+```yaml
+action: >-
+  swaymsg '[app_id="kitty"] focus';
+  herdr agent focus "$RAFFI_VALUE"
+```
+
+niri (requires `jq`):
+
+```yaml
+action: >-
+  id=$(niri msg -j windows | jq -r '.[] | select(.app_id == "kitty") | .id' | head -n1);
+  [ -z "$id" ] || niri msg action focus-window --id "$id";
+  herdr agent focus "$RAFFI_VALUE"
+```
+
+See the script's
+[README](https://github.com/chmouel/raffi/blob/main/scripts/herdr/README.md) for
+installation and usage.
+
 ### Web Search with Autocomplete
 
 The [`scripts/search/search.py`](https://github.com/chmouel/raffi/blob/main/scripts/search/search.py) script in the repository provides live DuckDuckGo autocomplete suggestions while opening results in any configured search engine.

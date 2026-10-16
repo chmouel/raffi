@@ -470,10 +470,8 @@ addons:
     # - name: "Herdr Agents"
     #   keyword: "herdr"
     #   command: "~/.config/raffi/scripts/herdr/herdr_filter.py"
-    #   action: >-
-    #     if command -v wm-jumpapp >/dev/null 2>&1; then
-    #     terminal="$HERDR_TERMINAL"; [ -n "$terminal" ] || terminal=kitty;
-    #     wm-jumpapp "$terminal"; fi; herdr agent focus "$RAFFI_VALUE"
+    #   action: 'herdr agent focus "$RAFFI_VALUE"'
+    # For compositor-specific window focus commands, see scripts/herdr/README.md.
 
   # text_snippets:
   #   - name: "Emails"
