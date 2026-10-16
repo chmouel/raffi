@@ -2339,6 +2339,15 @@ impl LauncherApp {
         use super::types::ScriptFilterPreviewError;
         // Whether the script speaks the protocol holds even for stale replies.
         let was_probing = self.script_filter.preview_probing.remove(&config_index);
+        let supported = self.script_filter.preview_supported.contains(&config_index);
+        // Only the first run's non-preview output disables previews; once
+        // the script has printed a preview object it is shown as an error.
+        let result = match result {
+            Ok(None) if supported => Err(ScriptFilterPreviewError::Invalid(
+                "Not a preview object".into(),
+            )),
+            result => result,
+        };
         match &result {
             Ok(Some(_)) | Err(ScriptFilterPreviewError::Invalid(_)) => {
                 self.script_filter.preview_supported.insert(config_index);
@@ -2350,9 +2359,7 @@ impl LauncherApp {
             }
             // A legacy script may be slow or fail when run for a preview;
             // re-running it on every selection would only repeat that.
-            Err(ScriptFilterPreviewError::Run(error))
-                if !self.script_filter.preview_supported.contains(&config_index) =>
-            {
+            Err(ScriptFilterPreviewError::Run(error)) if !supported => {
                 crate::debug_log!(
                     "script_filter: first preview run failed ({error}), disabling dynamic preview"
                 );

@@ -2650,6 +2650,30 @@ fn test_dynamic_preview_unreadable_first_answer_shows_the_error() {
 }
 
 #[test]
+fn test_dynamic_preview_later_non_preview_output_shows_an_error() {
+    let mut app = dynamic_preview_app(vec![plain_item("one")]);
+    let generation = app.script_filter.preview_generation;
+    let _ = app.update(Message::ScriptFilterPreview(
+        generation,
+        0,
+        0,
+        Ok(Some(prepared("live output", None))),
+    ));
+    assert!(app.script_filter.preview_supported.contains(&0));
+
+    // Once the script has printed a preview object, plain output is an error.
+    let _ = app.update(Message::ScriptFilterPreview(generation, 0, 0, Ok(None)));
+    assert!(!app.script_filter.preview_unsupported.contains(&0));
+    assert_eq!(app.dynamic_preview_target(), Some(0));
+    let preview = app.resolve_selected_preview().expect("preview");
+    assert_eq!(preview.title, "Dynamic title");
+    assert!(preview
+        .metadata
+        .iter()
+        .any(|(k, v)| k == "Preview" && v == "Not a preview object"));
+}
+
+#[test]
 fn test_dynamic_preview_probes_legacy_scripts_once() {
     let mut app = dynamic_preview_app(vec![plain_item("one"), plain_item("two")]);
     let _ = app.request_script_filter_preview();
