@@ -58,7 +58,12 @@ impl ZoneIndex {
         let mut places: HashMap<String, Vec<String>> = HashMap::new();
         for name in &names {
             let city = name.rsplit('/').next().unwrap_or(name);
-            for key in [normalize(city), normalize(name)] {
+            let mut keys = vec![normalize(name)];
+            match utc_offset_keys(name) {
+                Some(offset_keys) => keys.extend(offset_keys),
+                None => keys.push(normalize(city)),
+            }
+            for key in keys {
                 let zones = places.entry(key).or_default();
                 if !zones.contains(name) {
                     zones.push(name.clone());
@@ -128,6 +133,21 @@ fn normalize(text: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// `gmt±N` and `utc±N` for the zone `Etc/GMT∓N`: the zone database
+/// flips the sign, so `Etc/GMT+2` is two hours behind UTC.
+fn utc_offset_keys(name: &str) -> Option<[String; 2]> {
+    let offset = name.strip_prefix("Etc/GMT")?;
+    let (sign, hours) = if let Some(hours) = offset.strip_prefix('+') {
+        ('-', hours)
+    } else {
+        ('+', offset.strip_prefix('-')?)
+    };
+    if hours.is_empty() || !hours.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some([format!("gmt{sign}{hours}"), format!("utc{sign}{hours}")])
 }
 
 fn shape(query: &str) -> Option<Shape<'_>> {
@@ -384,6 +404,10 @@ mod fixtures {
             include_bytes!("../../../tests/fixtures/tz/Etc/GMT+12"),
         ),
         (
+            "Etc/GMT-2",
+            include_bytes!("../../../tests/fixtures/tz/Etc/GMT-2"),
+        ),
+        (
             "America/New_York",
             include_bytes!("../../../tests/fixtures/tz/America/New_York"),
         ),
@@ -493,12 +517,34 @@ mod tests {
 
     #[test]
     fn test_day_difference_reaches_two_days_each_way() {
-        let (title, subtitle) = &rows("11:30pm gmt+12 to kiritimati", "2026-10-16T12:00:00Z")[0];
+        let (title, subtitle) = &rows("11:30pm gmt-12 to kiritimati", "2026-10-16T12:00:00Z")[0];
         assert_eq!(title, "01:30, Sun 18 Oct");
         assert!(subtitle.starts_with("+2 days"), "{subtitle}");
-        let (title, subtitle) = &rows("1am kiritimati to gmt+12", "2026-10-16T12:00:00Z")[0];
+        let (title, subtitle) = &rows("1am kiritimati to gmt-12", "2026-10-16T12:00:00Z")[0];
         assert_eq!(title, "23:00, Thu 15 Oct");
         assert!(subtitle.starts_with("-2 days"), "{subtitle}");
+    }
+
+    #[test]
+    fn test_gmt_and_utc_offsets_are_ahead_of_utc_when_positive() {
+        let now = "2026-10-16T12:00:00Z";
+        for query in ["time gmt+2", "time utc+2", "time GMT+2"] {
+            let (title, subtitle) = &rows(query, now)[0];
+            assert_eq!(title, "14:00", "{query}");
+            assert!(subtitle.ends_with("UTC+02:00"), "{query}: {subtitle}");
+        }
+        let (title, subtitle) = &rows("time utc-12", now)[0];
+        assert_eq!(title, "00:00");
+        assert!(subtitle.ends_with("UTC-12:00"), "{subtitle}");
+        // The full zone name keeps the zone database's inverted sign.
+        let (title, subtitle) = &rows("time etc/gmt+12", now)[0];
+        assert_eq!(title, "00:00");
+        assert!(subtitle.ends_with("UTC-12:00"), "{subtitle}");
+        assert_eq!(
+            parse_time_query("time gmt+12", &fixtures::index()),
+            None,
+            "no zone is twelve hours ahead in the fixtures"
+        );
     }
 
     #[test]

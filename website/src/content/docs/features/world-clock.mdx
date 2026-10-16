@@ -35,6 +35,10 @@ short names are built in: `nyc`, `sf`, `la`, `uk`, `utc`, `gmt`, plus some
 common cities that have no zone of their own, such as `boston`, `seattle`,
 `beijing` and `mumbai`.
 
+A fixed offset from UTC is written `gmt+2` or `utc-5`, meaning two hours ahead
+of UTC or five hours behind it. The full zone name keeps the zone database's
+reversed sign, so `etc/gmt+2` is two hours behind UTC.
+
 When a name matches several zones, for example `eastern`, you get one row per
 zone. An unknown place shows nothing, and words that merely start with `time`,
 like an app called `timeshift`, are left alone.
