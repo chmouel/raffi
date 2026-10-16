@@ -24,7 +24,7 @@ use super::help::{filter_help_entries, help_entries};
 use super::script_filters::{execute_script_filter, parse_script_filter_output};
 use super::snippets::{
     compute_previews, execute_text_snippet_command, expand_final, fetch_clipboard, filter_snippets,
-    missing_clipboard, parse_snippet_file,
+    missing_clipboard, parse_snippet_file, snippet_mru_key,
 };
 use super::state::{
     CachedRate, ClipboardData, CurrencyConversion, CurrencyConversionRequest, CurrencyResult,
@@ -34,10 +34,10 @@ use super::state::{
     TextSnippetState, ViewState, WebSearchActiveState, WebSearchState,
 };
 use super::support::{
-    fuzzy_match_configs, load_history, load_mru_map, mru_sort_key, save_history, save_mru_map,
-    try_evaluate_math, MruEntry,
+    fuzzy_match_configs, load_history, load_mru_map, mru_bounds, mru_sort_key, record_mru_use,
+    save_history, save_mru_map, try_evaluate_math,
 };
-use crate::ui::FontSizes;
+use crate::ui::{get_mru_cache_path, get_snippet_mru_cache_path, FontSizes};
 use crate::{
     read_desktop_icon_map, read_icon_map, resolve_launcher_icon_path, AddonsConfig, RaffiConfig,
     SortMode,
@@ -286,17 +286,10 @@ impl LauncherApp {
             read_desktop_icon_map()
         };
 
-        let mru_map = load_mru_map();
+        let mru_map = load_mru_map(get_mru_cache_path().ok().as_deref());
 
         // Pre-compute aggregate stats for hybrid sorting
-        let max_count = mru_map.values().map(|e| e.count).max().unwrap_or(0);
-        let min_ts = mru_map
-            .values()
-            .map(|e| e.last_used)
-            .filter(|&t| t > 0)
-            .min()
-            .unwrap_or(0);
-        let max_ts = mru_map.values().map(|e| e.last_used).max().unwrap_or(0);
+        let (max_count, min_ts, max_ts) = mru_bounds(&mru_map);
 
         configs.sort_by_key(|config| {
             let description = config
@@ -330,6 +323,12 @@ impl LauncherApp {
         let file_browser_sort_reverse = addons.file_browser.sort_reverse;
 
         let fallbacks = Self::resolve_fallbacks(&fallback_paths, &addons);
+        let snippet_mru_path = get_snippet_mru_cache_path().ok();
+        let text_snippets = TextSnippetState {
+            mru_map: load_mru_map(snippet_mru_path.as_deref()),
+            mru_path: snippet_mru_path,
+            ..Default::default()
+        };
 
         (
             LauncherApp {
@@ -342,11 +341,12 @@ impl LauncherApp {
                 no_icons,
                 launcher_icon_paths,
                 mru_map,
+                sort_mode,
                 addons,
                 calculator_result: None,
                 currency: CurrencyState::default(),
                 script_filter: ScriptFilterState::default(),
-                text_snippets: TextSnippetState::default(),
+                text_snippets,
                 hyprland: None,
                 deferred_paste: Default::default(),
                 web_search: WebSearchState::default(),
@@ -964,11 +964,36 @@ impl LauncherApp {
 
     /// Filter freshly loaded snippets and refresh their previews.
     fn finish_text_snippet_load(&mut self, query: &str, tasks: &mut Vec<Task<Message>>) {
-        self.text_snippets.filtered = filter_snippets(&self.text_snippets.items, query);
+        let usage = self.text_snippet_usage();
+        self.text_snippets.filtered = filter_snippets(&self.text_snippets.items, query, &usage);
         self.text_snippets.loading = false;
         if let Some(task) = self.refresh_text_snippet_previews() {
             tasks.push(task);
         }
+    }
+
+    /// `mru_map` key of `snippet` in the active source.
+    fn text_snippet_mru_key(&self, snippet: &crate::TextSnippet) -> Option<String> {
+        let source = self
+            .text_snippets
+            .source_index
+            .and_then(|index| self.addons.text_snippets.get(index))?;
+        Some(snippet_mru_key(&source.keyword, &snippet.name))
+    }
+
+    /// Usage score of every loaded snippet, indexed like `items`.
+    fn text_snippet_usage(&self) -> Vec<u64> {
+        let map = &self.text_snippets.mru_map;
+        let (max_count, min_ts, max_ts) = mru_bounds(map);
+        self.text_snippets
+            .items
+            .iter()
+            .map(|snippet| {
+                self.text_snippet_mru_key(snippet).map_or(0, |key| {
+                    mru_sort_key(&key, map, &self.sort_mode, max_count, min_ts, max_ts)
+                })
+            })
+            .collect()
     }
 
     /// Recompute snippet subtitles, starting a clipboard fetch the first time
@@ -1188,16 +1213,8 @@ impl LauncherApp {
             if let Ok(mut selected) = self.selected_item.lock() {
                 *selected = Some(description.clone());
             }
-            let entry = self.mru_map.entry(description).or_insert(MruEntry {
-                count: 0,
-                last_used: 0,
-            });
-            entry.count += 1;
-            entry.last_used = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            save_mru_map(&self.mru_map);
+            record_mru_use(&mut self.mru_map, description);
+            save_mru_map(get_mru_cache_path().ok().as_deref(), &self.mru_map);
             self.save_query_to_history();
             return iced::exit();
         }
@@ -1397,6 +1414,11 @@ impl LauncherApp {
             .and_then(|&snippet_index| self.text_snippets.items.get(snippet_index))
             .cloned();
         if let Some(snippet) = snippet {
+            if let Some(key) = self.text_snippet_mru_key(&snippet) {
+                let state = &mut self.text_snippets;
+                record_mru_use(&mut state.mru_map, key);
+                save_mru_map(state.mru_path.as_deref(), &state.mru_map);
+            }
             let action = if self.view.current_modifiers.control() {
                 self.text_snippets
                     .secondary_action

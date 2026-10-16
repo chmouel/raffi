@@ -122,6 +122,10 @@ pub(super) struct TextSnippetState {
     pub previews: Vec<Option<String>>,
     pub pending: Option<PendingSelection>,
     pub error: Option<String>,
+    /// Snippet usage keyed by `snippet_mru_key`; kept across sessions.
+    pub mru_map: HashMap<String, super::support::MruEntry>,
+    /// Where `mru_map` is saved; `None` keeps usage in memory only.
+    pub mru_path: Option<std::path::PathBuf>,
 }
 
 impl TextSnippetState {
@@ -315,6 +319,7 @@ pub(super) struct LauncherApp {
     pub no_icons: bool,
     pub launcher_icon_paths: Vec<Option<String>>,
     pub mru_map: HashMap<String, super::support::MruEntry>,
+    pub sort_mode: crate::SortMode,
     pub addons: AddonsConfig,
     pub calculator_result: Option<CalculatorResult>,
     pub currency: CurrencyState,

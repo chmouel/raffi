@@ -35,7 +35,7 @@ version: 1
 #       text_muted: "#6c7086"
 #       accent: "#cba6f7"
 #       border: "#585b70"
-#   sort_mode: hybrid        # Sort mode for entries: frequency, recency, or hybrid (default: hybrid)
+#   sort_mode: hybrid        # Order launchers and snippets by use: frequency, recency, or hybrid (default: hybrid)
 #   clipboard_history: auto  # Manager for {clipboard:N} in snippets: auto, cliphist, copyq, clipman or none
 #   terminal_classes:        # Extra window classes that hypr_paste treats as terminals (Ctrl+Shift+V)
 #     - my-terminal          # Added to the built-in list; find a class with `hyprctl activewindow`

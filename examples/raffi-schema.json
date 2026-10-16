@@ -632,7 +632,7 @@
       ]
     },
     "SortMode": {
-      "description": "Sort mode for launcher entries when no search query is active",
+      "description": "Sort mode for launcher entries and text snippets by past use",
       "oneOf": [
         {
           "description": "Sort by launch count (most frequently used first)",

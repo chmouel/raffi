@@ -18,23 +18,11 @@ use crate::{
 use std::sync::{Arc, Mutex};
 
 fn test_app(addons: AddonsConfig) -> LauncherApp {
-    let (app, _) = LauncherApp::new(
-        Vec::new(),
-        addons,
-        true,
-        Arc::new(Mutex::new(None)),
-        None,
-        ThemeColors::from_mode_with_overrides(&crate::ThemeMode::Dark, None),
-        10,
-        FontSizes::default_sizes(),
-        SortMode::Hybrid,
-        Vec::new(),
-    );
-    app
+    test_app_with_fallbacks(addons, Vec::new())
 }
 
 fn test_app_with_fallbacks(addons: AddonsConfig, fallback_paths: Vec<String>) -> LauncherApp {
-    let (app, _) = LauncherApp::new(
+    let (mut app, _) = LauncherApp::new(
         Vec::new(),
         addons,
         true,
@@ -46,6 +34,9 @@ fn test_app_with_fallbacks(addons: AddonsConfig, fallback_paths: Vec<String>) ->
         SortMode::Hybrid,
         fallback_paths,
     );
+    // Keep the user's snippet usage cache out of tests, both ways.
+    app.text_snippets.mru_map.clear();
+    app.text_snippets.mru_path = None;
     app
 }
 
@@ -773,6 +764,32 @@ fn test_snippet_selection_captures_action_and_ignores_repeats() {
 }
 
 #[test]
+fn test_snippet_selection_moves_snippet_to_top() {
+    let mut source = snippet_source(
+        "Snippets",
+        "sn",
+        vec![snippet("First", "1"), snippet("Second", "2")],
+    );
+    source.placeholders = false;
+    source.action = Some("true".into());
+    let mut addons = AddonsConfig::default();
+    addons.emoji.enabled = false;
+    addons.text_snippets.push(source);
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+    app.sort_mode = SortMode::Recency;
+
+    open_snippets(&mut app, "sn ");
+    assert_eq!(app.text_snippets.filtered, vec![0, 1]);
+    let _ = app.update(Message::TextSnippetSelected(1));
+    assert_eq!(app.text_snippets.mru_map["sn:Second"].count, 1);
+
+    open_snippets(&mut app, "sn x");
+    open_snippets(&mut app, "sn ");
+    assert_eq!(app.text_snippets.filtered, vec![1, 0]);
+}
+
+#[test]
 fn test_snippet_shell_policy_follows_source() {
     let mut command_source = snippet_source("Command", "cc", Vec::new());
     command_source.snippets = None;
@@ -1419,6 +1436,18 @@ fn test_mru_sort_key_hybrid() {
         key_b > key_a,
         "B (recent) should beat A (frequent) in hybrid"
     );
+}
+
+#[test]
+fn test_parse_mru_map_keeps_pipes_in_keys() {
+    use super::support::parse_mru_map;
+
+    let map = parse_mru_map("sn:a|b|3|100\nFirefox|7|200\nLegacy|2\nbroken|x|1");
+    assert_eq!(map["sn:a|b"].count, 3);
+    assert_eq!(map["sn:a|b"].last_used, 100);
+    assert_eq!(map["Firefox"].count, 7);
+    assert_eq!(map["Legacy"].last_used, 0);
+    assert_eq!(map.len(), 3);
 }
 
 #[test]

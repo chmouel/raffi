@@ -104,7 +104,8 @@ Snippets can come from four different sources:
 
    Continue typing to filter snippets. Exact [keyword](#snippet-keywords-and-search)
    matches come first, then keyword prefixes, then fuzzy matches on the name,
-   then fuzzy matches on the snippet content
+   then fuzzy matches on the snippet content. Snippets you used recently come
+   first when nothing is typed and win ties between equal matches
 
 3. **Select Snippet**
 
@@ -271,7 +272,8 @@ John Doe
 <Aside type="note">
 The `keyword:` and `icon:` headers can appear in either order. Keep the name
 on the first line and the content after `---`. Directory-based snippets are
-sorted alphabetically and cached per session.
+read in alphabetical order, then ordered by use like any other source, and
+cached per session.
 </Aside>
 
 ## Dynamic Placeholders
@@ -397,6 +399,14 @@ Typing `sn !sig` puts that snippet first. Results are ranked as exact keyword,
 then keyword prefix, then fuzzy match on the name, then fuzzy match on the raw
 snippet value (before placeholders are filled in). The keyword is shown next to
 the snippet name.
+
+Raffi also remembers which snippets you pick, scored with the same
+[`sort_mode`](/configuration/general-settings/) as launchers (`hybrid` by
+default). With nothing typed after the source keyword, the snippets you use
+most come first; while typing, usage only decides between equally good
+matches. A query starting with `!` is a keyword lookup, so usage is ignored
+there and ties keep the source order. Usage is stored in
+`~/.cache/raffi/snippets.cache`, per source keyword and snippet name.
 
 ## Actions
 

@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::fs::File;
 use std::io::Read;
 use std::process::{Command, Stdio};
@@ -139,13 +140,23 @@ pub(super) fn parse_snippet_file(contents: &str) -> Option<TextSnippet> {
     })
 }
 
-/// Rank snippets for `query`: exact keyword, keyword prefix, fuzzy name, then
-/// fuzzy content. Ties keep the original order.
-pub(super) fn filter_snippets(snippets: &[TextSnippet], query: &str) -> Vec<usize> {
-    if query.is_empty() {
-        return (0..snippets.len()).collect();
-    }
+/// Usage cache key of snippet `name` from the source triggered by `keyword`.
+pub(super) fn snippet_mru_key(keyword: &str, name: &str) -> String {
+    format!("{keyword}:{name}")
+}
 
+/// Rank snippets for `query`: exact keyword, keyword prefix, fuzzy name, then
+/// fuzzy content. `usage[i]` (higher first) orders the empty query and breaks
+/// ties, except for `!` queries, which look up a keyword and keep the original
+/// order on ties.
+pub(super) fn filter_snippets(snippets: &[TextSnippet], query: &str, usage: &[u64]) -> Vec<usize> {
+    let usage_of = |index: usize| Reverse(usage.get(index).copied().unwrap_or(0));
+    if query.is_empty() {
+        let mut result: Vec<usize> = (0..snippets.len()).collect();
+        result.sort_by_key(|&index| usage_of(index));
+        return result;
+    }
+    let by_usage = !query.starts_with('!');
     let matcher = SkimMatcherV2::default();
     let lowered = query.to_lowercase();
     let mut ranked: Vec<(u8, i64, usize)> = snippets
@@ -168,7 +179,14 @@ pub(super) fn filter_snippets(snippets: &[TextSnippet], query: &str) -> Vec<usiz
                 .map(|score| (3, score, index))
         })
         .collect();
-    ranked.sort_by_key(|&(tier, score, _)| (tier, std::cmp::Reverse(score)));
+    ranked.sort_by_key(|&(tier, score, index)| {
+        let usage = if by_usage {
+            usage_of(index)
+        } else {
+            Reverse(0)
+        };
+        (tier, Reverse(score), usage)
+    });
     let result: Vec<usize> = ranked.into_iter().map(|(_, _, index)| index).collect();
     crate::debug_log!("snippets: filter query={query:?} results={}", result.len());
     result
@@ -441,7 +459,7 @@ mod tests {
             snippet("Gamma", "c", None),
         ];
 
-        let result = filter_snippets(&snippets, "");
+        let result = filter_snippets(&snippets, "", &[]);
         assert_eq!(result, vec![0, 1, 2]);
     }
 
@@ -453,7 +471,7 @@ mod tests {
             snippet("Phone Number", "+1234567890", None),
         ];
 
-        let result = filter_snippets(&snippets, "work");
+        let result = filter_snippets(&snippets, "work", &[]);
         assert!(!result.is_empty());
         assert!(result.contains(&1));
     }
@@ -462,7 +480,7 @@ mod tests {
     fn test_filter_snippets_no_match() {
         let snippets = vec![snippet("Alpha", "a", None), snippet("Beta", "b", None)];
 
-        let result = filter_snippets(&snippets, "zzzzz");
+        let result = filter_snippets(&snippets, "zzzzz", &[]);
         assert!(result.is_empty());
     }
 
@@ -475,7 +493,7 @@ mod tests {
             snippet("Exact", "y", Some("SIG")),
         ];
 
-        assert_eq!(filter_snippets(&snippets, "sig"), vec![3, 2, 1, 0]);
+        assert_eq!(filter_snippets(&snippets, "sig", &[]), vec![3, 2, 1, 0]);
     }
 
     #[test]
@@ -486,7 +504,25 @@ mod tests {
             snippet("Three", "kubectl get pods", None),
         ];
 
-        assert_eq!(filter_snippets(&snippets, "kubectl"), vec![0, 2]);
+        assert_eq!(filter_snippets(&snippets, "kubectl", &[]), vec![0, 2]);
+    }
+
+    #[test]
+    fn test_filter_snippets_orders_by_usage_except_bang_queries() {
+        let snippets = vec![
+            snippet("Mail one", "a", Some("!mail1")),
+            snippet("Mail two", "b", Some("!mail2")),
+            snippet("Other", "c", None),
+        ];
+        let usage = [1, 5, 9];
+
+        assert_eq!(filter_snippets(&snippets, "", &usage), vec![2, 1, 0]);
+        // Usage breaks the tie between equal fuzzy scores.
+        assert_eq!(filter_snippets(&snippets, "mail", &usage), vec![1, 0]);
+        // Match quality still wins over usage.
+        assert_eq!(filter_snippets(&snippets, "mail one", &usage)[0], 0);
+        // A `!` query keeps the keyword ranking and source order.
+        assert_eq!(filter_snippets(&snippets, "!mail", &usage), vec![0, 1]);
     }
 
     #[test]

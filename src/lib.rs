@@ -359,7 +359,7 @@ pub struct PreviewConfig {
     pub colors: Option<PreviewColorsConfig>,
 }
 
-/// Sort mode for launcher entries when no search query is active
+/// Sort mode for launcher entries and text snippets by past use
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum SortMode {

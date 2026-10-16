@@ -144,6 +144,14 @@ pub fn get_mru_cache_path() -> Result<PathBuf> {
     Ok(path)
 }
 
+/// Get the text snippet usage cache file path
+#[cfg(feature = "wayland")]
+pub fn get_snippet_mru_cache_path() -> Result<PathBuf> {
+    let mut path = get_mru_cache_path()?;
+    path.set_file_name("snippets.cache");
+    Ok(path)
+}
+
 /// Get the command history cache file path
 pub fn get_history_cache_path() -> Result<PathBuf> {
     let cache_dir = std::env::var("XDG_CACHE_HOME")

@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
 
 use super::state::CalculatorResult;
-use crate::ui::{get_history_cache_path, get_mru_cache_path};
+use crate::ui::get_history_cache_path;
 use crate::{RaffiConfig, SortMode};
 
 #[derive(Debug, Clone)]
@@ -93,52 +94,82 @@ pub(super) fn fuzzy_match_configs(configs: &[RaffiConfig], query: &str) -> Vec<u
     result
 }
 
-pub(super) fn load_mru_map() -> HashMap<String, MruEntry> {
-    if let Ok(path) = get_mru_cache_path() {
-        if let Ok(content) = fs::read_to_string(path) {
-            let mut map = HashMap::new();
-            for line in content.lines() {
-                let parts: Vec<&str> = line.splitn(3, '|').collect();
-                match parts.len() {
-                    3 => {
-                        // New format: desc|count|timestamp
-                        if let (Ok(count), Ok(ts)) =
-                            (parts[1].parse::<u32>(), parts[2].parse::<u64>())
-                        {
-                            map.insert(
-                                parts[0].to_string(),
-                                MruEntry {
-                                    count,
-                                    last_used: ts,
-                                },
-                            );
-                        }
-                    }
-                    2 => {
-                        // Old format: desc|count (auto-migrate, ts=0)
-                        if let Ok(count) = parts[1].parse::<u32>() {
-                            map.insert(
-                                parts[0].to_string(),
-                                MruEntry {
-                                    count,
-                                    last_used: 0,
-                                },
-                            );
-                        }
-                    }
-                    _ => {}
+/// Parse MRU cache lines. Fields are split from the right so keys may
+/// contain `|`.
+pub(super) fn parse_mru_map(content: &str) -> HashMap<String, MruEntry> {
+    let mut map = HashMap::new();
+    for line in content.lines() {
+        let parts: Vec<&str> = line.rsplitn(3, '|').collect();
+        match parts.len() {
+            3 => {
+                // New format: desc|count|timestamp
+                if let (Ok(count), Ok(ts)) = (parts[1].parse::<u32>(), parts[0].parse::<u64>()) {
+                    map.insert(
+                        parts[2].to_string(),
+                        MruEntry {
+                            count,
+                            last_used: ts,
+                        },
+                    );
                 }
             }
-            crate::debug_log!("mru: loaded {} entries", map.len());
-            return map;
+            2 => {
+                // Old format: desc|count (auto-migrate, ts=0)
+                if let Ok(count) = parts[0].parse::<u32>() {
+                    map.insert(
+                        parts[1].to_string(),
+                        MruEntry {
+                            count,
+                            last_used: 0,
+                        },
+                    );
+                }
+            }
+            _ => {}
         }
     }
-    HashMap::new()
+    map
 }
 
-pub(super) fn save_mru_map(map: &HashMap<String, MruEntry>) {
-    crate::debug_log!("mru: saving {} entries", map.len());
-    if let Ok(path) = get_mru_cache_path() {
+pub(super) fn load_mru_map(path: Option<&Path>) -> HashMap<String, MruEntry> {
+    let Some(content) = path.and_then(|path| fs::read_to_string(path).ok()) else {
+        return HashMap::new();
+    };
+    let map = parse_mru_map(&content);
+    crate::debug_log!("mru: loaded {} entries from {path:?}", map.len());
+    map
+}
+
+/// Count one more use of `key`, now.
+pub(super) fn record_mru_use(map: &mut HashMap<String, MruEntry>, key: String) {
+    let entry = map.entry(key).or_insert(MruEntry {
+        count: 0,
+        last_used: 0,
+    });
+    entry.count += 1;
+    entry.last_used = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+}
+
+/// Highest count, oldest non-zero timestamp and newest timestamp, as needed
+/// by `mru_sort_key`.
+pub(super) fn mru_bounds(map: &HashMap<String, MruEntry>) -> (u32, u64, u64) {
+    let max_count = map.values().map(|e| e.count).max().unwrap_or(0);
+    let min_ts = map
+        .values()
+        .map(|e| e.last_used)
+        .filter(|&t| t > 0)
+        .min()
+        .unwrap_or(0);
+    let max_ts = map.values().map(|e| e.last_used).max().unwrap_or(0);
+    (max_count, min_ts, max_ts)
+}
+
+pub(super) fn save_mru_map(path: Option<&Path>, map: &HashMap<String, MruEntry>) {
+    crate::debug_log!("mru: saving {} entries to {path:?}", map.len());
+    if let Some(path) = path {
         let mut entries: Vec<_> = map.iter().collect();
         entries.sort_by_key(|b| std::cmp::Reverse(b.1.count));
         let content = entries
@@ -146,7 +177,7 @@ pub(super) fn save_mru_map(map: &HashMap<String, MruEntry>) {
             .map(|(desc, entry)| format!("{}|{}|{}", desc, entry.count, entry.last_used))
             .collect::<Vec<_>>()
             .join("\n");
-        if let Err(error) = fs::write(&path, content) {
+        if let Err(error) = fs::write(path, content) {
             eprintln!("Warning: Failed to save MRU cache to {:?}: {}", path, error);
         }
     }
