@@ -19,7 +19,7 @@ The file browser is only available in **native mode**. It is not available when 
 
 ## Overview
 
-Navigate your filesystem directly from the launcher with fuzzy filtering, hidden file support, keyboard-driven actions, and a right-hand preview pane. Image previews scale to the largest size that fits the preview pane while keeping their aspect ratio and rescale when the window is resized; file details appear below the image and can be reached by scrolling the pane with Ctrl+J / Ctrl+K.
+Navigate your filesystem directly from the launcher with fuzzy filtering, hidden file support, keyboard-driven actions, drag-and-drop to other applications, and a right-hand preview pane. Image previews scale to the largest size that fits the preview pane while keeping their aspect ratio and rescale when the window is resized; file details appear below the image and can be reached by scrolling the pane with Ctrl+J / Ctrl+K.
 
 <Image src={fileBrowserScreenshot} alt="File browser example" width={800} />
 
@@ -164,6 +164,31 @@ Hidden files start with a dot (`.`), like `.bashrc`, `.config`, etc.
 ~/Documents/report.pdf
 [Alt+Enter] → Copies: /home/user/Documents/report.pdf
 ```
+
+### Drag and Drop
+
+Files and directories can be dragged **out of raffi** into any application that accepts drops (file managers, editors, terminals, browsers, email clients...):
+
+1. Press and hold the left mouse button on a file browser row
+2. Move the pointer — the drag starts once the pointer moves a few pixels (~8 logical px, typically while still inside the row)
+3. Release over the target application to drop
+
+```text Example
+~/Documents/report.pdf
+[press, move to a file manager] → Drops the file there
+```
+
+A quick press and release on a row still activates it like **Enter** would.
+
+The drag offers the file as `text/uri-list` (what file managers expect) and as plain UTF-8 text of the full path (what terminals and most editors take), so text targets that are not drop-aware may still receive the path if they accept text drops.
+
+<Aside type="note">
+Dragging out of raffi requires the native Wayland interface (the default). It does not work under XWayland, X11, or in Fuzzel mode.
+</Aside>
+
+<Aside type="note">
+raffi is a drag source only: it does not accept files dropped **into** it.
+</Aside>
 
 ### Autocomplete
 
@@ -349,4 +374,8 @@ Use fuzzy filtering after the last `/` to quickly find files: `/home/user/doc` m
 
 <Aside type="tip">
 Toggle hidden files with **Ctrl+H** without leaving the file browser.
+</Aside>
+
+<Aside type="tip">
+Drag files straight out of raffi into another application instead of copying their path first.
 </Aside>

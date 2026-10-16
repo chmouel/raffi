@@ -4,6 +4,7 @@ mod app;
 mod browser;
 mod clipboard_history;
 mod currency;
+mod dnd;
 mod emoji;
 mod help;
 mod hyprland;

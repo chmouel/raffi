@@ -3405,6 +3405,8 @@ name = "raffi"
 version = "0.24.0"
 dependencies = [
  "anyhow",
+ "calloop 0.14.5",
+ "calloop-wayland-source 0.4.1",
  "chrono",
  "fuzzy-matcher",
  "gumdrop",
@@ -3419,6 +3421,7 @@ dependencies = [
  "shlex",
  "ureq",
  "walkdir",
+ "wayland-client",
 ]
 
 [[package]]

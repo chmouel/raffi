@@ -961,6 +961,9 @@ fn test_file_browser_clear_resets_browsing_results() {
             is_dir: false,
         });
     app.file_browser.error = Some("boom".into());
+    app.file_browser.hovered_row = Some(0);
+    app.file_browser.pressed_row = Some(0);
+    app.file_browser.dragging = true;
 
     app.file_browser.clear();
 
@@ -968,6 +971,138 @@ fn test_file_browser_clear_resets_browsing_results() {
     assert!(app.file_browser.current_dir.is_empty());
     assert!(app.file_browser.entries.is_empty());
     assert!(app.file_browser.error.is_none());
+    assert!(app.file_browser.hovered_row.is_none());
+    assert!(app.file_browser.pressed_row.is_none());
+    assert!(!app.file_browser.dragging);
+}
+
+/// A tiny browser fixture with two directories; activating a directory only
+/// rewrites the query, so tests can exercise click routing without spawning
+/// anything.
+fn browser_app_with_two_dirs() -> LauncherApp {
+    let mut app = test_app(AddonsConfig::default());
+    app.keyword_suggestions.clear();
+    app.file_browser.active = true;
+    for name in ["alpha", "beta"] {
+        app.file_browser
+            .entries
+            .push(super::state::FileBrowserEntry {
+                name: name.into(),
+                full_path: format!("/tmp/{name}"),
+                is_dir: true,
+            });
+    }
+    app
+}
+
+#[test]
+fn test_file_browser_hover_tracks_the_row_under_the_pointer() {
+    let mut app = browser_app_with_two_dirs();
+
+    let _ = app.update(Message::FileBrowserHover(1));
+    assert_eq!(app.file_browser.hovered_row, Some(1));
+
+    // Leaving a different row must not clear the current hover.
+    let _ = app.update(Message::FileBrowserUnhover(0));
+    assert_eq!(app.file_browser.hovered_row, Some(1));
+
+    let _ = app.update(Message::FileBrowserUnhover(1));
+    assert_eq!(app.file_browser.hovered_row, None);
+}
+
+#[test]
+fn test_file_browser_row_press_then_release_activates() {
+    let mut app = browser_app_with_two_dirs();
+
+    let _ = app.update(Message::FileBrowserRowPressed {
+        index: 1,
+        path: "/tmp/beta".into(),
+    });
+    assert_eq!(app.file_browser.pressed_row, Some(1));
+
+    let _ = app.update(Message::FileBrowserRowReleased(1));
+    assert_eq!(app.selected_index, 1);
+    // Activating a directory rewrites the query into it.
+    assert_eq!(app.search_query, "/tmp/beta/");
+    assert!(app.file_browser.pressed_row.is_none());
+}
+
+#[test]
+fn test_file_browser_row_release_requires_matching_press() {
+    let mut app = browser_app_with_two_dirs();
+    app.selected_index = 0;
+
+    // A release without a press on that row (drag takeover, press elsewhere)
+    // must not activate anything.
+    let _ = app.update(Message::FileBrowserRowReleased(1));
+    assert_eq!(app.selected_index, 0);
+    assert_eq!(app.search_query, "");
+
+    // Pressing one row and releasing over another is not a click either.
+    let _ = app.update(Message::FileBrowserRowPressed {
+        index: 0,
+        path: "/tmp/alpha".into(),
+    });
+    let _ = app.update(Message::FileBrowserRowReleased(1));
+    assert_eq!(app.selected_index, 0);
+    assert_eq!(app.search_query, "");
+    assert!(app.file_browser.pressed_row.is_none());
+}
+
+#[test]
+fn test_mouse_release_resets_row_press_tracking() {
+    let mut app = browser_app_with_two_dirs();
+
+    let _ = app.update(Message::FileBrowserRowPressed {
+        index: 0,
+        path: "/tmp/alpha".into(),
+    });
+    // A release outside the browser rows still ends the press.
+    let _ = app.update(Message::MouseReleased);
+    assert!(app.file_browser.pressed_row.is_none());
+
+    let _ = app.update(Message::FileBrowserRowReleased(0));
+    assert_eq!(app.search_query, "");
+}
+
+#[test]
+fn test_drag_events_drive_browser_dragging_state() {
+    let mut app = browser_app_with_two_dirs();
+    app.file_browser.pressed_row = Some(0);
+    app.file_browser.hovered_row = Some(0);
+
+    let _ = app.update(Message::DragEvent(super::dnd::DragEvent::Started));
+    assert!(app.file_browser.dragging);
+    // The compositor consumed the pointer: press and hover tracking reset.
+    assert!(app.file_browser.pressed_row.is_none());
+    assert!(app.file_browser.hovered_row.is_none());
+
+    // A drag ending over the origin window must not launch the file: the
+    // release finds no matching press, so the row does not activate.
+    // Seeded non-zero so both assertions discriminate under regression
+    // (activation would set selected_index back to 0 and rewrite the query).
+    app.selected_index = 1;
+    let _ = app.update(Message::FileBrowserRowReleased(0));
+    assert_eq!(app.selected_index, 1);
+    assert_eq!(app.search_query, "");
+
+    let _ = app.update(Message::DragEvent(super::dnd::DragEvent::Cancelled));
+    assert!(!app.file_browser.dragging);
+
+    let _ = app.update(Message::DragEvent(super::dnd::DragEvent::Started));
+    let _ = app.update(Message::DragEvent(super::dnd::DragEvent::Dropped));
+    assert!(!app.file_browser.dragging);
+}
+
+#[test]
+fn test_file_browser_query_change_clears_stale_hover() {
+    let mut app = browser_app_with_two_dirs();
+    app.file_browser.hovered_row = Some(1);
+
+    let _ = app.update(Message::SearchChanged("/tmp/al".into()));
+
+    assert!(app.file_browser.active);
+    assert_eq!(app.file_browser.hovered_row, None);
 }
 
 #[test]

@@ -166,6 +166,25 @@ pub(crate) enum Message {
     HyprPastePrepared(u64, std::result::Result<super::hyprland::Hyprland, String>),
     WebSearchSelected,
     FileBrowserItemSelected(usize),
+    /// The user pressed the left button over a file browser row; carries the
+    /// display index and the entry path so a drag can be armed.
+    FileBrowserRowPressed {
+        index: usize,
+        path: String,
+    },
+    /// The user released the left button over a file browser row.
+    FileBrowserRowReleased(usize),
+    /// The pointer entered the file browser row at this entries index.
+    FileBrowserHover(usize),
+    /// The pointer left the file browser row at this entries index.
+    FileBrowserUnhover(usize),
+    /// A left button or touch release anywhere; used to reset row press
+    /// tracking for mouse and touch.
+    MouseReleased,
+    /// Raw Wayland handles of the main window, gathered once at startup.
+    WaylandHandles(Option<super::dnd::RawWaylandHandles>),
+    /// Lifecycle of a drag-and-drop session started from the file browser.
+    DragEvent(super::dnd::DragEvent),
     TabComplete,
     FileBrowserToggleHidden,
     ModifiersChanged(iced::keyboard::Modifiers),

@@ -115,7 +115,7 @@ Raffi supports two interface modes:
 - **Fuzzel** — uses the external Fuzzel launcher, integrates naturally with Wayland environments.
 - **Native** — built-in iced-based GUI with fuzzy search, keyboard navigation, and theme support.
 
-The native interface includes built-in addons: calculator, currency converter, file browser, emoji/Nerd Fonts picker, script filters, web searches, and text snippets, along with an Alfred-style right-hand preview pane (**Ctrl+P** to toggle).
+The native interface includes built-in addons: calculator, currency converter, file browser (with drag-and-drop of files to other applications on Wayland), emoji/Nerd Fonts picker, script filters, web searches, and text snippets, along with an Alfred-style right-hand preview pane (**Ctrl+P** to toggle).
 Press **Ctrl+/** to list every keyword, trigger and keyboard shortcut available as configured.
 
 See: [UI modes](https://chmouel.github.io/raffi/features/ui-modes/) · [Themes](https://chmouel.github.io/raffi/features/themes/) · [Calculator](https://chmouel.github.io/raffi/features/calculator/) · [Currency converter](https://chmouel.github.io/raffi/features/currency-converter/) · [File browser](https://chmouel.github.io/raffi/features/file-browser/) · [Script filters](https://chmouel.github.io/raffi/features/script-filters/) · [Web search](https://chmouel.github.io/raffi/features/web-search/) · [Text snippets](https://chmouel.github.io/raffi/features/text-snippets/)

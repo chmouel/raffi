@@ -220,6 +220,18 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
     suggestions
 }
 
+/// Fetch the raw Wayland handles of the main window, if any, so the
+/// drag-and-drop worker can attach to the same connection. Runs once at
+/// startup; on other windowing systems it resolves to `None`.
+fn fetch_wayland_handles() -> Task<Message> {
+    iced::window::oldest().then(|maybe_id| match maybe_id {
+        Some(id) => {
+            iced::window::run(id, super::dnd::extract_wayland_handles).map(Message::WaylandHandles)
+        }
+        None => Task::none(),
+    })
+}
+
 impl LauncherApp {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
@@ -331,11 +343,14 @@ impl LauncherApp {
                 keyword_suggestions: Vec::new(),
                 help_entries: Vec::new(),
                 help_filtered: Vec::new(),
+                drag: None,
             },
             if initial_query.is_empty() {
-                focus(search_input_id)
+                focus(search_input_id).chain(fetch_wayland_handles())
             } else {
-                focus(search_input_id).chain(Task::done(Message::SearchChanged(initial_query)))
+                focus(search_input_id)
+                    .chain(Task::done(Message::SearchChanged(initial_query)))
+                    .chain(fetch_wayland_handles())
             },
         )
     }
@@ -386,6 +401,28 @@ impl LauncherApp {
             }
             Message::WebSearchSelected => self.handle_web_search_selected(),
             Message::FileBrowserItemSelected(index) => self.handle_file_browser_selected(index),
+            Message::FileBrowserRowPressed { index, path } => {
+                self.handle_file_browser_row_pressed(index, path)
+            }
+            Message::FileBrowserRowReleased(index) => self.handle_file_browser_row_released(index),
+            Message::FileBrowserHover(row) => {
+                self.file_browser.hovered_row = Some(row);
+                Task::none()
+            }
+            Message::FileBrowserUnhover(row) => {
+                if self.file_browser.hovered_row == Some(row) {
+                    self.file_browser.hovered_row = None;
+                }
+                Task::none()
+            }
+            Message::MouseReleased => {
+                // Every left release ends row press tracking, even the ones
+                // that happen outside the file browser rows.
+                self.file_browser.pressed_row = None;
+                Task::none()
+            }
+            Message::WaylandHandles(handles) => self.handle_wayland_handles(handles),
+            Message::DragEvent(event) => self.handle_drag_event(event),
             Message::TabComplete => self.handle_tab_complete(),
             Message::FileBrowserToggleHidden => self.handle_file_browser_toggle_hidden(),
             Message::ModifiersChanged(modifiers) => {
@@ -528,6 +565,14 @@ impl LauncherApp {
             }
         }
 
+        // The routing above left file-browser mode, so any drag armed by a
+        // row press is stale (clear() already reset the row tracking).
+        if !self.file_browser.active {
+            if let Some(drag) = &self.drag {
+                drag.disarm();
+            }
+        }
+
         if let Some(task) = self.handle_currency_query(&query, &mut tasks) {
             return task;
         }
@@ -643,6 +688,15 @@ impl LauncherApp {
     fn handle_file_browser_query(&mut self, expanded: &str, filter_text: &str) {
         self.file_browser.active = true;
         self.file_browser.error = None;
+        // Rows are about to be rebuilt; the pointer may now be over a
+        // different one, so hover state from the previous listing is stale.
+        self.file_browser.hovered_row = None;
+        // Likewise the press: a row at the same index in the rebuilt listing
+        // is a different file, so a held button must not activate or drag it.
+        self.file_browser.pressed_row = None;
+        if let Some(drag) = &self.drag {
+            drag.disarm();
+        }
 
         let dir_path = if expanded.ends_with('/') {
             expanded
@@ -1419,6 +1473,66 @@ impl LauncherApp {
         iced::exit()
     }
 
+    fn handle_file_browser_row_pressed(&mut self, index: usize, path: String) -> Task<Message> {
+        crate::debug_log!("browser: row {index} pressed, arming drag for {path:?}");
+        self.file_browser.pressed_row = Some(index);
+        if let Some(drag) = &self.drag {
+            drag.arm(path);
+        }
+        Task::none()
+    }
+
+    fn handle_file_browser_row_released(&mut self, index: usize) -> Task<Message> {
+        let was_pressed = self.file_browser.pressed_row == Some(index);
+        self.file_browser.pressed_row = None;
+        if let Some(drag) = &self.drag {
+            drag.disarm();
+        }
+        if !was_pressed {
+            // The press started elsewhere (or was consumed by a drag), so
+            // this release must not activate the row.
+            return Task::none();
+        }
+        self.update(Message::ItemClicked(index))
+    }
+
+    fn handle_wayland_handles(
+        &mut self,
+        handles: Option<super::dnd::RawWaylandHandles>,
+    ) -> Task<Message> {
+        let Some(handles) = handles else {
+            crate::debug_log!("dnd: no Wayland window, drag-and-drop disabled");
+            return Task::none();
+        };
+        let (source, events) = super::dnd::spawn(handles);
+        self.drag = Some(source);
+        use iced::futures::StreamExt;
+        Task::stream(events.map(Message::DragEvent))
+    }
+
+    fn handle_drag_event(&mut self, event: super::dnd::DragEvent) -> Task<Message> {
+        crate::debug_log!("dnd: session event: {event:?}");
+        match event {
+            super::dnd::DragEvent::Started => {
+                self.file_browser.dragging = true;
+                // The compositor grabbed the pointer: the matching release
+                // will never arrive, so press tracking has to reset now.
+                self.file_browser.pressed_row = None;
+                self.file_browser.hovered_row = None;
+                Task::none()
+            }
+            super::dnd::DragEvent::Cancelled => {
+                self.file_browser.dragging = false;
+                Task::none()
+            }
+            super::dnd::DragEvent::Dropped => {
+                self.file_browser.dragging = false;
+                self.save_query_to_history();
+                iced::exit()
+            }
+        }
+    }
+
     fn handle_file_browser_selected(&mut self, index: usize) -> Task<Message> {
         if let Some(entry) = self.file_browser.entries.get(index) {
             if entry.is_dir {
@@ -1773,6 +1887,10 @@ impl LauncherApp {
         self.emoji.clear();
         self.web_search.clear();
         self.file_browser.clear();
+        // The browser is gone; a drag armed by a row press is stale.
+        if let Some(drag) = &self.drag {
+            drag.disarm();
+        }
         self.currency.clear();
         self.refresh_help_filter();
         self.view.refresh_ids();

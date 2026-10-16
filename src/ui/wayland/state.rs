@@ -170,6 +170,13 @@ pub(super) struct FileBrowserState {
     pub current_dir: String,
     pub error: Option<String>,
     pub cached_preview: Option<InspectedFile>,
+    /// Entries index of the row under the pointer, for hover styling.
+    pub hovered_row: Option<usize>,
+    /// Display index of the row the left button went down on. A release on
+    /// the same row activates it, like a button click.
+    pub pressed_row: Option<usize>,
+    /// A drag-and-drop session is in flight.
+    pub dragging: bool,
 }
 
 impl FileBrowserState {
@@ -180,6 +187,9 @@ impl FileBrowserState {
         self.current_dir.clear();
         self.error = None;
         self.cached_preview = None;
+        self.hovered_row = None;
+        self.pressed_row = None;
+        self.dragging = false;
     }
 }
 
@@ -310,6 +320,8 @@ pub(super) struct LauncherApp {
     pub deferred_paste: Arc<Mutex<Option<super::hyprland::Hyprland>>>,
     pub web_search: WebSearchState,
     pub file_browser: FileBrowserState,
+    /// Wayland drag-and-drop source worker, if the UI runs on Wayland.
+    pub drag: Option<super::dnd::DragSource>,
     pub view: ViewState,
     pub history: HistoryState,
     pub emoji: EmojiState,

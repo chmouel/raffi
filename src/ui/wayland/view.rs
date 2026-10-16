@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use iced::widget::{
-    button, container, image, rich_text, scrollable, span, svg, text, text_input, Column, Row,
-    Space,
+    button, container, image, mouse_area, rich_text, scrollable, span, svg, text, text_input,
+    Column, Row, Space,
 };
 use iced::{Element, Length};
 
@@ -57,6 +57,53 @@ fn item_button_style(
                     ..base_style
                 },
             }
+        }
+    }
+}
+
+/// Styling for file browser rows. The rows are [`mouse_area`] widgets rather
+/// than buttons (pressing a row must arm a drag with the exact entry under
+/// the pointer), so this replicates the item button look from tracked
+/// selection and hover state.
+fn item_row_style(
+    t: ThemeColors,
+    is_selected: bool,
+    is_hovered: bool,
+    text_color: iced::Color,
+) -> impl Fn(&iced::Theme) -> container::Style {
+    move |_theme| {
+        let base_style = container::Style {
+            text_color: Some(text_color),
+            border: iced::Border {
+                radius: 10.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        if is_selected {
+            container::Style {
+                background: Some(iced::Background::Color(t.selection_bg)),
+                border: iced::Border {
+                    color: iced::Color {
+                        a: 0.38,
+                        ..t.accent
+                    },
+                    width: 1.0,
+                    radius: 10.0.into(),
+                },
+                ..base_style
+            }
+        } else if is_hovered {
+            container::Style {
+                background: Some(iced::Background::Color(iced::Color {
+                    a: 0.12,
+                    ..t.accent_hover
+                })),
+                ..base_style
+            }
+        } else {
+            base_style
         }
     }
 }
@@ -1101,8 +1148,9 @@ impl LauncherApp {
                 items_column = items_column.push(error_button);
             }
 
-            for entry in &self.file_browser.entries {
+            for (entry_index, entry) in self.file_browser.entries.iter().enumerate() {
                 let is_selected = self.selected_index == special_item_idx;
+                let is_hovered = self.file_browser.hovered_row == Some(entry_index);
                 let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
 
                 if !self.icon_map.is_empty() {
@@ -1154,13 +1202,26 @@ impl LauncherApp {
                 );
                 item_row = item_row.push(text_col.width(Length::Fill));
 
-                let item_button = button(item_row)
-                    .on_press(Message::ItemClicked(special_item_idx))
+                // Rows are mouse areas instead of buttons: the press must
+                // carry the exact entry under the pointer so it can arm a
+                // drag-and-drop session, and a release on the same row then
+                // activates it like a button click.
+                let item_container = container(item_row)
                     .padding(fs.item_padding)
                     .width(Length::Fill)
-                    .style(item_button_style(t, is_selected, t.text_main));
+                    .style(item_row_style(t, is_selected, is_hovered, name_color));
 
-                items_column = items_column.push(item_button);
+                let item_area = mouse_area(item_container)
+                    .on_enter(Message::FileBrowserHover(entry_index))
+                    .on_exit(Message::FileBrowserUnhover(entry_index))
+                    .on_press(Message::FileBrowserRowPressed {
+                        index: special_item_idx,
+                        path: entry.full_path.clone(),
+                    })
+                    .on_release(Message::FileBrowserRowReleased(special_item_idx))
+                    .interaction(iced::mouse::Interaction::Pointer);
+
+                items_column = items_column.push(item_area);
                 special_item_idx += 1;
             }
         }
@@ -1523,12 +1584,22 @@ impl LauncherApp {
         hint_spans.push(span("Ctrl+/").size(fs.hint).color(t.accent));
         hint_spans.push(span(" keywords").size(fs.hint).color(t.text_muted));
 
+        if self.file_browser.dragging {
+            hint_spans.clear();
+            hint_spans.push(
+                span("Release over a target to drop the file")
+                    .size(fs.hint)
+                    .color(t.accent),
+            );
+        }
+
         self.shell("Type to search...", hint_spans, items_column)
     }
 
     pub(super) fn subscription(&self) -> iced::Subscription<Message> {
         use iced::keyboard;
         use iced::keyboard::key::Named;
+        use iced::mouse;
         use iced::window;
         use iced::{event, Event};
 
@@ -1590,6 +1661,14 @@ impl LauncherApp {
                 modifiers,
                 ..
             }) if c.as_str() == "k" && modifiers.control() => Some(Message::PreviewScrollUp),
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                Some(Message::MouseReleased)
+            }
+            // iced's mouse_area maps touch lifts to the same press/release
+            // callbacks, so a finger lifted outside the rows must reset row
+            // press tracking just like a mouse button release.
+            Event::Touch(iced::touch::Event::FingerLifted { .. })
+            | Event::Touch(iced::touch::Event::FingerLost { .. }) => Some(Message::MouseReleased),
             Event::Window(window::Event::Resized(size)) => Some(Message::WindowResized(size)),
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
                 Some(Message::ModifiersChanged(modifiers))
