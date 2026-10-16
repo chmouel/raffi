@@ -37,6 +37,7 @@ export default defineConfig({
             { label: 'UI Modes', slug: 'features/ui-modes' },
             { label: 'Calculator', slug: 'features/calculator' },
             { label: 'Clipboard History', slug: 'features/clipboard-history' },
+            { label: 'Color Converter', slug: 'features/color-converter' },
             { label: 'Currency Converter', slug: 'features/currency-converter' },
             { label: 'File Browser', slug: 'features/file-browser' },
             { label: 'Script Filters', slug: 'features/script-filters' },

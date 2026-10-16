@@ -591,3 +591,9 @@ addons:
   # copies it with the unit.
   # units:
   #   enabled: true
+
+  # Color converter (native UI only). Type "#ff8800", "rgb(255 136 0)" or
+  # "hsl(32 100% 50%)" to see the color as hex, rgb, hsl and the nearest
+  # CSS color name. Enter copies the selected format.
+  # color:
+  #   enabled: true

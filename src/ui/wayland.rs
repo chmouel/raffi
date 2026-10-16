@@ -5,6 +5,7 @@ mod browser;
 mod clipboard;
 mod clipboard_history;
 mod clipboard_mode;
+mod color;
 mod currency;
 mod dnd;
 mod emoji;

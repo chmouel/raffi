@@ -87,6 +87,20 @@ impl Default for UnitsAddonConfig {
     }
 }
 
+/// Configuration for the inline color converter addon
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
+pub struct ColorAddonConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for ColorAddonConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 /// Configuration for the file browser addon
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
@@ -479,6 +493,8 @@ pub struct AddonsConfig {
     pub calculator: CalculatorAddonConfig,
     #[serde(default)]
     pub units: UnitsAddonConfig,
+    #[serde(default)]
+    pub color: ColorAddonConfig,
     #[serde(default)]
     pub file_browser: FileBrowserAddonConfig,
     #[serde(default)]

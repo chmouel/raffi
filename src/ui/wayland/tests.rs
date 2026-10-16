@@ -1599,6 +1599,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "math",
             "$",
             "units",
+            "color",
             "↑/↓",
             "Ctrl+J",
             "Ctrl+K",
@@ -1647,6 +1648,7 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
     addons.file_browser.enabled = false;
     addons.system.enabled = false;
     addons.units.enabled = false;
+    addons.color.enabled = false;
     let entries = help_entries(&addons);
 
     // With every addon disabled only the general shortcut rows remain.
@@ -1695,6 +1697,7 @@ fn test_help_entries_skip_disabled_addons() {
     addons.file_browser.enabled = false;
     addons.system.enabled = false;
     addons.units.enabled = false;
+    addons.color.enabled = false;
 
     // Disabled addons drop their keyword rows and addon-specific shortcuts.
     let entries = help_entries(&addons);
@@ -3248,6 +3251,71 @@ fn test_unit_conversion_leaves_math_and_currency_alone() {
         classify_query("10 km to mi", &disabled).inline_provider,
         None
     );
+}
+
+#[test]
+fn test_color_inline_rows_copy_selected_format() {
+    let mut app = test_app(AddonsConfig::default());
+    app.history.max_items = 0;
+    let _ = app.update(Message::SearchChanged("#ff8800".into()));
+    assert_eq!(app.query_class.inline_provider, Some(InlineProvider::Color));
+    assert!(!app.query_class.sensitive);
+    let inline = app.inline_result.as_ref().expect("color rows");
+    let titles: Vec<&str> = inline.rows.iter().map(|row| row.title.as_str()).collect();
+    assert_eq!(
+        titles,
+        [
+            "#ff8800",
+            "rgb(255, 136, 0)",
+            "hsl(32, 100%, 50%)",
+            "nearest: darkorange"
+        ]
+    );
+    assert!(inline.rows.iter().all(|row| row.swatch.is_some()));
+    assert_eq!(app.total_items(), 4);
+
+    let _ = app.update(Message::MoveDown);
+    assert_eq!(app.selected_index, 1);
+    assert!(app.resolve_selected_preview().is_some());
+    assert_eq!(
+        app.inline_copy_value(app.selected_index).as_deref(),
+        Some("rgb(255, 136, 0)")
+    );
+    let _ = app.update(Message::Submit);
+    assert!(app.in_flight.is_pending("inline-copy", ""));
+
+    let _ = app.update(Message::SearchChanged("#fff".into()));
+    assert_eq!(app.inline_result.as_ref().map(|r| r.rows.len()), Some(4));
+    let _ = app.update(Message::SearchChanged("firefox".into()));
+    assert!(app.inline_result.is_none());
+    assert_eq!(app.total_items(), 0);
+}
+
+#[test]
+fn test_color_inline_provider_order_and_rejections() {
+    let addons = AddonsConfig::default();
+    for (query, provider) in [
+        ("#123", Some(InlineProvider::Color)),
+        ("rgb(1 2 3)", Some(InlineProvider::Color)),
+        ("hsl(32, 100%, 50%)", Some(InlineProvider::Color)),
+        ("2*3", Some(InlineProvider::Calculator)),
+        ("10 km to mi", Some(InlineProvider::Units)),
+        ("#", None),
+        ("#zzz", None),
+        ("red", None),
+        ("color", None),
+        ("firefox", None),
+    ] {
+        assert_eq!(
+            classify_query(query, &addons).inline_provider,
+            provider,
+            "{query}"
+        );
+    }
+
+    let mut disabled = addons;
+    disabled.color.enabled = false;
+    assert_eq!(classify_query("#ff8800", &disabled).inline_provider, None);
 }
 
 fn open_system(app: &mut LauncherApp, query: &str) {

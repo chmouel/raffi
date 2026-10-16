@@ -41,6 +41,9 @@
         "clipboard": {
           "$ref": "#/$defs/ClipboardAddonConfig"
         },
+        "color": {
+          "$ref": "#/$defs/ColorAddonConfig"
+        },
         "currency": {
           "$ref": "#/$defs/CurrencyAddonConfig"
         },
@@ -201,6 +204,17 @@
           "const": "none"
         }
       ]
+    },
+    "ColorAddonConfig": {
+      "description": "Configuration for the inline color converter addon",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "additionalProperties": false
     },
     "CurrencyAddonConfig": {
       "description": "Configuration for the currency addon",

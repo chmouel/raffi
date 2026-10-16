@@ -1623,6 +1623,22 @@ fn describe_addon_by_keyword(
         );
     }
 
+    if keyword == "color" && addons.color.enabled {
+        return (
+            "Color Converter".to_string(),
+            vec![
+                (
+                    "Input".to_string(),
+                    "#rgb, #rrggbb, rgb(), rgba(), hsl(), hsla()".to_string(),
+                ),
+                (
+                    "Output".to_string(),
+                    "Hex, RGB, HSL and the nearest CSS color name".to_string(),
+                ),
+            ],
+        );
+    }
+
     let curr_trigger = addons.currency.trigger.as_deref().unwrap_or("$");
     if addons.currency.enabled && keyword == curr_trigger {
         return (

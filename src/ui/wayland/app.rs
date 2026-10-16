@@ -13,6 +13,7 @@ use super::actions::{
     open_in_file_manager, DeferredAction,
 };
 use super::browser::read_directory;
+use super::color::{color_inline_result, try_parse_color};
 use super::currency::{
     fetch_exchange_rate, fetch_multi_exchange_rates, is_currency_help_query,
     try_parse_currency_conversion, try_parse_multi_currency_conversion,
@@ -177,6 +178,9 @@ fn inline_provider(query: &str, addons: &AddonsConfig) -> Option<InlineProvider>
     }
     if addons.units.enabled && try_parse_unit_conversion(query).is_some() {
         return Some(InlineProvider::Units);
+    }
+    if addons.color.enabled && try_parse_color(query).is_some() {
+        return Some(InlineProvider::Color);
     }
     None
 }
@@ -773,6 +777,9 @@ impl LauncherApp {
             }
             Some(InlineProvider::Units) => {
                 try_parse_unit_conversion(&query).map(|conversion| units_inline_result(&conversion))
+            }
+            Some(InlineProvider::Color) => {
+                try_parse_color(&query).map(|color| color_inline_result(&color))
             }
             _ => None,
         };

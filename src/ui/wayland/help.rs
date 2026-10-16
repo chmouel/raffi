@@ -159,6 +159,17 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         });
     }
 
+    if addons.color.enabled {
+        entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
+            trigger: "color".to_string(),
+            title: "Color converter".to_string(),
+            usage: "#ff8800, rgb(255 136 0) or hsl(32 100% 50%)".to_string(),
+            icon: None,
+            completion: None,
+        });
+    }
+
     entries.extend(keyboard_shortcut_entries(addons));
 
     entries

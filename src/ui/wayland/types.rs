@@ -17,6 +17,7 @@ pub(crate) enum InlineProvider {
     Calculator,
     Currency,
     Units,
+    Color,
 }
 
 /// One row shown above the launchers; Enter copies `copy_value`, Ctrl+Enter

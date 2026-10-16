@@ -1,6 +1,6 @@
 ---
 title: Addon Configuration
-description: Configuration reference for built-in addons (currency, calculator, unit conversion, file browser, script filters, web searches, text snippets, clipboard history, system commands)
+description: Configuration reference for built-in addons (currency, calculator, unit conversion, color converter, file browser, script filters, web searches, text snippets, clipboard history, system commands)
 ---
 
 import { Image } from 'astro:assets';
@@ -179,6 +179,24 @@ Enable or disable unit conversion.
 ```yaml
 addons:
   units:
+    enabled: false
+```
+
+## Color Converter
+
+Shows a color typed as `#ff8800`, `rgb(255 136 0)` or `hsl(32 100% 50%)` in
+hex, rgb and hsl, with the nearest CSS color name. See
+[Color Converter](/features/color-converter/) for the accepted formats.
+
+### Configuration
+
+**`addons.color.enabled`** `boolean` (default: `true`)
+
+Enable or disable the color converter.
+
+```yaml
+addons:
+  color:
     enabled: false
 ```
 
@@ -955,6 +973,9 @@ addons:
     enabled: true
 
   units:
+    enabled: true
+
+  color:
     enabled: true
 
   file_browser:
