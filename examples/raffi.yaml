@@ -404,9 +404,10 @@ addons:
   # matching keywords at the top of the results; Enter or Tab on one of those
   # rows completes the input for you.
   #
-  # Press Ctrl+/ in the native UI to list every keyword and trigger configured
-  # below, each with its usage syntax. Typing filters that list, Enter or Tab
-  # starts using the keyword, and Escape closes it.
+  # Press Ctrl+/ in the native UI to see addon keywords/actions and keyboard
+  # shortcuts in separate sections. Typing filters both; opening help clears
+  # the current query temporarily, and Escape restores it. Enter or Tab on a
+  # keyword row applies its completion.
   script_filters:
     # grab batz from https://github.com/chmouel/batzconverter
     - name: "Timezones"

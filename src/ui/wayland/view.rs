@@ -374,7 +374,7 @@ impl LauncherApp {
         if self.help_filtered.is_empty() {
             return Column::new().spacing(6).push(
                 container(
-                    text("No matching keyword.")
+                    text("No matching help entries.")
                         .size(fs.subtitle)
                         .color(t.text_muted),
                 )
@@ -405,12 +405,26 @@ impl LauncherApp {
             + 12.0;
 
         let mut items_column = Column::new().spacing(4);
+        let mut previous_section = None;
 
         for (display_idx, &entry_index) in self.help_filtered.iter().enumerate() {
             let Some(entry) = self.help_entries.get(entry_index) else {
                 continue;
             };
             let is_selected = display_idx == self.selected_index;
+
+            if previous_section != Some(entry.section) {
+                items_column = items_column.push(
+                    container(
+                        text(entry.section.heading())
+                            .size(fs.subtitle)
+                            .color(t.text_muted),
+                    )
+                    .width(Length::Fill)
+                    .padding([8.0, fs.item_padding]),
+                );
+                previous_section = Some(entry.section);
+            }
 
             let icon_slot: Element<Message> = entry
                 .icon
@@ -813,7 +827,7 @@ impl LauncherApp {
 
         if self.view.help_active {
             return self.shell(
-                "Search keywords...",
+                "Search help...",
                 self.help_hint_spans(),
                 self.help_items_column(),
             );

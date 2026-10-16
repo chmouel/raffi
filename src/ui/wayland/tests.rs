@@ -1,5 +1,5 @@
 use super::app::{fido_updir, keyword_suggestions, route_query, QueryMode};
-use super::help::{filter_help_entries, help_entries};
+use super::help::{filter_help_entries, help_entries, HelpSection};
 use super::placeholders::Expanded;
 use super::preview::{
     format_byte_size, inspect_path, PreviewBody, MAX_FILE_PREVIEW_BYTES, MAX_FILE_PREVIEW_LINES,
@@ -1573,12 +1573,25 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "Ctrl+Enter"
         ]
     );
+    let shortcut_start = entries
+        .iter()
+        .position(|entry| entry.section == HelpSection::KeyboardShortcuts)
+        .unwrap();
+    assert!(entries[..shortcut_start]
+        .iter()
+        .all(|entry| entry.section == HelpSection::KeywordsAndActions));
+    assert!(entries[shortcut_start..]
+        .iter()
+        .all(|entry| entry.section == HelpSection::KeyboardShortcuts));
     assert_eq!(entries[1].icon.as_deref(), Some("gist-icon"));
     assert_eq!(entries[1].completion.as_deref(), Some("gist "));
     assert_eq!(entries[0].completion.as_deref(), Some("~/"));
     assert_eq!(entries[5].completion, None);
     // Shortcut rows are informational: they never arm a keyword.
-    for entry in entries.iter().skip(7) {
+    for entry in entries
+        .iter()
+        .filter(|entry| entry.section == HelpSection::KeyboardShortcuts)
+    {
         assert_eq!(entry.completion, None);
     }
 }
@@ -1593,6 +1606,9 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
     let entries = help_entries(&addons);
 
     // With every addon disabled only the general shortcut rows remain.
+    assert!(entries
+        .iter()
+        .all(|entry| entry.section == HelpSection::KeyboardShortcuts));
     let triggers: Vec<&str> = entries.iter().map(|entry| entry.trigger.as_str()).collect();
     assert_eq!(
         triggers,
@@ -1637,6 +1653,9 @@ fn test_help_entries_skip_disabled_addons() {
     // Disabled addons drop their keyword rows and addon-specific shortcuts.
     let entries = help_entries(&addons);
     assert!(entries.iter().all(|entry| entry.completion.is_none()));
+    assert!(entries
+        .iter()
+        .all(|entry| entry.section == HelpSection::KeyboardShortcuts));
     assert_eq!(entries.len(), 10);
 }
 
@@ -1709,9 +1728,10 @@ fn test_help_replaces_launcher_entries() {
     let _ = app.update(Message::ToggleHelp);
 
     assert!(app.view.help_active);
+    assert!(app.search_query.is_empty());
     assert!(app.filtered_configs.is_empty());
     assert!(app.keyword_suggestions.is_empty());
-    assert_eq!(app.total_items(), 1);
+    assert_eq!(app.total_items(), app.help_entries.len());
     assert_eq!(app.fallback_count(), 0);
 }
 
@@ -1730,7 +1750,9 @@ fn test_help_list_filters_while_typing() {
 #[test]
 fn test_help_selection_arms_keyword() {
     let mut app = test_app(help_addons());
+    app.search_query = "gist ".into();
     let _ = app.update(Message::ToggleHelp);
+    assert!(app.search_query.is_empty());
     let _ = app.update(Message::SearchChanged("sn".into()));
     assert_eq!(app.total_items(), 1);
 
@@ -1761,15 +1783,22 @@ fn test_help_closes_on_toggle_and_cancel() {
 
     let _ = app.update(Message::ToggleHelp);
     assert!(app.view.help_active);
+    assert!(app.search_query.is_empty());
+    let _ = app.update(Message::SearchChanged("Ctrl+P".into()));
+    assert_eq!(app.total_items(), 1);
     let _ = app.update(Message::ToggleHelp);
     assert!(!app.view.help_active);
+    assert_eq!(app.search_query, "gist ");
     assert!(app.help_filtered.is_empty());
     assert!(app.script_filter.loading || app.script_filter.results.is_some());
 
     let _ = app.update(Message::ToggleHelp);
     assert!(app.view.help_active);
+    assert!(app.search_query.is_empty());
+    let _ = app.update(Message::SearchChanged("sn".into()));
     let _ = app.update(Message::Cancel);
     assert!(!app.view.help_active);
+    assert_eq!(app.search_query, "gist ");
 }
 
 #[test]

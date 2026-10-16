@@ -1,9 +1,25 @@
 use super::preview::describe_file_action;
 use crate::AddonsConfig;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum HelpSection {
+    KeywordsAndActions,
+    KeyboardShortcuts,
+}
+
+impl HelpSection {
+    pub(super) fn heading(self) -> &'static str {
+        match self {
+            Self::KeywordsAndActions => "Keywords and actions",
+            Self::KeyboardShortcuts => "Keyboard shortcuts",
+        }
+    }
+}
+
 /// A single row of the keyword help list shown with `Ctrl+/`.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct HelpEntry {
+    pub section: HelpSection,
     pub trigger: String,
     pub title: String,
     pub usage: String,
@@ -22,6 +38,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
 
     if addons.file_browser.enabled {
         entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
             trigger: "~/".to_string(),
             title: "File browser".to_string(),
             usage: "~/ or /path/to/dir".to_string(),
@@ -32,6 +49,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
 
     for config in &addons.script_filters {
         entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
             trigger: config.keyword.clone(),
             title: config.name.clone(),
             usage: format!("{} <query>", config.keyword),
@@ -42,6 +60,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
 
     for config in &addons.text_snippets {
         entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
             trigger: config.keyword.clone(),
             title: config.name.clone(),
             usage: format!("{} <filter>", config.keyword),
@@ -53,6 +72,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
     if addons.emoji.enabled {
         let trigger = addons.emoji.trigger.as_deref().unwrap_or("emoji");
         entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
             trigger: trigger.to_string(),
             title: "Emoji and icons".to_string(),
             usage: format!("{trigger} <name>"),
@@ -63,6 +83,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
 
     for config in &addons.web_searches {
         entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
             trigger: config.keyword.clone(),
             title: config.name.clone(),
             usage: format!("{} <query>", config.keyword),
@@ -73,6 +94,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
 
     if addons.calculator.enabled {
         entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
             trigger: "math".to_string(),
             title: "Calculator".to_string(),
             usage: "2+2*3 or (10/4)^2".to_string(),
@@ -84,6 +106,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
     if addons.currency.enabled {
         let trigger = addons.currency.trigger.as_deref().unwrap_or("$");
         entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
             trigger: trigger.to_string(),
             title: "Currency converter".to_string(),
             usage: "100 usd to eur".to_string(),
@@ -101,6 +124,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
 /// keyword rows. They cannot be armed, so Enter and Tab do nothing on them.
 fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
     let shortcut = |trigger: &str, title: &str, usage: &str| HelpEntry {
+        section: HelpSection::KeyboardShortcuts,
         trigger: trigger.to_string(),
         title: title.to_string(),
         usage: usage.to_string(),

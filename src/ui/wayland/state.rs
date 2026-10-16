@@ -333,4 +333,5 @@ pub(super) struct LauncherApp {
     pub keyword_suggestions: Vec<KeywordSuggestion>,
     pub help_entries: Vec<HelpEntry>,
     pub help_filtered: Vec<usize>,
+    pub help_saved_query: Option<String>,
 }

@@ -371,6 +371,7 @@ impl LauncherApp {
                 keyword_suggestions: Vec::new(),
                 help_entries: Vec::new(),
                 help_filtered: Vec::new(),
+                help_saved_query: None,
                 drag: None,
             },
             if initial_query.is_empty() {
@@ -1986,6 +1987,7 @@ impl LauncherApp {
             return self.close_help();
         }
 
+        self.help_saved_query = Some(std::mem::take(&mut self.search_query));
         self.view.help_active = true;
         if self.help_entries.is_empty() {
             self.help_entries = help_entries(&self.addons);
@@ -2010,10 +2012,14 @@ impl LauncherApp {
     }
 
     fn close_help(&mut self) -> Task<Message> {
+        let query = self
+            .help_saved_query
+            .take()
+            .expect("help saves the search query when it opens");
         self.view.help_active = false;
         self.help_filtered.clear();
         crate::debug_log!("help: closed");
-        self.handle_search_changed(self.search_query.clone())
+        self.handle_search_changed(query)
     }
 
     fn refresh_help_filter(&mut self) {
@@ -2033,6 +2039,7 @@ impl LauncherApp {
         crate::debug_log!("help: arming {entry:?}");
         self.view.help_active = false;
         self.help_filtered.clear();
+        self.help_saved_query = None;
         let input_id = self.view.search_input_id.clone();
         self.update(Message::SearchChanged(entry))
             .chain(move_cursor_to_end(input_id))
