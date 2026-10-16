@@ -194,6 +194,8 @@ pub(super) enum DeferredAction {
     CommandBatch(Vec<Vec<String>>),
     /// Quit niri, ending the session.
     NiriQuit,
+    /// Make sway exit, ending the session.
+    SwayExit,
     Hypr(super::hyprland::HyprAction),
     /// Signal a process after checking it is still the one listed.
     Signal(super::kill::SignalTarget),
@@ -208,6 +210,7 @@ impl DeferredAction {
             Self::Command(argv) => run_detached(argv, DEFERRED_TIMEOUT),
             Self::CommandBatch(commands) => run_batch(commands, DEFERRED_TIMEOUT),
             Self::NiriQuit => super::windows::niri_quit(),
+            Self::SwayExit => super::windows::sway_exit(),
             Self::Hypr(action) => action.run(),
             Self::Signal(target) => super::kill::send_signal(target),
             Self::Bluetooth(args) => super::bluetooth::run_action(args),
@@ -219,6 +222,7 @@ impl DeferredAction {
             Self::HyprPaste(_) => "hypr_paste",
             Self::Command(_) | Self::CommandBatch(_) => "action",
             Self::NiriQuit => "niri",
+            Self::SwayExit => "swaymsg",
             Self::Hypr(_) => "hyprctl",
             Self::Signal(_) => "kill",
             Self::Bluetooth(_) => "bluetoothctl",

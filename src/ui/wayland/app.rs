@@ -1583,7 +1583,7 @@ impl LauncherApp {
             CommandListAddon::Windows => {
                 let Some(compositor) = (self.compositor)() else {
                     self.command_list
-                        .set_notice("Window switching needs Hyprland or niri".to_string());
+                        .set_notice("Window switching needs Hyprland, niri or sway".to_string());
                     return Task::none();
                 };
                 if !(self.program_exists)(compositor.program()) {

@@ -18,6 +18,7 @@ const MAX_OUTPUT: usize = 4 * 1024 * 1024;
 pub(super) enum Compositor {
     Hyprland,
     Niri,
+    Sway,
 }
 
 impl Compositor {
@@ -28,6 +29,8 @@ impl Compositor {
             Some(Self::Hyprland)
         } else if set("NIRI_SOCKET") {
             Some(Self::Niri)
+        } else if set("SWAYSOCK") {
+            Some(Self::Sway)
         } else {
             None
         }
@@ -42,6 +45,7 @@ impl Compositor {
         match self {
             Self::Hyprland => "hyprctl",
             Self::Niri => "niri",
+            Self::Sway => "swaymsg",
         }
     }
 
@@ -64,6 +68,11 @@ impl Compositor {
             Self::Niri => niri_items(
                 &run(&["msg", "--json", "windows"])?,
                 &run(&["msg", "--json", "workspaces"])?,
+                own_pid,
+            ),
+            Self::Sway => sway_items(
+                &run(&["-t", "get_tree", "-r"])?,
+                &run(&["-t", "get_workspaces", "-r"])?,
                 own_pid,
             ),
         }
@@ -410,11 +419,230 @@ fn niri_move_here(id: &str, output: Option<&str>, focused: &NiriWorkspace) -> Ve
     commands
 }
 
+#[derive(Debug, Deserialize)]
+struct SwayNode {
+    id: i64,
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    pid: Option<i64>,
+    #[serde(default)]
+    app_id: Option<String>,
+    #[serde(default)]
+    window_properties: Option<SwayWindowProperties>,
+    #[serde(default)]
+    nodes: Vec<SwayNode>,
+    #[serde(default)]
+    floating_nodes: Vec<SwayNode>,
+    /// Child ids, most recently focused first.
+    #[serde(default)]
+    focus: Vec<i64>,
+}
+
+/// Set for Xwayland windows.
+#[derive(Debug, Deserialize)]
+struct SwayWindowProperties {
+    #[serde(default)]
+    class: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SwayWorkspace {
+    name: String,
+    #[serde(default)]
+    focused: bool,
+    #[serde(default)]
+    output: Option<String>,
+}
+
+const SWAY_SCRATCHPAD: &str = "__i3_scratch";
+
+struct SwayWindow<'a> {
+    node: &'a SwayNode,
+    workspace: Option<&'a str>,
+    output: Option<&'a str>,
+}
+
+impl SwayNode {
+    /// The app ID, or the class of an Xwayland window.
+    fn app(&self) -> (&str, &'static str) {
+        match self.app_id.as_deref().filter(|app_id| !app_id.is_empty()) {
+            Some(app_id) => (app_id, "App ID"),
+            None => (
+                self.window_properties
+                    .as_ref()
+                    .and_then(|properties| properties.class.as_deref())
+                    .unwrap_or_default(),
+                "Class",
+            ),
+        }
+    }
+}
+
+/// Build the window rows from `swaymsg -t get_tree -r` and `swaymsg -t
+/// get_workspaces -r` output, leaving out the windows of `own_pid`.
+pub(super) fn sway_items(
+    tree: &[u8],
+    workspaces: &[u8],
+    own_pid: u32,
+) -> Result<Vec<CommandItem>, String> {
+    let tree: SwayNode = serde_json::from_slice(tree)
+        .map_err(|_| "sway returned invalid window data".to_string())?;
+    let workspaces: Vec<SwayWorkspace> = serde_json::from_slice(workspaces)
+        .map_err(|_| "sway returned invalid workspace data".to_string())?;
+    let target = workspaces
+        .iter()
+        .find(|workspace| workspace.focused)
+        .and_then(|workspace| sway_quote(&workspace.name));
+    let several_outputs = workspaces
+        .iter()
+        .any(|workspace| workspace.output != workspaces[0].output);
+
+    let mut windows = Vec::new();
+    sway_windows(&tree, None, None, &mut windows);
+    Ok(windows
+        .into_iter()
+        .filter(|window| window.node.pid != Some(i64::from(own_pid)))
+        .map(|window| sway_window(window, target.as_deref(), several_outputs))
+        .collect())
+}
+
+/// Collect the windows under `node`, visiting the children of each container
+/// most recently focused first. Sway keeps that order per container, not
+/// globally, so the windows of a workspace stay together even when one of
+/// them was focused after a window of the next workspace.
+fn sway_windows<'a>(
+    node: &'a SwayNode,
+    workspace: Option<&'a str>,
+    output: Option<&'a str>,
+    windows: &mut Vec<SwayWindow<'a>>,
+) {
+    let (workspace, output) = match node.kind.as_str() {
+        "output" => (workspace, node.name.as_deref()),
+        "workspace" => (node.name.as_deref(), output),
+        _ => (workspace, output),
+    };
+    if matches!(node.kind.as_str(), "con" | "floating_con")
+        && node.pid.is_some()
+        && !node.app().0.is_empty()
+    {
+        windows.push(SwayWindow {
+            node,
+            workspace,
+            output,
+        });
+    }
+    let children = || node.nodes.iter().chain(&node.floating_nodes);
+    let focused = node
+        .focus
+        .iter()
+        .filter_map(|id| children().find(|child| child.id == *id));
+    // The scratchpad is missing from the root focus list.
+    let rest = children().filter(|child| !node.focus.contains(&child.id));
+    for child in focused.chain(rest) {
+        sway_windows(child, workspace, output, windows);
+    }
+}
+
+fn sway_window(window: SwayWindow, target: Option<&str>, several_outputs: bool) -> CommandItem {
+    let node = window.node;
+    let mut label = match window.workspace {
+        Some(SWAY_SCRATCHPAD) => "scratchpad".to_string(),
+        Some(name) => name.to_string(),
+        None => String::new(),
+    };
+    if let Some(output) = window
+        .output
+        .filter(|_| several_outputs && window.workspace != Some(SWAY_SCRATCHPAD))
+    {
+        label = format!("{label} ({output})");
+    }
+    let id = node.id.to_string();
+    let (app, app_label) = node.app();
+    let focus = sway_command(&id, "focus");
+    window_item(Window {
+        title: node.name.clone().unwrap_or_default(),
+        icon_names: icon_names(&[app]),
+        app: app.to_string(),
+        app_label,
+        workspace: label,
+        move_here: target.map(|target| {
+            DeferredAction::CommandBatch(vec![
+                sway_command(
+                    &id,
+                    &format!("move --no-auto-back-and-forth container to workspace {target}"),
+                ),
+                focus.clone(),
+            ])
+        }),
+        focus: DeferredAction::Command(focus),
+        identity: id,
+    })
+}
+
+/// `swaymsg` running `command` on the window with container `id`.
+fn sway_command(id: &str, command: &str) -> Vec<String> {
+    vec!["swaymsg".to_string(), format!("[con_id={id}] {command}")]
+}
+
+/// Quote a workspace `name` as the last argument of a sway command, or None
+/// when sway cannot read it back. Sway splits commands on `;` and `,` and
+/// arguments on spaces outside quotes, drops quotes not escaped by a
+/// backslash but keeps every backslash, then expands `$` variables, leaving
+/// `$` alone after a single backslash and turning `$$` into `$`. A `"` goes
+/// in single quotes. Keywords such as `next` and names ending in an odd
+/// number of backslashes, which would escape the closing quote, have no
+/// quoted form.
+fn sway_quote(name: &str) -> Option<String> {
+    const KEYWORDS: [&str; 7] = [
+        "next",
+        "prev",
+        "next_on_output",
+        "prev_on_output",
+        "current",
+        "back_and_forth",
+        "number",
+    ];
+    if name.is_empty()
+        || KEYWORDS
+            .iter()
+            .any(|keyword| keyword.eq_ignore_ascii_case(name))
+    {
+        return None;
+    }
+    let mut quoted = String::from('"');
+    let mut backslashes = 0;
+    for c in name.chars() {
+        match c {
+            '"' if backslashes % 2 == 0 => quoted.push_str(r#""'"'""#),
+            '$' if backslashes != 1 => quoted.push_str("$$"),
+            c => quoted.push(c),
+        }
+        backslashes = if c == '\\' { backslashes + 1 } else { 0 };
+    }
+    quoted.push('"');
+    (backslashes % 2 == 0).then_some(quoted)
+}
+
 pub(super) const NIRI_QUIT: [&str; 5] = ["niri", "msg", "action", "quit", "--skip-confirmation"];
+pub(super) const SWAY_EXIT: [&str; 2] = ["swaymsg", "exit"];
 
 /// Ask niri to quit, ending the session. Blocking.
 pub(super) fn niri_quit() -> Result<(), String> {
-    let (program, args) = NIRI_QUIT.split_first().unwrap();
+    quit_session(&NIRI_QUIT, "niri", niri_closed)
+}
+
+/// Ask sway to exit, ending the session. Blocking.
+pub(super) fn sway_exit() -> Result<(), String> {
+    quit_session(&SWAY_EXIT, "sway", sway_closed)
+}
+
+/// Run `argv`, which ends the `compositor` session. The compositor may close
+/// its socket before answering; `closed` recognizes that error output.
+fn quit_session(argv: &[&str], compositor: &str, closed: fn(&str) -> bool) -> Result<(), String> {
+    let (program, args) = argv.split_first().unwrap();
     let mut child = Command::new(program)
         .args(args)
         .stdin(Stdio::null())
@@ -422,7 +650,7 @@ pub(super) fn niri_quit() -> Result<(), String> {
         .stderr(Stdio::piped())
         .process_group(0)
         .spawn()
-        .map_err(|error| format!("cannot start niri: {error}"))?;
+        .map_err(|error| format!("cannot start {program}: {error}"))?;
     let deadline = Instant::now() + TIMEOUT;
     let status = loop {
         match child.try_wait() {
@@ -431,32 +659,50 @@ pub(super) fn niri_quit() -> Result<(), String> {
             Ok(None) => {
                 kill_process_group(child.id());
                 let _ = child.wait();
-                return Err("niri did not answer".to_string());
+                return Err(format!("{program} did not answer"));
             }
-            Err(_) => return Err("niri could not be waited for".to_string()),
+            Err(_) => return Err(format!("{program} could not be waited for")),
         }
     };
     let mut stderr = String::new();
     if let Some(mut pipe) = child.stderr.take() {
         let _ = pipe.read_to_string(&mut stderr);
     }
-    niri_quit_result(status, &stderr)
+    quit_result(compositor, status, &stderr, closed)
 }
 
 /// niri closes its socket before answering a quit, so `niri msg` reports an
-/// empty reply when it worked. Any other failure is a real error.
-fn niri_quit_result(status: ExitStatus, stderr: &str) -> Result<(), String> {
-    let closed = stderr.contains("error communicating with niri")
-        && stderr.contains("EOF while parsing a value at line 1 column 0");
-    if status.success() || closed {
+/// empty reply when it worked.
+fn niri_closed(stderr: &str) -> bool {
+    stderr.contains("error communicating with niri")
+        && stderr.contains("EOF while parsing a value at line 1 column 0")
+}
+
+/// sway closes its socket before answering `exit`.
+fn sway_closed(stderr: &str) -> bool {
+    stderr.contains("Unable to receive IPC response")
+}
+
+/// Any failure other than the closed socket is a real error.
+fn quit_result(
+    compositor: &str,
+    status: ExitStatus,
+    stderr: &str,
+    closed: fn(&str) -> bool,
+) -> Result<(), String> {
+    if status.success() || closed(stderr) {
         return Ok(());
     }
+    // swaymsg prefixes its errors with a time and a source location.
     let reason = stderr
         .lines()
-        .map(|line| line.trim_start_matches("Error:").trim())
+        .map(|line| {
+            let line = line.rsplit_once("] ").map_or(line, |(_, message)| message);
+            line.trim_start_matches("Error:").trim()
+        })
         .find(|line| !line.is_empty())
         .unwrap_or("no reason given");
-    Err(format!("niri could not quit: {reason}"))
+    Err(format!("{compositor} could not quit: {reason}"))
 }
 
 #[cfg(test)]
@@ -674,6 +920,25 @@ mod tests {
             Some(Compositor::Niri)
         );
         assert_eq!(detect(&[("NIRI_SOCKET", "")]), None);
+        assert_eq!(
+            detect(&[("SWAYSOCK", "/run/sway.sock")]),
+            Some(Compositor::Sway)
+        );
+        assert_eq!(
+            detect(&[
+                ("SWAYSOCK", "/run/sway.sock"),
+                ("NIRI_SOCKET", "/run/niri.sock")
+            ]),
+            Some(Compositor::Niri)
+        );
+        assert_eq!(
+            detect(&[
+                ("SWAYSOCK", "/run/sway.sock"),
+                ("HYPRLAND_INSTANCE_SIGNATURE", "abc")
+            ]),
+            Some(Compositor::Hyprland)
+        );
+        assert_eq!(detect(&[("SWAYSOCK", "")]), None);
     }
 
     #[test]
@@ -797,23 +1062,241 @@ mod tests {
         let failed = ExitStatus::from_raw(1 << 8);
         // Captured from niri 26.04 after a successful quit.
         let quit = "Error: error communicating with niri\n\nCaused by:\n    EOF while parsing a value at line 1 column 0\n";
-        assert!(niri_quit_result(failed, quit).is_ok());
-        assert!(niri_quit_result(ExitStatus::from_raw(0), "").is_ok());
+        assert!(quit_result("niri", failed, quit, niri_closed).is_ok());
+        assert!(quit_result("niri", ExitStatus::from_raw(0), "", niri_closed).is_ok());
         assert_eq!(
-            niri_quit_result(
+            quit_result(
+                "niri",
                 failed,
-                "Error: error connecting to the niri socket\n\nCaused by:\n    No such file or directory (os error 2)\n"
+                "Error: error connecting to the niri socket\n\nCaused by:\n    No such file or directory (os error 2)\n",
+                niri_closed
             )
             .unwrap_err(),
             "niri could not quit: error connecting to the niri socket"
         );
         assert_eq!(
-            niri_quit_result(
+            quit_result(
+                "niri",
                 failed,
-                "Error: error communicating with niri\n\nCaused by:\n    expected value at line 1 column 1\n"
+                "Error: error communicating with niri\n\nCaused by:\n    expected value at line 1 column 1\n",
+                niri_closed
             )
             .unwrap_err(),
             "niri could not quit: error communicating with niri"
         );
+    }
+
+    #[test]
+    fn test_sway_quit_result() {
+        use std::os::unix::process::ExitStatusExt;
+        let failed = ExitStatus::from_raw(1 << 8);
+        // Captured from sway 1.12 after a successful exit.
+        let exited =
+            "00:00:00.003 [ERROR] [common/ipc-client.c:86] Unable to receive IPC response\n";
+        assert!(quit_result("sway", failed, exited, sway_closed).is_ok());
+        assert_eq!(
+            quit_result(
+                "sway",
+                failed,
+                "00:00:00.000 [ERROR] [common/ipc-client.c:71] Unable to connect to /run/user/1000/sway.sock\n",
+                sway_closed
+            )
+            .unwrap_err(),
+            "sway could not quit: Unable to connect to /run/user/1000/sway.sock"
+        );
+        assert!(quit_result("sway", failed, exited, niri_closed).is_err());
+    }
+
+    // Captured from a headless sway 1.12 with two outputs, trimmed to the
+    // fields Raffi reads. Focus went to term D, term B, x kitty (Xwayland),
+    // then term A; scratch one sits in the scratchpad.
+    const SWAY_TREE: &str = r#"
+    {"id":1,"type":"root","name":"root","focus":[3,5],
+     "nodes":[
+      {"id":2147483647,"type":"output","name":"__i3","focus":[2147483646],
+       "nodes":[
+        {"id":2147483646,"type":"workspace","name":"__i3_scratch","focus":[14],
+         "nodes":[],
+         "floating_nodes":[
+          {"id":14,"type":"floating_con","name":"scratch one","pid":1848336,"app_id":"scratchy","shell":"xdg_shell","focus":[],
+           "nodes":[],"floating_nodes":[]}
+         ]}
+       ],
+       "floating_nodes":[]},
+      {"id":3,"type":"output","name":"HEADLESS-1","focus":[4,11],
+       "nodes":[
+        {"id":4,"type":"workspace","name":"1","focus":[7,9],
+         "nodes":[
+          {"id":7,"type":"con","name":"term A","pid":1846505,"app_id":"termA","shell":"xdg_shell","focus":[],
+           "nodes":[],"floating_nodes":[]},
+          {"id":9,"type":"con","name":null,"focus":[8,10],
+           "nodes":[
+            {"id":8,"type":"con","name":"term B","pid":1846750,"app_id":"termB","shell":"xdg_shell","focus":[],
+             "nodes":[],"floating_nodes":[]},
+            {"id":10,"type":"con","name":"term C","pid":1847043,"app_id":"termC","shell":"xdg_shell","focus":[],
+             "nodes":[],"floating_nodes":[]}
+           ],
+           "floating_nodes":[]}
+         ],
+         "floating_nodes":[]},
+        {"id":11,"type":"workspace","name":"web","focus":[12,13],
+         "nodes":[
+          {"id":12,"type":"con","name":"x kitty","pid":1847415,"app_id":null,"shell":"xwayland","window_properties":{"class":"XKitty","instance":"XKitty"},"focus":[],
+           "nodes":[],"floating_nodes":[]}
+         ],
+         "floating_nodes":[
+          {"id":13,"type":"floating_con","name":"floating one","pid":1848019,"app_id":"floaty","shell":"xdg_shell","focus":[],
+           "nodes":[],"floating_nodes":[]}
+         ]}
+       ],
+       "floating_nodes":[]},
+      {"id":5,"type":"output","name":"HEADLESS-2","focus":[15],
+       "nodes":[
+        {"id":15,"type":"workspace","name":"3","focus":[16],
+         "nodes":[
+          {"id":16,"type":"con","name":"term D","pid":1848572,"app_id":"termD","shell":"xdg_shell","focus":[],
+           "nodes":[],"floating_nodes":[]}
+         ],
+         "floating_nodes":[]}
+       ],
+       "floating_nodes":[]}
+     ],
+     "floating_nodes":[]}"#;
+    const SWAY_WORKSPACES: &str = r#"[
+        {"id":4,"num":1,"name":"1","visible":true,"focused":true,"output":"HEADLESS-1"},
+        {"id":11,"num":-1,"name":"web","visible":false,"focused":false,"output":"HEADLESS-1"},
+        {"id":15,"num":3,"name":"3","visible":true,"focused":false,"output":"HEADLESS-2"}
+    ]"#;
+
+    fn swaymsg(command: &str) -> Vec<String> {
+        vec!["swaymsg".to_string(), command.to_string()]
+    }
+
+    #[test]
+    fn test_sway_items_order_and_rows() {
+        let items = sway_items(SWAY_TREE.as_bytes(), SWAY_WORKSPACES.as_bytes(), 1847043).unwrap();
+        let ids: Vec<&str> = items.iter().map(|item| item.identity.as_str()).collect();
+        assert_eq!(ids, vec!["7", "8", "12", "13", "16", "14"]);
+        assert_eq!(items[0].title, "term A");
+        assert_eq!(items[0].subtitle, "termA on workspace 1 (HEADLESS-1)");
+        let xwayland = &items[2];
+        assert_eq!(xwayland.subtitle, "XKitty on workspace web (HEADLESS-1)");
+        assert_eq!(xwayland.icon_names, vec!["XKitty", "xkitty"]);
+        assert_eq!(
+            xwayland.details[0],
+            ("Class".to_string(), "XKitty".to_string())
+        );
+        assert_eq!(items[0].details[0].0, "App ID");
+        assert_eq!(items[4].subtitle, "termD on workspace 3 (HEADLESS-2)");
+        assert_eq!(items[5].subtitle, "scratchy on workspace scratchpad");
+
+        let one_output = r#"[{"name":"web","focused":true,"output":"HEADLESS-1"}]"#;
+        let items = sway_items(SWAY_TREE.as_bytes(), one_output.as_bytes(), 0).unwrap();
+        assert_eq!(items.len(), 7);
+        assert_eq!(items[0].subtitle, "termA on workspace 1");
+    }
+
+    #[test]
+    fn test_sway_items_skip_containers_and_unnamed_windows() {
+        let tree = r#"{"id":1,"type":"root","name":"root","focus":[4],"nodes":[
+            {"id":4,"type":"workspace","name":"2","focus":[6,5,7],"nodes":[
+                {"id":5,"type":"con","name":"no app","pid":10,"app_id":null,"nodes":[]},
+                {"id":6,"type":"con","name":null,"pid":11,"app_id":"foot"},
+                {"id":7,"type":"con","name":"split","nodes":[]}]}]}"#;
+        let items = sway_items(tree.as_bytes(), b"[]", 0).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].title, "foot");
+        assert_eq!(items[0].subtitle, "foot on workspace 2");
+        assert!(items[0].secondary.is_none(), "no focused workspace");
+    }
+
+    #[test]
+    fn test_sway_actions() {
+        let items = sway_items(SWAY_TREE.as_bytes(), SWAY_WORKSPACES.as_bytes(), 0).unwrap();
+        let xwayland = items.iter().find(|item| item.identity == "12").unwrap();
+        assert_eq!(
+            argvs(xwayland.primary.as_ref().unwrap()),
+            vec![swaymsg("[con_id=12] focus")]
+        );
+        assert_eq!(
+            argvs(xwayland.secondary.as_ref().unwrap()),
+            vec![
+                swaymsg(r#"[con_id=12] move --no-auto-back-and-forth container to workspace "1""#),
+                swaymsg("[con_id=12] focus"),
+            ]
+        );
+
+        let hostile = r#"[{"name":"a\";exec x, b","focused":true,"output":"HEADLESS-1"}]"#;
+        let items = sway_items(SWAY_TREE.as_bytes(), hostile.as_bytes(), 0).unwrap();
+        assert_eq!(
+            argvs(items[0].secondary.as_ref().unwrap())[0],
+            swaymsg(
+                r#"[con_id=7] move --no-auto-back-and-forth container to workspace "a"'"'";exec x, b""#
+            )
+        );
+        let keyword = r#"[{"name":"Current","focused":true,"output":"HEADLESS-1"}]"#;
+        let items = sway_items(SWAY_TREE.as_bytes(), keyword.as_bytes(), 0).unwrap();
+        assert!(items[0].secondary.is_none());
+    }
+
+    #[test]
+    fn test_sway_quote() {
+        // Each quoted name was checked against sway 1.12 by creating the
+        // workspace and moving a window to it.
+        for (name, quoted) in [
+            ("1", r#""1""#),
+            (r#"a"b"#, r#""a"'"'"b""#),
+            (r#""lead"#, r#"""'"'"lead""#),
+            ("x;y,z", r#""x;y,z""#),
+            ("with space", r#""with space""#),
+            ("number 5", r#""number 5""#),
+            ("it's", r#""it's""#),
+            ("[x]", r#""[x]""#),
+            (r"back\slash", r#""back\slash""#),
+            (r#"a\"b"#, r#""a\"b""#),
+            (r"q\\", r#""q\\""#),
+            ("$mod", r#""$$mod""#),
+            ("a$$b", r#""a$$$$b""#),
+            (r"a\$b", r#""a\$b""#),
+            (r"a\\$b", r#""a\\$$b""#),
+        ] {
+            assert_eq!(sway_quote(name).as_deref(), Some(quoted), "{name}");
+        }
+        for name in ["", r"q\", r"a\\\", "next", "Back_And_Forth", "number"] {
+            assert_eq!(sway_quote(name), None, "{name}");
+        }
+    }
+
+    #[test]
+    fn test_sway_items_reject_invalid_json() {
+        assert_eq!(
+            sway_items(b"[]", SWAY_WORKSPACES.as_bytes(), 1).unwrap_err(),
+            "sway returned invalid window data"
+        );
+        assert_eq!(
+            sway_items(SWAY_TREE.as_bytes(), b"{}", 1).unwrap_err(),
+            "sway returned invalid workspace data"
+        );
+    }
+
+    /// Focuses and moves a window in a sway session; never run by default.
+    /// Point SWAYSOCK at a throwaway headless sway with two windows, the
+    /// focused one on another workspace than `RAFFI_SWAY_TEST_ID`:
+    /// `RAFFI_SWAY_TEST_ID=12 cargo test --all-features -- --ignored live_sway`
+    #[test]
+    #[ignore]
+    fn live_sway_actions() {
+        let id = std::env::var("RAFFI_SWAY_TEST_ID").unwrap();
+        let items = Compositor::Sway.load_windows().unwrap();
+        let item = items.iter().find(|item| item.identity == id).unwrap();
+        let run = |action: &CommandAction| {
+            super::super::actions::run_deferred(&std::sync::Mutex::new(Some(action.action.clone())))
+        };
+        run(item.secondary.as_ref().unwrap()).unwrap();
+        let items = Compositor::Sway.load_windows().unwrap();
+        assert_eq!(items[0].identity, id, "the moved window has the focus");
+        run(items[1].primary.as_ref().unwrap()).unwrap();
+        let items = Compositor::Sway.load_windows().unwrap();
+        assert_ne!(items[0].identity, id, "the other window has the focus");
     }
 }

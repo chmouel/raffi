@@ -33,6 +33,7 @@ impl SystemEntry {
                 .join("; "),
             DeferredAction::Hypr(action) => format!("hyprctl eval '{}'", action.lua()),
             DeferredAction::NiriQuit => super::windows::NIRI_QUIT.join(" "),
+            DeferredAction::SwayExit => super::windows::SWAY_EXIT.join(" "),
             DeferredAction::HyprPaste(_)
             | DeferredAction::Signal(_)
             | DeferredAction::Bluetooth(_) => String::new(),
@@ -83,6 +84,7 @@ fn default_action(
         SystemCommand::Logout => match compositor {
             Some(Compositor::Hyprland) => DeferredAction::Hypr(HyprAction::Exit),
             Some(Compositor::Niri) => DeferredAction::NiriQuit,
+            Some(Compositor::Sway) => DeferredAction::SwayExit,
             None => {
                 let mut args = vec!["loginctl", "terminate-session"];
                 args.extend(session_id);
@@ -100,6 +102,7 @@ fn program(action: &DeferredAction) -> Option<&str> {
         DeferredAction::CommandBatch(commands) => commands.first()?.first().map(String::as_str),
         DeferredAction::Hypr(_) => Some("hyprctl"),
         DeferredAction::NiriQuit => Some("niri"),
+        DeferredAction::SwayExit => Some("swaymsg"),
         DeferredAction::HyprPaste(_) | DeferredAction::Signal(_) => None,
         DeferredAction::Bluetooth(_) => Some("bluetoothctl"),
     }

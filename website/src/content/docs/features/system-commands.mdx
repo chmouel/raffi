@@ -17,7 +17,7 @@ System commands are only available in native mode. They are on by default.
 | Lock      | `loginctl lock-session`                           |
 | Suspend   | `systemctl suspend`                               |
 | Hibernate | `systemctl hibernate`                             |
-| Log out   | Hyprland's exit dispatcher on Hyprland, `niri msg action quit --skip-confirmation` on niri, otherwise `loginctl terminate-session $XDG_SESSION_ID` |
+| Log out   | Hyprland's exit dispatcher on Hyprland, `niri msg action quit --skip-confirmation` on niri, `swaymsg exit` on sway, otherwise `loginctl terminate-session $XDG_SESSION_ID` |
 | Reboot    | `systemctl reboot`                                |
 | Shut down | `systemctl poweroff`                              |
 
@@ -38,7 +38,8 @@ If the program behind an entry is not installed, the row says so (for
 example "hyprlock not found") and Enter does nothing. On Hyprland, Log out
 uses `hyprctl eval` with a Lua config (Hyprland 0.55 or later) and
 `hyprctl dispatch exit` otherwise. On niri it asks niri to quit without its
-own confirmation dialog. Elsewhere, the default Log out needs
+own confirmation dialog, and on sway it runs `swaymsg exit`. Elsewhere, the
+default Log out needs
 `XDG_SESSION_ID`; without it the row says so.
 
 Raffi closes before running the command. If it fails, Raffi reports the error

@@ -1,22 +1,23 @@
 ---
 title: Window Switcher
-description: Jump to any open window on Hyprland or niri from Raffi
+description: Jump to any open window on Hyprland, niri or sway from Raffi
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
 Type `win ` (with the trailing space) to list the open windows, the most
 recently used first. Each row shows the window title, its application (the
-class on Hyprland, the app ID on niri) and its workspace, with the
-application icon when one is found. Words after the keyword filter the list
+class on Hyprland, the app ID on niri and sway, or the class of an Xwayland
+window on sway) and its workspace, with the application icon when one is
+found. Words after the keyword filter the list
 by title or application, so `win fire` finds Firefox.
 
 <Aside type="note">
-The window switcher is only available in native mode and needs Hyprland or
-niri. It reads the windows with `hyprctl` or `niri msg`, and is on by
-default. In another session the list shows "Window switching needs Hyprland
-or niri", and when the tool is missing it shows, for example, "niri not
-found".
+The window switcher is only available in native mode and needs Hyprland,
+niri or sway. It reads the windows with `hyprctl`, `niri msg` or `swaymsg`,
+and is on by default. In another session the list shows "Window switching
+needs Hyprland, niri or sway", and when the tool is missing it shows, for
+example, "swaymsg not found".
 </Aside>
 
 | Key        | Action                                                  |
@@ -45,6 +46,22 @@ because niri reads an index on the window's own monitor. The list follows
 the focus history on niri versions that report it, and puts the focused
 window first on older ones. niri ignores a window that has closed in the
 meantime, so nothing happens then.
+
+## sway
+
+Raffi runs `swaymsg [con_id=N] focus` and, for Ctrl+Enter,
+`swaymsg [con_id=N] move container to workspace` with the focused
+workspace's name before focusing. Workspace names with quotes, semicolons or
+commas work. Ctrl+Enter is not offered for the rare names sway cannot read
+back, such as one ending in a backslash.
+
+Sway has no global focus history. Raffi follows the focus order sway keeps
+for each output, workspace and container, so the windows of a workspace stay
+together and the workspace you used last comes first. Windows in the
+scratchpad are listed last, on workspace "scratchpad". Enter shows such a
+window on the current workspace; Ctrl+Enter does the same, and the window
+stays a scratchpad window. If the window has closed in the meantime, Raffi
+reports it.
 
 Raffi's own window is left out of the list. Queries typed in this mode are
 not saved in the search history.

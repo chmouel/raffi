@@ -4036,6 +4036,18 @@ fn test_system_logout_default_follows_session() {
     .unwrap();
     assert_eq!(niri_logout.missing.as_deref(), Some("niri"));
     assert!(matches!(
+        logout(Some(Compositor::Sway), None),
+        DeferredAction::SwayExit
+    ));
+    let sway_logout = system_entries(&config, Some(Compositor::Sway), None, |program| {
+        program != "swaymsg"
+    })
+    .into_iter()
+    .find(|entry| entry.id == crate::SystemCommand::Logout)
+    .unwrap();
+    assert_eq!(sway_logout.missing.as_deref(), Some("swaymsg"));
+    assert_eq!(sway_logout.command_line(), "swaymsg exit");
+    assert!(matches!(
         logout(None, Some("3")),
         DeferredAction::Command(argv) if argv == ["loginctl", "terminate-session", "3"]
     ));
@@ -4233,7 +4245,7 @@ fn test_windows_status_rows_are_not_actionable() {
     );
     assert_eq!(
         app.command_list.status(),
-        Some("Window switching needs Hyprland or niri")
+        Some("Window switching needs Hyprland, niri or sway")
     );
     assert_eq!(app.total_items(), 1);
     let _ = app.update(Message::Submit);
@@ -4249,6 +4261,12 @@ fn test_windows_status_rows_are_not_actionable() {
     app.program_exists = |program| program != "niri";
     let _ = app.update(Message::SearchChanged("win ".into()));
     assert_eq!(app.command_list.status(), Some("niri not found"));
+
+    let mut app = windows_app();
+    app.compositor = || Some(Compositor::Sway);
+    app.program_exists = |program| program != "swaymsg";
+    let _ = app.update(Message::SearchChanged("win ".into()));
+    assert_eq!(app.command_list.status(), Some("swaymsg not found"));
 
     let mut app = windows_app();
     let _ = app.update(Message::SearchChanged("win ".into()));

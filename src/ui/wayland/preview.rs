@@ -1714,7 +1714,7 @@ fn describe_addon_by_keyword(
                     "Ctrl+Enter".to_string(),
                     "Move it to the current workspace and focus it".to_string(),
                 ),
-                ("Requires".to_string(), "Hyprland or niri".to_string()),
+                ("Requires".to_string(), "Hyprland, niri or sway".to_string()),
             ],
         );
     }

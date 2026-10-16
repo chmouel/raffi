@@ -601,8 +601,8 @@ addons:
   #     lock: [hyprlock]
   #   hide: [hibernate]
 
-  # Window switcher (native UI only, Hyprland or niri). Type "win " to list
-  # open windows, most recently used first. Enter focuses the window,
+  # Window switcher (native UI only, Hyprland, niri or sway). Type "win " to
+  # list open windows, most recently used first. Enter focuses the window,
   # Ctrl+Enter moves it to the current workspace and focuses it.
   # windows:
   #   enabled: true
