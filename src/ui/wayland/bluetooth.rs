@@ -348,8 +348,8 @@ pub(super) fn power_item(adapter: &Adapter, keep_open: bool) -> CommandItem {
     }
 }
 
-/// A paired device. Its identity names the action, so a confirmation armed
-/// to disconnect never connects.
+/// A paired device. Its identity is its address alone, so the selection
+/// stays on the device when a connect or disconnect reloads the list.
 pub(super) fn device_item(
     address: &str,
     listed_name: &str,
@@ -379,7 +379,7 @@ pub(super) fn device_item(
             match_text: format!("{name} {address}"),
             icon_names,
             icon: None,
-            identity: format!("device/{address}/unknown"),
+            identity: format!("device/{address}"),
             unavailable: Some(UNKNOWN_STATE.to_string()),
             primary: None,
             secondary: None,
@@ -444,7 +444,7 @@ pub(super) fn device_item(
         ),
         icon_names,
         icon: None,
-        identity: format!("device/{address}/{verb}"),
+        identity: format!("device/{address}"),
         unavailable: None,
         primary: Some(primary),
         secondary: None,
@@ -605,7 +605,7 @@ mod tests {
             items[1].subtitle,
             "Connected · 80% battery · 00:11:22:33:44:01"
         );
-        assert_eq!(items[1].identity, "device/00:11:22:33:44:01/disconnect");
+        assert_eq!(items[1].identity, "device/00:11:22:33:44:01");
         assert_eq!(argv(&items[1]), ["disconnect", "00:11:22:33:44:01"]);
         let disconnect = items[1].primary.as_ref().unwrap();
         assert_eq!(
@@ -616,7 +616,7 @@ mod tests {
         assert_eq!(items[1].icon_names, ["audio-headset", "bluetooth"]);
 
         assert_eq!(items[2].subtitle, "Not connected · 00:11:22:33:44:02");
-        assert_eq!(items[2].identity, "device/00:11:22:33:44:02/connect");
+        assert_eq!(items[2].identity, "device/00:11:22:33:44:02");
         assert_eq!(argv(&items[2]), ["connect", "00:11:22:33:44:02"]);
         let connect = items[2].primary.as_ref().unwrap();
         assert!(connect.confirm.is_none() && connect.keep_open);
@@ -727,7 +727,7 @@ mod tests {
         assert_eq!(late.title, "Device 9");
         assert_eq!(late.unavailable.as_deref(), Some(UNKNOWN_STATE));
         assert!(late.primary.is_none());
-        assert_eq!(late.identity, "device/00:11:22:33:44:09/unknown");
+        assert_eq!(late.identity, "device/00:11:22:33:44:09");
     }
 
     #[test]

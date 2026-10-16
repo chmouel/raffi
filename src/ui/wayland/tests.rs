@@ -5385,7 +5385,7 @@ fn test_bluetooth_connect_runs_at_once_and_shows_progress() {
             "✓ Keyboard K3"
         ]
     );
-    let identity = "device/00:11:22:33:44:02/connect".to_string();
+    let identity = "device/00:11:22:33:44:02".to_string();
     select_identity(&mut app, &identity);
     let task = app.update(Message::Submit);
     assert!(task.units() > 0, "connecting runs in the background");
@@ -5407,8 +5407,44 @@ fn test_bluetooth_connect_runs_at_once_and_shows_progress() {
 }
 
 #[test]
+fn test_bluetooth_selection_stays_on_the_device_after_the_refresh() {
+    let mut app = bluetooth_app("bt ", true);
+    let identity = "device/00:11:22:33:44:02";
+    select_identity(&mut app, identity);
+    let _ = app.update(Message::Submit);
+    let _ = app.update(Message::CommandListActionDone(
+        CommandListAddon::Bluetooth,
+        app.command_list.session,
+        identity.to_string(),
+        Ok(()),
+    ));
+
+    let mut items = super::bluetooth::fixture_items(true);
+    let connected = super::bluetooth::DeviceInfo {
+        name: "Ear Buds".to_string(),
+        alias: "My Buds".to_string(),
+        icon: "audio-headset".to_string(),
+        connected: true,
+        paired: true,
+        battery: None,
+    };
+    let position = items
+        .iter()
+        .position(|item| item.identity == identity)
+        .unwrap();
+    items[position] =
+        super::bluetooth::device_item("00:11:22:33:44:02", "Ear Buds", Some(&connected), true);
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(items)));
+
+    let selected = app.command_list.item(app.selected_index).unwrap();
+    assert_eq!(selected.identity, identity);
+    assert_eq!(selected.title, "✓ My Buds");
+}
+
+#[test]
 fn test_bluetooth_disconnect_and_power_off_need_confirmation() {
-    for identity in ["device/00:11:22:33:44:01/disconnect", "adapter/power-off"] {
+    for identity in ["device/00:11:22:33:44:01", "adapter/power-off"] {
         let mut app = bluetooth_app("bt ", true);
         select_identity(&mut app, identity);
 
@@ -5463,7 +5499,7 @@ fn test_bluetooth_adapter_off_and_power_on() {
 #[test]
 fn test_bluetooth_failure_shows_an_error_row_and_refreshes() {
     let mut app = bluetooth_app("bt ", true);
-    let identity = "device/00:11:22:33:44:02/connect".to_string();
+    let identity = "device/00:11:22:33:44:02".to_string();
     select_identity(&mut app, &identity);
     let _ = app.update(Message::Submit);
     let task = app.update(Message::CommandListActionDone(
@@ -5495,7 +5531,7 @@ fn test_bluetooth_close_on_action_defers_the_action() {
             false,
         )),
     ));
-    select_identity(&mut app, "device/00:11:22:33:44:02/connect");
+    select_identity(&mut app, "device/00:11:22:33:44:02");
     let _ = app.update(Message::Submit);
     assert!(matches!(
         deferred_action(&app),
