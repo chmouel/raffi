@@ -568,7 +568,7 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
     if addons.system.enabled && matches(addons.system.trigger()) {
         suggestions.push(KeywordSuggestion {
             keyword: addons.system.trigger().to_string(),
-            subtitle: "Lock, suspend, log out, reboot or shut down".to_string(),
+            subtitle: "Lock, suspend, hibernate, log out, reboot or shut down".to_string(),
             icon: Some(SYSTEM_ICON.to_string()),
         });
     }

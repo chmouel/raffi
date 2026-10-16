@@ -3996,7 +3996,7 @@ fn test_default_triggers_do_not_shadow_each_other_or_web_searches() {
         subtitles,
         vec![
             "Search Sysdig",
-            "Lock, suspend, log out, reboot or shut down"
+            "Lock, suspend, hibernate, log out, reboot or shut down"
         ]
     );
 }

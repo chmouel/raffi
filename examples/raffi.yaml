@@ -596,7 +596,9 @@ addons:
   # System commands (native UI only). Type "sys " to list lock, suspend,
   # hibernate, log out, reboot and shut down. Everything except lock asks
   # for a second Enter. Commands are argument lists run without a shell;
-  # an empty list hides the entry, like `hide`.
+  # an empty list hides the entry, like `hide`. The "sys " keyword takes
+  # over launcher searches starting with "sys "; change `trigger` or set
+  # `enabled: false` to keep them.
   # system:
   #   enabled: true
   #   trigger: sys

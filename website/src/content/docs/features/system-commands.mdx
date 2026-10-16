@@ -1,6 +1,6 @@
 ---
 title: System Commands
-description: Lock, suspend, log out, reboot or shut down from Raffi
+description: Lock, suspend, hibernate, log out, reboot or shut down from Raffi
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -26,6 +26,13 @@ To open the list from a key binding, pass the keyword as the initial query:
 ```sh
 raffi -u native -i "sys "
 ```
+
+<Aside type="caution">
+The `sys ` keyword takes over any search starting with "sys ", so a launcher
+search such as `sys monitor` opens the system commands instead. Set
+`addons.system.trigger` to another keyword, or `addons.system.enabled: false`,
+if you need those searches.
+</Aside>
 
 ## Confirmation
 

@@ -119,7 +119,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             section: HelpSection::KeywordsAndActions,
             trigger: trigger.to_string(),
             title: "System commands".to_string(),
-            usage: format!("{trigger} <lock|suspend|log out|reboot|shut down>"),
+            usage: format!("{trigger} <lock|suspend|hibernate|log out|reboot|shut down>"),
             icon: Some(super::app::SYSTEM_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
         });
