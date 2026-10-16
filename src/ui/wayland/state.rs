@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -9,7 +10,7 @@ use super::preview::InspectedFile;
 use super::theme::{PreviewStyle, ThemeColors};
 pub(crate) use super::types::{
     CachedRate, CalculatorResult, ClipboardData, CurrencyConversion, CurrencyConversionRequest,
-    CurrencyResult, EmojiEntry, FileBrowserEntry, Message, MultiCurrencyRequest,
+    CurrencyResult, DynamicPreview, EmojiEntry, FileBrowserEntry, Message, MultiCurrencyRequest,
     MultiCurrencyResult, ScriptFilterResult, WebSearchActiveState,
 };
 use crate::{AddonsConfig, TextSnippet};
@@ -67,6 +68,25 @@ pub(super) struct ScriptFilterState {
     pub action: Option<String>,
     pub secondary_action: Option<String>,
     pub help_message: Option<String>,
+    /// Config index of the script filter that produced the current results.
+    pub config_index: Option<usize>,
+    pub query: String,
+    /// Bumped on every selection or result change so stale preview work is
+    /// dropped.
+    pub preview_generation: u64,
+    /// Copy of `preview_generation` read by sleeping refresh timers, so a
+    /// superseded timer ends early instead of holding its thread.
+    pub preview_live_generation: Arc<AtomicU64>,
+    /// Dynamic previews of the current results, by item index.
+    pub previews: HashMap<usize, DynamicPreview>,
+    /// Config indexes whose script did not answer `RAFFI_PREVIEW=1` with a
+    /// preview object; kept for the whole session.
+    pub preview_unsupported: HashSet<usize>,
+    /// Config indexes whose script answered with a preview object at least once.
+    pub preview_supported: HashSet<usize>,
+    /// Config indexes with a first preview run in flight. Until it answers no
+    /// other run starts, so a legacy script is run only once more.
+    pub preview_probing: HashSet<usize>,
 }
 
 impl ScriptFilterState {
@@ -77,6 +97,16 @@ impl ScriptFilterState {
         self.action = None;
         self.secondary_action = None;
         self.help_message = None;
+        self.config_index = None;
+        self.query.clear();
+        self.previews.clear();
+        self.bump_preview_generation();
+    }
+
+    pub fn bump_preview_generation(&mut self) {
+        self.preview_generation = self.preview_generation.wrapping_add(1);
+        self.preview_live_generation
+            .store(self.preview_generation, Ordering::Relaxed);
     }
 }
 

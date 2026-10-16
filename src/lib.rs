@@ -304,6 +304,9 @@ pub struct ScriptFilterConfig {
     #[serde(default)]
     pub env: std::collections::HashMap<String, String>,
     pub min_query_length: Option<usize>,
+    /// Re-run the command with `RAFFI_PREVIEW=1` for the selected item and show
+    /// the preview object it prints (default: true).
+    pub dynamic_preview: Option<bool>,
 }
 
 /// Configuration for a web search addon

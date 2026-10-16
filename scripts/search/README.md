@@ -11,6 +11,8 @@ A Raffi script filter that provides live DuckDuckGo autocomplete suggestions whi
 
 The script calls the DuckDuckGo free autocomplete API (`duckduckgo.com/ac/`) to fetch suggestions for the typed query. Each suggestion is displayed as a Raffi item whose `arg` is the full search URL for the configured engine. The first item is always the raw query itself, so you can always search without waiting for suggestions.
 
+With the preview pane open (`Ctrl+P`), the selected suggestion is looked up in the DuckDuckGo Instant Answer API (`api.duckduckgo.com`). When there is an answer, the preview shows its heading, summary, source link, and image. Otherwise it shows the URL that Enter opens. Raffi asks for this by running the script again with `RAFFI_PREVIEW=1` and the suggestion in `RAFFI_TITLE`. Add `dynamic_preview: false` to an entry to turn it off.
+
 Multiple Raffi entries (one per search engine) call the same script, each passing a different engine name as the first argument. Raffi appends the user's query as the final argument automatically.
 
 ## Installation
@@ -86,4 +88,10 @@ python3 search.py badengine "test"
 
 # Validate JSON output
 python3 search.py google "rust async" | python3 -m json.tool
+
+# Preview for one suggestion, as Raffi asks for it
+RAFFI_PREVIEW=1 RAFFI_TITLE="rust programming" python3 search.py google | python3 -m json.tool
+
+# Unit tests
+python3 -m unittest test_search
 ```

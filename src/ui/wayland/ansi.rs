@@ -27,6 +27,23 @@ fn ansi_color(code: u8) -> Option<iced::Color> {
     }
 }
 
+/// Colour of an xterm 256-colour palette index.
+fn xterm_256(n: u8) -> iced::Color {
+    match n {
+        0..=7 => ansi_color(30 + n).unwrap_or(iced::Color::WHITE),
+        8..=15 => ansi_color(90 + n - 8).unwrap_or(iced::Color::WHITE),
+        16..=231 => {
+            let n = n - 16;
+            let level = |v: u8| if v == 0 { 0 } else { 55 + v * 40 };
+            iced::Color::from_rgb8(level(n / 36), level((n / 6) % 6), level(n % 6))
+        }
+        232..=255 => {
+            let v = 8 + (n - 232) * 10;
+            iced::Color::from_rgb8(v, v, v)
+        }
+    }
+}
+
 pub(crate) fn ansi_to_spans<'a>(
     s: &str,
     font_size: f32,
@@ -64,26 +81,49 @@ pub(crate) fn ansi_to_spans<'a>(
             continue;
         }
 
-        for part in params.split(';') {
-            if let Ok(code) = part.parse::<u8>() {
-                match code {
-                    0 => {
-                        fg = default_color;
-                        bold = false;
-                        underline = false;
+        let codes: Vec<u8> = params
+            .split(';')
+            .map(|part| part.parse().unwrap_or(u8::MAX))
+            .collect();
+        let mut i = 0;
+        while i < codes.len() {
+            match codes[i] {
+                0 => {
+                    fg = default_color;
+                    bold = false;
+                    underline = false;
+                }
+                1 => bold = true,
+                4 => underline = true,
+                22 => bold = false,
+                24 => underline = false,
+                39 => fg = default_color,
+                code @ (30..=37 | 90..=97) => {
+                    if let Some(color) = ansi_color(code) {
+                        fg = color;
                     }
-                    1 => bold = true,
-                    4 => underline = true,
-                    22 => bold = false,
-                    24 => underline = false,
-                    30..=37 | 90..=97 => {
-                        if let Some(color) = ansi_color(code) {
+                }
+                // Extended colours: `5;n` (256 palette) or `2;r;g;b`. Their
+                // arguments must be skipped, not read as SGR codes.
+                code @ (38 | 48) => {
+                    let (color, used) = match codes.get(i + 1) {
+                        Some(5) => (codes.get(i + 2).map(|&n| xterm_256(n)), 2),
+                        Some(2) => match codes.get(i + 2..i + 5) {
+                            Some(&[r, g, b]) => (Some(iced::Color::from_rgb8(r, g, b)), 4),
+                            _ => (None, 4),
+                        },
+                        _ => (None, 0),
+                    };
+                    if code == 38 {
+                        if let Some(color) = color {
                             fg = color;
                         }
                     }
-                    _ => {}
+                    i += used;
                 }
+                _ => {}
             }
+            i += 1;
         }
     }
 
@@ -107,4 +147,37 @@ pub(crate) fn ansi_to_spans<'a>(
 
 pub(crate) fn strip_ansi(s: &str) -> String {
     ANSI_SGR_RE.replace_all(s, "").into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ansi_to_spans, xterm_256};
+
+    fn colors(s: &str) -> Vec<iced::Color> {
+        ansi_to_spans(s, 12.0, iced::Color::WHITE)
+            .into_iter()
+            .map(|span| span.color.unwrap_or(iced::Color::WHITE))
+            .collect()
+    }
+
+    #[test]
+    fn test_truecolor_arguments_are_not_read_as_codes() {
+        // 32 inside the RGB triple must not turn the text green.
+        assert_eq!(
+            colors("\x1b[38;2;10;32;200mx"),
+            vec![iced::Color::from_rgb8(10, 32, 200)]
+        );
+    }
+
+    #[test]
+    fn test_256_colour_background_and_default_reset() {
+        assert_eq!(colors("\x1b[38;5;196mx"), vec![xterm_256(196)]);
+        assert_eq!(xterm_256(196), iced::Color::from_rgb8(255, 0, 0));
+        // Backgrounds are ignored, including their arguments.
+        assert_eq!(colors("\x1b[48;2;31;32;33mx"), vec![iced::Color::WHITE]);
+        assert_eq!(
+            colors("\x1b[31ma\x1b[39mb"),
+            vec![super::ansi_color(31).unwrap(), iced::Color::WHITE]
+        );
+    }
 }

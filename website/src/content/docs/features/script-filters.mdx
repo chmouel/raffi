@@ -81,6 +81,11 @@ Action on Enter. Options:
 Action on Ctrl+Enter. Accepts same values as `action`. If omitted, Ctrl+Enter behaves same as Enter.
 
 
+**`dynamic_preview`** `boolean` (default: `true`)
+
+Ask the script for a preview of the selected item. See [Dynamic previews](#dynamic-previews). Set to `false` to only use the `preview` field from the item list.
+
+
 ## JSON Format
 
 Script filters must output JSON matching this structure (subset of [Alfred's format](https://www.alfredapp.com/help/workflows/inputs/script-filter/json/)):
@@ -125,9 +130,14 @@ Value copied to clipboard (falls back to title if omitted)
 Absolute path to a PNG or SVG icon
 
 
-**`preview`** `string`
+**`preview`** `string` or `object`
 
-Optional multiline preview text (supports ANSI escape codes) or local file/image path rendered in the right-hand preview pane
+Optional multiline preview text (supports ANSI escape codes) or local file/image path rendered in the right-hand preview pane. It can also be a [preview object](#preview-object), with `"dynamic": false` added to skip the dynamic preview call for this item
+
+
+**`variables`** `object`
+
+Optional Alfred string map. Each entry is exported as an environment variable to the preview call and to the `action` and `secondary_action` commands, so the script can pass structured data along without packing it into `arg`
 
 
 **`quicklookurl`** `string`
@@ -235,6 +245,102 @@ script_filters:
     Opens bookmark URL in browser
   </TabItem>
 </Tabs>
+
+## Dynamic Previews
+
+When the preview pane is open (`Ctrl+P`), Raffi runs the script filter again
+for the selected item and shows the preview object it prints. The command, args,
+and query are the same as for the item list, with these environment variables
+added:
+
+| Variable | Value |
+|----------|-------|
+| `RAFFI_PREVIEW` | `1` |
+| `RAFFI_VALUE` | the item's `arg`, or its title |
+| `RAFFI_TITLE` | the item's title without ANSI codes |
+| `RAFFI_QUERY` | the text typed after the keyword |
+| `RAFFI_PREVIEW_WIDTH`, `RAFFI_PREVIEW_HEIGHT` | preview pane size in pixels |
+
+The config `env` and the item's `variables` are exported too. The call is
+debounced while you move through the list, killed after 3 seconds, and its
+output is capped at 8 MiB.
+
+A script supports this by checking `RAFFI_PREVIEW` before building its list:
+
+```python
+import json, os
+
+if os.environ.get("RAFFI_PREVIEW") == "1":
+    value = os.environ["RAFFI_VALUE"]
+    print(json.dumps({"title": value, "text": f"Details for {value}"}))
+    raise SystemExit
+```
+
+<Aside type="caution">
+Previews run the script filter command again, so a command that changes
+something each time it runs (sends a request with side effects, writes state)
+must check `RAFFI_PREVIEW` first, or the filter needs `dynamic_preview: false`.
+</Aside>
+
+Scripts that ignore `RAFFI_PREVIEW` keep working. Raffi waits for the first
+preview run of a script filter to answer before starting another. If a
+successful run prints
+something other than a preview object (for example the usual
+`{"items": [...]}` or invalid JSON), Raffi stops asking that script filter for
+the rest of the session and uses the item's `preview` field. A failed run
+(non-zero exit or timeout) keeps the last preview on screen, adds a `Preview`
+row with the error, and is retried the next time the item is selected.
+
+### Preview Object
+
+Every field is optional:
+
+```json
+{
+  "title": "claude [working]",
+  "subtitle": "project-a",
+  "badge": "Herdr",
+  "icon": "utilities-terminal",
+  "text": "\u001b[32mANSI text\u001b[0m",
+  "image": "/tmp/shot.png",
+  "sections": [
+    { "type": "text", "heading": "Output", "content": "..." },
+    { "type": "image", "base64": "iVBORw0KGgo..." },
+    { "type": "file", "path": "~/notes.md" }
+  ],
+  "metadata": [["Status", "working"], ["Directory", "/home/me/project-a"]],
+  "refresh": 2
+}
+```
+
+**`title`**, **`subtitle`**, **`badge`**: replace the header of the preview pane.
+
+**`icon`**: icon theme name, image path, or emoji.
+
+**`text`**: body text, ANSI colours supported (16, 256, and 24-bit).
+
+**`image`**: a local image path, or `{"path": "..."}`, or `{"base64": "..."}`.
+Base64 data may also be a `data:image/...;base64,` URL. Use
+`RAFFI_PREVIEW_WIDTH` and `RAFFI_PREVIEW_HEIGHT` to size generated images.
+
+**`sections`**: ordered body blocks. `text` takes `content` and an optional
+`heading`, `image` takes `path` or `base64`, and `file` takes a `path` shown
+with the same viewer as the file browser (text, images, directories). When
+`sections` is set, `text` and `image` are ignored, and an empty list clears the
+body. Without it the image comes first, then the text. A preview with no
+`sections`, `text`, or `image` keeps the item's own preview body and only
+changes the header and metadata.
+
+**`metadata`**: `[label, value]` rows shown above Raffi's own Enter and
+Ctrl+Enter rows.
+
+**`refresh`**: seconds after which Raffi asks again while the item stays
+selected, between 0.5 and 3600. Use it for live data such as logs or
+progress. A `file` section is read again on every refresh.
+
+The same object can be used as an item's static `preview` field (`refresh` has
+no effect there). Add `"dynamic": false` to it to keep that item out of the
+dynamic preview calls.
 
 ## ANSI Color Support
 
@@ -363,6 +469,7 @@ addons:
     - name: "Herdr Agents"
       keyword: "herdr"
       command: "~/.config/raffi/scripts/herdr/herdr_filter.py"
+      icon: "utilities-terminal"
       action: 'herdr agent focus "$RAFFI_VALUE"'
 ```
 
@@ -394,6 +501,9 @@ action: >-
   [ -z "$id" ] || niri msg action focus-window --id "$id";
   herdr agent focus "$RAFFI_VALUE"
 ```
+
+With the preview pane open, the selected agent shows its status, directory,
+and recent terminal output, refreshed every 2 seconds.
 
 See the script's
 [README](https://github.com/chmouel/raffi/blob/main/scripts/herdr/README.md) for
@@ -443,6 +553,8 @@ ddg rust async
 # Enter: open in browser
 # Ctrl+Enter: copy URL to clipboard
 ```
+
+With the preview pane open, the selected suggestion shows the DuckDuckGo Instant Answer for it (summary, source link, and image) when there is one.
 
 <Aside type="note">
 Suggestions are fetched from the DuckDuckGo autocomplete API (no API key required). On timeout or network error the script falls back to showing the raw query only.

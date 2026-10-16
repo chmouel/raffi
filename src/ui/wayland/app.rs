@@ -9,8 +9,8 @@ use iced::widget::scrollable::{self, AbsoluteOffset};
 use iced::Task;
 
 use super::actions::{
-    copy_text_checked, execute_action, execute_file_action, execute_snippet_action,
-    open_in_file_manager, DeferredAction,
+    copy_text_checked, execute_action, execute_action_with_env, execute_file_action,
+    execute_snippet_action, open_in_file_manager, DeferredAction,
 };
 use super::browser::read_directory;
 use super::color::{color_inline_result, try_parse_color};
@@ -28,7 +28,10 @@ use super::emoji::{
     load_emoji_data_from_disk, resolve_emoji_file_names,
 };
 use super::help::{filter_help_entries, help_entries};
-use super::script_filters::{execute_script_filter, parse_script_filter_output};
+use super::script_filters::{
+    execute_script_filter, execute_script_filter_preview, parse_script_filter_output,
+    schedule_script_filter_preview, PreviewRequest,
+};
 use super::snippets::{
     compute_previews, execute_text_snippet_command, expand_final, fetch_clipboard, filter_snippets,
     missing_clipboard, parse_snippet_file, snippet_mru_key,
@@ -239,6 +242,9 @@ const INLINE_COPY: &str = "inline-copy";
 
 /// Pixels scrolled per Ctrl+J / Ctrl+K press in the preview pane.
 const PREVIEW_SCROLL_STEP: f32 = 120.0;
+/// Wait before running a Script Filter dynamic preview, so moving quickly
+/// through results does not start one process per row.
+const SCRIPT_FILTER_PREVIEW_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(80);
 
 /// Match `keyword` followed by a space and return the remaining query.
 ///
@@ -805,6 +811,12 @@ impl LauncherApp {
                 self.handle_script_filter_result(generation, result)
             }
             Message::ScriptFilterItemSelected(index) => self.handle_script_filter_selected(index),
+            Message::ScriptFilterPreviewDue(generation, index) => {
+                self.handle_script_filter_preview_due(generation, index)
+            }
+            Message::ScriptFilterPreview(generation, config_index, index, result) => {
+                self.handle_script_filter_preview(generation, config_index, index, result)
+            }
             Message::TextSnippetCommandResult(generation, result) => {
                 self.handle_text_snippet_command_result(generation, result)
             }
@@ -871,7 +883,7 @@ impl LauncherApp {
                     }
                 }
                 self.refresh_file_preview_cache();
-                Task::none()
+                self.request_script_filter_preview()
             }
             Message::PreviewScrollDown => self.scroll_preview(PREVIEW_SCROLL_STEP),
             Message::PreviewScrollUp => self.scroll_preview(-PREVIEW_SCROLL_STEP),
@@ -1326,6 +1338,10 @@ impl LauncherApp {
             self.script_filter.action = config.action.clone();
             self.script_filter.secondary_action = config.secondary_action.clone();
             self.script_filter.results = None;
+            self.script_filter.config_index = Some(config_index);
+            self.script_filter.query.clone_from(&query);
+            self.script_filter.previews.clear();
+            self.script_filter.bump_preview_generation();
             tasks.push(execute_script_filter(
                 config.command.clone(),
                 config.args.clone(),
@@ -1829,7 +1845,10 @@ impl LauncherApp {
         self.follow_clipboard_selection();
         self.refresh_file_preview_cache();
         self.view.preview_scrollable_id = super::state::ScrollableId::unique();
-        self.snap_to_selection()
+        Task::batch([
+            self.snap_to_selection(),
+            self.request_script_filter_preview(),
+        ])
     }
 
     fn snap_to_selection(&self) -> Task<Message> {
@@ -2166,7 +2185,159 @@ impl LauncherApp {
         self.script_filter.loading_name = None;
         self.script_filter.results = result.ok();
         self.refresh_file_preview_cache();
-        Task::none()
+        self.request_script_filter_preview()
+    }
+
+    /// Index of the selected Script Filter result when it should get a
+    /// dynamic preview.
+    pub(super) fn dynamic_preview_target(&self) -> Option<usize> {
+        if !self.view.show_preview || self.view.help_active {
+            return None;
+        }
+        let config_index = self.script_filter.config_index?;
+        if self
+            .script_filter
+            .preview_unsupported
+            .contains(&config_index)
+        {
+            return None;
+        }
+        let config = self.addons.script_filters.get(config_index)?;
+        if config.dynamic_preview == Some(false)
+            || self.script_filter.loading
+            || self.script_filter.help_message.is_some()
+        {
+            return None;
+        }
+        let index = self
+            .selected_index
+            .checked_sub(self.keyword_suggestions.len())?;
+        let item = self.script_filter.results.as_ref()?.items.get(index)?;
+        let opted_out = item
+            .preview
+            .as_ref()
+            .and_then(super::types::ScriptFilterPreview::as_rich)
+            .is_some_and(|preview| !preview.dynamic);
+        (!opted_out).then_some(index)
+    }
+
+    /// Drop pending preview work and, when the selection is a Script Filter
+    /// result, schedule its dynamic preview.
+    pub(super) fn request_script_filter_preview(&mut self) -> Task<Message> {
+        self.script_filter.bump_preview_generation();
+        let Some(index) = self.dynamic_preview_target() else {
+            return Task::none();
+        };
+        let cached_without_refresh = self
+            .script_filter
+            .previews
+            .get(&index)
+            .and_then(|dynamic| dynamic.preview.as_ref())
+            .is_some_and(|preview| preview.refresh.is_none());
+        if cached_without_refresh {
+            return Task::none();
+        }
+        schedule_script_filter_preview(
+            SCRIPT_FILTER_PREVIEW_DEBOUNCE,
+            self.script_filter.preview_generation,
+            self.script_filter.preview_live_generation.clone(),
+            index,
+        )
+    }
+
+    fn handle_script_filter_preview_due(&mut self, generation: u64, index: usize) -> Task<Message> {
+        if generation != self.script_filter.preview_generation
+            || self.dynamic_preview_target() != Some(index)
+        {
+            return Task::none();
+        }
+        let Some(config_index) = self.script_filter.config_index else {
+            return Task::none();
+        };
+        if !self.script_filter.preview_supported.contains(&config_index)
+            && !self.script_filter.preview_probing.insert(config_index)
+        {
+            // A first run is still out; its reply asks again for the selection.
+            return Task::none();
+        }
+        let (Some(config), Some(item)) = (
+            self.addons.script_filters.get(config_index),
+            self.script_filter
+                .results
+                .as_ref()
+                .and_then(|results| results.items.get(index)),
+        ) else {
+            self.script_filter.preview_probing.remove(&config_index);
+            return Task::none();
+        };
+        let size = self.view.window_size;
+        let pane = (
+            (size.width * self.view.preview_style.width_fraction).round() as u32,
+            size.height.round() as u32,
+        );
+        let request = PreviewRequest::new(config, &self.script_filter.query, item, pane);
+        execute_script_filter_preview(request, generation, config_index, index)
+    }
+
+    fn handle_script_filter_preview(
+        &mut self,
+        generation: u64,
+        config_index: usize,
+        index: usize,
+        result: std::result::Result<Option<super::types::PreparedPreview>, String>,
+    ) -> Task<Message> {
+        // Whether the script speaks the protocol holds even for stale replies.
+        let was_probing = self.script_filter.preview_probing.remove(&config_index);
+        match &result {
+            Ok(Some(_)) => {
+                self.script_filter.preview_supported.insert(config_index);
+            }
+            Ok(None) => {
+                crate::debug_log!("script_filter: no preview object, disabling dynamic preview");
+                self.script_filter.preview_unsupported.insert(config_index);
+                return Task::none();
+            }
+            Err(_) => {}
+        }
+        if generation != self.script_filter.preview_generation {
+            // Requests made while the probe ran were skipped; retry the current one.
+            return if was_probing {
+                self.request_script_filter_preview()
+            } else {
+                Task::none()
+            };
+        }
+        let entry = match result {
+            Ok(Some(preview)) => {
+                if preview.file_path().is_some() {
+                    // Same path on refresh still needs a fresh read.
+                    self.file_browser.cached_preview = None;
+                }
+                let entry = self.script_filter.previews.entry(index).or_default();
+                entry.preview = Some(preview);
+                entry.error = None;
+                entry
+            }
+            Ok(None) => return Task::none(),
+            Err(error) => {
+                crate::debug_log!("script_filter: preview failed: {error}");
+                let entry = self.script_filter.previews.entry(index).or_default();
+                entry.error = Some(error);
+                entry
+            }
+        };
+        // Keep refreshing after a failure too, so a transient error recovers.
+        let refresh = entry.preview.as_ref().and_then(|preview| preview.refresh);
+        self.refresh_file_preview_cache();
+        match refresh {
+            Some(delay) => schedule_script_filter_preview(
+                delay,
+                generation,
+                self.script_filter.preview_live_generation.clone(),
+                index,
+            ),
+            None => Task::none(),
+        }
     }
 
     fn handle_script_filter_selected(&mut self, index: usize) -> Task<Message> {
@@ -2181,7 +2352,7 @@ impl LauncherApp {
                 } else {
                     self.script_filter.action.as_deref()
                 };
-                execute_action(action.unwrap_or("copy"), value);
+                execute_action_with_env(action.unwrap_or("copy"), value, &item.variables);
             }
         }
         self.save_query_to_history();

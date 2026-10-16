@@ -1,10 +1,19 @@
+use std::collections::HashMap;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
 use iced::Task;
 use serde::Deserialize;
 
 use super::state::{Message, ScriptFilterResult};
-use super::types::ScriptFilterItem;
+use super::types::{PreparedPreview, RawPreviewSpec, ScriptFilterItem, PREVIEW_SPEC_KEYS};
+
+/// Longest a `RAFFI_PREVIEW=1` run may take before it is killed.
+const PREVIEW_TIMEOUT: Duration = Duration::from_secs(3);
+/// Largest preview output accepted, enough for a base64 screenshot.
+const MAX_PREVIEW_OUTPUT: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, Deserialize)]
 struct ScriptFilterResponse {
@@ -86,9 +95,158 @@ pub(super) fn execute_script_filter(
     )
 }
 
+/// Parse the output of a `RAFFI_PREVIEW=1` run. `None` means the script does
+/// not speak the preview protocol: the output is not JSON, is an item list,
+/// or has none of the preview fields.
+pub(super) fn parse_preview_response(stdout: &[u8]) -> Option<PreparedPreview> {
+    let value: serde_json::Value = serde_json::from_slice(stdout).ok()?;
+    let object = value.as_object()?;
+    if object.contains_key("items") || !PREVIEW_SPEC_KEYS.iter().any(|k| object.contains_key(*k)) {
+        return None;
+    }
+    let spec: RawPreviewSpec = serde_json::from_value(value).ok()?;
+    Some(spec.into())
+}
+
+/// Everything needed to run one dynamic preview of a Script Filter item.
+#[derive(Debug, Clone)]
+pub(super) struct PreviewRequest {
+    pub command: String,
+    pub args: Vec<String>,
+    pub query: String,
+    pub env: HashMap<String, String>,
+}
+
+impl PreviewRequest {
+    /// Environment for a preview run: the config `env`, then the item
+    /// `variables`, then the `RAFFI_*` protocol variables.
+    pub fn new(
+        config: &crate::ScriptFilterConfig,
+        query: &str,
+        item: &ScriptFilterItem,
+        pane_size: (u32, u32),
+    ) -> Self {
+        let mut env = config.env.clone();
+        env.extend(item.variables.clone());
+        let value = item.arg.clone().unwrap_or_else(|| item.title.clone());
+        env.insert("RAFFI_PREVIEW".into(), "1".into());
+        env.insert("RAFFI_VALUE".into(), value);
+        env.insert("RAFFI_TITLE".into(), super::ansi::strip_ansi(&item.title));
+        env.insert("RAFFI_QUERY".into(), query.to_string());
+        env.insert("RAFFI_PREVIEW_WIDTH".into(), pane_size.0.to_string());
+        env.insert("RAFFI_PREVIEW_HEIGHT".into(), pane_size.1.to_string());
+        Self {
+            command: config.command.clone(),
+            args: config.args.clone(),
+            query: query.to_string(),
+            env,
+        }
+    }
+
+    fn run(self) -> Result<Option<PreparedPreview>, String> {
+        crate::debug_log!(
+            "script_filter: preview command={:?} value={:?}",
+            self.command,
+            self.env.get("RAFFI_VALUE")
+        );
+        let mut command = Command::new(&self.command);
+        command.args(&self.args).arg(&self.query).envs(&self.env);
+        let output = super::actions::run_bounded(command, PREVIEW_TIMEOUT, MAX_PREVIEW_OUTPUT)?;
+        Ok(parse_preview_response(&output))
+    }
+}
+
+/// Run the preview command on a worker thread.
+pub(super) fn execute_script_filter_preview(
+    request: PreviewRequest,
+    generation: u64,
+    config_index: usize,
+    index: usize,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            let (sender, receiver) = iced::futures::channel::oneshot::channel();
+            std::thread::spawn(move || {
+                let _ = sender.send(request.run());
+            });
+            receiver
+                .await
+                .unwrap_or_else(|_| Err("preview worker stopped".into()))
+        },
+        move |result| Message::ScriptFilterPreview(generation, config_index, index, result),
+    )
+}
+
+/// Sleep for `delay`, waking every 100 ms to stop early once `live` no longer
+/// holds `generation`.
+fn sleep_unless_superseded(delay: Duration, generation: u64, live: &AtomicU64) {
+    const POLL: Duration = Duration::from_millis(100);
+    let deadline = std::time::Instant::now() + delay;
+    loop {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() || live.load(Ordering::Relaxed) != generation {
+            return;
+        }
+        std::thread::sleep(left.min(POLL));
+    }
+}
+
+/// Fire `ScriptFilterPreviewDue` after `delay`, or sooner once `live` moves
+/// past `generation` (the message is then ignored as stale).
+pub(super) fn schedule_script_filter_preview(
+    delay: Duration,
+    generation: u64,
+    live: Arc<AtomicU64>,
+    index: usize,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            let (sender, receiver) = iced::futures::channel::oneshot::channel();
+            std::thread::spawn(move || {
+                sleep_unless_superseded(delay, generation, &live);
+                let _ = sender.send(());
+            });
+            let _ = receiver.await;
+        },
+        move |()| Message::ScriptFilterPreviewDue(generation, index),
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::parse_script_filter_output;
+    use super::super::types::{PreparedPreviewBody, ScriptFilterPreview};
+    use super::{parse_preview_response, parse_script_filter_output, sleep_unless_superseded};
+    use std::sync::atomic::AtomicU64;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn test_superseded_timer_wakes_early() {
+        let live = AtomicU64::new(2);
+        let start = Instant::now();
+        sleep_unless_superseded(Duration::from_secs(60), 1, &live);
+        assert!(start.elapsed() < Duration::from_secs(1));
+
+        let start = Instant::now();
+        sleep_unless_superseded(Duration::from_millis(150), 2, &live);
+        assert!(start.elapsed() >= Duration::from_millis(150));
+    }
+
+    #[test]
+    fn test_preview_refresh_is_clamped() {
+        let huge = parse_preview_response(br#"{"text":"x","refresh":1e100}"#).unwrap();
+        assert_eq!(huge.refresh, Some(Duration::from_secs(3600)));
+        let tiny = parse_preview_response(br#"{"text":"x","refresh":0.01}"#).unwrap();
+        assert_eq!(tiny.refresh, Some(Duration::from_millis(500)));
+    }
+
+    #[test]
+    fn test_preview_explicit_empty_sections_replace_body() {
+        let empty = parse_preview_response(br#"{"text":"ignored","sections":[]}"#).unwrap();
+        assert!(empty.bodies.is_empty());
+        assert!(empty.replaces_body);
+        let header_only = parse_preview_response(br#"{"title":"t"}"#).unwrap();
+        assert!(!header_only.replaces_body);
+    }
 
     #[test]
     fn test_parse_script_filter_output_valid_json() {
@@ -135,7 +293,10 @@ mod tests {
 
         assert_eq!(result.items.len(), 1);
         let item = &result.items[0];
-        assert_eq!(item.preview.as_deref(), Some("Detailed PR body\nLine 2"));
+        assert_eq!(
+            item.preview.as_ref().and_then(ScriptFilterPreview::as_text),
+            Some("Detailed PR body\nLine 2")
+        );
         assert_eq!(
             item.quicklookurl.as_deref(),
             Some("https://github.com/chmouel/raffi/pull/42")
@@ -143,6 +304,129 @@ mod tests {
         let text = item.text.as_ref().expect("expected text object");
         assert_eq!(text.copy.as_deref(), Some("#42"));
         assert_eq!(text.largetype.as_deref(), Some("Large type text"));
+    }
+
+    #[test]
+    fn test_parse_script_filter_output_with_rich_preview_and_variables() {
+        // "aGk=" is base64 for "hi".
+        let stdout = r#"{"items":[{
+            "title": "Agent",
+            "arg": "w1:p1",
+            "variables": {"PANE": "w1:p1"},
+            "preview": {
+                "title": "Agent preview",
+                "icon": "utilities-terminal",
+                "text": "output",
+                "image": {"base64": "aGk="},
+                "metadata": [["Status", "working"]],
+                "dynamic": false
+            }
+        }]}"#;
+        let result = parse_script_filter_output(stdout, None).expect("valid rich preview json");
+        let item = &result.items[0];
+        assert_eq!(
+            item.variables.get("PANE").map(String::as_str),
+            Some("w1:p1")
+        );
+        let preview = item
+            .preview
+            .as_ref()
+            .and_then(ScriptFilterPreview::as_rich)
+            .expect("rich preview");
+        assert_eq!(preview.title.as_deref(), Some("Agent preview"));
+        assert_eq!(preview.icon.as_deref(), Some("utilities-terminal"));
+        assert!(!preview.dynamic);
+        assert_eq!(
+            preview.metadata,
+            vec![("Status".to_string(), "working".to_string())]
+        );
+        // Image comes before text when no sections are given.
+        assert!(matches!(
+            preview.bodies.as_slice(),
+            [
+                PreparedPreviewBody::ImageData(_),
+                PreparedPreviewBody::Text { content, .. }
+            ] if content == "output"
+        ));
+    }
+
+    #[test]
+    fn test_parse_preview_response_sections_and_refresh() {
+        let stdout = br#"{
+            "sections": [
+                {"type": "text", "heading": "Log", "content": "line"},
+                {"type": "image", "path": "/tmp/shot.png"},
+                {"type": "image", "base64": "data:image/png;base64,aGk="},
+                {"type": "image", "base64": "not base64!"},
+                {"type": "file", "path": "~/notes.md"}
+            ],
+            "text": "ignored when sections are set",
+            "refresh": 0.1
+        }"#;
+        let preview = parse_preview_response(stdout).expect("preview response");
+        assert_eq!(
+            preview.refresh,
+            Some(super::super::types::MIN_PREVIEW_REFRESH)
+        );
+        assert!(preview.dynamic);
+        assert_eq!(preview.file_path(), Some("~/notes.md"));
+        match preview.bodies.as_slice() {
+            [PreparedPreviewBody::Text { heading, content }, PreparedPreviewBody::Image(path), PreparedPreviewBody::ImageData(_), PreparedPreviewBody::Text { content: error, .. }, PreparedPreviewBody::File(_)] =>
+            {
+                assert_eq!(heading.as_deref(), Some("Log"));
+                assert_eq!(content, "line");
+                assert_eq!(path, "/tmp/shot.png");
+                assert!(error.starts_with("Invalid base64 image"));
+            }
+            other => panic!("unexpected bodies: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_preview_response_rejects_non_preview_output() {
+        assert!(parse_preview_response(br#"{"items":[{"title":"x"}]}"#).is_none());
+        assert!(parse_preview_response(br#"{"unrelated":1}"#).is_none());
+        assert!(parse_preview_response(b"plain text").is_none());
+        assert!(parse_preview_response(br#"["text"]"#).is_none());
+        assert!(parse_preview_response(br#"{"text":"ok"}"#).is_some());
+    }
+
+    #[test]
+    fn test_preview_request_runs_script_with_protocol_env() {
+        let config = crate::ScriptFilterConfig {
+            name: "Echo".into(),
+            command: "sh".into(),
+            keyword: "e".into(),
+            icon: None,
+            args: vec![
+                "-c".into(),
+                r#"[ "$RAFFI_PREVIEW" = 1 ] && printf '{"text":"%s|%s|%s|%s|%s"}' "$RAFFI_VALUE" "$RAFFI_TITLE" "$1" "$PANE" "$RAFFI_PREVIEW_WIDTH""#.into(),
+                "sh".into(),
+            ],
+            action: None,
+            secondary_action: None,
+            env: std::collections::HashMap::new(),
+            min_query_length: None,
+            dynamic_preview: None,
+        };
+        let item = super::ScriptFilterItem {
+            title: "\u{1b}[32mAgent\u{1b}[0m".into(),
+            subtitle: None,
+            arg: Some("w1:p1".into()),
+            icon: None,
+            preview: None,
+            variables: [("PANE".to_string(), "p1".to_string())].into(),
+            quicklookurl: None,
+            text: None,
+        };
+        let preview = super::PreviewRequest::new(&config, "my query", &item, (400, 600))
+            .run()
+            .expect("preview run")
+            .expect("preview object");
+        assert!(matches!(
+            preview.bodies.as_slice(),
+            [PreparedPreviewBody::Text { content, .. }] if content == "w1:p1|Agent|my query|p1|400"
+        ));
     }
 
     #[test]

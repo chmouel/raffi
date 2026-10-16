@@ -34,21 +34,28 @@ impl super::state::LauncherApp {
             .icon
             .iter()
             .chain(self.text_snippets.icon.iter())
-            .find_map(|icon| {
-                if let Some(path) = crate::resolve_icon_reference(icon, &self.icon_map)
-                    .filter(|path| std::path::Path::new(path).is_file())
-                {
-                    return Some(SnippetIcon::File(path));
-                }
-                // Literal glyphs may include variation selectors or joined emoji.
-                if icon.chars().any(|c| !c.is_ascii() && !c.is_alphanumeric())
-                    && !icon.contains('/')
-                    && !icon.chars().any(char::is_whitespace)
-                {
-                    return Some(SnippetIcon::Glyph(icon.clone()));
-                }
-                None
-            })
+            .find_map(|icon| self.resolve_icon_or_glyph(icon))
+    }
+
+    /// Resolve an icon name or image path to a file, or accept a literal
+    /// emoji/glyph. Returns `None` when icons are disabled.
+    pub(super) fn resolve_icon_or_glyph(&self, icon: &str) -> Option<SnippetIcon> {
+        if self.no_icons {
+            return None;
+        }
+        if let Some(path) = crate::resolve_icon_reference(icon, &self.icon_map)
+            .filter(|path| std::path::Path::new(path).is_file())
+        {
+            return Some(SnippetIcon::File(path));
+        }
+        // Literal glyphs may include variation selectors or joined emoji.
+        if icon.chars().any(|c| !c.is_ascii() && !c.is_alphanumeric())
+            && !icon.contains('/')
+            && !icon.chars().any(char::is_whitespace)
+        {
+            return Some(SnippetIcon::Glyph(icon.to_string()));
+        }
+        None
     }
 }
 

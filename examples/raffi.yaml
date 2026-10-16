@@ -422,6 +422,11 @@ addons:
       min_query_length: 2 # only execute after 2 chars typed after keyword
       env:
         TZ_FORMAT: "short" # environment variables passed to the script process
+      # With the preview pane open (Ctrl+P), raffi runs the command again with
+      # RAFFI_PREVIEW=1 for the selected item and shows the preview object it
+      # prints. Scripts that only print items are detected and skipped.
+      # Commands with side effects should check RAFFI_PREVIEW or turn this off.
+      # dynamic_preview: false # turn it off for this filter (default: true)
     # action/secondary_action accept two special keywords:
     #   "copy"   — copy to clipboard via wl-copy (default for Enter)
     #   "insert" — type into focused app via wtype/ydotool
@@ -434,7 +439,8 @@ addons:
     #   action: "copy"
     #   secondary_action: "xdg-open {value}"
 
-    # Web search with DuckDuckGo autocomplete suggestions.
+    # Web search with DuckDuckGo autocomplete suggestions. The preview pane
+    # shows the DuckDuckGo Instant Answer (summary and image) for a suggestion.
     # Copy scripts/search/search.py to ~/.config/raffi/scripts/search/search.py and make it executable.
     # See scripts/search/README.md for full setup instructions.
     # - name: "Search DuckDuckGo"
@@ -467,9 +473,11 @@ addons:
     #   secondary_action: "copy"
 
     # Herdr agent sessions. Install scripts/herdr/herdr_filter.py first.
+    # The preview pane shows the agent's live terminal output.
     # - name: "Herdr Agents"
     #   keyword: "herdr"
     #   command: "~/.config/raffi/scripts/herdr/herdr_filter.py"
+    #   icon: "utilities-terminal"
     #   action: 'herdr agent focus "$RAFFI_VALUE"'
     # For compositor-specific window focus commands, see scripts/herdr/README.md.
 

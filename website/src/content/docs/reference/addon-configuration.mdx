@@ -463,6 +463,18 @@ Minimum number of characters required after the keyword before the script execut
 
 ```
 
+**`dynamic_preview`** `boolean` (default: `true`)
+
+Re-run the script with `RAFFI_PREVIEW=1` for the selected item and show the preview object it prints in the preview pane. Scripts that do not support it are detected and skipped after one run. See [Dynamic Previews](/features/script-filters/#dynamic-previews).
+
+  ```yaml
+  addons:
+    script_filters:
+      - command: "my-script"
+        dynamic_preview: false   # only use the items' preview field
+
+```
+
 ### JSON Output Format
 
 The script must output JSON matching this structure:
@@ -486,6 +498,8 @@ The script must output JSON matching this structure:
 - `subtitle` (optional): Secondary text shown below the title
 - `arg` (optional): Value used in actions (falls back to `title` if omitted)
 - `icon.path` (optional): Absolute path to a PNG or SVG icon
+- `preview` (optional): Preview text or file path, or a preview object (see [Dynamic Previews](/features/script-filters/#dynamic-previews))
+- `variables` (optional): String map exported as environment variables to the preview call and to the actions
 
 The `title` and `subtitle` fields support ANSI color codes for colored text rendering.
 

@@ -15,7 +15,10 @@ use super::state::{
     CurrencyConversion, CurrencyResult, EmojiEntry, FallbackAction, FileBrowserEntry,
     KeywordSuggestion, LauncherApp, MultiCurrencyResult, ResolvedFallback, WebSearchActiveState,
 };
-use super::types::{CalculatorResult, ScriptFilterItem, ScriptFilterResult};
+use super::types::{
+    CalculatorResult, PreparedPreview, PreparedPreviewBody, ScriptFilterItem, ScriptFilterPreview,
+    ScriptFilterResult,
+};
 use crate::{AddonsConfig, ClipboardAction, RaffiConfig, TextSnippet};
 
 /// Maximum number of bytes read from a file when generating a text preview.
@@ -427,11 +430,19 @@ impl LauncherApp {
         } else if let Some(sf_result) = &self.script_filter.results {
             let count = sf_result.items.len();
             if self.selected_index >= current_index && self.selected_index < current_index + count {
-                let item = &sf_result.items[self.selected_index - current_index];
-                if let Some(preview_str) = &item.preview {
-                    if let Some(local) = resolve_local_preview_path(preview_str) {
-                        return Some((local, false));
-                    }
+                let index = self.selected_index - current_index;
+                let item = &sf_result.items[index];
+                let preview = item.preview.as_ref();
+                let file = self
+                    .script_filter
+                    .previews
+                    .get(&index)
+                    .and_then(|dynamic| dynamic.preview.as_ref())
+                    .or_else(|| preview.and_then(ScriptFilterPreview::as_rich))
+                    .and_then(PreparedPreview::file_path)
+                    .or_else(|| preview.and_then(ScriptFilterPreview::as_text));
+                if let Some(local) = file.and_then(resolve_local_preview_path) {
+                    return Some((local, false));
                 }
                 if let Some(ql) = &item.quicklookurl {
                     if let Some(local) = resolve_local_preview_path(ql) {
@@ -535,8 +546,12 @@ impl LauncherApp {
         } else if let Some(sf_result) = &self.script_filter.results {
             let count = sf_result.items.len();
             if index >= current_index && index < current_index + count {
-                let item = &sf_result.items[index - current_index];
-                return Some(self.build_script_filter_preview(item, sf_result));
+                let item_index = index - current_index;
+                return Some(self.build_script_filter_preview(
+                    item_index,
+                    &sf_result.items[item_index],
+                    sf_result,
+                ));
             }
             current_index += count;
         }
@@ -856,6 +871,7 @@ impl LauncherApp {
 
     fn build_script_filter_preview(
         &self,
+        index: usize,
         item: &ScriptFilterItem,
         sf_result: &ScriptFilterResult,
     ) -> PreviewData {
@@ -879,10 +895,10 @@ impl LauncherApp {
         let mut bodies = Vec::new();
         let mut metadata = Vec::new();
 
+        let static_text = item.preview.as_ref().and_then(ScriptFilterPreview::as_text);
+
         // Check local file preview from `preview` or `quicklookurl`
-        let local_file = item
-            .preview
-            .as_deref()
+        let local_file = static_text
             .and_then(resolve_local_preview_path)
             .or_else(|| {
                 item.quicklookurl
@@ -900,10 +916,10 @@ impl LauncherApp {
                 .unwrap_or_else(|| inspect_path(&path, false));
             bodies.extend(inspected.bodies);
             metadata.extend(inspected.metadata);
-        } else if let Some(preview_text) = &item.preview {
+        } else if let Some(preview_text) = static_text {
             bodies.push(PreviewBody::AnsiText {
                 heading: Some("Preview".to_string()),
-                content: preview_text.clone(),
+                content: preview_text.to_string(),
             });
         } else if let Some(largetype) = item.text.as_ref().and_then(|t| t.largetype.as_ref()) {
             bodies.push(PreviewBody::AnsiText {
@@ -933,7 +949,7 @@ impl LauncherApp {
             metadata.push(("Ctrl+Enter".to_string(), describe_action(secondary)));
         }
 
-        PreviewData {
+        let mut data = PreviewData {
             title: super::ansi::strip_ansi(&item.title),
             subtitle: item
                 .subtitle
@@ -944,6 +960,92 @@ impl LauncherApp {
             icon: icon_path.map(PreviewIcon::File),
             bodies,
             metadata,
+        };
+
+        // A dynamic preview replaces the item's own rich preview.
+        let dynamic = self.script_filter.previews.get(&index);
+        if let Some(rich) = dynamic
+            .and_then(|dynamic| dynamic.preview.as_ref())
+            .or_else(|| item.preview.as_ref().and_then(ScriptFilterPreview::as_rich))
+        {
+            self.apply_prepared_preview(&mut data, rich);
+        }
+        if let Some(error) = dynamic.and_then(|dynamic| dynamic.error.as_ref()) {
+            data.metadata.push(("Preview".to_string(), error.clone()));
+        }
+        data
+    }
+
+    /// Overlay a script-provided preview on the default Script Filter preview.
+    fn apply_prepared_preview(&self, data: &mut PreviewData, preview: &PreparedPreview) {
+        if let Some(title) = &preview.title {
+            data.title = super::ansi::strip_ansi(title);
+        }
+        if let Some(subtitle) = &preview.subtitle {
+            data.subtitle = Some(super::ansi::strip_ansi(subtitle));
+        }
+        if let Some(badge) = &preview.badge {
+            data.badge = Some(badge.clone());
+        }
+        if let Some(icon) = &preview.icon {
+            if let Some(icon) = self.resolve_icon_or_glyph(icon) {
+                data.icon = Some(match icon {
+                    SnippetIcon::File(path) => PreviewIcon::File(path),
+                    SnippetIcon::Glyph(glyph) => PreviewIcon::Glyph(glyph),
+                });
+            }
+        }
+
+        let mut file_metadata = Vec::new();
+        if preview.replaces_body {
+            data.bodies.clear();
+            let mut file_shown = false;
+            for body in &preview.bodies {
+                match body {
+                    PreparedPreviewBody::Text { heading, content } => {
+                        data.bodies.push(PreviewBody::AnsiText {
+                            heading: heading.clone(),
+                            content: content.clone(),
+                        });
+                    }
+                    PreparedPreviewBody::Image(path) => {
+                        let expanded = crate::expand_config_value(path);
+                        if Path::new(&expanded).is_file() {
+                            data.bodies.push(PreviewBody::Image { path: expanded });
+                        }
+                    }
+                    PreparedPreviewBody::ImageData(handle) => {
+                        data.bodies.push(PreviewBody::ImageData {
+                            handle: handle.clone(),
+                        });
+                    }
+                    // Only the first file is shown: it is the one kept in the
+                    // inspection cache.
+                    PreparedPreviewBody::File(path) if !file_shown => {
+                        file_shown = true;
+                        let Some(local) = resolve_local_preview_path(path) else {
+                            continue;
+                        };
+                        let inspected = self
+                            .file_browser
+                            .cached_preview
+                            .as_ref()
+                            .filter(|c| c.path == local)
+                            .cloned()
+                            .unwrap_or_else(|| inspect_path(&local, false));
+                        data.bodies.extend(inspected.bodies);
+                        file_metadata = inspected.metadata;
+                    }
+                    PreparedPreviewBody::File(_) => {}
+                }
+            }
+        }
+
+        if !preview.metadata.is_empty() || !file_metadata.is_empty() {
+            let mut metadata = preview.metadata.clone();
+            metadata.extend(file_metadata);
+            metadata.append(&mut data.metadata);
+            data.metadata = metadata;
         }
     }
 

@@ -94,6 +94,208 @@ pub(crate) struct ScriptFilterItemText {
     pub largetype: Option<String>,
 }
 
+/// Image in a Script Filter preview: a path string, `{"path": ...}`, or
+/// `{"base64": ...}`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum RawPreviewImage {
+    Path(String),
+    Source {
+        path: Option<String>,
+        base64: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+enum RawPreviewSection {
+    Text {
+        heading: Option<String>,
+        content: String,
+    },
+    Image {
+        path: Option<String>,
+        base64: Option<String>,
+    },
+    File {
+        path: String,
+    },
+}
+
+/// Rich Script Filter preview, as written by a script in an item's `preview`
+/// object or in a `RAFFI_PREVIEW=1` response.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub(crate) struct RawPreviewSpec {
+    title: Option<String>,
+    subtitle: Option<String>,
+    badge: Option<String>,
+    icon: Option<String>,
+    text: Option<String>,
+    image: Option<RawPreviewImage>,
+    sections: Option<Vec<RawPreviewSection>>,
+    metadata: Vec<(String, String)>,
+    refresh: Option<f64>,
+    dynamic: Option<bool>,
+}
+
+/// Top-level keys that make a JSON object a preview response.
+pub(crate) const PREVIEW_SPEC_KEYS: &[&str] = &[
+    "title", "subtitle", "badge", "icon", "text", "image", "sections", "metadata", "refresh",
+];
+
+/// Shortest allowed auto-refresh interval for dynamic previews.
+pub(crate) const MIN_PREVIEW_REFRESH: Duration = Duration::from_millis(500);
+/// Longest auto-refresh interval, in seconds; larger values are clamped.
+const MAX_PREVIEW_REFRESH_SECS: f64 = 3600.0;
+
+/// One body block of a prepared Script Filter preview.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PreparedPreviewBody {
+    Text {
+        heading: Option<String>,
+        content: String,
+    },
+    Image(String),
+    ImageData(iced::widget::image::Handle),
+    File(String),
+}
+
+/// Script Filter preview with images decoded once, ready to render.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct PreparedPreview {
+    pub title: Option<String>,
+    pub subtitle: Option<String>,
+    pub badge: Option<String>,
+    pub icon: Option<String>,
+    pub bodies: Vec<PreparedPreviewBody>,
+    /// Whether `bodies` replaces the default preview body, even when empty
+    /// (an explicit `"sections": []`).
+    pub replaces_body: bool,
+    pub metadata: Vec<(String, String)>,
+    pub refresh: Option<Duration>,
+    /// `false` when the item opts out of the dynamic preview call.
+    pub dynamic: bool,
+}
+
+impl PreparedPreview {
+    /// Path of the first `file` section, which is the only one rendered.
+    pub fn file_path(&self) -> Option<&str> {
+        self.bodies.iter().find_map(|body| match body {
+            PreparedPreviewBody::File(path) => Some(path.as_str()),
+            _ => None,
+        })
+    }
+}
+
+fn prepare_image(path: Option<String>, data: Option<String>) -> Option<PreparedPreviewBody> {
+    use base64::Engine;
+    if let Some(data) = data {
+        // Accept data URLs as well as bare base64.
+        let encoded = data
+            .split_once(";base64,")
+            .map_or(data.as_str(), |(_, rest)| rest);
+        let cleaned: String = encoded.chars().filter(|c| !c.is_whitespace()).collect();
+        return Some(
+            match base64::engine::general_purpose::STANDARD.decode(cleaned) {
+                Ok(bytes) => {
+                    PreparedPreviewBody::ImageData(iced::widget::image::Handle::from_bytes(bytes))
+                }
+                Err(error) => PreparedPreviewBody::Text {
+                    heading: Some("Image".to_string()),
+                    content: format!("Invalid base64 image: {error}"),
+                },
+            },
+        );
+    }
+    path.map(PreparedPreviewBody::Image)
+}
+
+impl From<RawPreviewSpec> for PreparedPreview {
+    fn from(raw: RawPreviewSpec) -> Self {
+        let replaces_body = raw.sections.is_some() || raw.text.is_some() || raw.image.is_some();
+        let bodies = if let Some(sections) = raw.sections {
+            sections
+                .into_iter()
+                .filter_map(|section| match section {
+                    RawPreviewSection::Text { heading, content } => {
+                        Some(PreparedPreviewBody::Text { heading, content })
+                    }
+                    RawPreviewSection::Image { path, base64 } => prepare_image(path, base64),
+                    RawPreviewSection::File { path } => Some(PreparedPreviewBody::File(path)),
+                })
+                .collect()
+        } else {
+            let image = raw.image.and_then(|image| match image {
+                RawPreviewImage::Path(path) => prepare_image(Some(path), None),
+                RawPreviewImage::Source { path, base64 } => prepare_image(path, base64),
+            });
+            let text = raw.text.map(|content| PreparedPreviewBody::Text {
+                heading: None,
+                content,
+            });
+            image.into_iter().chain(text).collect()
+        };
+        Self {
+            title: raw.title,
+            subtitle: raw.subtitle,
+            badge: raw.badge,
+            icon: raw.icon,
+            bodies,
+            replaces_body,
+            metadata: raw.metadata,
+            refresh: raw
+                .refresh
+                .filter(|secs| secs.is_finite() && *secs > 0.0)
+                .map(|secs| {
+                    Duration::from_secs_f64(secs.min(MAX_PREVIEW_REFRESH_SECS))
+                        .max(MIN_PREVIEW_REFRESH)
+                }),
+            dynamic: raw.dynamic.unwrap_or(true),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum RawItemPreview {
+    Text(String),
+    Rich(Box<RawPreviewSpec>),
+}
+
+/// Static per-item preview: plain text/path string or a rich object.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(from = "RawItemPreview")]
+pub(crate) enum ScriptFilterPreview {
+    Text(String),
+    Rich(Box<PreparedPreview>),
+}
+
+impl From<RawItemPreview> for ScriptFilterPreview {
+    fn from(raw: RawItemPreview) -> Self {
+        match raw {
+            RawItemPreview::Text(text) => Self::Text(text),
+            RawItemPreview::Rich(spec) => Self::Rich(Box::new((*spec).into())),
+        }
+    }
+}
+
+impl ScriptFilterPreview {
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            Self::Text(text) => Some(text),
+            Self::Rich(_) => None,
+        }
+    }
+
+    pub fn as_rich(&self) -> Option<&PreparedPreview> {
+        match self {
+            Self::Text(_) => None,
+            Self::Rich(preview) => Some(preview),
+        }
+    }
+}
+
 /// Alfred Script Filter JSON item.
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct ScriptFilterItem {
@@ -101,15 +303,27 @@ pub(crate) struct ScriptFilterItem {
     pub subtitle: Option<String>,
     pub arg: Option<String>,
     pub icon: Option<ScriptFilterIcon>,
-    /// Optional explicit preview text or local file/image path for the right-hand preview pane.
+    /// Optional preview for the right-hand pane: text or a local file/image
+    /// path, or a rich preview object.
     #[serde(default)]
-    pub preview: Option<String>,
+    pub preview: Option<ScriptFilterPreview>,
+    /// Alfred `variables`, passed as environment to the preview call and to
+    /// shell actions.
+    #[serde(default)]
+    pub variables: std::collections::HashMap<String, String>,
     /// Optional Alfred QuickLook URL or local file path.
     #[serde(default)]
     pub quicklookurl: Option<String>,
     /// Optional Alfred `text` object (`copy` and `largetype`).
     #[serde(default)]
     pub text: Option<ScriptFilterItemText>,
+}
+
+/// Latest dynamic preview state of one Script Filter result item.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DynamicPreview {
+    pub preview: Option<PreparedPreview>,
+    pub error: Option<String>,
 }
 
 /// Container for script filter results with default icon.
@@ -191,6 +405,18 @@ pub(crate) enum Message {
     MultiCurrencyResultCopied(usize),
     ScriptFilterResult(u64, std::result::Result<ScriptFilterResult, String>),
     ScriptFilterItemSelected(usize),
+    /// Time to run the dynamic preview of this result item for this
+    /// preview generation (after the debounce or refresh delay).
+    ScriptFilterPreviewDue(u64, usize),
+    /// Dynamic preview output for this generation, script filter config index
+    /// and result item; `Ok(None)` when the script does not answer with a
+    /// preview object.
+    ScriptFilterPreview(
+        u64,
+        usize,
+        usize,
+        std::result::Result<Option<PreparedPreview>, String>,
+    ),
     TextSnippetCommandResult(u64, std::result::Result<Vec<TextSnippet>, String>),
     TextSnippetSelected(usize),
     TextSnippetClipboard(u64, ClipboardData),

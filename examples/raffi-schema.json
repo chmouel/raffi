@@ -839,6 +839,13 @@
         "command": {
           "type": "string"
         },
+        "dynamic_preview": {
+          "description": "Re-run the command with `RAFFI_PREVIEW=1` for the selected item and show\nthe preview object it prints (default: true).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "env": {
           "type": "object",
           "additionalProperties": {

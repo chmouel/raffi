@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::os::unix::process::CommandExt;
 use std::path::Path;
@@ -300,12 +301,17 @@ fn run_batch(commands: &[Vec<String>], timeout: Duration) -> Result<(), String> 
     })
 }
 
-fn spawn_custom_action(action: &str, value: &str) -> Result<(), String> {
+fn spawn_custom_action(
+    action: &str,
+    value: &str,
+    env: &HashMap<String, String>,
+) -> Result<(), String> {
     let command = action.replace("{value}", value);
     crate::debug_log!("action: executing shell command={command:?}");
     Command::new("sh")
         .arg("-c")
         .arg(&command)
+        .envs(env)
         .env("RAFFI_VALUE", value)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -324,6 +330,16 @@ fn spawn_custom_action(action: &str, value: &str) -> Result<(), String> {
 pub(super) fn execute_action(action: &str, value: &str) {
     crate::debug_log!("action: action={action:?} value={value:?}");
     let _ = dispatch(action, value, 0);
+}
+
+/// [`execute_action`] with extra environment for shell command actions, such
+/// as a Script Filter item's `variables`.
+pub(super) fn execute_action_with_env(action: &str, value: &str, env: &HashMap<String, String>) {
+    crate::debug_log!("action: action={action:?} value={value:?}");
+    let _ = match action {
+        "insert" | "copy" | "hypr_paste" => dispatch(action, value, 0),
+        _ => spawn_custom_action(action, value, env),
+    };
 }
 
 /// Execute a file browser action. `open` hands the path to `xdg-open`; every
@@ -417,7 +433,7 @@ pub(super) fn open_in_file_manager(dir: &str, selected: Option<&str>, configured
         detect_file_manager(&desktop, |name| find_tool(&[name]).is_some()).unwrap_or("xdg-open")
     });
     let (command, value) = file_manager_command(manager, dir, selected);
-    let _ = spawn_custom_action(&command, value);
+    let _ = spawn_custom_action(&command, value, &HashMap::new());
 }
 
 fn dispatch(action: &str, value: &str, cursor_moves: usize) -> Result<(), String> {
@@ -427,7 +443,7 @@ fn dispatch(action: &str, value: &str, cursor_moves: usize) -> Result<(), String
         "hypr_paste" => {
             Err("hypr_paste is only available for text snippets in the native UI".into())
         }
-        _ => spawn_custom_action(action, value),
+        _ => spawn_custom_action(action, value, &HashMap::new()),
     }
 }
 

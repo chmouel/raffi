@@ -71,6 +71,7 @@ fn test_preview_script_filter_reads_virtual_file_with_zero_reported_size() {
             icon: None,
             preview: None,
             quicklookurl: Some("file:///proc/cpuinfo".into()),
+            variables: Default::default(),
             text: None,
         }],
     });
@@ -105,6 +106,7 @@ fn test_route_query_file_browser_precedence() {
         secondary_action: None,
         env: std::collections::HashMap::new(),
         min_query_length: None,
+        dynamic_preview: None,
     });
 
     assert!(matches!(
@@ -126,6 +128,7 @@ fn test_route_query_prefers_script_filter_over_text_snippet() {
         secondary_action: None,
         env: std::collections::HashMap::new(),
         min_query_length: None,
+        dynamic_preview: None,
     });
     addons.text_snippets.push(TextSnippetSourceConfig {
         name: "GitHub".into(),
@@ -310,6 +313,7 @@ fn test_keyword_suggestions_follow_routing_precedence() {
         secondary_action: None,
         env: std::collections::HashMap::new(),
         min_query_length: None,
+        dynamic_preview: None,
     });
 
     let subtitles: Vec<String> = keyword_suggestions("gh", &addons)
@@ -1516,6 +1520,7 @@ fn test_resolve_fallbacks_script_filter() {
         secondary_action: None,
         env: std::collections::HashMap::new(),
         min_query_length: None,
+        dynamic_preview: None,
     });
 
     let app = test_app_with_fallbacks(addons, vec!["addons.script_filters.Brave".into()]);
@@ -1558,6 +1563,7 @@ fn help_addons() -> AddonsConfig {
         secondary_action: None,
         env: std::collections::HashMap::new(),
         min_query_length: None,
+        dynamic_preview: None,
     });
     addons.text_snippets.push(TextSnippetSourceConfig {
         name: "Snippets".into(),
@@ -2184,8 +2190,11 @@ fn test_preview_script_filter_precedence() {
                 subtitle: Some("Fallback subtitle".into()),
                 arg: Some("arg1".into()),
                 icon: None,
-                preview: Some("Explicit preview body".into()),
+                preview: Some(super::types::ScriptFilterPreview::Text(
+                    "Explicit preview body".into(),
+                )),
                 quicklookurl: None,
+                variables: Default::default(),
                 text: Some(ScriptFilterItemText {
                     copy: Some("copy1".into()),
                     largetype: Some("Large type body".into()),
@@ -2198,6 +2207,7 @@ fn test_preview_script_filter_precedence() {
                 icon: None,
                 preview: None,
                 quicklookurl: None,
+                variables: Default::default(),
                 text: Some(ScriptFilterItemText {
                     copy: None,
                     largetype: Some("Large type body".into()),
@@ -2244,6 +2254,7 @@ fn test_preview_script_filter_decodes_file_url_paths() {
         icon: None,
         preview: None,
         quicklookurl: Some(quicklookurl),
+        variables: Default::default(),
         text: None,
     };
 
@@ -2270,6 +2281,297 @@ fn test_preview_script_filter_decodes_file_url_paths() {
     }
 
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+fn dynamic_preview_app(items: Vec<ScriptFilterItem>) -> LauncherApp {
+    let mut addons = AddonsConfig::default();
+    addons.script_filters.push(ScriptFilterConfig {
+        name: "Agents".into(),
+        command: "agents".into(),
+        keyword: "ag".into(),
+        icon: None,
+        args: Vec::new(),
+        action: None,
+        secondary_action: None,
+        env: std::collections::HashMap::new(),
+        min_query_length: None,
+        dynamic_preview: None,
+    });
+    let mut app = test_app(addons);
+    app.keyword_suggestions.clear();
+    app.view.show_preview = true;
+    app.script_filter.config_index = Some(0);
+    app.script_filter.results = Some(ScriptFilterResult {
+        default_icon: None,
+        items,
+    });
+    app
+}
+
+fn plain_item(title: &str) -> ScriptFilterItem {
+    ScriptFilterItem {
+        title: title.into(),
+        subtitle: None,
+        arg: Some(format!("{title}-arg")),
+        icon: None,
+        preview: Some(super::types::ScriptFilterPreview::Text(
+            "static body".into(),
+        )),
+        quicklookurl: None,
+        variables: Default::default(),
+        text: None,
+    }
+}
+
+fn prepared(text: &str, refresh: Option<std::time::Duration>) -> super::types::PreparedPreview {
+    super::types::PreparedPreview {
+        title: Some("Dynamic title".into()),
+        bodies: vec![super::types::PreparedPreviewBody::Text {
+            heading: None,
+            content: text.into(),
+        }],
+        replaces_body: true,
+        metadata: vec![("Status".into(), "working".into())],
+        refresh,
+        dynamic: true,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn test_dynamic_preview_replaces_static_preview_and_reports_errors() {
+    let mut app = dynamic_preview_app(vec![plain_item("one")]);
+
+    let generation = app.script_filter.preview_generation;
+    let _ = app.update(Message::ScriptFilterPreview(
+        generation,
+        0,
+        0,
+        Ok(Some(prepared("live output", None))),
+    ));
+    let preview = app.resolve_selected_preview().expect("preview");
+    assert_eq!(preview.title, "Dynamic title");
+    assert!(matches!(
+        preview.bodies.as_slice(),
+        [PreviewBody::AnsiText { content, .. }] if content == "live output"
+    ));
+    assert_eq!(
+        preview.metadata.first(),
+        Some(&("Status".to_string(), "working".to_string()))
+    );
+    assert!(preview.metadata.iter().any(|(k, _)| k == "Enter"));
+
+    // A later failure keeps the last good preview and says why.
+    let _ = app.update(Message::ScriptFilterPreview(
+        generation,
+        0,
+        0,
+        Err("timed out after 3s".into()),
+    ));
+    let preview = app.resolve_selected_preview().expect("preview");
+    assert_eq!(preview.title, "Dynamic title");
+    assert!(preview
+        .metadata
+        .iter()
+        .any(|(k, v)| k == "Preview" && v == "timed out after 3s"));
+}
+
+#[test]
+fn test_dynamic_preview_ignores_stale_generations() {
+    let mut app = dynamic_preview_app(vec![plain_item("one"), plain_item("two")]);
+    let stale = app.script_filter.preview_generation;
+    let _ = app.update(Message::MoveDown);
+    assert_ne!(app.script_filter.preview_generation, stale);
+
+    let _ = app.update(Message::ScriptFilterPreview(
+        stale,
+        0,
+        0,
+        Ok(Some(prepared("old", None))),
+    ));
+    assert!(app.script_filter.previews.is_empty());
+}
+
+#[test]
+fn test_dynamic_preview_disabled_for_scripts_without_preview_support() {
+    let mut app = dynamic_preview_app(vec![plain_item("one")]);
+    let _ = app.request_script_filter_preview();
+    let generation = app.script_filter.preview_generation;
+    assert_eq!(app.dynamic_preview_target(), Some(0));
+
+    let _ = app.update(Message::ScriptFilterPreview(generation, 0, 0, Ok(None)));
+    assert!(app.script_filter.preview_unsupported.contains(&0));
+    assert_eq!(app.dynamic_preview_target(), None);
+
+    // The static preview is still shown.
+    let preview = app.resolve_selected_preview().expect("preview");
+    assert!(matches!(
+        preview.bodies.as_slice(),
+        [PreviewBody::AnsiText { content, .. }] if content == "static body"
+    ));
+
+    // Leaving script filter mode does not forget it.
+    app.script_filter.clear();
+    assert!(app.script_filter.preview_unsupported.contains(&0));
+}
+
+#[test]
+fn test_dynamic_preview_opt_outs() {
+    let mut app = dynamic_preview_app(vec![plain_item("one")]);
+    app.addons.script_filters[0].dynamic_preview = Some(false);
+    assert_eq!(app.dynamic_preview_target(), None);
+
+    let mut app = dynamic_preview_app(vec![plain_item("one")]);
+    app.view.show_preview = false;
+    assert_eq!(app.dynamic_preview_target(), None);
+
+    let mut item = plain_item("one");
+    item.preview = Some(super::types::ScriptFilterPreview::Rich(Box::new(
+        super::types::PreparedPreview {
+            dynamic: false,
+            ..prepared("static rich", None)
+        },
+    )));
+    let app = dynamic_preview_app(vec![item]);
+    assert_eq!(app.dynamic_preview_target(), None);
+    let preview = app.resolve_selected_preview().expect("preview");
+    assert!(matches!(
+        preview.bodies.as_slice(),
+        [PreviewBody::AnsiText { content, .. }] if content == "static rich"
+    ));
+}
+
+#[test]
+fn test_dynamic_preview_cache_skips_rerun_unless_refreshing() {
+    let mut app = dynamic_preview_app(vec![plain_item("one")]);
+    let generation = app.script_filter.preview_generation;
+    let _ = app.update(Message::ScriptFilterPreview(
+        generation,
+        0,
+        0,
+        Ok(Some(prepared("cached", None))),
+    ));
+    // Moving onto a cached item without `refresh` must not start a new run;
+    // the generation still moves so pending work is dropped.
+    let before = app.script_filter.preview_generation;
+    let _ = app.request_script_filter_preview();
+    assert_ne!(app.script_filter.preview_generation, before);
+    assert!(app.script_filter.previews.contains_key(&0));
+}
+
+#[test]
+fn test_dynamic_preview_probes_legacy_scripts_once() {
+    let mut app = dynamic_preview_app(vec![plain_item("one"), plain_item("two")]);
+    let _ = app.request_script_filter_preview();
+    let probe = app.script_filter.preview_generation;
+    let _ = app.update(Message::ScriptFilterPreviewDue(probe, 0));
+    assert!(app.script_filter.preview_probing.contains(&0));
+
+    // While the first run is out, moving on does not start another one.
+    let _ = app.update(Message::MoveDown);
+    let current = app.script_filter.preview_generation;
+    let _ = app.update(Message::ScriptFilterPreviewDue(current, 1));
+    assert!(app.script_filter.preview_probing.contains(&0));
+
+    // Its stale reply still tells Raffi the script does not do previews.
+    let _ = app.update(Message::ScriptFilterPreview(probe, 0, 0, Ok(None)));
+    assert!(app.script_filter.preview_probing.is_empty());
+    assert!(app.script_filter.preview_unsupported.contains(&0));
+    assert_eq!(app.dynamic_preview_target(), None);
+}
+
+#[test]
+fn test_dynamic_preview_stale_probe_success_marks_script_supported() {
+    let mut app = dynamic_preview_app(vec![plain_item("one"), plain_item("two")]);
+    let _ = app.request_script_filter_preview();
+    let probe = app.script_filter.preview_generation;
+    let _ = app.update(Message::ScriptFilterPreviewDue(probe, 0));
+    let _ = app.update(Message::MoveDown);
+
+    let _ = app.update(Message::ScriptFilterPreview(
+        probe,
+        0,
+        0,
+        Ok(Some(prepared("old", None))),
+    ));
+    assert!(app.script_filter.preview_supported.contains(&0));
+    assert!(app.script_filter.previews.is_empty());
+
+    // Once supported, runs are no longer serialised behind a probe.
+    let current = app.script_filter.preview_generation;
+    let _ = app.update(Message::ScriptFilterPreviewDue(current, 1));
+    assert!(app.script_filter.preview_probing.is_empty());
+}
+
+#[test]
+fn test_dynamic_preview_empty_sections_clear_static_body() {
+    let mut app = dynamic_preview_app(vec![plain_item("one")]);
+    let generation = app.script_filter.preview_generation;
+    let mut cleared = prepared("unused", None);
+    cleared.bodies.clear();
+    let _ = app.update(Message::ScriptFilterPreview(
+        generation,
+        0,
+        0,
+        Ok(Some(cleared)),
+    ));
+    let preview = app.resolve_selected_preview().expect("preview");
+    assert!(preview.bodies.is_empty());
+
+    // A metadata-only answer keeps the static body.
+    let mut app = dynamic_preview_app(vec![plain_item("one")]);
+    let generation = app.script_filter.preview_generation;
+    let metadata_only = super::types::PreparedPreview {
+        replaces_body: false,
+        bodies: Vec::new(),
+        ..prepared("unused", None)
+    };
+    let _ = app.update(Message::ScriptFilterPreview(
+        generation,
+        0,
+        0,
+        Ok(Some(metadata_only)),
+    ));
+    let preview = app.resolve_selected_preview().expect("preview");
+    assert!(matches!(
+        preview.bodies.as_slice(),
+        [PreviewBody::AnsiText { content, .. }] if content == "static body"
+    ));
+}
+
+#[test]
+fn test_dynamic_preview_file_section_rereads_same_path() {
+    let dir = std::env::temp_dir().join(format!("raffi-sf-file-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("status.txt");
+    std::fs::write(&file, "first version").unwrap();
+    let path = file.to_string_lossy().to_string();
+    let file_preview = || super::types::PreparedPreview {
+        bodies: vec![super::types::PreparedPreviewBody::File(path.clone())],
+        ..prepared("unused", Some(std::time::Duration::from_secs(2)))
+    };
+
+    let mut app = dynamic_preview_app(vec![plain_item("one")]);
+    let generation = app.script_filter.preview_generation;
+    let _ = app.update(Message::ScriptFilterPreview(
+        generation,
+        0,
+        0,
+        Ok(Some(file_preview())),
+    ));
+    let preview = app.resolve_selected_preview().expect("preview");
+    assert!(format!("{:?}", preview.bodies).contains("first version"));
+
+    std::fs::write(&file, "second version").unwrap();
+    let _ = app.update(Message::ScriptFilterPreview(
+        generation,
+        0,
+        0,
+        Ok(Some(file_preview())),
+    ));
+    let preview = app.resolve_selected_preview().expect("preview");
+    assert!(format!("{:?}", preview.bodies).contains("second version"));
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
