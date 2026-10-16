@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use std::process::{Command, Stdio};
 
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
@@ -9,7 +8,9 @@ use iced::widget::operation::{focus, move_cursor_to_end, scroll_by, snap_to};
 use iced::widget::scrollable::{self, AbsoluteOffset};
 use iced::Task;
 
-use super::actions::{execute_action, execute_snippet_action, spawn_copy};
+use super::actions::{
+    execute_action, execute_file_action, execute_snippet_action, open_in_file_manager, spawn_copy,
+};
 use super::browser::read_directory;
 use super::currency::{
     fetch_exchange_rate, fetch_multi_exchange_rates, is_currency_help_query,
@@ -325,6 +326,8 @@ impl LauncherApp {
         let search_input_id = super::state::TextInputId::unique();
 
         let file_browser_show_hidden = addons.file_browser.show_hidden.unwrap_or(false);
+        let file_browser_sort = addons.file_browser.sort;
+        let file_browser_sort_reverse = addons.file_browser.sort_reverse;
 
         let fallbacks = Self::resolve_fallbacks(&fallback_paths, &addons);
 
@@ -349,6 +352,8 @@ impl LauncherApp {
                 web_search: WebSearchState::default(),
                 file_browser: FileBrowserState {
                     show_hidden: file_browser_show_hidden,
+                    sort: file_browser_sort,
+                    sort_reverse: file_browser_sort_reverse,
                     ..Default::default()
                 },
                 view: {
@@ -448,6 +453,8 @@ impl LauncherApp {
             Message::DragEvent(event) => self.handle_drag_event(event),
             Message::TabComplete => self.handle_tab_complete(),
             Message::FileBrowserToggleHidden => self.handle_file_browser_toggle_hidden(),
+            Message::FileBrowserOpenFileManager => self.handle_file_browser_open_file_manager(),
+            Message::FileBrowserCycleSort => self.handle_file_browser_cycle_sort(),
             Message::ModifiersChanged(modifiers) => {
                 self.view.current_modifiers = modifiers;
                 Task::none()
@@ -764,7 +771,12 @@ impl LauncherApp {
 
         if dir_path != self.file_browser.current_dir {
             self.file_browser.current_dir = dir_path.to_string();
-            let all_entries = read_directory(dir_path, self.file_browser.show_hidden);
+            let all_entries = read_directory(
+                dir_path,
+                self.file_browser.show_hidden,
+                self.file_browser.sort,
+                self.file_browser.sort_reverse,
+            );
             if all_entries.is_empty() && !Path::new(dir_path).is_dir() {
                 self.file_browser.error = Some(format!("Cannot read directory: {}", dir_path));
             }
@@ -1595,22 +1607,20 @@ impl LauncherApp {
 
     fn handle_file_browser_selected(&mut self, index: usize) -> Task<Message> {
         if let Some(entry) = self.file_browser.entries.get(index) {
-            if entry.is_dir {
+            let secondary = self.view.current_modifiers.control();
+            if entry.is_dir && !secondary {
                 let new_query = format!("{}/", entry.full_path);
                 self.search_query = new_query.clone();
                 return Task::done(Message::SearchChanged(new_query));
             }
 
-            if self.view.current_modifiers.control() {
-                spawn_copy(&entry.full_path);
+            let config = &self.addons.file_browser;
+            let action = if secondary {
+                config.secondary_action()
             } else {
-                let _ = Command::new("xdg-open")
-                    .arg(&entry.full_path)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn();
-            }
+                config.action()
+            };
+            execute_file_action(action, &entry.full_path);
         }
 
         self.save_query_to_history();
@@ -1654,11 +1664,52 @@ impl LauncherApp {
             self.file_browser.all_entries = read_directory(
                 &self.file_browser.current_dir,
                 self.file_browser.show_hidden,
+                self.file_browser.sort,
+                self.file_browser.sort_reverse,
             );
             let query = self.search_query.clone();
             return Task::done(Message::SearchChanged(query));
         }
         Task::none()
+    }
+
+    fn handle_file_browser_cycle_sort(&mut self) -> Task<Message> {
+        if !self.file_browser.active {
+            return Task::none();
+        }
+        self.file_browser.sort = self.file_browser.sort.next();
+        if !self.file_browser.current_dir.is_empty() {
+            self.file_browser.all_entries = read_directory(
+                &self.file_browser.current_dir,
+                self.file_browser.show_hidden,
+                self.file_browser.sort,
+                self.file_browser.sort_reverse,
+            );
+        }
+        let query = self.search_query.clone();
+        Task::done(Message::SearchChanged(query))
+    }
+
+    fn handle_file_browser_open_file_manager(&mut self) -> Task<Message> {
+        let dir = &self.file_browser.current_dir;
+        if !self.file_browser.active || dir.is_empty() || !Path::new(dir).is_dir() {
+            return Task::none();
+        }
+        let entry_index = self
+            .selected_index
+            .saturating_sub(self.script_filter_offset());
+        let selected = self
+            .file_browser
+            .entries
+            .get(entry_index)
+            .map(|entry| entry.full_path.as_str());
+        open_in_file_manager(
+            dir,
+            selected,
+            self.addons.file_browser.file_manager.as_deref(),
+        );
+        self.save_query_to_history();
+        iced::exit()
     }
 
     fn handle_history_previous(&mut self) -> Task<Message> {

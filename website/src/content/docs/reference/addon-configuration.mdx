@@ -156,7 +156,7 @@ No trigger character is needed; simply type a valid expression.
 
 ## File Browser
 
-Browses the filesystem with fuzzy filtering. Selecting a directory navigates into it; selecting a file opens it with `xdg-open`. Hidden files can be toggled with Ctrl+H.
+Browses the filesystem with fuzzy filtering. Selecting a directory navigates into it; selecting a file opens it with `xdg-open` unless `action` says otherwise. Hidden files can be toggled with Ctrl+H.
 
 ### Configuration
 
@@ -184,6 +184,29 @@ Show hidden files by default.
 
 ```
 
+**`addons.file_browser.sort`** `string` (default: `name`)
+
+Initial order of the listing: `name` (alphabetical), `modified` (newest first; `date` is accepted too) or `created` (newest first). Directories stay before files. Cycle with Ctrl+S at runtime.
+
+  ```yaml
+  addons:
+    file_browser:
+      sort: modified
+
+```
+
+**`addons.file_browser.sort_reverse`** `boolean` (default: `false`)
+
+Reverse the active sort: Z to A, or oldest first for `modified`/`created`. Directories stay before files. Ctrl+S cycles the mode and leaves this setting alone.
+
+  ```yaml
+  addons:
+    file_browser:
+      sort: modified
+      sort_reverse: true
+
+```
+
 **`addons.file_browser.backspace_updir`** `boolean` (default: `true`)
 
 When the input ends with `/`, Backspace jumps to the parent directory (like Emacs fido/ido mode) and selects the directory you left. Set to `false` for a plain delete.
@@ -195,16 +218,39 @@ When the input ends with `/`, Backspace jumps to the parent directory (like Emac
 
 ```
 
+**`addons.file_browser.action`** `string` (default: `open`)
+
+Action run when pressing Enter (or clicking) on a file. Enter on a directory always navigates into it. Accepts `open` (xdg-open), `copy` (copy the full path), `insert` (type the full path into the focused app), or a shell command where `{value}` is replaced by the full path (also available as `$RAFFI_VALUE`).
+
+**`addons.file_browser.secondary_action`** `string` (default: `copy`)
+
+Action run when pressing Ctrl+Enter (or Ctrl+click) on a file or directory. Accepts the same values as `action`.
+
+**`addons.file_browser.file_manager`** `string` (default: autodetected)
+
+Command that Ctrl+O uses to open the browsed directory. The directory is appended as the last argument, or replaces `{value}` when present. Nautilus, Dolphin, Nemo and Caja (given as a bare program name or path) open with the selected entry highlighted through `--select`. When unset, raffi uses the desktop's own file manager (Dolphin, Nautilus, Thunar, Nemo, Caja, PCManFM...) if installed, then the first installed one, then `xdg-open`.
+
+  ```yaml
+  addons:
+    file_browser:
+      action: "code {value}"
+      secondary_action: insert
+      file_manager: dolphin
+
+```
+
 ### Usage
 
 - Type `/` to browse from root
 - Type `~` to browse from home directory
 - Text after the last `/` filters the current directory (e.g., `/home/us` filters `/home/` by "us")
-- Enter: Navigate into directory or open file
-- Alt+Enter: Copy file/directory path to clipboard
+- Enter: Navigate into directory, or run `action` on a file (open by default)
+- Ctrl+Enter: Run `secondary_action` on a file or directory (copy path by default)
 - Tab: Autocomplete selected entry into search bar
 - Backspace on a trailing `/`: Go up to the parent directory
 - Ctrl+H: Toggle hidden file visibility
+- Ctrl+O: Open the current directory in a file manager
+- Ctrl+S: Cycle the sort order (name, modified, created)
 
 Directories are listed first in accent color.
 

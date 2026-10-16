@@ -164,7 +164,7 @@ pub(super) fn inspect_path(full_path: &str, show_hidden: bool) -> InspectedFile 
 
     if meta.is_dir() {
         metadata.push(("Type".to_string(), "Directory".to_string()));
-        let entries = read_directory(full_path, show_hidden);
+        let entries = read_directory(full_path, show_hidden, crate::FileBrowserSort::Name, false);
         let total_count = entries.len();
         let preview_entries: Vec<(String, bool)> = entries
             .into_iter()
@@ -332,6 +332,15 @@ fn describe_action(action: &str) -> String {
         "insert" => "Type into focused app".to_string(),
         "hypr_paste" => "Paste into original window (Hyprland)".to_string(),
         custom => format!("Run `{custom}`"),
+    }
+}
+
+fn describe_file_action(action: &str) -> String {
+    match action {
+        "open" => "Open with xdg-open".to_string(),
+        "copy" => "Copy full path".to_string(),
+        "insert" => "Type full path into focused app".to_string(),
+        custom => describe_action(custom),
     }
 }
 
@@ -714,6 +723,7 @@ impl LauncherApp {
             .cloned()
             .unwrap_or_else(|| inspect_path(&entry.full_path, self.file_browser.show_hidden));
 
+        let config = &self.addons.file_browser;
         let mut metadata = vec![("Path".to_string(), entry.full_path.clone())];
         metadata.extend(inspected.metadata);
         metadata.push((
@@ -721,11 +731,15 @@ impl LauncherApp {
             if entry.is_dir {
                 "Open directory".to_string()
             } else {
-                "Open with xdg-open".to_string()
+                describe_file_action(config.action())
             },
         ));
-        metadata.push(("Ctrl+Enter".to_string(), "Copy full path".to_string()));
+        metadata.push((
+            "Ctrl+Enter".to_string(),
+            describe_file_action(config.secondary_action()),
+        ));
         metadata.push(("Tab".to_string(), "Autocomplete path".to_string()));
+        metadata.push(("Ctrl+O".to_string(), "Show in file manager".to_string()));
 
         PreviewData {
             title: if entry.is_dir {
@@ -1320,6 +1334,26 @@ fn describe_addon_by_keyword(
                 (
                     "Shortcut".to_string(),
                     "Ctrl+H toggles dotfiles".to_string(),
+                ),
+                (
+                    "Sort".to_string(),
+                    format!(
+                        "{}{} (Ctrl+S cycles)",
+                        addons.file_browser.sort.label(),
+                        if addons.file_browser.sort_reverse {
+                            ", reversed"
+                        } else {
+                            ""
+                        }
+                    ),
+                ),
+                (
+                    "Enter".to_string(),
+                    describe_file_action(addons.file_browser.action()),
+                ),
+                (
+                    "Ctrl+Enter".to_string(),
+                    describe_file_action(addons.file_browser.secondary_action()),
                 ),
             ],
         );

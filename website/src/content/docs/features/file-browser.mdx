@@ -51,11 +51,13 @@ Start the file browser by typing one of these prefixes:
 
 | Key | Action |
 |-----|--------|
-| **Enter** | Navigate into directory OR open file with `xdg-open` |
-| **Alt+Enter** | Copy file/directory path to clipboard |
+| **Enter** | Navigate into directory OR run `action` on a file (`xdg-open` by default) |
+| **Ctrl+Enter** | Run `secondary_action` on a file or directory (copy path by default) |
 | **Tab** | Autocomplete selected entry into search bar |
 | **Backspace** | On a trailing `/`, go up to the parent directory |
 | **Ctrl+H** | Toggle hidden file visibility |
+| **Ctrl+O** | Open the current directory in a file manager |
+| **Ctrl+S** | Cycle the sort order: name, modified date, created date |
 | **Ctrl+J** / **Ctrl+K** | Scroll the right-hand preview pane down / up |
 | **Ctrl+P** | Toggle right-hand file/directory/image preview pane |
 | **Esc** | Exit file browser |
@@ -167,13 +169,15 @@ With the input ending in `/`, press **Backspace** to jump to the parent director
 ### Copy Path
 
 1. Navigate to file or directory
-2. Press **Alt+Enter**
+2. Press **Ctrl+Enter** (or Ctrl+click the row)
 3. Full path copied to clipboard
 
 ```text Example
 ~/Documents/report.pdf
-[Alt+Enter] → Copies: /home/user/Documents/report.pdf
+[Ctrl+Enter] → Copies: /home/user/Documents/report.pdf
 ```
+
+This is the default `secondary_action`; see [Configuration](#configuration) to change it.
 
 ### Drag and Drop
 
@@ -200,6 +204,16 @@ Dragging out of raffi requires the native Wayland interface (the default). It do
 raffi is a drag source only: it does not accept files dropped **into** it.
 </Aside>
 
+### Open in File Manager
+
+Press **Ctrl+O** to open the directory you are browsing in a graphical file manager. With Nautilus, Dolphin, Nemo and Caja the entry selected in raffi is also selected in the file manager; other file managers just open the directory. Raffi picks your desktop's own file manager when it is installed (Dolphin on KDE, Nautilus on GNOME, Thunar on XFCE, Nemo on Cinnamon, Caja on MATE, PCManFM on LXQt/LXDE, and so on). On other sessions such as Hyprland or Sway it uses the first one it finds, and falls back to `xdg-open`. Set [`file_manager`](#configuration) to choose one yourself.
+
+```text Example
+~/Projects/myapp/src/
+Selected: main.rs
+[Ctrl+O] → Opens ~/Projects/myapp/src/ in your file manager with main.rs selected
+```
+
 ### Autocomplete
 
 1. Navigate to file or directory
@@ -221,7 +235,12 @@ addons:
   file_browser:
     enabled: true
     show_hidden: false
+    sort: name
+    sort_reverse: false
     backspace_updir: true
+    action: open
+    secondary_action: copy
+    file_manager: thunar
 ```
 
 ### Configuration Options
@@ -236,9 +255,57 @@ Enable or disable the file browser addon
 Show hidden files (dotfiles) by default. Can be toggled at runtime with Ctrl+H.
 
 
+**`sort`** `string` (default: `name`)
+
+Initial order of the listing. Directories always come before files. Press Ctrl+S to cycle through the modes while browsing; the hint bar shows the current one.
+
+- `name`: alphabetical, ignoring case
+- `modified` (or `date`): last modification time, newest first
+- `created`: creation time, newest first. Entries on filesystems that do not record it go last.
+
+
+**`sort_reverse`** `boolean` (default: `false`)
+
+Reverse the order of whichever `sort` mode is active: Z to A for `name`, oldest first for `modified` and `created`. Directories still come first. Ctrl+S does not change this setting.
+
+
 **`backspace_updir`** `boolean` (default: `true`)
 
 When the input ends with `/`, Backspace jumps to the parent directory instead of deleting the slash, like Emacs fido/ido mode. The directory you just left is selected in the parent listing. On `~/` it goes up to the parent of your home directory, and on `/` it is a plain delete. Set to `false` to make Backspace always delete one character.
+
+
+**`action`** `string` (default: `open`)
+
+What Enter (or a click) does on a file. Enter on a directory always navigates into it. Accepted values:
+
+- `open`: open the file with `xdg-open`
+- `copy`: copy the full path to the clipboard
+- `insert`: type the full path into the focused app (needs `wtype` or `ydotool`)
+- any other string: run it as a shell command, with `{value}` replaced by the full path (also exported as `$RAFFI_VALUE`)
+
+
+**`secondary_action`** `string` (default: `copy`)
+
+What Ctrl+Enter (or Ctrl+click) does on a file or directory. Takes the same values as `action`.
+
+```yaml raffi.yaml
+addons:
+  file_browser:
+    action: "code {value}"
+    secondary_action: insert
+```
+
+**`file_manager`** `string` (default: autodetected)
+
+Command used by **Ctrl+O** to open the current directory. The directory is appended as the last argument, or replaces `{value}` if present (it is also exported as `$RAFFI_VALUE`). When the value is just `nautilus`, `dolphin`, `nemo` or `caja` (or a path to one), raffi passes `--select` with the selected entry instead. When unset, raffi detects a file manager as described in [Open in File Manager](#open-in-file-manager).
+
+```yaml raffi.yaml
+addons:
+  file_browser:
+    file_manager: dolphin
+    # or a terminal file manager:
+    # file_manager: kitty yazi
+```
 
 
 ### Disable File Browser
@@ -269,7 +336,7 @@ addons:
     ```text
     ~/Projects/myapp/src/
     # Navigate to: main.rs
-    # [Alt+Enter] to copy path
+    # [Ctrl+Enter] to copy path
     # Paste into terminal or IDE
     ```
   </details>
@@ -370,7 +437,7 @@ Clipboard operations require `wl-copy` (wl-clipboard) for Wayland
 
 3. **Copy Path**
 
-   Press **Alt+Enter** to copy full path
+   Press **Ctrl+Enter** to copy full path
 
 4. **Use Path**
 

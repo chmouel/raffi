@@ -190,6 +190,14 @@
       "description": "Configuration for the file browser addon",
       "type": "object",
       "properties": {
+        "action": {
+          "description": "Action on Enter for files: `open` (xdg-open), `copy`, `insert`, or a\nshell command where `{value}` is the full path. Defaults to `open`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "backspace_updir": {
           "description": "Backspace on a trailing `/` jumps to the parent directory, like\nEmacs fido/ido mode.",
           "type": "boolean",
@@ -199,15 +207,60 @@
           "type": "boolean",
           "default": true
         },
+        "file_manager": {
+          "description": "File manager opened with Ctrl+O on the browsed directory. `{value}` is\nreplaced by the directory, otherwise it is appended as the last\nargument. Nautilus, Dolphin, Nemo and Caja also get the selected entry\nhighlighted. Autodetected when unset.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "secondary_action": {
+          "description": "Action on Ctrl+Enter for files and directories, with the same values as\n`action`. Defaults to `copy`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "show_hidden": {
           "type": [
             "boolean",
             "null"
           ],
           "default": null
+        },
+        "sort": {
+          "description": "Initial order of the listing; Ctrl+S cycles through the modes.\nDirectories are always listed first.",
+          "$ref": "#/$defs/FileBrowserSort"
+        },
+        "sort_reverse": {
+          "description": "Reverse the sort order: Z to A, or oldest first for date sorts.\nDirectories stay first and Ctrl+S keeps this setting.",
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false
+    },
+    "FileBrowserSort": {
+      "description": "Order of file browser entries",
+      "oneOf": [
+        {
+          "description": "Alphabetical, case-insensitive",
+          "type": "string",
+          "const": "name"
+        },
+        {
+          "description": "Last modification time, newest first (`date` is accepted as an alias)",
+          "type": "string",
+          "const": "modified"
+        },
+        {
+          "description": "Creation time, newest first, where the filesystem records it",
+          "type": "string",
+          "const": "created"
+        }
+      ]
     },
     "GeneralConfig": {
       "description": "General configuration for persistent defaults",

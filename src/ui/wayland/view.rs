@@ -1574,6 +1574,24 @@ impl LauncherApp {
             }
             hint_spans.push(span("Ctrl+H").size(fs.hint).color(t.accent));
             hint_spans.push(span(" toggle hidden").size(fs.hint).color(t.text_muted));
+            hint_spans.push(sep.clone());
+            hint_spans.push(span("Ctrl+O").size(fs.hint).color(t.accent));
+            hint_spans.push(span(" file manager").size(fs.hint).color(t.text_muted));
+            hint_spans.push(sep.clone());
+            hint_spans.push(span("Ctrl+S").size(fs.hint).color(t.accent));
+            hint_spans.push(
+                span(format!(
+                    " sort: {}{}",
+                    self.file_browser.sort.label(),
+                    if self.file_browser.sort_reverse {
+                        " (reversed)"
+                    } else {
+                        ""
+                    }
+                ))
+                .size(fs.hint)
+                .color(t.text_muted),
+            );
         }
         if !hint_spans.is_empty() {
             hint_spans.push(sep.clone());
@@ -1641,6 +1659,18 @@ impl LauncherApp {
             }) if c.as_str() == "h" && modifiers.control() => {
                 Some(Message::FileBrowserToggleHidden)
             }
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Character(ref c),
+                modifiers,
+                ..
+            }) if c.as_str() == "o" && modifiers.control() => {
+                Some(Message::FileBrowserOpenFileManager)
+            }
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Character(ref c),
+                modifiers,
+                ..
+            }) if c.as_str() == "s" && modifiers.control() => Some(Message::FileBrowserCycleSort),
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Character(ref c),
                 modifiers,

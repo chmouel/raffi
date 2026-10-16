@@ -167,6 +167,10 @@ pub(super) struct FileBrowserState {
     pub all_entries: Vec<FileBrowserEntry>,
     pub active: bool,
     pub show_hidden: bool,
+    /// Listing order, cycled with Ctrl+S; survives leaving the browser.
+    pub sort: crate::FileBrowserSort,
+    /// Flip the order of `sort` (from the `sort_reverse` setting).
+    pub sort_reverse: bool,
     pub current_dir: String,
     pub error: Option<String>,
     pub cached_preview: Option<InspectedFile>,

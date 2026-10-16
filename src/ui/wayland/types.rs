@@ -187,6 +187,10 @@ pub(crate) enum Message {
     DragEvent(super::dnd::DragEvent),
     TabComplete,
     FileBrowserToggleHidden,
+    /// Open the directory being browsed in a file manager.
+    FileBrowserOpenFileManager,
+    /// Switch the file browser to the next sort mode.
+    FileBrowserCycleSort,
     ModifiersChanged(iced::keyboard::Modifiers),
     HistoryPrevious,
     HistoryNext,

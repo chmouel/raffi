@@ -1066,6 +1066,128 @@ fn test_mouse_release_resets_row_press_tracking() {
 }
 
 #[test]
+fn test_file_browser_runs_configured_actions() {
+    let dir = std::env::temp_dir().join(format!("raffi-fb-action-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let primary = dir.join("primary");
+    let secondary = dir.join("secondary");
+    let write_to =
+        |out: &std::path::Path| format!("printf '%s' \"$RAFFI_VALUE\" > '{}'", out.display());
+
+    let mut addons = AddonsConfig::default();
+    addons.file_browser.action = Some(write_to(&primary));
+    addons.file_browser.secondary_action = Some(write_to(&secondary));
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+    app.keyword_suggestions.clear();
+    app.file_browser.active = true;
+    for (name, is_dir) in [("dir", true), ("file.txt", false)] {
+        app.file_browser
+            .entries
+            .push(super::state::FileBrowserEntry {
+                name: name.into(),
+                full_path: format!("/tmp/{name}"),
+                is_dir,
+            });
+    }
+
+    // Enter on a directory keeps navigating instead of running the action.
+    let _ = app.update(Message::FileBrowserItemSelected(0));
+    assert_eq!(app.search_query, "/tmp/dir/");
+
+    let _ = app.update(Message::FileBrowserItemSelected(1));
+    app.view.current_modifiers = iced::keyboard::Modifiers::CTRL;
+    let _ = app.update(Message::FileBrowserItemSelected(0));
+
+    let read = |out: &std::path::Path| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline && std::fs::read_to_string(out).is_err() {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::fs::read_to_string(out).unwrap()
+    };
+    assert_eq!(read(&primary), "/tmp/file.txt");
+    assert_eq!(read(&secondary), "/tmp/dir");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_file_browser_opens_current_dir_in_configured_file_manager() {
+    let dir = std::env::temp_dir().join(format!("raffi-fb-fm-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("out");
+
+    let mut addons = AddonsConfig::default();
+    addons.file_browser.file_manager = Some(format!(
+        "sh -c 'printf \"%s\" \"$1\" > {}' fm",
+        out.display()
+    ));
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+
+    // Outside the file browser the shortcut does nothing.
+    let _ = app.update(Message::FileBrowserOpenFileManager);
+    assert!(!out.exists());
+
+    let browsed = format!("{}/", dir.display());
+    app.file_browser.active = true;
+    app.file_browser.current_dir = browsed.clone();
+    let _ = app.update(Message::FileBrowserOpenFileManager);
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline && std::fs::read_to_string(&out).is_err() {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), browsed);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_file_browser_cycle_sort_reorders_entries() {
+    let dir = std::env::temp_dir().join(format!("raffi-fb-sort-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let base = std::time::SystemTime::now();
+    for (name, age) in [("a.txt", 300), ("b.txt", 10)] {
+        let file = std::fs::File::create(dir.join(name)).unwrap();
+        file.set_modified(base - std::time::Duration::from_secs(age))
+            .unwrap();
+    }
+
+    let mut addons = AddonsConfig::default();
+    addons.file_browser.sort = crate::FileBrowserSort::Name;
+    let mut app = test_app(addons);
+    assert_eq!(app.file_browser.sort, crate::FileBrowserSort::Name);
+
+    // Outside the file browser the shortcut is ignored.
+    let _ = app.update(Message::FileBrowserCycleSort);
+    assert_eq!(app.file_browser.sort, crate::FileBrowserSort::Name);
+
+    app.file_browser.active = true;
+    app.file_browser.current_dir = format!("{}/", dir.display());
+    let names = |app: &LauncherApp| -> Vec<String> {
+        app.file_browser
+            .all_entries
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect()
+    };
+
+    let _ = app.update(Message::FileBrowserCycleSort);
+    assert_eq!(app.file_browser.sort, crate::FileBrowserSort::Modified);
+    assert_eq!(names(&app), vec!["b.txt", "a.txt"]);
+
+    let _ = app.update(Message::FileBrowserCycleSort);
+    assert_eq!(app.file_browser.sort, crate::FileBrowserSort::Created);
+    let _ = app.update(Message::FileBrowserCycleSort);
+    assert_eq!(app.file_browser.sort, crate::FileBrowserSort::Name);
+    assert_eq!(names(&app), vec!["a.txt", "b.txt"]);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn test_drag_events_drive_browser_dragging_state() {
     let mut app = browser_app_with_two_dirs();
     app.file_browser.pressed_row = Some(0);
@@ -1440,6 +1562,8 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "Ctrl+K",
             "Ctrl+P",
             "Ctrl+H",
+            "Ctrl+O",
+            "Ctrl+S",
             "Alt+P/N",
             "Tab",
             "Backspace",
@@ -1478,6 +1602,8 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
             "Ctrl+K",
             "Ctrl+P",
             "Ctrl+H",
+            "Ctrl+O",
+            "Ctrl+S",
             "Alt+P/N",
             "Tab",
             "Ctrl+/",
@@ -1498,6 +1624,8 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
             "Ctrl+K",
             "Ctrl+P",
             "Ctrl+H",
+            "Ctrl+O",
+            "Ctrl+S",
             "Ctrl+/",
             "Ctrl+Enter"
         ]
@@ -1521,7 +1649,7 @@ fn test_help_entries_skip_disabled_addons() {
     // Disabled addons drop their keyword rows; the keyboard shortcut rows stay.
     let entries = help_entries(&addons);
     assert!(entries.iter().all(|entry| entry.completion.is_none()));
-    assert_eq!(entries.len(), 11);
+    assert_eq!(entries.len(), 13);
 }
 
 #[test]

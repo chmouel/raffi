@@ -133,6 +133,16 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             "Toggle hidden files",
             "File browser: show or hide dotfiles",
         ),
+        shortcut(
+            "Ctrl+O",
+            "Open in file manager",
+            "File browser: opens the current directory with the entry selected",
+        ),
+        shortcut(
+            "Ctrl+S",
+            "Cycle sort order",
+            "File browser: name, modified date, created date",
+        ),
         shortcut("Alt+P/N", "Search history", "Previous / next query"),
         shortcut(
             "Tab",
@@ -158,7 +168,7 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         shortcut(
             "Ctrl+Enter",
             "Secondary action",
-            "Runs the addon's secondary action; file browser copies the path",
+            "Runs the addon's secondary action; file browser copies the path by default",
         ),
     ]);
     entries

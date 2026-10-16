@@ -114,6 +114,100 @@ pub(super) fn execute_action(action: &str, value: &str) {
     let _ = dispatch(action, value, 0);
 }
 
+/// Execute a file browser action. `open` hands the path to `xdg-open`; every
+/// other value behaves like [`execute_action`].
+pub(super) fn execute_file_action(action: &str, path: &str) {
+    if action != "open" {
+        return execute_action(action, path);
+    }
+    crate::debug_log!("action: xdg-open {path:?}");
+    let _ = Command::new("xdg-open")
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+}
+
+/// Known file managers with the `XDG_CURRENT_DESKTOP` names that ship them.
+/// The order is also the fallback preference when no desktop matches.
+const FILE_MANAGERS: &[(&[&str], &str)] = &[
+    (&["GNOME", "Budgie", "Unity"], "nautilus"),
+    (&["KDE"], "dolphin"),
+    (&["XFCE"], "thunar"),
+    (&["X-Cinnamon", "Cinnamon"], "nemo"),
+    (&["MATE"], "caja"),
+    (&["LXQt"], "pcmanfm-qt"),
+    (&["LXDE"], "pcmanfm"),
+    (&["Pantheon"], "io.elementary.files"),
+    (&["COSMIC"], "cosmic-files"),
+    (&["Deepin", "DDE"], "dde-file-manager"),
+    (&[], "spacefm"),
+    (&[], "krusader"),
+];
+
+/// Pick the desktop's own file manager when installed, otherwise the first
+/// installed one. `desktop` is the colon-separated `XDG_CURRENT_DESKTOP`.
+fn detect_file_manager(
+    desktop: &str,
+    installed: impl Fn(&'static str) -> bool,
+) -> Option<&'static str> {
+    let desktops: Vec<&str> = desktop.split(':').map(str::trim).collect();
+    let for_desktop = FILE_MANAGERS.iter().find(|(names, binary)| {
+        names
+            .iter()
+            .any(|name| desktops.iter().any(|d| d.eq_ignore_ascii_case(name)))
+            && installed(binary)
+    });
+    for_desktop
+        .or_else(|| FILE_MANAGERS.iter().find(|(_, binary)| installed(binary)))
+        .map(|(_, binary)| *binary)
+}
+
+/// Shell command and `$RAFFI_VALUE` opening `dir` in `manager`, selecting
+/// `selected` when the manager supports `--select`. A command containing
+/// `{value}` is used as is with the directory; otherwise the path is appended.
+fn file_manager_command<'a>(
+    manager: &str,
+    dir: &'a str,
+    selected: Option<&'a str>,
+) -> (String, &'a str) {
+    if manager.contains("{value}") {
+        return (manager.to_string(), dir);
+    }
+    match selected {
+        Some(path) if supports_select(manager) => {
+            (format!("{manager} --select \"$RAFFI_VALUE\""), path)
+        }
+        _ => (format!("{manager} \"$RAFFI_VALUE\""), dir),
+    }
+}
+
+/// File managers whose `--select` opens the parent folder with the item
+/// selected. Only a bare program name or path qualifies, so custom commands
+/// with their own arguments are left alone.
+fn supports_select(manager: &str) -> bool {
+    let program = manager.trim();
+    !program.contains(char::is_whitespace)
+        && matches!(
+            std::path::Path::new(program)
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some("nautilus" | "dolphin" | "nemo" | "caja")
+        )
+}
+
+/// Open `dir` in the configured or detected file manager, falling back to
+/// `xdg-open`, with `selected` highlighted when the manager supports it.
+pub(super) fn open_in_file_manager(dir: &str, selected: Option<&str>, configured: Option<&str>) {
+    let manager = configured.unwrap_or_else(|| {
+        let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+        detect_file_manager(&desktop, |name| find_tool(&[name]).is_some()).unwrap_or("xdg-open")
+    });
+    let (command, value) = file_manager_command(manager, dir, selected);
+    let _ = spawn_custom_action(&command, value);
+}
+
 fn dispatch(action: &str, value: &str, cursor_moves: usize) -> Result<(), String> {
     match action {
         "insert" => spawn_insert(value, cursor_moves),
@@ -346,6 +440,62 @@ mod tests {
         let mut command = Command::new("sh");
         command.arg("-c").arg(script);
         command
+    }
+
+    #[test]
+    fn test_detect_file_manager_prefers_the_desktop() {
+        let all = |_: &str| true;
+        assert_eq!(detect_file_manager("KDE", all), Some("dolphin"));
+        assert_eq!(detect_file_manager("ubuntu:GNOME", all), Some("nautilus"));
+        assert_eq!(detect_file_manager("xfce", all), Some("thunar"));
+        // Unknown desktops (Hyprland, sway...) take the first installed one.
+        assert_eq!(
+            detect_file_manager("Hyprland", |name| name == "thunar" || name == "nemo"),
+            Some("thunar")
+        );
+        // The desktop's manager must be installed to win.
+        assert_eq!(
+            detect_file_manager("KDE", |name| name == "pcmanfm"),
+            Some("pcmanfm")
+        );
+        assert_eq!(detect_file_manager("KDE", |_| false), None);
+    }
+
+    #[test]
+    fn test_file_manager_command_selects_when_supported() {
+        let dir = "/home/u/src/";
+        let file = Some("/home/u/src/main.rs");
+        assert_eq!(
+            file_manager_command("nautilus", dir, file),
+            (
+                "nautilus --select \"$RAFFI_VALUE\"".into(),
+                "/home/u/src/main.rs"
+            )
+        );
+        assert_eq!(
+            file_manager_command("/usr/bin/dolphin", dir, file),
+            (
+                "/usr/bin/dolphin --select \"$RAFFI_VALUE\"".into(),
+                "/home/u/src/main.rs"
+            )
+        );
+        // Nothing selected, or no --select support: open the directory.
+        assert_eq!(
+            file_manager_command("nautilus", dir, None),
+            ("nautilus \"$RAFFI_VALUE\"".into(), dir)
+        );
+        assert_eq!(
+            file_manager_command("thunar", dir, file),
+            ("thunar \"$RAFFI_VALUE\"".into(), dir)
+        );
+        assert_eq!(
+            file_manager_command("nautilus --new-window", dir, file),
+            ("nautilus --new-window \"$RAFFI_VALUE\"".into(), dir)
+        );
+        assert_eq!(
+            file_manager_command("kitty -d {value} yazi", dir, file),
+            ("kitty -d {value} yazi".into(), dir)
+        );
     }
 
     #[test]

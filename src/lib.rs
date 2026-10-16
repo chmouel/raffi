@@ -85,6 +85,71 @@ pub struct FileBrowserAddonConfig {
     /// Emacs fido/ido mode.
     #[serde(default = "default_true")]
     pub backspace_updir: bool,
+    /// Action on Enter for files: `open` (xdg-open), `copy`, `insert`, or a
+    /// shell command where `{value}` is the full path. Defaults to `open`.
+    #[serde(default)]
+    pub action: Option<String>,
+    /// Action on Ctrl+Enter for files and directories, with the same values as
+    /// `action`. Defaults to `copy`.
+    #[serde(default)]
+    pub secondary_action: Option<String>,
+    /// File manager opened with Ctrl+O on the browsed directory. `{value}` is
+    /// replaced by the directory, otherwise it is appended as the last
+    /// argument. Nautilus, Dolphin, Nemo and Caja also get the selected entry
+    /// highlighted. Autodetected when unset.
+    #[serde(default)]
+    pub file_manager: Option<String>,
+    /// Initial order of the listing; Ctrl+S cycles through the modes.
+    /// Directories are always listed first.
+    #[serde(default)]
+    pub sort: FileBrowserSort,
+    /// Reverse the sort order: Z to A, or oldest first for date sorts.
+    /// Directories stay first and Ctrl+S keeps this setting.
+    #[serde(default)]
+    pub sort_reverse: bool,
+}
+
+/// Order of file browser entries
+#[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FileBrowserSort {
+    /// Alphabetical, case-insensitive
+    #[default]
+    Name,
+    /// Last modification time, newest first (`date` is accepted as an alias)
+    #[serde(alias = "date")]
+    Modified,
+    /// Creation time, newest first, where the filesystem records it
+    Created,
+}
+
+impl FileBrowserSort {
+    /// The mode after this one, wrapping around.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Name => Self::Modified,
+            Self::Modified => Self::Created,
+            Self::Created => Self::Name,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Name => "name",
+            Self::Modified => "modified",
+            Self::Created => "created",
+        }
+    }
+}
+
+impl FileBrowserAddonConfig {
+    pub fn action(&self) -> &str {
+        self.action.as_deref().unwrap_or("open")
+    }
+
+    pub fn secondary_action(&self) -> &str {
+        self.secondary_action.as_deref().unwrap_or("copy")
+    }
 }
 
 impl Default for FileBrowserAddonConfig {
@@ -93,6 +158,11 @@ impl Default for FileBrowserAddonConfig {
             enabled: true,
             show_hidden: None,
             backspace_updir: true,
+            action: None,
+            secondary_action: None,
+            file_manager: None,
+            sort: FileBrowserSort::default(),
+            sort_reverse: false,
         }
     }
 }
@@ -1050,6 +1120,10 @@ fn process_config(config: Config, args: &Args) -> Result<ParsedConfig> {
     }
 
     let mut addons = config.addons;
+    let fb = &mut addons.file_browser;
+    fb.action = fb.action.as_ref().map(|s| expand_config_value(s));
+    fb.secondary_action = fb.secondary_action.as_ref().map(|s| expand_config_value(s));
+    fb.file_manager = fb.file_manager.as_ref().map(|s| expand_config_value(s));
     for sf in &mut addons.script_filters {
         sf.command = expand_config_value(&sf.command);
         sf.icon = sf.icon.as_ref().map(|s| expand_config_value(s));
@@ -2485,6 +2559,21 @@ mod tests {
         assert_eq!(tz.name, "Timezones");
         assert_eq!(tz.action, None);
         assert_eq!(tz.secondary_action, None);
+    }
+
+    #[test]
+    fn test_file_browser_sort_parsing() {
+        let parse = |s: &str| serde_yaml::from_str::<FileBrowserSort>(s).unwrap();
+        assert_eq!(parse("name"), FileBrowserSort::Name);
+        assert_eq!(parse("modified"), FileBrowserSort::Modified);
+        assert_eq!(parse("date"), FileBrowserSort::Modified);
+        assert_eq!(parse("created"), FileBrowserSort::Created);
+        assert!(serde_yaml::from_str::<FileBrowserSort>("size").is_err());
+        assert_eq!(
+            FileBrowserAddonConfig::default().sort,
+            FileBrowserSort::Name
+        );
+        assert_eq!(FileBrowserSort::Created.next(), FileBrowserSort::Name);
     }
 
     #[test]
