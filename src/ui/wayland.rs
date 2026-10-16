@@ -7,6 +7,7 @@ mod clipboard_history;
 mod clipboard_mode;
 mod color;
 mod currency;
+mod devtools;
 mod dnd;
 mod emoji;
 mod help;

@@ -388,6 +388,32 @@ impl SystemState {
     }
 }
 
+#[derive(Default)]
+pub(super) struct DevtoolsState {
+    pub active: bool,
+    pub rows: Vec<super::devtools::DevRow>,
+    /// Bumped by every `dev` query and when leaving the mode; a hash worker
+    /// started for an older value skips its work or has its result dropped.
+    pub hash_generation: Arc<std::sync::atomic::AtomicU64>,
+    /// Hash command replacing every hash tool in tests.
+    #[cfg(test)]
+    pub hash_command: Option<Vec<String>>,
+}
+
+impl DevtoolsState {
+    pub fn clear(&mut self) {
+        self.active = false;
+        self.rows.clear();
+        self.hash_generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn current_generation(&self) -> u64 {
+        self.hash_generation
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(super) enum FallbackAction {
     WebSearch {
@@ -481,6 +507,7 @@ pub(super) struct LauncherApp {
     pub history: HistoryState,
     pub emoji: EmojiState,
     pub system: SystemState,
+    pub devtools: DevtoolsState,
     pub clipboard: ClipboardState,
     pub fallbacks: Vec<ResolvedFallback>,
     pub keyword_suggestions: Vec<KeywordSuggestion>,

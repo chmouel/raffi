@@ -39,6 +39,7 @@ export default defineConfig({
             { label: 'Clipboard History', slug: 'features/clipboard-history' },
             { label: 'Color Converter', slug: 'features/color-converter' },
             { label: 'Currency Converter', slug: 'features/currency-converter' },
+            { label: 'Developer Tools', slug: 'features/developer-tools' },
             { label: 'File Browser', slug: 'features/file-browser' },
             { label: 'Script Filters', slug: 'features/script-filters' },
             { label: 'System Commands', slug: 'features/system-commands' },

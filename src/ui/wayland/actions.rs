@@ -554,7 +554,6 @@ pub(super) fn run_bounded(
 /// whole run, and the child is killed and reaped on any failure. Errors name
 /// the program but never include its output or input, since a child can
 /// echo its input back.
-#[allow(dead_code)]
 pub(super) fn run_bounded_with_input(
     argv: &[&str],
     input: &[u8],

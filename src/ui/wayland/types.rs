@@ -18,6 +18,8 @@ pub(crate) enum InlineProvider {
     Currency,
     Units,
     Color,
+    Uuid,
+    Password,
 }
 
 /// One row shown above the launchers; Enter copies `copy_value`, Ctrl+Enter
@@ -235,6 +237,9 @@ pub(crate) enum Message {
     EmojiSelected(usize),
     EmojiDataLoaded(Vec<EmojiEntry>),
     SystemSelected(usize),
+    DevtoolsSelected(usize),
+    /// Hash rows computed for the `dev` query with this generation.
+    DevtoolsHashes(u64, Vec<super::devtools::DevRow>),
     FallbackSelected(usize),
     KeywordSuggestionSelected(usize),
     /// A page of clipboard history for the scan with this generation.

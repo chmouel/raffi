@@ -1596,10 +1596,12 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "emoji",
             "gh",
             "sys",
+            "dev",
             "math",
             "$",
             "units",
             "color",
+            "uuid/pw",
             "↑/↓",
             "Ctrl+J",
             "Ctrl+K",
@@ -1629,7 +1631,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
     assert_eq!(entries[1].icon.as_deref(), Some("gist-icon"));
     assert_eq!(entries[1].completion.as_deref(), Some("gist "));
     assert_eq!(entries[0].completion.as_deref(), Some("~/"));
-    assert_eq!(entries[6].completion, None);
+    assert_eq!(entries[7].completion, None);
     // Shortcut rows are informational: they never arm a keyword.
     for entry in entries
         .iter()
@@ -1649,6 +1651,7 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
     addons.system.enabled = false;
     addons.units.enabled = false;
     addons.color.enabled = false;
+    addons.devtools.enabled = false;
     let entries = help_entries(&addons);
 
     // With every addon disabled only the general shortcut rows remain.
@@ -1698,6 +1701,7 @@ fn test_help_entries_skip_disabled_addons() {
     addons.system.enabled = false;
     addons.units.enabled = false;
     addons.color.enabled = false;
+    addons.devtools.enabled = false;
 
     // Disabled addons drop their keyword rows and addon-specific shortcuts.
     let entries = help_entries(&addons);
@@ -3663,4 +3667,290 @@ fn test_system_logout_without_session_is_not_actionable() {
         .find(|entry| entry.id == crate::SystemCommand::Logout)
         .unwrap();
     assert!(logout.missing.is_none());
+}
+
+fn launcher_names(app: &LauncherApp) -> Vec<String> {
+    app.filtered_configs
+        .iter()
+        .map(|&index| app.configs[index].description.clone().unwrap_or_default())
+        .collect()
+}
+
+fn devtools_app() -> LauncherApp {
+    let configs = vec![
+        RaffiConfig {
+            binary: Some("pwvucontrol".into()),
+            description: Some("pwvucontrol".into()),
+            ..Default::default()
+        },
+        RaffiConfig {
+            binary: Some("firefox".into()),
+            description: Some("Firefox".into()),
+            ..Default::default()
+        },
+    ];
+    let (mut app, _) = LauncherApp::new(
+        configs,
+        AddonsConfig::default(),
+        true,
+        Arc::new(Mutex::new(None)),
+        None,
+        ThemeColors::from_mode_with_overrides(&crate::ThemeMode::Dark, None),
+        10,
+        FontSizes::default_sizes(),
+        SortMode::Hybrid,
+        Vec::new(),
+    );
+    app.mru_map.clear();
+    app.text_snippets.mru_map.clear();
+    app.text_snippets.mru_path = None;
+    app.program_exists = |_| true;
+    app.history.max_items = 10;
+    app.history.items = vec!["older".into()];
+    app
+}
+
+#[test]
+fn test_generator_queries_classify_as_sensitive() {
+    let addons = AddonsConfig::default();
+    for (query, provider) in [
+        ("uuid", Some(InlineProvider::Uuid)),
+        ("pw", Some(InlineProvider::Password)),
+        ("pw 32", Some(InlineProvider::Password)),
+        ("uuidgen", None),
+        ("pwvu", None),
+        ("pw x", None),
+    ] {
+        let class = classify_query(query, &addons);
+        assert_eq!(class.inline_provider, provider, "{query}");
+        assert_eq!(class.sensitive, provider.is_some(), "{query}");
+    }
+    assert_eq!(loggable_query("pw 20", &addons), "<redacted>");
+    assert_eq!(loggable_query("uuid", &addons), "<redacted>");
+    // Math still wins over the generators.
+    assert_eq!(
+        classify_query("2*3", &addons).inline_provider,
+        Some(InlineProvider::Calculator)
+    );
+
+    let mut disabled = addons;
+    disabled.devtools.enabled = false;
+    assert_eq!(classify_query("pw", &disabled).inline_provider, None);
+    assert!(!classify_query("pw", &disabled).sensitive);
+}
+
+#[test]
+fn test_password_row_keeps_launchers_and_stays_out_of_history() {
+    let mut app = devtools_app();
+    let _ = app.update(Message::SearchChanged("pw".into()));
+    let inline = app.inline_result.as_ref().expect("password row");
+    assert_eq!(inline.provider, InlineProvider::Password);
+    let password = inline.rows[0].copy_value.clone();
+    assert_eq!(password.chars().count(), 20);
+    assert!(password.chars().all(super::devtools::is_password_char));
+    assert_eq!(inline.rows[0].title, password);
+    // Launchers starting with "pw" are still listed below the row.
+    assert_eq!(launcher_names(&app), ["pwvucontrol"]);
+    assert_eq!(app.total_items(), 2);
+
+    // The value is generated once per query change, not per lookup.
+    assert!(app.resolve_selected_preview().is_some());
+    assert_eq!(app.inline_copy_value(0).as_deref(), Some(password.as_str()));
+
+    let _ = app.update(Message::SearchChanged("pw 32".into()));
+    let longer = &app.inline_result.as_ref().unwrap().rows[0].copy_value;
+    assert_eq!(longer.chars().count(), 32);
+    assert_ne!(longer, &password);
+
+    // Launching the app under the generator row saves nothing either.
+    let _ = app.update(Message::SearchChanged("pw".into()));
+    let _ = app.update(Message::MoveDown);
+    let _ = app.update(Message::Submit);
+    assert_eq!(
+        app.selected_item.lock().unwrap().as_deref(),
+        Some("pwvucontrol")
+    );
+    assert_eq!(app.history.items, ["older"]);
+}
+
+#[test]
+fn test_uuid_row_copies_through_checked_copy() {
+    let mut app = devtools_app();
+    app.copier = failing_copier();
+    let _ = app.update(Message::SearchChanged("uuid".into()));
+    let uuid = app.inline_result.as_ref().unwrap().rows[0]
+        .copy_value
+        .clone();
+    assert!(super::devtools::is_uuid_v4(&uuid), "{uuid}");
+
+    let _ = app.update(Message::Submit);
+    assert!(app.in_flight.is_pending("inline-copy", ""));
+    let result = app.copy_job(uuid)();
+    let task = app.update(Message::InlineCopied(app.inline_generation, result));
+    assert_eq!(task.units(), 0, "a failed copy keeps Raffi open");
+    assert!(app.inline_copy_error.is_some());
+
+    let task = app.update(Message::InlineCopied(app.inline_generation, Ok(())));
+    assert!(task.units() > 0);
+    assert_eq!(app.history.items, ["older"]);
+}
+
+fn fake_hash_command(script: &str) -> Option<Vec<String>> {
+    Some(vec!["sh".into(), "-c".into(), script.into()])
+}
+
+#[test]
+fn test_devtools_route_keeps_raw_payload_and_is_sensitive() {
+    let mut addons = AddonsConfig::default();
+    assert_eq!(
+        route_query("dev  a b ", &addons),
+        QueryMode::Devtools {
+            payload: " a b ".into()
+        }
+    );
+    assert_eq!(
+        route_query("  dev x", &addons),
+        QueryMode::Devtools {
+            payload: "x".into()
+        }
+    );
+    assert_eq!(route_query("dev", &addons), QueryMode::Standard);
+    assert_eq!(route_query("devhelp", &addons), QueryMode::Standard);
+
+    let class = classify_query("dev my secret", &addons);
+    assert!(class.sensitive);
+    assert_eq!(class.inline_provider, None);
+    assert_eq!(class.loggable_query("dev my secret", &addons), "<redacted>");
+    assert!(!format!("{class:?}").contains("secret"));
+    assert!(keyword_suggestions("dev", &addons)
+        .iter()
+        .any(|suggestion| suggestion.keyword == "dev"));
+
+    // A user web search with the same keyword wins.
+    addons.web_searches.push(WebSearchConfig {
+        name: "Dev docs".into(),
+        keyword: "dev".into(),
+        url: "https://devdocs.io/#q={query}".into(),
+        icon: None,
+    });
+    assert!(matches!(
+        route_query("dev x", &addons),
+        QueryMode::WebSearch { .. }
+    ));
+    addons.web_searches.clear();
+    addons.devtools.trigger = Some("tx".into());
+    assert_eq!(
+        route_query("tx  ", &addons),
+        QueryMode::Devtools {
+            payload: " ".into()
+        }
+    );
+}
+
+#[test]
+fn test_devtools_rows_hash_asynchronously_and_drop_stale_results() {
+    let mut app = devtools_app();
+    app.devtools.hash_command = fake_hash_command("cat >/dev/null; echo 'ABCDEF01  -'");
+    let _ = app.update(Message::SearchChanged("dev hi".into()));
+    assert!(app.devtools.active);
+    assert!(app.filtered_configs.is_empty());
+    assert!(app.inline_result.is_none());
+    let titles: Vec<&str> = app.devtools.rows.iter().map(|row| row.title).collect();
+    assert_eq!(
+        titles,
+        ["Base64 encode", "Uppercase", "SHA-256", "SHA-1", "MD5"]
+    );
+    assert_eq!(app.devtools.rows[0].value, "aGk=");
+    assert_eq!(app.total_items(), app.devtools.rows.len());
+    assert!(app.resolve_selected_preview().is_some());
+
+    // Pending hash rows can't be activated.
+    let sha_index = 2;
+    assert_eq!(
+        app.devtools.rows[sha_index].value,
+        super::devtools::HASH_PENDING
+    );
+    app.selected_index = sha_index;
+    let _ = app.update(Message::Submit);
+    assert!(!app.in_flight.is_pending("inline-copy", ""));
+
+    let jobs: Vec<_> = app
+        .devtools_hash_jobs()
+        .into_iter()
+        .map(|(title, argv)| (title, argv.unwrap()))
+        .collect();
+    let hashed = super::devtools::compute_hash_rows(&jobs, "hi");
+    let stale = app.devtools.current_generation().wrapping_sub(1);
+    let _ = app.update(Message::DevtoolsHashes(stale, hashed.clone()));
+    assert_eq!(
+        app.devtools.rows[sha_index].value,
+        super::devtools::HASH_PENDING
+    );
+
+    let started = app.devtools.current_generation();
+    let _ = app.update(Message::DevtoolsHashes(started, hashed.clone()));
+    assert_eq!(app.devtools.rows[sha_index].value, "abcdef01");
+    assert!(app.devtools.rows[sha_index].copyable);
+
+    // Results computed for an older query are dropped.
+    let _ = app.update(Message::SearchChanged("dev hj".into()));
+    let _ = app.update(Message::DevtoolsHashes(started, hashed));
+    assert!(app.devtools.rows[sha_index..]
+        .iter()
+        .all(|row| row.value == super::devtools::HASH_PENDING));
+
+    // Enter copies the selected result; the query never reaches history.
+    let _ = app.update(Message::Submit);
+    assert!(app.in_flight.is_pending("inline-copy", ""));
+    let task = app.update(Message::InlineCopied(app.inline_generation, Ok(())));
+    assert!(task.units() > 0);
+    assert_eq!(app.history.items, ["older"]);
+
+    // Leaving the mode clears its rows.
+    let _ = app.update(Message::SearchChanged("fire".into()));
+    assert!(!app.devtools.active);
+    assert!(app.devtools.rows.is_empty());
+    assert_eq!(launcher_names(&app), ["Firefox"]);
+}
+
+#[test]
+fn test_devtools_hash_errors_are_rows_without_the_input() {
+    let mut app = devtools_app();
+    app.program_exists = |program| program != "md5sum";
+    app.devtools.hash_command = fake_hash_command("cat >&2; exit 2");
+    let _ = app.update(Message::SearchChanged("dev topsecret".into()));
+    let md5 = app.devtools.rows.last().unwrap();
+    assert_eq!((md5.title, md5.value.as_str()), ("MD5", "md5sum not found"));
+    assert!(!md5.copyable);
+
+    let jobs: Vec<_> = app
+        .devtools_hash_jobs()
+        .into_iter()
+        .filter_map(|(title, argv)| argv.ok().map(|argv| (title, argv)))
+        .collect();
+    assert_eq!(jobs.len(), 2);
+    let rows = super::devtools::compute_hash_rows(&jobs, "topsecret");
+    let _ = app.update(Message::DevtoolsHashes(
+        app.devtools.current_generation(),
+        rows,
+    ));
+    let sha = app
+        .devtools
+        .rows
+        .iter()
+        .find(|row| row.title == "SHA-256")
+        .unwrap();
+    assert_eq!(sha.value, "Hash failed: sh failed (exit 2)");
+    assert!(!sha.copyable);
+    assert!(app
+        .devtools
+        .rows
+        .iter()
+        .filter(|row| !row.copyable)
+        .all(|row| !row.value.contains("topsecret")));
+
+    let index = app.devtools.rows.len() - 1;
+    app.selected_index = index;
+    let _ = app.update(Message::Submit);
+    assert!(!app.in_flight.is_pending("inline-copy", ""));
 }

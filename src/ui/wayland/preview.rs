@@ -7,6 +7,7 @@ use chrono::{DateTime, Local};
 
 use super::browser::read_directory;
 use super::clipboard::{ClipItem, ItemKind};
+use super::devtools::DevRow;
 use super::help::HelpEntry;
 use super::snippets::SnippetIcon;
 use super::state::{
@@ -458,6 +459,10 @@ impl LauncherApp {
             current_index += self.system.filtered.len();
         }
 
+        if self.devtools.active {
+            current_index += self.devtools.rows.len();
+        }
+
         if self.file_browser.active {
             let count = self.file_browser.entries.len();
             if self.selected_index >= current_index && self.selected_index < current_index + count {
@@ -599,6 +604,15 @@ impl LauncherApp {
             if index >= current_index && index < current_index + count {
                 let entry = &self.system.entries[self.system.filtered[index - current_index]];
                 return Some(self.build_system_preview(entry));
+            }
+            current_index += count;
+        }
+
+        // 4d. Developer tools
+        if self.devtools.active {
+            let count = self.devtools.rows.len();
+            if index >= current_index && index < current_index + count {
+                return Some(devtools_preview(&self.devtools.rows[index - current_index]));
             }
             current_index += count;
         }
@@ -1597,6 +1611,19 @@ fn describe_addon_by_keyword(
         );
     }
 
+    if addons.devtools.enabled && keyword == addons.devtools.trigger() {
+        return (
+            "Developer Tools".to_string(),
+            vec![
+                (
+                    "Transforms".to_string(),
+                    "Base64, URL encoding, hashes, epoch, JSON, case".to_string(),
+                ),
+                ("Enter".to_string(), "Copy the result".to_string()),
+            ],
+        );
+    }
+
     if keyword == "math" && addons.calculator.enabled {
         return (
             "Calculator".to_string(),
@@ -1655,4 +1682,27 @@ fn describe_addon_by_keyword(
     }
 
     ("Addon".to_string(), Vec::new())
+}
+
+fn devtools_preview(row: &DevRow) -> PreviewData {
+    let (bodies, enter) = if row.copyable {
+        (
+            vec![PreviewBody::Text {
+                heading: None,
+                content: row.value.clone(),
+                truncated: false,
+            }],
+            "Copy to clipboard",
+        )
+    } else {
+        (Vec::new(), "Nothing to copy")
+    };
+    PreviewData {
+        title: row.title.to_string(),
+        subtitle: (!row.copyable).then(|| row.value.clone()),
+        badge: Some("Developer Tools".to_string()),
+        icon: None,
+        bodies,
+        metadata: vec![("Enter".to_string(), enter.to_string())],
+    }
 }

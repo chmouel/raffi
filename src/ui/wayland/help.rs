@@ -125,6 +125,18 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         });
     }
 
+    if addons.devtools.enabled {
+        let trigger = addons.devtools.trigger();
+        entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
+            trigger: trigger.to_string(),
+            title: "Developer tools".to_string(),
+            usage: format!("{trigger} <text> to encode, decode, hash or reformat it"),
+            icon: Some(super::app::DEVTOOLS_ICON.to_string()),
+            completion: Some(format!("{trigger} ")),
+        });
+    }
+
     if addons.calculator.enabled {
         entries.push(HelpEntry {
             section: HelpSection::KeywordsAndActions,
@@ -165,6 +177,17 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             trigger: "color".to_string(),
             title: "Color converter".to_string(),
             usage: "#ff8800, rgb(255 136 0) or hsl(32 100% 50%)".to_string(),
+            icon: None,
+            completion: None,
+        });
+    }
+
+    if addons.devtools.enabled {
+        entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
+            trigger: "uuid/pw".to_string(),
+            title: "UUID and password generator".to_string(),
+            usage: "uuid, pw or pw 32".to_string(),
             icon: None,
             completion: None,
         });

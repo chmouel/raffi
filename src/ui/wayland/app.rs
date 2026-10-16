@@ -18,6 +18,10 @@ use super::currency::{
     fetch_exchange_rate, fetch_multi_exchange_rates, is_currency_help_query,
     try_parse_currency_conversion, try_parse_multi_currency_conversion,
 };
+use super::devtools::{
+    compute_hash_rows, generator_inline_result, transform_rows, try_parse_generator, DevRow,
+    Generator, HASHES, HASH_DEBOUNCE, HASH_PENDING,
+};
 use super::emoji::{
     download_and_load_emoji_data, emoji_fallback_entries, filter_emoji_into,
     load_emoji_data_from_disk, resolve_emoji_file_names,
@@ -30,8 +34,8 @@ use super::snippets::{
 };
 use super::state::{
     CachedRate, ClipboardData, ClipboardState, CurrencyConversion, CurrencyConversionRequest,
-    CurrencyResult, CurrencyState, EmojiEntry, EmojiState, FallbackAction, FileBrowserState,
-    HistoryState, KeywordSuggestion, LauncherApp, Message, MultiCurrencyRequest,
+    CurrencyResult, CurrencyState, DevtoolsState, EmojiEntry, EmojiState, FallbackAction,
+    FileBrowserState, HistoryState, KeywordSuggestion, LauncherApp, Message, MultiCurrencyRequest,
     MultiCurrencyResult, PendingSelection, ResolvedFallback, ScriptFilterResult, ScriptFilterState,
     SharedSelection, SystemState, TextSnippetState, ViewState, WebSearchActiveState,
     WebSearchState,
@@ -58,6 +62,7 @@ pub(super) enum QueryMode {
     Clipboard { query: String, images_only: bool },
     WebSearch { config_index: usize, query: String },
     System { query: String },
+    Devtools { payload: String },
     Standard,
 }
 
@@ -100,6 +105,7 @@ impl std::fmt::Debug for QueryMode {
                 .field("query", query)
                 .finish(),
             Self::System { .. } => f.debug_struct("System").finish_non_exhaustive(),
+            Self::Devtools { .. } => f.debug_struct("Devtools").finish_non_exhaustive(),
             Self::Standard => f.write_str("Standard"),
         }
     }
@@ -146,12 +152,19 @@ impl QueryClass {
 pub(super) fn classify_query(query: &str, addons: &AddonsConfig) -> QueryClass {
     let mode = route_query(query, addons);
     let inline_provider = match mode {
-        QueryMode::FileBrowser { .. } | QueryMode::Clipboard { .. } | QueryMode::System { .. } => {
-            None
-        }
+        QueryMode::FileBrowser { .. }
+        | QueryMode::Clipboard { .. }
+        | QueryMode::System { .. }
+        | QueryMode::Devtools { .. } => None,
         _ => inline_provider(query, addons),
     };
-    let sensitive = matches!(mode, QueryMode::Clipboard { .. } | QueryMode::System { .. });
+    let sensitive = matches!(
+        mode,
+        QueryMode::Clipboard { .. } | QueryMode::System { .. } | QueryMode::Devtools { .. }
+    ) || matches!(
+        inline_provider,
+        Some(InlineProvider::Uuid | InlineProvider::Password)
+    );
     QueryClass {
         mode,
         inline_provider,
@@ -182,6 +195,13 @@ fn inline_provider(query: &str, addons: &AddonsConfig) -> Option<InlineProvider>
     if addons.color.enabled && try_parse_color(query).is_some() {
         return Some(InlineProvider::Color);
     }
+    if addons.devtools.enabled {
+        match try_parse_generator(query, addons.devtools.password_length()) {
+            Some(Generator::Uuid) => return Some(InlineProvider::Uuid),
+            Some(Generator::Password(_)) => return Some(InlineProvider::Password),
+            None => {}
+        }
+    }
     None
 }
 
@@ -201,6 +221,15 @@ fn extract_keyword_query(input: &str, keyword: &str) -> Option<String> {
         .strip_prefix(keyword)
         .and_then(|rest| rest.strip_prefix(' '))
         .map(|rest| rest.trim().to_string())
+}
+
+/// Like `extract_keyword_query` but keeps the rest exactly as typed, since
+/// whitespace changes hashes and encodings.
+fn extract_raw_keyword_payload(input: &str, keyword: &str) -> Option<String> {
+    input
+        .strip_prefix(keyword)
+        .and_then(|rest| rest.strip_prefix(' '))
+        .map(str::to_string)
 }
 
 /// Strip leading whitespace only, preserving a trailing space so keyword
@@ -247,6 +276,7 @@ pub(super) fn fido_updir(old: &str, new: &str, home: &str) -> Option<(String, St
 pub(super) const CLIPBOARD_ICON: &str = "copyq";
 pub(super) const CLIPBOARD_IMAGES_ICON: &str = "image-x-generic";
 pub(super) const SYSTEM_ICON: &str = "system-shutdown";
+pub(super) const DEVTOOLS_ICON: &str = "utilities-terminal";
 
 /// The query as it may appear in debug logs: sensitive searches such as the
 /// clipboard can contain copied secrets, so only their trigger is kept.
@@ -345,6 +375,12 @@ pub(super) fn route_query(query: &str, addons: &AddonsConfig) -> QueryMode {
         }
     }
 
+    if addons.devtools.enabled {
+        if let Some(payload) = extract_raw_keyword_payload(input, addons.devtools.trigger()) {
+            return QueryMode::Devtools { payload };
+        }
+    }
+
     QueryMode::Standard
 }
 
@@ -433,6 +469,14 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
             keyword: addons.system.trigger().to_string(),
             subtitle: "Lock, suspend, log out, reboot or shut down".to_string(),
             icon: Some(SYSTEM_ICON.to_string()),
+        });
+    }
+
+    if addons.devtools.enabled && matches(addons.devtools.trigger()) {
+        suggestions.push(KeywordSuggestion {
+            keyword: addons.devtools.trigger().to_string(),
+            subtitle: "Encode, decode, hash or reformat text".to_string(),
+            icon: Some(DEVTOOLS_ICON.to_string()),
         });
     }
 
@@ -573,6 +617,7 @@ impl LauncherApp {
                 },
                 emoji: EmojiState::default(),
                 system: SystemState::default(),
+                devtools: DevtoolsState::default(),
                 clipboard: ClipboardState::default(),
                 fallbacks,
                 keyword_suggestions: Vec::new(),
@@ -714,6 +759,10 @@ impl LauncherApp {
             Message::EmojiDataLoaded(data) => self.handle_emoji_data_loaded(data),
             Message::EmojiSelected(index) => self.handle_emoji_selected(index),
             Message::SystemSelected(index) => self.handle_system_selected(index),
+            Message::DevtoolsSelected(index) => self.handle_devtools_selected(index),
+            Message::DevtoolsHashes(generation, rows) => {
+                self.handle_devtools_hashes(generation, rows)
+            }
             Message::FallbackSelected(index) => self.handle_fallback_selected(index),
             Message::KeywordSuggestionSelected(index) => {
                 self.handle_keyword_suggestion_selected(index)
@@ -781,6 +830,10 @@ impl LauncherApp {
             Some(InlineProvider::Color) => {
                 try_parse_color(&query).map(|color| color_inline_result(&color))
             }
+            Some(InlineProvider::Uuid | InlineProvider::Password) => {
+                try_parse_generator(&query, self.addons.devtools.password_length())
+                    .and_then(generator_inline_result)
+            }
             _ => None,
         };
         self.selected_index = 0;
@@ -803,6 +856,7 @@ impl LauncherApp {
         }
         // Rebuilt for every system query too, which also disarms it.
         self.system.clear();
+        self.devtools.clear();
         self.keyword_suggestions = if matches!(qmode, QueryMode::Standard) {
             keyword_suggestions(&query, &self.addons)
         } else {
@@ -890,6 +944,21 @@ impl LauncherApp {
                     drag.disarm();
                 }
                 self.handle_system_query(&query);
+                return Task::batch(tasks);
+            }
+            QueryMode::Devtools { payload } => {
+                self.file_browser.clear();
+                self.script_filter.clear();
+                self.text_snippets.clear();
+                self.emoji.clear();
+                self.web_search.clear();
+                self.currency.clear();
+                self.filtered_configs.clear();
+                self.inline_result = None;
+                if let Some(drag) = &self.drag {
+                    drag.disarm();
+                }
+                tasks.push(self.handle_devtools_query(payload));
                 return Task::batch(tasks);
             }
             QueryMode::WebSearch {
@@ -1470,6 +1539,14 @@ impl LauncherApp {
             let item_count = self.system.filtered.len();
             if index >= current_index && index < current_index + item_count {
                 return self.update(Message::SystemSelected(index - current_index));
+            }
+            current_index += item_count;
+        }
+
+        if self.devtools.active {
+            let item_count = self.devtools.rows.len();
+            if index >= current_index && index < current_index + item_count {
+                return self.update(Message::DevtoolsSelected(index - current_index));
             }
             current_index += item_count;
         }
@@ -2237,6 +2314,93 @@ impl LauncherApp {
         iced::exit()
     }
 
+    /// Builds the transform rows at once; hashes follow after a short
+    /// debounce, off the UI thread.
+    fn handle_devtools_query(&mut self, payload: String) -> Task<Message> {
+        self.devtools.active = true;
+        self.devtools.rows = transform_rows(&payload);
+        if payload.is_empty() {
+            return Task::none();
+        }
+        let jobs = self.devtools_hash_jobs();
+        for (title, argv) in &jobs {
+            self.devtools.rows.push(match argv {
+                Ok(_) => DevRow::status(title, HASH_PENDING),
+                Err(missing) => DevRow::status(title, missing.as_str()),
+            });
+        }
+        let jobs: Vec<_> = jobs
+            .into_iter()
+            .filter_map(|(title, argv)| argv.ok().map(|argv| (title, argv)))
+            .collect();
+        if jobs.is_empty() {
+            return Task::none();
+        }
+        let generation = self.devtools.current_generation();
+        let current = self.devtools.hash_generation.clone();
+        Task::perform(
+            async move {
+                let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                std::thread::spawn(move || {
+                    std::thread::sleep(HASH_DEBOUNCE);
+                    let rows = if current.load(std::sync::atomic::Ordering::SeqCst) == generation {
+                        compute_hash_rows(&jobs, &payload)
+                    } else {
+                        Vec::new()
+                    };
+                    let _ = sender.send(rows);
+                });
+                receiver.await.unwrap_or_default()
+            },
+            move |rows| Message::DevtoolsHashes(generation, rows),
+        )
+    }
+
+    /// Each hash row with the command computing it, or the status shown
+    /// when its tool is not installed.
+    pub(super) fn devtools_hash_jobs(&self) -> Vec<(&'static str, Result<Vec<String>, String>)> {
+        HASHES
+            .iter()
+            .map(|&(title, program)| {
+                if !(self.program_exists)(program) {
+                    return (title, Err(format!("{program} not found")));
+                }
+                #[cfg(test)]
+                if let Some(argv) = &self.devtools.hash_command {
+                    return (title, Ok(argv.clone()));
+                }
+                (title, Ok(vec![program.to_string()]))
+            })
+            .collect()
+    }
+
+    fn handle_devtools_hashes(&mut self, generation: u64, rows: Vec<DevRow>) -> Task<Message> {
+        if !self.devtools.active || generation != self.devtools.current_generation() {
+            return Task::none();
+        }
+        for row in rows {
+            if let Some(slot) = self
+                .devtools
+                .rows
+                .iter_mut()
+                .find(|slot| slot.title == row.title)
+            {
+                *slot = row;
+            }
+        }
+        Task::none()
+    }
+
+    fn handle_devtools_selected(&mut self, index: usize) -> Task<Message> {
+        let value = self
+            .devtools
+            .rows
+            .get(index)
+            .filter(|row| row.copyable)
+            .map(|row| row.value.clone());
+        self.start_checked_copy(value)
+    }
+
     fn script_filter_offset(&self) -> usize {
         if self.script_filter.loading {
             1
@@ -2279,6 +2443,9 @@ impl LauncherApp {
         if self.system.active {
             offset += self.system.filtered.len();
         }
+        if self.devtools.active {
+            offset += self.devtools.rows.len();
+        }
         if self.file_browser.active {
             offset += self.file_browser.entries.len();
         }
@@ -2310,6 +2477,7 @@ impl LauncherApp {
             || self.emoji.active
             || self.clipboard.active
             || self.system.active
+            || self.devtools.active
             || self.file_browser.active
             || self.web_search.active.is_some()
     }
@@ -2449,6 +2617,7 @@ impl LauncherApp {
         self.emoji.clear();
         self.clipboard.clear();
         self.system.clear();
+        self.devtools.clear();
         self.web_search.clear();
         self.file_browser.clear();
         // The browser is gone; a drag armed by a row press is stale.

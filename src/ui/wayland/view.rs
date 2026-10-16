@@ -1264,6 +1264,41 @@ impl LauncherApp {
             }
         }
 
+        if self.devtools.active {
+            for row in &self.devtools.rows {
+                let is_selected = self.selected_index == special_item_idx;
+                let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
+                if let Some(icon) = self
+                    .icon_map
+                    .get(super::app::DEVTOOLS_ICON)
+                    .and_then(|path| icon_element(Path::new(path), 40.0))
+                {
+                    item_row = item_row.push(icon);
+                }
+                // Multi-line results such as pretty JSON show their first line.
+                let first_line = row.value.lines().next().unwrap_or_default();
+                let shown = if first_line.len() < row.value.len() {
+                    format!("{first_line} ...")
+                } else {
+                    first_line.to_string()
+                };
+                let subtitle_color = if row.copyable { t.accent } else { t.text_muted };
+                let text_col = Column::new()
+                    .push(text(row.title).size(fs.item).color(t.text_main))
+                    .push(text(shown).size(fs.subtitle).color(subtitle_color));
+                item_row = item_row.push(text_col.width(Length::Fill));
+                let mut item_button = button(item_row)
+                    .padding(fs.item_padding)
+                    .width(Length::Fill)
+                    .style(item_button_style(t, is_selected, t.text_main));
+                if row.copyable {
+                    item_button = item_button.on_press(Message::ItemClicked(special_item_idx));
+                }
+                items_column = items_column.push(item_button);
+                special_item_idx += 1;
+            }
+        }
+
         if self.file_browser.active {
             if let Some(error) = &self.file_browser.error {
                 let error_row = Row::new()
@@ -1618,6 +1653,7 @@ impl LauncherApp {
             && !has_emoji
             && !has_clipboard
             && self.system.filtered.is_empty()
+            && self.devtools.rows.is_empty()
             && !has_file_browser
             && !has_web_search
             && !has_fallbacks
