@@ -13,6 +13,7 @@ use super::state::{
     CurrencyConversion, CurrencyResult, EmojiEntry, FallbackAction, FileBrowserEntry,
     KeywordSuggestion, LauncherApp, MultiCurrencyResult, ResolvedFallback, WebSearchActiveState,
 };
+use super::system::SystemEntry;
 use super::types::{CalculatorResult, ScriptFilterItem, ScriptFilterResult};
 use crate::{AddonsConfig, ClipboardAction, RaffiConfig, TextSnippet};
 
@@ -453,6 +454,10 @@ impl LauncherApp {
 
         current_index += self.clipboard.row_count();
 
+        if self.system.active {
+            current_index += self.system.filtered.len();
+        }
+
         if self.file_browser.active {
             let count = self.file_browser.entries.len();
             if self.selected_index >= current_index && self.selected_index < current_index + count {
@@ -584,6 +589,16 @@ impl LauncherApp {
                         metadata: Vec::new(),
                     },
                 });
+            }
+            current_index += count;
+        }
+
+        // 4c. System commands
+        if self.system.active {
+            let count = self.system.filtered.len();
+            if index >= current_index && index < current_index + count {
+                let entry = &self.system.entries[self.system.filtered[index - current_index]];
+                return Some(self.build_system_preview(entry));
             }
             current_index += count;
         }
@@ -1030,6 +1045,29 @@ impl LauncherApp {
             icon,
             bodies,
             metadata,
+        }
+    }
+
+    fn build_system_preview(&self, entry: &SystemEntry) -> PreviewData {
+        let enter = if entry.needs_confirmation() {
+            format!("Press twice to {}", entry.verb)
+        } else {
+            format!("{} the session", entry.title)
+        };
+        PreviewData {
+            title: entry.title.to_string(),
+            subtitle: None,
+            badge: Some("System".to_string()),
+            icon: self
+                .icon_map
+                .get(entry.icon)
+                .cloned()
+                .map(PreviewIcon::File),
+            bodies: Vec::new(),
+            metadata: vec![
+                ("Command".to_string(), entry.command_line()),
+                ("Enter".to_string(), enter),
+            ],
         }
     }
 
@@ -1546,6 +1584,16 @@ fn describe_addon_by_keyword(
         return (
             "Web Search".to_string(),
             vec![("URL Template".to_string(), ws.url.clone())],
+        );
+    }
+
+    if addons.system.enabled && keyword == addons.system.trigger() {
+        return (
+            "System Commands".to_string(),
+            vec![(
+                "Enter".to_string(),
+                "Run; every entry but Lock asks for a second Enter".to_string(),
+            )],
         );
     }
 

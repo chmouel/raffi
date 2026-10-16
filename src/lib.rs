@@ -371,6 +371,90 @@ impl Default for ClipboardAddonConfig {
     }
 }
 
+/// A built-in entry of the system commands addon
+#[derive(Deserialize, JsonSchema, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemCommand {
+    Lock,
+    Suspend,
+    Hibernate,
+    Logout,
+    Reboot,
+    Shutdown,
+}
+
+/// Commands replacing the built-in ones of the system commands addon, as
+/// argument lists run without a shell. An empty list hides the entry.
+#[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
+#[schemars(deny_unknown_fields)]
+pub struct SystemCommandsConfig {
+    /// Default: `loginctl lock-session`.
+    #[serde(default)]
+    pub lock: Option<Vec<String>>,
+    /// Default: `systemctl suspend`.
+    #[serde(default)]
+    pub suspend: Option<Vec<String>>,
+    /// Default: `systemctl hibernate`.
+    #[serde(default)]
+    pub hibernate: Option<Vec<String>>,
+    /// Default: `hyprctl dispatch exit` on Hyprland, otherwise
+    /// `loginctl terminate-session $XDG_SESSION_ID`.
+    #[serde(default)]
+    pub logout: Option<Vec<String>>,
+    /// Default: `systemctl reboot`.
+    #[serde(default)]
+    pub reboot: Option<Vec<String>>,
+    /// Default: `systemctl poweroff`.
+    #[serde(default)]
+    pub shutdown: Option<Vec<String>>,
+}
+
+impl SystemCommandsConfig {
+    pub fn get(&self, command: SystemCommand) -> Option<&Vec<String>> {
+        match command {
+            SystemCommand::Lock => self.lock.as_ref(),
+            SystemCommand::Suspend => self.suspend.as_ref(),
+            SystemCommand::Hibernate => self.hibernate.as_ref(),
+            SystemCommand::Logout => self.logout.as_ref(),
+            SystemCommand::Reboot => self.reboot.as_ref(),
+            SystemCommand::Shutdown => self.shutdown.as_ref(),
+        }
+    }
+}
+
+/// Configuration for the system commands addon (native UI only)
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
+pub struct SystemAddonConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Keyword that opens the list (default: `sys`).
+    #[serde(default)]
+    pub trigger: Option<String>,
+    #[serde(default)]
+    pub commands: SystemCommandsConfig,
+    /// Entries left out of the list.
+    #[serde(default)]
+    pub hide: Vec<SystemCommand>,
+}
+
+impl SystemAddonConfig {
+    pub fn trigger(&self) -> &str {
+        self.trigger.as_deref().unwrap_or("sys")
+    }
+}
+
+impl Default for SystemAddonConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            trigger: None,
+            commands: SystemCommandsConfig::default(),
+            hide: Vec::new(),
+        }
+    }
+}
+
 /// Container for all addon configurations
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
@@ -385,6 +469,8 @@ pub struct AddonsConfig {
     pub emoji: EmojiAddonConfig,
     #[serde(default)]
     pub clipboard: ClipboardAddonConfig,
+    #[serde(default)]
+    pub system: SystemAddonConfig,
     #[serde(default)]
     pub script_filters: Vec<ScriptFilterConfig>,
     #[serde(default)]
@@ -1296,7 +1382,7 @@ fn is_valid_config(
 }
 
 /// Check if a binary exists in the PATH.
-fn find_binary(binary: &str) -> bool {
+pub(crate) fn find_binary(binary: &str) -> bool {
     if binary.contains('/') {
         return Path::new(binary).exists();
     }
@@ -3508,6 +3594,28 @@ shell:
 
         assert!(parse("addons:\n  clipboard:\n    action: insert\n").is_err());
         assert!(parse("addons:\n  clipboard:\n    backend: cliphist\n").is_err());
+    }
+
+    #[test]
+    fn test_system_addon_config_parsing() {
+        let defaults = AddonsConfig::default().system;
+        assert!(defaults.enabled);
+        assert_eq!(defaults.trigger(), "sys");
+
+        let config: SystemAddonConfig = serde_yaml::from_str(
+            "trigger: power\ncommands:\n  lock: [hyprlock]\nhide: [hibernate, logout]\n",
+        )
+        .unwrap();
+        assert_eq!(config.trigger(), "power");
+        assert_eq!(
+            config.commands.get(SystemCommand::Lock),
+            Some(&vec!["hyprlock".to_string()])
+        );
+        assert_eq!(config.commands.get(SystemCommand::Reboot), None);
+        assert_eq!(
+            config.hide,
+            vec![SystemCommand::Hibernate, SystemCommand::Logout]
+        );
     }
 
     #[test]

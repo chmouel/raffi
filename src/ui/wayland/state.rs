@@ -368,6 +368,26 @@ impl EmojiState {
     }
 }
 
+#[derive(Default)]
+pub(super) struct SystemState {
+    pub active: bool,
+    pub entries: Vec<super::system::SystemEntry>,
+    pub filtered: Vec<usize>,
+    pub matcher: SkimMatcherV2,
+    /// Entry and modifiers armed by a first Enter; a second Enter with the
+    /// same pair runs it.
+    pub armed: Option<(crate::SystemCommand, iced::keyboard::Modifiers)>,
+}
+
+impl SystemState {
+    pub fn clear(&mut self) {
+        self.active = false;
+        self.entries.clear();
+        self.filtered.clear();
+        self.armed = None;
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(super) enum FallbackAction {
     WebSearch {
@@ -451,6 +471,8 @@ pub(super) struct LauncherApp {
     /// Clipboard command replacing the real copier in tests.
     #[cfg(test)]
     pub copier: Option<Vec<String>>,
+    /// Reports whether a program is installed; replaced in tests.
+    pub program_exists: fn(&str) -> bool,
     pub web_search: WebSearchState,
     pub file_browser: FileBrowserState,
     /// Wayland drag-and-drop source worker, if the UI runs on Wayland.
@@ -458,6 +480,7 @@ pub(super) struct LauncherApp {
     pub view: ViewState,
     pub history: HistoryState,
     pub emoji: EmojiState,
+    pub system: SystemState,
     pub clipboard: ClipboardState,
     pub fallbacks: Vec<ResolvedFallback>,
     pub keyword_suggestions: Vec<KeywordSuggestion>,

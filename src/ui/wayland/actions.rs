@@ -187,9 +187,7 @@ fn wait_until(child: &mut Child, deadline: Instant) -> Result<ExitStatus, String
 #[derive(Debug, Clone)]
 pub(super) enum DeferredAction {
     HyprPaste(super::hyprland::Hyprland),
-    #[allow(dead_code)]
     Command(Vec<String>),
-    #[allow(dead_code)]
     HyprDispatch(Vec<String>),
 }
 

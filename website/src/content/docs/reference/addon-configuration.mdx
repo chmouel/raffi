@@ -1,6 +1,6 @@
 ---
 title: Addon Configuration
-description: Configuration reference for built-in addons (currency, calculator, file browser, script filters, web searches, text snippets, clipboard history)
+description: Configuration reference for built-in addons (currency, calculator, file browser, script filters, web searches, text snippets, clipboard history, system commands)
 ---
 
 import { Image } from 'astro:assets';
@@ -12,8 +12,8 @@ The native UI includes several built-in addons that can be configured under the 
 
 ## Keywords
 
-Script filters, web searches, text snippets, the emoji picker, and the clipboard
-history browser are reached by
+Script filters, web searches, text snippets, the emoji picker, the clipboard
+history browser, and system commands are reached by
 typing their keyword followed by a space. Typing `sn` on its own searches your
 launchers as usual, while `sn ` enters the snippet source.
 
@@ -886,6 +886,41 @@ addons:
     trigger: "cb"
     action: hypr_paste
     secondary_action: copy
+```
+
+## System Commands
+
+Lists lock, suspend, hibernate, log out, reboot and shut down. See
+[System Commands](/features/system-commands/) for usage.
+
+### Configuration
+
+**`addons.system.enabled`** `boolean` (default: `true`)
+
+**`addons.system.trigger`** `string` (default: `sys`)
+
+Keyword that opens the list. Type it followed by a space. Web searches with
+the same keyword take precedence.
+
+**`addons.system.commands`** `object`
+
+Replaces built-in commands. Keys are `lock`, `suspend`, `hibernate`, `logout`,
+`reboot` and `shutdown`; values are argument lists run without a shell. An
+empty list hides the entry.
+
+**`addons.system.hide`** `list` (default: `[]`)
+
+Entries to leave out, using the same names as `commands`.
+
+### Example
+
+```yaml
+addons:
+  system:
+    trigger: "power"
+    commands:
+      lock: ["hyprlock"]
+    hide: [hibernate]
 ```
 
 ## Complete Addon Example

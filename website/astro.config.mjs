@@ -40,6 +40,7 @@ export default defineConfig({
             { label: 'Currency Converter', slug: 'features/currency-converter' },
             { label: 'File Browser', slug: 'features/file-browser' },
             { label: 'Script Filters', slug: 'features/script-filters' },
+            { label: 'System Commands', slug: 'features/system-commands' },
             { label: 'Text Snippets', slug: 'features/text-snippets' },
             { label: 'Themes', slug: 'features/themes' },
             { label: 'Web Search', slug: 'features/web-search' },

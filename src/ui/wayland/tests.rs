@@ -1,3 +1,4 @@
+use super::actions::DeferredAction;
 use super::app::{
     classify_query, fido_updir, keyword_suggestions, loggable_query, route_query, QueryMode,
 };
@@ -10,6 +11,7 @@ use super::state::{
     ClipboardData, CurrencyConversionRequest, CurrencyResult, EmojiEntry, FallbackAction,
     KeywordSuggestion, LauncherApp, Message, ScriptFilterResult,
 };
+use super::system::system_entries;
 use super::theme::ThemeColors;
 use super::types::{InlineProvider, ScriptFilterItem, ScriptFilterItemText};
 use crate::ui::FontSizes;
@@ -39,6 +41,7 @@ fn test_app_with_fallbacks(addons: AddonsConfig, fallback_paths: Vec<String>) ->
     // Keep the user's snippet usage cache out of tests, both ways.
     app.text_snippets.mru_map.clear();
     app.text_snippets.mru_path = None;
+    app.program_exists = |_| true;
     app
 }
 
@@ -213,6 +216,7 @@ fn test_route_query_requires_space_after_keyword() {
 fn test_keyword_suggestions_prefix_match() {
     let mut addons = AddonsConfig::default();
     addons.emoji.enabled = false;
+    addons.system.enabled = false;
     addons.text_snippets.push(TextSnippetSourceConfig {
         name: "Snippets".into(),
         keyword: "sn".into(),
@@ -1591,6 +1595,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "sn",
             "emoji",
             "gh",
+            "sys",
             "math",
             "$",
             "↑/↓",
@@ -1622,7 +1627,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
     assert_eq!(entries[1].icon.as_deref(), Some("gist-icon"));
     assert_eq!(entries[1].completion.as_deref(), Some("gist "));
     assert_eq!(entries[0].completion.as_deref(), Some("~/"));
-    assert_eq!(entries[5].completion, None);
+    assert_eq!(entries[6].completion, None);
     // Shortcut rows are informational: they never arm a keyword.
     for entry in entries
         .iter()
@@ -1639,6 +1644,7 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
     addons.calculator.enabled = false;
     addons.currency.enabled = false;
     addons.file_browser.enabled = false;
+    addons.system.enabled = false;
     let entries = help_entries(&addons);
 
     // With every addon disabled only the general shortcut rows remain.
@@ -1685,6 +1691,7 @@ fn test_help_entries_skip_disabled_addons() {
     addons.calculator.enabled = false;
     addons.currency.enabled = false;
     addons.file_browser.enabled = false;
+    addons.system.enabled = false;
 
     // Disabled addons drop their keyword rows and addon-specific shortcuts.
     let entries = help_entries(&addons);
@@ -3164,4 +3171,351 @@ fn test_calculator_owns_inline_area_over_currency() {
 
     let _ = app.update(Message::SearchChanged("-".into()));
     assert!(app.currency.help);
+}
+
+fn open_system(app: &mut LauncherApp, query: &str) {
+    app.history.max_items = 0;
+    let _ = app.update(Message::SearchChanged(query.into()));
+    assert!(app.system.active);
+}
+
+fn deferred_argv(app: &LauncherApp) -> Option<Vec<String>> {
+    match app.deferred_action.lock().unwrap().as_ref()? {
+        DeferredAction::Command(argv) => Some(argv.clone()),
+        other => panic!("unexpected deferred action {other:?}"),
+    }
+}
+
+fn system_titles(app: &LauncherApp) -> Vec<&'static str> {
+    app.system
+        .filtered
+        .iter()
+        .map(|&index| app.system.entries[index].title)
+        .collect()
+}
+
+#[test]
+fn test_route_query_system_trigger() {
+    let mut addons = AddonsConfig::default();
+    assert_eq!(route_query("sys", &addons), QueryMode::Standard);
+    assert_eq!(
+        route_query("sys ", &addons),
+        QueryMode::System {
+            query: String::new()
+        }
+    );
+    assert_eq!(
+        route_query(" sys reb", &addons),
+        QueryMode::System {
+            query: "reb".into()
+        }
+    );
+
+    addons.system.trigger = Some("power".into());
+    assert_eq!(route_query("sys reb", &addons), QueryMode::Standard);
+    assert!(matches!(
+        route_query("power reb", &addons),
+        QueryMode::System { .. }
+    ));
+
+    addons.system.enabled = false;
+    assert_eq!(route_query("power reb", &addons), QueryMode::Standard);
+    assert!(keyword_suggestions("power", &addons).is_empty());
+}
+
+#[test]
+fn test_default_triggers_do_not_shadow_each_other_or_web_searches() {
+    let mut addons = AddonsConfig::default();
+    addons.clipboard.enabled = true;
+    assert!(matches!(
+        route_query("emoji x", &addons),
+        QueryMode::Emoji { .. }
+    ));
+    assert!(matches!(
+        route_query("clip x", &addons),
+        QueryMode::Clipboard {
+            images_only: false,
+            ..
+        }
+    ));
+    assert!(matches!(
+        route_query("clipimg x", &addons),
+        QueryMode::Clipboard {
+            images_only: true,
+            ..
+        }
+    ));
+    assert!(matches!(
+        route_query("sys x", &addons),
+        QueryMode::System { .. }
+    ));
+
+    // A user web search keeps its keyword, and its suggestion comes first.
+    addons.web_searches.push(WebSearchConfig {
+        name: "Sysdig".into(),
+        keyword: "sys".into(),
+        url: "https://example.invalid?q={query}".into(),
+        icon: None,
+    });
+    assert!(matches!(
+        route_query("sys x", &addons),
+        QueryMode::WebSearch { .. }
+    ));
+    let subtitles: Vec<String> = keyword_suggestions("sys", &addons)
+        .into_iter()
+        .map(|suggestion| suggestion.subtitle)
+        .collect();
+    assert_eq!(
+        subtitles,
+        vec![
+            "Search Sysdig",
+            "Lock, suspend, log out, reboot or shut down"
+        ]
+    );
+}
+
+#[test]
+fn test_system_list_filters_entries() {
+    let mut app = test_app(AddonsConfig::default());
+    open_system(&mut app, "sys ");
+    assert_eq!(
+        system_titles(&app),
+        vec![
+            "Lock",
+            "Suspend",
+            "Hibernate",
+            "Log out",
+            "Reboot",
+            "Shut down"
+        ]
+    );
+    assert_eq!(app.total_items(), 6);
+    assert!(app.filtered_configs.is_empty());
+    assert_eq!(app.fallback_count(), 0);
+
+    open_system(&mut app, "sys reb");
+    assert_eq!(system_titles(&app), vec!["Reboot"]);
+    open_system(&mut app, "sys zzz");
+    assert_eq!(app.total_items(), 0);
+
+    let _ = app.update(Message::SearchChanged("firefox".into()));
+    assert!(!app.system.active);
+    assert!(app.system.entries.is_empty());
+}
+
+#[test]
+fn test_system_lock_runs_on_first_enter() {
+    let mut app = test_app(AddonsConfig::default());
+    open_system(&mut app, "sys lock");
+    let task = app.update(Message::Submit);
+    assert!(task.units() > 0, "Raffi closes");
+    assert_eq!(
+        deferred_argv(&app),
+        Some(vec!["loginctl".into(), "lock-session".into()])
+    );
+}
+
+#[test]
+fn test_system_power_actions_need_a_second_enter() {
+    let mut app = test_app(AddonsConfig::default());
+    open_system(&mut app, "sys reboot");
+
+    let task = app.update(Message::Submit);
+    assert_eq!(task.units(), 0);
+    assert!(app.system.armed.is_some());
+    assert!(app.deferred_action.lock().unwrap().is_none());
+
+    let task = app.update(Message::Submit);
+    assert!(task.units() > 0, "Raffi closes");
+    assert_eq!(
+        deferred_argv(&app),
+        Some(vec!["systemctl".into(), "reboot".into()])
+    );
+}
+
+#[test]
+fn test_system_confirmation_resets_on_selection_query_and_modifiers() {
+    let mut app = test_app(AddonsConfig::default());
+    open_system(&mut app, "sys ");
+    app.selected_index = 4;
+
+    let _ = app.update(Message::Submit);
+    let _ = app.update(Message::MoveDown);
+    let _ = app.update(Message::MoveUp);
+    assert!(app.system.armed.is_none());
+    let _ = app.update(Message::Submit);
+    assert!(app.system.armed.is_some());
+
+    let _ = app.update(Message::SearchChanged("sys re".into()));
+    assert!(app.system.armed.is_none());
+    let _ = app.update(Message::Submit);
+
+    let _ = app.update(Message::ModifiersChanged(iced::keyboard::Modifiers::CTRL));
+    assert!(app.system.armed.is_none());
+    let _ = app.update(Message::Submit);
+    let _ = app.update(Message::ModifiersChanged(iced::keyboard::Modifiers::empty()));
+    let _ = app.update(Message::Submit);
+    assert!(app.system.armed.is_some());
+
+    // Clicking another row arms that row instead of running the first.
+    let _ = app.update(Message::SearchChanged("sys ".into()));
+    let _ = app.update(Message::ItemClicked(4));
+    let _ = app.update(Message::ItemClicked(5));
+    assert_eq!(
+        app.system.armed.map(|(id, _)| id),
+        Some(crate::SystemCommand::Shutdown)
+    );
+
+    let _ = app.update(Message::ToggleHelp);
+    assert!(app.system.armed.is_none());
+    assert!(app.deferred_action.lock().unwrap().is_none());
+}
+
+#[test]
+fn test_system_ignores_enter_autorepeat() {
+    let mut app = test_app(AddonsConfig::default());
+    open_system(&mut app, "sys shut");
+    let _ = app.update(Message::Submit);
+    assert_eq!(app.update(Message::SubmitRepeat).units(), 0);
+    assert_eq!(app.update(Message::SubmitRepeat).units(), 0);
+    assert!(app.deferred_action.lock().unwrap().is_none());
+
+    open_system(&mut app, "sys lock");
+    assert_eq!(app.update(Message::SubmitRepeat).units(), 0);
+    assert!(app.deferred_action.lock().unwrap().is_none());
+
+    open_system(&mut app, "sys shut");
+    let _ = app.update(Message::Submit);
+    let _ = app.update(Message::Submit);
+    assert_eq!(
+        deferred_argv(&app),
+        Some(vec!["systemctl".into(), "poweroff".into()])
+    );
+}
+
+#[test]
+fn test_system_commands_overrides_and_hide() {
+    let mut addons = AddonsConfig::default();
+    addons.system.commands.lock = Some(vec!["hyprlock".into(), "--immediate".into()]);
+    addons.system.commands.suspend = Some(Vec::new());
+    addons.system.commands.logout = Some(vec!["my-logout".into()]);
+    addons.system.hide = vec![crate::SystemCommand::Hibernate];
+
+    let entries = system_entries(&addons.system, true, None, |_| true);
+    let ids: Vec<crate::SystemCommand> = entries.iter().map(|entry| entry.id).collect();
+    use crate::SystemCommand::*;
+    assert_eq!(ids, vec![Lock, Logout, Reboot, Shutdown]);
+    assert!(matches!(&entries[1].action, DeferredAction::Command(argv) if argv == &["my-logout"]));
+
+    let mut app = test_app(addons);
+    open_system(&mut app, "sys lock");
+    let _ = app.update(Message::Submit);
+    assert_eq!(
+        deferred_argv(&app),
+        Some(vec!["hyprlock".into(), "--immediate".into()])
+    );
+}
+
+#[test]
+fn test_system_logout_default_follows_session() {
+    let config = crate::SystemAddonConfig::default();
+    let logout = |hyprland, session| {
+        system_entries(&config, hyprland, session, |_| true)
+            .into_iter()
+            .find(|entry| entry.id == crate::SystemCommand::Logout)
+            .unwrap()
+            .action
+    };
+    assert!(matches!(
+        logout(true, Some("3")),
+        DeferredAction::HyprDispatch(args) if args == ["exit"]
+    ));
+    assert!(matches!(
+        logout(false, Some("3")),
+        DeferredAction::Command(argv) if argv == ["loginctl", "terminate-session", "3"]
+    ));
+}
+
+#[test]
+fn test_system_queries_stay_out_of_history_and_logs() {
+    let addons = AddonsConfig::default();
+    assert_eq!(loggable_query("sys reboot", &addons), "<redacted>");
+    assert!(classify_query("sys reboot", &addons).sensitive);
+
+    let mut app = test_app(addons);
+    open_system(&mut app, "sys lock");
+    app.history.max_items = 10;
+    let before = app.history.items.clone();
+    let _ = app.update(Message::Submit);
+    app.save_query_to_history();
+    assert_eq!(app.history.items, before);
+}
+
+#[test]
+fn test_system_missing_program_is_not_actionable() {
+    let mut addons = AddonsConfig::default();
+    addons.system.commands.lock = Some(vec!["no-such-locker".into()]);
+    let entries = system_entries(&addons.system, false, Some("2"), |program| {
+        program != "no-such-locker"
+    });
+    let lock = entries
+        .iter()
+        .find(|entry| entry.id == crate::SystemCommand::Lock)
+        .unwrap();
+    assert_eq!(lock.missing.as_deref(), Some("no-such-locker"));
+    assert!(entries
+        .iter()
+        .filter(|entry| entry.id != crate::SystemCommand::Lock)
+        .all(|entry| entry.missing.is_none()));
+
+    let mut app = test_app(addons);
+    app.program_exists = |program| program != "no-such-locker";
+    open_system(&mut app, "sys lock");
+    let _ = app.update(Message::Submit);
+    let _ = app.update(Message::Submit);
+    assert_eq!(deferred_argv(&app), None);
+}
+
+#[test]
+fn test_system_click_elsewhere_cancels_confirmation() {
+    let mut addons = AddonsConfig::default();
+    addons.system.commands.lock = Some(vec!["no-such-locker".into()]);
+    let mut app = test_app(addons);
+    app.program_exists = |program| program != "no-such-locker";
+    open_system(&mut app, "sys ");
+    let position = |app: &LauncherApp, id| {
+        app.system
+            .filtered
+            .iter()
+            .position(|&index| app.system.entries[index].id == id)
+            .unwrap()
+    };
+    let reboot = position(&app, crate::SystemCommand::Reboot);
+    let lock = position(&app, crate::SystemCommand::Lock);
+
+    let _ = app.update(Message::ItemClicked(reboot));
+    assert!(app.system.armed.is_some());
+    let _ = app.update(Message::ItemClicked(lock));
+    assert!(app.system.armed.is_none());
+    let _ = app.update(Message::ItemClicked(reboot));
+    assert_eq!(deferred_argv(&app), None);
+    assert!(app.system.armed.is_some());
+}
+
+#[test]
+fn test_system_logout_without_session_is_not_actionable() {
+    let config = crate::SystemAddonConfig::default();
+    let logout = system_entries(&config, false, None, |_| true)
+        .into_iter()
+        .find(|entry| entry.id == crate::SystemCommand::Logout)
+        .unwrap();
+    assert_eq!(logout.missing.as_deref(), Some("XDG_SESSION_ID"));
+
+    let mut config = crate::SystemAddonConfig::default();
+    config.commands.logout = Some(vec!["uwsm".into(), "stop".into()]);
+    let logout = system_entries(&config, false, None, |_| true)
+        .into_iter()
+        .find(|entry| entry.id == crate::SystemCommand::Logout)
+        .unwrap();
+    assert!(logout.missing.is_none());
 }

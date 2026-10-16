@@ -1,0 +1,61 @@
+---
+title: System Commands
+description: Lock, suspend, log out, reboot or shut down from Raffi
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Type `sys ` (with the trailing space) to list session and power commands.
+Words after the keyword filter the list, so `sys reb` leaves only Reboot.
+
+<Aside type="note">
+System commands are only available in native mode. They are on by default.
+</Aside>
+
+| Entry     | Default command                                   |
+|-----------|---------------------------------------------------|
+| Lock      | `loginctl lock-session`                           |
+| Suspend   | `systemctl suspend`                               |
+| Hibernate | `systemctl hibernate`                             |
+| Log out   | `hyprctl dispatch exit` on Hyprland, otherwise `loginctl terminate-session $XDG_SESSION_ID` |
+| Reboot    | `systemctl reboot`                                |
+| Shut down | `systemctl poweroff`                              |
+
+To open the list from a key binding, pass the keyword as the initial query:
+
+```sh
+raffi -u native -i "sys "
+```
+
+## Confirmation
+
+Lock runs on the first Enter. Every other entry asks first: the row reads
+"Press Enter again to reboot", and only a second Enter on the same entry runs
+it. Moving the selection, editing the query, or pressing or releasing a
+modifier cancels the request. Holding Enter down does not confirm.
+
+If the program behind an entry is not installed, the row says so (for
+example "hyprlock not found") and Enter does nothing. Outside Hyprland,
+the default Log out needs `XDG_SESSION_ID`; without it the row says so.
+
+Raffi closes before running the command. If it fails, Raffi reports the error
+as a Hyprland notification when one is available.
+
+## Custom commands
+
+Replace any command with an argument list. Commands run directly, without a
+shell. Use `hide` to remove entries, or give an entry an empty list:
+
+```yaml
+addons:
+  system:
+    commands:
+      lock: ["hyprlock"]
+      logout: ["uwsm", "stop"]
+    hide: [hibernate]
+```
+
+Queries typed in this mode are not saved in the search history.
+
+See the [addon reference](/reference/addon-configuration/#system-commands) for
+every field.

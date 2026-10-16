@@ -113,6 +113,18 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         });
     }
 
+    if addons.system.enabled {
+        let trigger = addons.system.trigger();
+        entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
+            trigger: trigger.to_string(),
+            title: "System commands".to_string(),
+            usage: format!("{trigger} <lock|suspend|log out|reboot|shut down>"),
+            icon: Some(super::app::SYSTEM_ICON.to_string()),
+            completion: Some(format!("{trigger} ")),
+        });
+    }
+
     if addons.calculator.enabled {
         entries.push(HelpEntry {
             section: HelpSection::KeywordsAndActions,

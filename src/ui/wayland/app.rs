@@ -32,12 +32,14 @@ use super::state::{
     CurrencyResult, CurrencyState, EmojiEntry, EmojiState, FallbackAction, FileBrowserState,
     HistoryState, KeywordSuggestion, LauncherApp, Message, MultiCurrencyRequest,
     MultiCurrencyResult, PendingSelection, ResolvedFallback, ScriptFilterResult, ScriptFilterState,
-    SharedSelection, TextSnippetState, ViewState, WebSearchActiveState, WebSearchState,
+    SharedSelection, SystemState, TextSnippetState, ViewState, WebSearchActiveState,
+    WebSearchState,
 };
 use super::support::{
     calculator_inline_result, fuzzy_match_configs, load_history, load_mru_map, mru_bounds,
     mru_sort_key, record_mru_use, save_history, save_mru_map, try_evaluate_math,
 };
+use super::system::{filter_system_into, system_entries};
 use super::types::InlineProvider;
 use crate::ui::{get_mru_cache_path, get_snippet_mru_cache_path, FontSizes};
 use crate::{
@@ -53,6 +55,7 @@ pub(super) enum QueryMode {
     Emoji { query: String },
     Clipboard { query: String, images_only: bool },
     WebSearch { config_index: usize, query: String },
+    System { query: String },
     Standard,
 }
 
@@ -94,6 +97,7 @@ impl std::fmt::Debug for QueryMode {
                 .field("config_index", config_index)
                 .field("query", query)
                 .finish(),
+            Self::System { .. } => f.debug_struct("System").finish_non_exhaustive(),
             Self::Standard => f.write_str("Standard"),
         }
     }
@@ -140,10 +144,12 @@ impl QueryClass {
 pub(super) fn classify_query(query: &str, addons: &AddonsConfig) -> QueryClass {
     let mode = route_query(query, addons);
     let inline_provider = match mode {
-        QueryMode::FileBrowser { .. } | QueryMode::Clipboard { .. } => None,
+        QueryMode::FileBrowser { .. } | QueryMode::Clipboard { .. } | QueryMode::System { .. } => {
+            None
+        }
         _ => inline_provider(query, addons),
     };
-    let sensitive = matches!(mode, QueryMode::Clipboard { .. });
+    let sensitive = matches!(mode, QueryMode::Clipboard { .. } | QueryMode::System { .. });
     QueryClass {
         mode,
         inline_provider,
@@ -232,6 +238,7 @@ pub(super) fn fido_updir(old: &str, new: &str, home: &str) -> Option<(String, St
 /// theme lacks them.
 pub(super) const CLIPBOARD_ICON: &str = "copyq";
 pub(super) const CLIPBOARD_IMAGES_ICON: &str = "image-x-generic";
+pub(super) const SYSTEM_ICON: &str = "system-shutdown";
 
 /// The query as it may appear in debug logs: sensitive searches such as the
 /// clipboard can contain copied secrets, so only their trigger is kept.
@@ -324,6 +331,12 @@ pub(super) fn route_query(query: &str, addons: &AddonsConfig) -> QueryMode {
         };
     }
 
+    if addons.system.enabled {
+        if let Some(query) = extract_keyword_query(input, addons.system.trigger()) {
+            return QueryMode::System { query };
+        }
+    }
+
     QueryMode::Standard
 }
 
@@ -405,6 +418,14 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
                 icon: config.icon.clone(),
             });
         }
+    }
+
+    if addons.system.enabled && matches(addons.system.trigger()) {
+        suggestions.push(KeywordSuggestion {
+            keyword: addons.system.trigger().to_string(),
+            subtitle: "Lock, suspend, log out, reboot or shut down".to_string(),
+            icon: Some(SYSTEM_ICON.to_string()),
+        });
     }
 
     suggestions
@@ -524,6 +545,7 @@ impl LauncherApp {
                 inline_copy_error: None,
                 #[cfg(test)]
                 copier: None,
+                program_exists: crate::find_binary,
                 web_search: WebSearchState::default(),
                 file_browser: FileBrowserState {
                     show_hidden: file_browser_show_hidden,
@@ -542,6 +564,7 @@ impl LauncherApp {
                     ..Default::default()
                 },
                 emoji: EmojiState::default(),
+                system: SystemState::default(),
                 clipboard: ClipboardState::default(),
                 fallbacks,
                 keyword_suggestions: Vec::new(),
@@ -572,6 +595,8 @@ impl LauncherApp {
             Message::MoveUp => self.move_selection(-1),
             Message::MoveDown => self.move_selection(1),
             Message::Submit => self.activate_index(self.selected_index),
+            Message::SubmitRepeat if self.system.active => Task::none(),
+            Message::SubmitRepeat => self.activate_index(self.selected_index),
             Message::Cancel => {
                 if self.view.help_active {
                     return self.close_help();
@@ -579,6 +604,9 @@ impl LauncherApp {
                 iced::exit()
             }
             Message::ItemClicked(index) => {
+                if index != self.selected_index {
+                    self.system.armed = None;
+                }
                 self.selected_index = index;
                 self.activate_index(index)
             }
@@ -642,6 +670,9 @@ impl LauncherApp {
             Message::FileBrowserOpenFileManager => self.handle_file_browser_open_file_manager(),
             Message::FileBrowserCycleSort => self.handle_file_browser_cycle_sort(),
             Message::ModifiersChanged(modifiers) => {
+                if modifiers != self.view.current_modifiers {
+                    self.system.armed = None;
+                }
                 self.view.current_modifiers = modifiers;
                 Task::none()
             }
@@ -674,6 +705,7 @@ impl LauncherApp {
             Message::HelpEntrySelected(index) => self.handle_help_entry_selected(index),
             Message::EmojiDataLoaded(data) => self.handle_emoji_data_loaded(data),
             Message::EmojiSelected(index) => self.handle_emoji_selected(index),
+            Message::SystemSelected(index) => self.handle_system_selected(index),
             Message::FallbackSelected(index) => self.handle_fallback_selected(index),
             Message::KeywordSuggestionSelected(index) => {
                 self.handle_keyword_suggestion_selected(index)
@@ -755,6 +787,8 @@ impl LauncherApp {
         if !matches!(qmode, QueryMode::Clipboard { .. }) {
             self.clipboard.clear();
         }
+        // Rebuilt for every system query too, which also disarms it.
+        self.system.clear();
         self.keyword_suggestions = if matches!(qmode, QueryMode::Standard) {
             keyword_suggestions(&query, &self.addons)
         } else {
@@ -827,6 +861,21 @@ impl LauncherApp {
                     drag.disarm();
                 }
                 self.handle_clipboard_query(query, images_only, &mut tasks);
+                return Task::batch(tasks);
+            }
+            QueryMode::System { query } => {
+                self.file_browser.clear();
+                self.script_filter.clear();
+                self.text_snippets.clear();
+                self.emoji.clear();
+                self.web_search.clear();
+                self.currency.clear();
+                self.filtered_configs.clear();
+                self.inline_result = None;
+                if let Some(drag) = &self.drag {
+                    drag.disarm();
+                }
+                self.handle_system_query(&query);
                 return Task::batch(tasks);
             }
             QueryMode::WebSearch {
@@ -1270,6 +1319,23 @@ impl LauncherApp {
         );
     }
 
+    fn handle_system_query(&mut self, query: &str) {
+        let session_id = std::env::var("XDG_SESSION_ID").ok();
+        self.system.active = true;
+        self.system.entries = system_entries(
+            &self.addons.system,
+            super::hyprland::in_session(),
+            session_id.as_deref().filter(|id| !id.is_empty()),
+            self.program_exists,
+        );
+        filter_system_into(
+            &self.system.entries,
+            query,
+            &self.system.matcher,
+            &mut self.system.filtered,
+        );
+    }
+
     fn handle_web_search_query(&mut self, config_index: usize, query: String) {
         if let Some(config) = self.addons.web_searches.get(config_index) {
             self.filtered_configs.clear();
@@ -1312,6 +1378,7 @@ impl LauncherApp {
             self.selected_index = 0;
         }
 
+        self.system.armed = None;
         self.follow_clipboard_selection();
         self.refresh_file_preview_cache();
         self.view.preview_scrollable_id = super::state::ScrollableId::unique();
@@ -1381,6 +1448,14 @@ impl LauncherApp {
             let item_count = self.clipboard.row_count();
             if index >= current_index && index < current_index + item_count {
                 return self.update(Message::ClipboardSelected(index - current_index));
+            }
+            current_index += item_count;
+        }
+
+        if self.system.active {
+            let item_count = self.system.filtered.len();
+            if index >= current_index && index < current_index + item_count {
+                return self.update(Message::SystemSelected(index - current_index));
             }
             current_index += item_count;
         }
@@ -2118,6 +2193,36 @@ impl LauncherApp {
         iced::exit()
     }
 
+    /// Runs the entry after Raffi closes. Entries other than lock need a
+    /// second Enter on the same entry with the same modifiers.
+    fn handle_system_selected(&mut self, index: usize) -> Task<Message> {
+        let Some(entry) = self
+            .system
+            .filtered
+            .get(index)
+            .and_then(|&entry_index| self.system.entries.get(entry_index))
+        else {
+            return Task::none();
+        };
+        if entry.missing.is_some() {
+            self.system.armed = None;
+            return Task::none();
+        }
+        let identity = (entry.id, self.view.current_modifiers);
+        if entry.needs_confirmation() && self.system.armed != Some(identity) {
+            crate::debug_log!("system: arming {:?}", entry.id);
+            self.system.armed = Some(identity);
+            return Task::none();
+        }
+        crate::debug_log!("system: running {:?} after close", entry.id);
+        let action = entry.action.clone();
+        self.system.armed = None;
+        if let Ok(mut slot) = self.deferred_action.lock() {
+            *slot = Some(action);
+        }
+        iced::exit()
+    }
+
     fn script_filter_offset(&self) -> usize {
         if self.script_filter.loading {
             1
@@ -2157,6 +2262,9 @@ impl LauncherApp {
             offset += self.emoji.filtered.len();
         }
         offset += self.clipboard.row_count();
+        if self.system.active {
+            offset += self.system.filtered.len();
+        }
         if self.file_browser.active {
             offset += self.file_browser.entries.len();
         }
@@ -2187,6 +2295,7 @@ impl LauncherApp {
             || self.text_snippets.loading
             || self.emoji.active
             || self.clipboard.active
+            || self.system.active
             || self.file_browser.active
             || self.web_search.active.is_some()
     }
@@ -2325,6 +2434,7 @@ impl LauncherApp {
         self.text_snippets.clear();
         self.emoji.clear();
         self.clipboard.clear();
+        self.system.clear();
         self.web_search.clear();
         self.file_browser.clear();
         // The browser is gone; a drag armed by a row press is stale.

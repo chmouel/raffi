@@ -574,3 +574,14 @@ addons:
   #   backend: copyq
   #   action: copy
   #   secondary_action: hypr_paste
+
+  # System commands (native UI only). Type "sys " to list lock, suspend,
+  # hibernate, log out, reboot and shut down. Everything except lock asks
+  # for a second Enter. Commands are argument lists run without a shell;
+  # an empty list hides the entry, like `hide`.
+  # system:
+  #   enabled: true
+  #   trigger: sys
+  #   commands:
+  #     lock: [hyprlock]
+  #   hide: [hibernate]

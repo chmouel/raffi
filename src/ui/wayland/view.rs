@@ -234,8 +234,9 @@ impl LauncherApp {
 
         let search_input = text_input(placeholder, &self.search_query)
             .id(self.view.search_input_id.clone())
+            // Enter is handled by the subscription alone, which knows about
+            // key autorepeat; an `on_submit` here would deliver it twice.
             .on_input(Message::SearchChanged)
-            .on_submit(Message::Submit)
             .padding(fs.input_padding)
             .size(fs.input)
             .style(move |_theme, status| {
@@ -1220,6 +1221,49 @@ impl LauncherApp {
             }
         }
 
+        if self.system.active {
+            for &entry_idx in &self.system.filtered {
+                let Some(entry) = self.system.entries.get(entry_idx) else {
+                    continue;
+                };
+                let is_selected = self.selected_index == special_item_idx;
+                let armed = self.system.armed.is_some_and(|(id, _)| id == entry.id);
+                let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
+                if let Some(icon) = self
+                    .icon_map
+                    .get(entry.icon)
+                    .and_then(|path| icon_element(Path::new(path), 40.0))
+                {
+                    item_row = item_row.push(icon);
+                }
+                let subtitle = if let Some(program) = &entry.missing {
+                    text(format!("{program} not found"))
+                        .size(fs.subtitle)
+                        .color(t.text_muted)
+                } else if armed {
+                    text(format!("Press Enter again to {}", entry.verb))
+                        .size(fs.subtitle)
+                        .color(t.accent)
+                } else {
+                    text(entry.command_line())
+                        .size(fs.subtitle)
+                        .color(t.text_muted)
+                };
+                let text_col = Column::new()
+                    .push(text(entry.title).size(fs.item).color(t.text_main))
+                    .push(subtitle);
+                item_row = item_row.push(text_col.width(Length::Fill));
+                items_column = items_column.push(
+                    button(item_row)
+                        .on_press(Message::ItemClicked(special_item_idx))
+                        .padding(fs.item_padding)
+                        .width(Length::Fill)
+                        .style(item_button_style(t, is_selected, t.text_main)),
+                );
+                special_item_idx += 1;
+            }
+        }
+
         if self.file_browser.active {
             if let Some(error) = &self.file_browser.error {
                 let error_row = Row::new()
@@ -1573,6 +1617,7 @@ impl LauncherApp {
             && !has_text_snippet
             && !has_emoji
             && !has_clipboard
+            && self.system.filtered.is_empty()
             && !has_file_browser
             && !has_web_search
             && !has_fallbacks
@@ -1793,8 +1838,13 @@ impl LauncherApp {
             }) => Some(Message::MoveUp),
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Named(Named::Enter),
+                repeat,
                 ..
-            }) => Some(Message::Submit),
+            }) => Some(if repeat {
+                Message::SubmitRepeat
+            } else {
+                Message::Submit
+            }),
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Named(Named::Escape),
                 ..

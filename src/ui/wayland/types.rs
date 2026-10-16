@@ -166,6 +166,8 @@ pub(crate) enum Message {
     MoveUp,
     MoveDown,
     Submit,
+    /// Enter held down; never confirms an armed system command.
+    SubmitRepeat,
     Cancel,
     ItemClicked(usize),
     InlineSelected(usize),
@@ -230,6 +232,7 @@ pub(crate) enum Message {
     HelpEntrySelected(usize),
     EmojiSelected(usize),
     EmojiDataLoaded(Vec<EmojiEntry>),
+    SystemSelected(usize),
     FallbackSelected(usize),
     KeywordSuggestionSelected(usize),
     /// A page of clipboard history for the scan with this generation.

@@ -66,6 +66,9 @@
             "$ref": "#/$defs/ScriptFilterConfig"
           }
         },
+        "system": {
+          "$ref": "#/$defs/SystemAddonConfig"
+        },
         "text_snippets": {
           "type": "array",
           "items": {
@@ -737,6 +740,120 @@
           "const": "hybrid"
         }
       ]
+    },
+    "SystemAddonConfig": {
+      "description": "Configuration for the system commands addon (native UI only)",
+      "type": "object",
+      "properties": {
+        "commands": {
+          "$ref": "#/$defs/SystemCommandsConfig"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "hide": {
+          "description": "Entries left out of the list.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SystemCommand"
+          }
+        },
+        "trigger": {
+          "description": "Keyword that opens the list (default: `sys`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "SystemCommand": {
+      "description": "A built-in entry of the system commands addon",
+      "type": "string",
+      "enum": [
+        "lock",
+        "suspend",
+        "hibernate",
+        "logout",
+        "reboot",
+        "shutdown"
+      ]
+    },
+    "SystemCommandsConfig": {
+      "description": "Commands replacing the built-in ones of the system commands addon, as\nargument lists run without a shell. An empty list hides the entry.",
+      "type": "object",
+      "properties": {
+        "hibernate": {
+          "description": "Default: `systemctl hibernate`.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "type": "string"
+          }
+        },
+        "lock": {
+          "description": "Default: `loginctl lock-session`.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "type": "string"
+          }
+        },
+        "logout": {
+          "description": "Default: `hyprctl dispatch exit` on Hyprland, otherwise\n`loginctl terminate-session $XDG_SESSION_ID`.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "type": "string"
+          }
+        },
+        "reboot": {
+          "description": "Default: `systemctl reboot`.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "type": "string"
+          }
+        },
+        "shutdown": {
+          "description": "Default: `systemctl poweroff`.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "type": "string"
+          }
+        },
+        "suspend": {
+          "description": "Default: `systemctl suspend`.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "TextSnippet": {
       "description": "A single text snippet entry",
