@@ -1607,6 +1607,22 @@ fn describe_addon_by_keyword(
         );
     }
 
+    if keyword == "units" && addons.units.enabled {
+        return (
+            "Unit Converter".to_string(),
+            vec![
+                (
+                    "Units".to_string(),
+                    "length, mass, volume, temperature, data, time, speed, area".to_string(),
+                ),
+                (
+                    "Ctrl+Enter".to_string(),
+                    "Copy the result with its unit".to_string(),
+                ),
+            ],
+        );
+    }
+
     let curr_trigger = addons.currency.trigger.as_deref().unwrap_or("$");
     if addons.currency.enabled && keyword == curr_trigger {
         return (

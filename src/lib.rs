@@ -73,6 +73,20 @@ impl Default for CalculatorAddonConfig {
     }
 }
 
+/// Configuration for the inline unit converter addon
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
+pub struct UnitsAddonConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for UnitsAddonConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 /// Configuration for the file browser addon
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
@@ -463,6 +477,8 @@ pub struct AddonsConfig {
     pub currency: CurrencyAddonConfig,
     #[serde(default)]
     pub calculator: CalculatorAddonConfig,
+    #[serde(default)]
+    pub units: UnitsAddonConfig,
     #[serde(default)]
     pub file_browser: FileBrowserAddonConfig,
     #[serde(default)]

@@ -1598,6 +1598,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "sys",
             "math",
             "$",
+            "units",
             "↑/↓",
             "Ctrl+J",
             "Ctrl+K",
@@ -1645,6 +1646,7 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
     addons.currency.enabled = false;
     addons.file_browser.enabled = false;
     addons.system.enabled = false;
+    addons.units.enabled = false;
     let entries = help_entries(&addons);
 
     // With every addon disabled only the general shortcut rows remain.
@@ -1692,6 +1694,7 @@ fn test_help_entries_skip_disabled_addons() {
     addons.currency.enabled = false;
     addons.file_browser.enabled = false;
     addons.system.enabled = false;
+    addons.units.enabled = false;
 
     // Disabled addons drop their keyword rows and addon-specific shortcuts.
     let entries = help_entries(&addons);
@@ -3171,6 +3174,80 @@ fn test_calculator_owns_inline_area_over_currency() {
 
     let _ = app.update(Message::SearchChanged("-".into()));
     assert!(app.currency.help);
+}
+
+#[test]
+fn test_unit_conversion_inline_row() {
+    let mut app = test_app(AddonsConfig::default());
+    app.history.max_items = 0;
+    let _ = app.update(Message::SearchChanged("10 km to mi".into()));
+    assert_eq!(app.query_class.inline_provider, Some(InlineProvider::Units));
+    assert!(!app.query_class.sensitive);
+    let inline = app.inline_result.as_ref().expect("units row");
+    assert_eq!(inline.rows[0].title, "10 km = 6.21371 mi");
+    assert_eq!(app.total_items(), 1);
+    assert!(app.resolve_selected_preview().is_some());
+
+    assert_eq!(
+        app.inline_copy_value(0).as_deref(),
+        Some("6.21371192237334")
+    );
+    app.view.current_modifiers = iced::keyboard::Modifiers::CTRL;
+    assert_eq!(
+        app.inline_copy_value(0).as_deref(),
+        Some("6.21371192237334 mi")
+    );
+    app.view.current_modifiers = iced::keyboard::Modifiers::default();
+
+    let _ = app.update(Message::Submit);
+    assert!(app.in_flight.is_pending("inline-copy", ""));
+    let task = app.update(Message::InlineCopied(app.inline_generation, Ok(())));
+    assert!(task.units() > 0);
+
+    let _ = app.update(Message::SearchChanged("10 km".into()));
+    assert!(app.inline_result.is_none());
+    let _ = app.update(Message::SearchChanged("raffi-units-transition".into()));
+    assert!(app.inline_result.is_none());
+    assert_eq!(app.total_items(), 0);
+}
+
+#[test]
+fn test_unit_conversion_leaves_math_and_currency_alone() {
+    let addons = AddonsConfig::default();
+    assert_eq!(
+        classify_query("2*3", &addons).inline_provider,
+        Some(InlineProvider::Calculator)
+    );
+    assert_eq!(
+        classify_query("$10 usd to eur", &addons).inline_provider,
+        Some(InlineProvider::Currency)
+    );
+    for query in ["10 usd to eur", "10 apples", "10 to", "5 m", "firefox"] {
+        assert_eq!(
+            classify_query(query, &addons).inline_provider,
+            None,
+            "{query}"
+        );
+    }
+
+    // With an empty currency trigger, currency still wins its own queries.
+    let mut bare = addons.clone();
+    bare.currency.trigger = Some(String::new());
+    assert_eq!(
+        classify_query("10 usd to eur", &bare).inline_provider,
+        Some(InlineProvider::Currency)
+    );
+    assert_eq!(
+        classify_query("10 km to mi", &bare).inline_provider,
+        Some(InlineProvider::Units)
+    );
+
+    let mut disabled = addons;
+    disabled.units.enabled = false;
+    assert_eq!(
+        classify_query("10 km to mi", &disabled).inline_provider,
+        None
+    );
 }
 
 fn open_system(app: &mut LauncherApp, query: &str) {

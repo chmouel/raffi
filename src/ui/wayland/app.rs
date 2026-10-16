@@ -41,6 +41,7 @@ use super::support::{
 };
 use super::system::{filter_system_into, system_entries};
 use super::types::InlineProvider;
+use super::units::{try_parse_unit_conversion, units_inline_result};
 use crate::ui::{get_mru_cache_path, get_snippet_mru_cache_path, FontSizes};
 use crate::{
     read_desktop_icon_map, read_icon_map, resolve_launcher_icon_path, AddonsConfig, RaffiConfig,
@@ -173,6 +174,9 @@ fn inline_provider(query: &str, addons: &AddonsConfig) -> Option<InlineProvider>
         {
             return Some(InlineProvider::Currency);
         }
+    }
+    if addons.units.enabled && try_parse_unit_conversion(query).is_some() {
+        return Some(InlineProvider::Units);
     }
     None
 }
@@ -766,6 +770,9 @@ impl LauncherApp {
         self.inline_result = match class.inline_provider {
             Some(InlineProvider::Calculator) => {
                 try_evaluate_math(&query).map(|calc| calculator_inline_result(&calc))
+            }
+            Some(InlineProvider::Units) => {
+                try_parse_unit_conversion(&query).map(|conversion| units_inline_result(&conversion))
             }
             _ => None,
         };

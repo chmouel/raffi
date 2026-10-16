@@ -75,6 +75,9 @@
             "$ref": "#/$defs/TextSnippetSourceConfig"
           }
         },
+        "units": {
+          "$ref": "#/$defs/UnitsAddonConfig"
+        },
         "web_searches": {
           "type": "array",
           "items": {
@@ -1024,6 +1027,17 @@
             "string",
             "null"
           ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "UnitsAddonConfig": {
+      "description": "Configuration for the inline unit converter addon",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
         }
       },
       "additionalProperties": false

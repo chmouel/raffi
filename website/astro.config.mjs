@@ -43,6 +43,7 @@ export default defineConfig({
             { label: 'System Commands', slug: 'features/system-commands' },
             { label: 'Text Snippets', slug: 'features/text-snippets' },
             { label: 'Themes', slug: 'features/themes' },
+            { label: 'Unit Conversion', slug: 'features/unit-conversion' },
             { label: 'Web Search', slug: 'features/web-search' },
           ],
         },

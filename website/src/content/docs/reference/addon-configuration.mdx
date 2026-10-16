@@ -1,6 +1,6 @@
 ---
 title: Addon Configuration
-description: Configuration reference for built-in addons (currency, calculator, file browser, script filters, web searches, text snippets, clipboard history, system commands)
+description: Configuration reference for built-in addons (currency, calculator, unit conversion, file browser, script filters, web searches, text snippets, clipboard history, system commands)
 ---
 
 import { Image } from 'astro:assets';
@@ -163,6 +163,24 @@ sin(0.5)            → ~0.479
 ```
 
 No trigger character is needed; simply type a valid expression.
+
+## Unit Conversion
+
+Converts lengths, weights, volumes, temperatures, data sizes, durations,
+speeds and areas as you type, such as `10 km to mi`. See
+[Unit Conversion](/features/unit-conversion/) for the supported units.
+
+### Configuration
+
+**`addons.units.enabled`** `boolean` (default: `true`)
+
+Enable or disable unit conversion.
+
+```yaml
+addons:
+  units:
+    enabled: false
+```
 
 ## File Browser
 
@@ -934,6 +952,9 @@ addons:
     currencies: ["USD", "EUR", "GBP", "JPY"]
 
   calculator:
+    enabled: true
+
+  units:
     enabled: true
 
   file_browser:

@@ -148,6 +148,17 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         });
     }
 
+    if addons.units.enabled {
+        entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
+            trigger: "units".to_string(),
+            title: "Unit converter".to_string(),
+            usage: "10 km to mi or 70f to c".to_string(),
+            icon: None,
+            completion: None,
+        });
+    }
+
     entries.extend(keyboard_shortcut_entries(addons));
 
     entries

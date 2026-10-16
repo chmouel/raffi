@@ -1,0 +1,58 @@
+---
+title: Unit Conversion
+description: Convert lengths, weights, temperatures, data sizes and more as you type
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Type an amount, a unit, `to` or `in`, and a target unit. A result row shows up
+above your launchers, with no keyword needed:
+
+```text
+10 km to mi        → 10 km = 6.21371 mi
+70f to c           → 70 °F = 21.1111 °C
+5 GB in MB         → 5 GB = 5000 MB
+3 cups to ml       → 3 cup = 709.765 ml
+1.5 hours to min   → 1.5 h = 90 min
+100 km/h to mph    → 100 km/h = 62.1371 mph
+```
+
+Enter copies the number and Ctrl+Enter copies it with its unit. The row
+rounds to 6 significant digits; the copied value keeps 15, and whole numbers
+are copied exactly.
+Copying needs `wl-copy`.
+
+<Aside type="note">
+Unit conversion is only available in native mode. It is on by default; set
+`addons.units.enabled: false` to turn it off.
+</Aside>
+
+Both units must measure the same thing, so `10 km to kg` shows nothing. A
+target unit is required: `5 m` alone keeps searching your launchers. Math
+expressions go to the [calculator](/features/calculator/) and currency
+conversions to the [currency converter](/features/currency-converter/) first.
+
+## Supported units
+
+Unit names are case-insensitive, and most accept their full name and plural
+too (`km`, `kilometer`, `kilometres`).
+
+| Kind        | Units |
+|-------------|-------|
+| Length      | `mm`, `cm`, `m`, `km`, `in`, `ft`, `yd`, `mi`, `nmi` |
+| Mass        | `mg`, `g`, `kg`, `t` (tonne), `oz`, `lb`, `st` (stone) |
+| Volume      | `ml`, `cl`, `dl`, `l`, `cm3`/`cc`, `m3`, `tsp`, `tbsp`, `floz`/`fl oz`, `cup`, `pt`, `qt`, `gal` |
+| Temperature | `c`, `f`, `k` (also `°C`, `celsius`, `fahrenheit`, `kelvin`) |
+| Data        | `b`, `B`, `kb`, `kB`/`KB`, `Mb`, `MB`, `Gb`, `GB`, `Tb`, `TB`, `PB`, `Kib`, `KiB`, `Mib`, `MiB`, `Gib`, `GiB`, `TiB` |
+| Time        | `ms`, `s`, `min`, `h`, `d`, `wk`, `yr` |
+| Speed       | `m/s`, `km/h` (`kph`), `mph`, `kn` (knots), `ft/s` |
+| Area        | `cm2`, `m2`, `km2`, `ha`, `ac`, `in2`, `ft2`, `yd2`, `mi2` (also `sq ft` and friends) |
+
+Cups, pints, quarts, gallons and fluid ounces are US customary. Prefix pints,
+quarts, gallons or fluid ounces with `imp` or `uk` for the imperial ones, as
+in `2 uk gal to l`. A year is 365.25 days.
+
+Data symbols are case-sensitive: a lowercase `b` means bits and an uppercase
+`B` means bytes, so `Mb` is a megabit and `MB` a megabyte. `KB` and `kB` are
+1000 bytes, while `KiB` is 1024. Spelled-out names such as `megabytes` work in
+any case.

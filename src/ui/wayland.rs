@@ -19,6 +19,7 @@ mod support;
 mod system;
 mod theme;
 mod types;
+mod units;
 mod view;
 
 #[cfg(test)]

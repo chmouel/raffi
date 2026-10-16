@@ -16,6 +16,7 @@ pub(crate) struct CalculatorResult {
 pub(crate) enum InlineProvider {
     Calculator,
     Currency,
+    Units,
 }
 
 /// One row shown above the launchers; Enter copies `copy_value`, Ctrl+Enter
