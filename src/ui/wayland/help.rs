@@ -1,3 +1,4 @@
+use super::preview::describe_file_action;
 use crate::AddonsConfig;
 
 /// A single row of the keyword help list shown with `Ctrl+/`.
@@ -128,29 +129,36 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             "Toggle preview pane",
             "Shows or hides the right-hand preview",
         ),
-        shortcut(
-            "Ctrl+H",
-            "Toggle hidden files",
-            "File browser: show or hide dotfiles",
-        ),
-        shortcut(
-            "Ctrl+O",
-            "Open in file manager",
-            "File browser: opens the current directory with the entry selected",
-        ),
-        shortcut(
-            "Ctrl+S",
-            "Cycle sort order",
-            "File browser: name, modified date, created date",
-        ),
+    ];
+    let file_browser = &addons.file_browser;
+    if file_browser.enabled {
+        entries.extend([
+            shortcut(
+                "Ctrl+H",
+                "Toggle hidden files",
+                "File browser: show or hide dotfiles",
+            ),
+            shortcut(
+                "Ctrl+O",
+                "Open in file manager",
+                "File browser: opens the current directory with the entry selected",
+            ),
+            shortcut(
+                "Ctrl+S",
+                "Cycle sort order",
+                "File browser: name, modified date, created date",
+            ),
+        ]);
+    }
+    entries.extend([
         shortcut("Alt+P/N", "Search history", "Previous / next query"),
         shortcut(
             "Tab",
             "Complete selection",
             "Completes the keyword or file browser path",
         ),
-    ];
-    if addons.file_browser.enabled && addons.file_browser.backspace_updir {
+    ]);
+    if file_browser.enabled && file_browser.backspace_updir {
         entries.push(shortcut(
             "Backspace",
             "Parent directory",
@@ -160,16 +168,27 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
     entries.extend([
         shortcut("Ctrl+/", "Keyword and shortcut help", "Opens this list"),
         shortcut("Esc", "Close help or quit", "Closes help, otherwise exits"),
-        shortcut(
-            "Enter",
-            "Use selected entry",
-            "Launches, arms or activates the selection",
-        ),
-        shortcut(
-            "Ctrl+Enter",
-            "Secondary action",
-            "Runs the addon's secondary action; file browser copies the path by default",
-        ),
+    ]);
+    let (enter_usage, ctrl_enter_usage) = if file_browser.enabled {
+        (
+            format!(
+                "Launches, arms or activates the selection. File browser files: {}",
+                describe_file_action(file_browser.action())
+            ),
+            format!(
+                "Runs the addon's secondary action. File browser: {}",
+                describe_file_action(file_browser.secondary_action())
+            ),
+        )
+    } else {
+        (
+            "Launches, arms or activates the selection".to_string(),
+            "Runs the addon's secondary action".to_string(),
+        )
+    };
+    entries.extend([
+        shortcut("Enter", "Use selected entry", &enter_usage),
+        shortcut("Ctrl+Enter", "Secondary action", &ctrl_enter_usage),
     ]);
     entries
 }

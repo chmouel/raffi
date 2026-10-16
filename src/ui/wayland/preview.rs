@@ -335,7 +335,7 @@ fn describe_action(action: &str) -> String {
     }
 }
 
-fn describe_file_action(action: &str) -> String {
+pub(super) fn describe_file_action(action: &str) -> String {
     match action {
         "open" => "Open with xdg-open".to_string(),
         "copy" => "Copy full path".to_string(),

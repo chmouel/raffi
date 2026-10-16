@@ -1592,7 +1592,7 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
     addons.file_browser.enabled = false;
     let entries = help_entries(&addons);
 
-    // With every addon disabled only the shortcut rows remain.
+    // With every addon disabled only the general shortcut rows remain.
     let triggers: Vec<&str> = entries.iter().map(|entry| entry.trigger.as_str()).collect();
     assert_eq!(
         triggers,
@@ -1601,9 +1601,6 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
             "Ctrl+J",
             "Ctrl+K",
             "Ctrl+P",
-            "Ctrl+H",
-            "Ctrl+O",
-            "Ctrl+S",
             "Alt+P/N",
             "Tab",
             "Ctrl+/",
@@ -1619,16 +1616,7 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
         .collect();
     assert_eq!(
         by_ctrl,
-        vec![
-            "Ctrl+J",
-            "Ctrl+K",
-            "Ctrl+P",
-            "Ctrl+H",
-            "Ctrl+O",
-            "Ctrl+S",
-            "Ctrl+/",
-            "Ctrl+Enter"
-        ]
+        vec!["Ctrl+J", "Ctrl+K", "Ctrl+P", "Ctrl+/", "Ctrl+Enter"]
     );
 
     let by_scroll: Vec<&str> = filter_help_entries(&entries, "scroll")
@@ -1646,10 +1634,27 @@ fn test_help_entries_skip_disabled_addons() {
     addons.currency.enabled = false;
     addons.file_browser.enabled = false;
 
-    // Disabled addons drop their keyword rows; the keyboard shortcut rows stay.
+    // Disabled addons drop their keyword rows and addon-specific shortcuts.
     let entries = help_entries(&addons);
     assert!(entries.iter().all(|entry| entry.completion.is_none()));
-    assert_eq!(entries.len(), 13);
+    assert_eq!(entries.len(), 10);
+}
+
+#[test]
+fn test_help_entries_describe_configured_file_actions() {
+    let mut addons = AddonsConfig::default();
+    addons.file_browser.secondary_action = Some("insert".into());
+    let entries = help_entries(&addons);
+    let usage = |trigger: &str| {
+        entries
+            .iter()
+            .find(|entry| entry.trigger == trigger)
+            .map(|entry| entry.usage.clone())
+            .unwrap()
+    };
+
+    assert!(usage("Enter").ends_with("File browser files: Open with xdg-open"));
+    assert!(usage("Ctrl+Enter").ends_with("File browser: Type full path into focused app"));
 }
 
 #[test]
