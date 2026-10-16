@@ -968,7 +968,7 @@
           }
         },
         "logout": {
-          "description": "Default: `hyprctl dispatch exit` on Hyprland, otherwise\n`loginctl terminate-session $XDG_SESSION_ID`.",
+          "description": "Default: Hyprland's exit dispatcher on Hyprland (through `hyprctl eval`\nwith a Lua config, `hyprctl dispatch exit` otherwise), otherwise\n`loginctl terminate-session $XDG_SESSION_ID`.",
           "type": [
             "array",
             "null"

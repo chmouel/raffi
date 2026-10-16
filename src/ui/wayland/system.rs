@@ -1,5 +1,6 @@
 use super::actions::DeferredAction;
 use super::command_list::{CommandAction, CommandItem};
+use super::hyprland::HyprAction;
 use crate::{SystemAddonConfig, SystemCommand};
 
 /// One row of the system commands list.
@@ -24,9 +25,8 @@ impl SystemEntry {
     pub fn command_line(&self) -> String {
         match &self.action {
             DeferredAction::Command(argv) => argv.join(" "),
-            DeferredAction::HyprDispatch(args) => format!("hyprctl dispatch {}", args.join(" ")),
+            DeferredAction::Hypr(action) => format!("hyprctl eval '{}'", action.lua()),
             DeferredAction::HyprPaste(_)
-            | DeferredAction::HyprDispatchBatch(_)
             | DeferredAction::Signal(_)
             | DeferredAction::Bluetooth(_) => String::new(),
         }
@@ -69,7 +69,7 @@ fn default_action(id: SystemCommand, hyprland: bool, session_id: Option<&str>) -
         SystemCommand::Lock => argv(&["loginctl", "lock-session"]),
         SystemCommand::Suspend => argv(&["systemctl", "suspend"]),
         SystemCommand::Hibernate => argv(&["systemctl", "hibernate"]),
-        SystemCommand::Logout if hyprland => DeferredAction::HyprDispatch(vec!["exit".into()]),
+        SystemCommand::Logout if hyprland => DeferredAction::Hypr(HyprAction::Exit),
         SystemCommand::Logout => {
             let mut args = vec!["loginctl", "terminate-session"];
             args.extend(session_id);
@@ -83,7 +83,7 @@ fn default_action(id: SystemCommand, hyprland: bool, session_id: Option<&str>) -
 fn program(action: &DeferredAction) -> Option<&str> {
     match action {
         DeferredAction::Command(argv) => argv.first().map(String::as_str),
-        DeferredAction::HyprDispatch(_) | DeferredAction::HyprDispatchBatch(_) => Some("hyprctl"),
+        DeferredAction::Hypr(_) => Some("hyprctl"),
         DeferredAction::HyprPaste(_) | DeferredAction::Signal(_) => None,
         DeferredAction::Bluetooth(_) => Some("bluetoothctl"),
     }

@@ -188,9 +188,7 @@ fn wait_until(child: &mut Child, deadline: Instant) -> Result<ExitStatus, String
 pub(super) enum DeferredAction {
     HyprPaste(super::hyprland::Hyprland),
     Command(Vec<String>),
-    HyprDispatch(Vec<String>),
-    /// Several dispatches run in order, stopping at the first failure.
-    HyprDispatchBatch(Vec<Vec<String>>),
+    Hypr(super::hyprland::HyprAction),
     /// Signal a process after checking it is still the one listed.
     Signal(super::kill::SignalTarget),
     /// `bluetoothctl` with these arguments, failing on the errors it prints.
@@ -202,10 +200,7 @@ impl DeferredAction {
         match self {
             Self::HyprPaste(target) => target.paste(),
             Self::Command(argv) => run_detached(argv, DEFERRED_TIMEOUT),
-            Self::HyprDispatch(args) => super::hyprland::dispatch(args),
-            Self::HyprDispatchBatch(batch) => batch
-                .iter()
-                .try_for_each(|args| super::hyprland::dispatch(args)),
+            Self::Hypr(action) => action.run(),
             Self::Signal(target) => super::kill::send_signal(target),
             Self::Bluetooth(args) => super::bluetooth::run_action(args),
         }
@@ -215,7 +210,7 @@ impl DeferredAction {
         match self {
             Self::HyprPaste(_) => "hypr_paste",
             Self::Command(_) => "action",
-            Self::HyprDispatch(_) | Self::HyprDispatchBatch(_) => "hyprctl dispatch",
+            Self::Hypr(_) => "hyprctl",
             Self::Signal(_) => "kill",
             Self::Bluetooth(_) => "bluetoothctl",
         }

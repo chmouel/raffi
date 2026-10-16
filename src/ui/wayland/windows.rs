@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 use super::actions::{run_bounded, DeferredAction};
 use super::command_list::{CommandAction, CommandItem};
-use super::hyprland::valid_address;
+use super::hyprland::{valid_address, HyprAction};
 
 const TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_OUTPUT: usize = 4 * 1024 * 1024;
@@ -105,8 +105,9 @@ pub(super) fn window_items(
         .collect())
 }
 
-/// The `movetoworkspacesilent` target for the active workspace. Named
-/// workspaces have negative ids, which Hyprland would read as relative moves.
+/// The workspace selector for moving a window to the active workspace. Named
+/// workspaces have negative ids, which Hyprland would read as relative moves,
+/// and the legacy dispatch cannot take names with commas.
 fn move_target(active: &Workspace) -> Option<String> {
     if active.id > 0 {
         Some(active.id.to_string())
@@ -122,8 +123,6 @@ fn move_target(active: &Workspace) -> Option<String> {
 }
 
 fn window_item(client: Client, target: Option<&str>) -> CommandItem {
-    let window = format!("address:{}", client.address);
-    let focus = vec!["focuswindow".to_string(), window.clone()];
     let title = if client.title.is_empty() {
         client.class.clone()
     } else {
@@ -162,13 +161,10 @@ fn window_item(client: Client, target: Option<&str>) -> CommandItem {
             "Move it to the current workspace and focus it".to_string(),
         ));
         CommandAction {
-            action: DeferredAction::HyprDispatchBatch(vec![
-                vec![
-                    "movetoworkspacesilent".to_string(),
-                    format!("{target},{window}"),
-                ],
-                focus.clone(),
-            ]),
+            action: DeferredAction::Hypr(HyprAction::MoveHere {
+                address: client.address.clone(),
+                workspace: target.to_string(),
+            }),
             confirm: None,
             keep_open: false,
             progress: None,
@@ -180,10 +176,12 @@ fn window_item(client: Client, target: Option<&str>) -> CommandItem {
         subtitle,
         icon_names,
         icon: None,
-        identity: client.address,
+        identity: client.address.clone(),
         unavailable: None,
         primary: Some(CommandAction {
-            action: DeferredAction::HyprDispatch(focus),
+            action: DeferredAction::Hypr(HyprAction::Focus {
+                address: client.address,
+            }),
             confirm: None,
             keep_open: false,
             progress: None,
@@ -269,15 +267,13 @@ mod tests {
         let firefox = &items[1];
         assert!(matches!(
             &firefox.primary.as_ref().unwrap().action,
-            DeferredAction::HyprDispatch(args) if args == &["focuswindow", "address:0x1a"]
+            DeferredAction::Hypr(HyprAction::Focus { address }) if address == "0x1a"
         ));
         let secondary = firefox.secondary.as_ref().unwrap();
         assert!(matches!(
             &secondary.action,
-            DeferredAction::HyprDispatchBatch(batch) if batch == &[
-                vec!["movetoworkspacesilent".to_string(), "1,address:0x1a".to_string()],
-                vec!["focuswindow".to_string(), "address:0x1a".to_string()],
-            ]
+            DeferredAction::Hypr(HyprAction::MoveHere { address, workspace })
+                if address == "0x1a" && workspace == "1"
         ));
         assert!(firefox.primary.as_ref().unwrap().confirm.is_none() && secondary.confirm.is_none());
     }
@@ -291,7 +287,7 @@ mod tests {
         let items = window_items(CLIENTS.as_bytes(), named.as_bytes(), 4242).unwrap();
         assert!(matches!(
             &items[0].secondary.as_ref().unwrap().action,
-            DeferredAction::HyprDispatchBatch(batch) if batch[0][1] == "name:web,address:0x3c"
+            DeferredAction::Hypr(HyprAction::MoveHere { workspace, .. }) if workspace == "name:web"
         ));
 
         let odd = monitor(
@@ -311,7 +307,7 @@ mod tests {
         let items = window_items(CLIENTS.as_bytes(), special.as_bytes(), 4242).unwrap();
         assert!(matches!(
             &items[1].secondary.as_ref().unwrap().action,
-            DeferredAction::HyprDispatchBatch(batch) if batch[0][1] == "special:magic,address:0x1a"
+            DeferredAction::Hypr(HyprAction::MoveHere { workspace, .. }) if workspace == "special:magic"
         ));
     }
 

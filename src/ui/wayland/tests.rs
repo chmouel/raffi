@@ -4,6 +4,7 @@ use super::app::{
 };
 use super::command_list::CommandListAddon;
 use super::help::{filter_help_entries, help_entries, HelpSection};
+use super::hyprland::HyprAction;
 use super::placeholders::Expanded;
 use super::preview::{
     format_byte_size, inspect_path, PreviewBody, MAX_FILE_PREVIEW_BYTES, MAX_FILE_PREVIEW_LINES,
@@ -3718,7 +3719,7 @@ fn test_system_logout_default_follows_session() {
     };
     assert!(matches!(
         logout(true, Some("3")),
-        DeferredAction::HyprDispatch(args) if args == ["exit"]
+        DeferredAction::Hypr(HyprAction::Exit)
     ));
     assert!(matches!(
         logout(false, Some("3")),
@@ -3882,7 +3883,7 @@ fn test_windows_load_then_filter_and_focus() {
     assert!(task.units() > 0, "Raffi closes");
     assert!(matches!(
         deferred_action(&app),
-        Some(DeferredAction::HyprDispatch(args)) if args == ["focuswindow", "address:0xa1"]
+        Some(DeferredAction::Hypr(HyprAction::Focus { address })) if address == "0xa1"
     ));
     let before = app.history.items.clone();
     app.history.max_items = 10;
@@ -3899,19 +3900,11 @@ fn test_windows_ctrl_enter_brings_window_here() {
     let _ = app.update(Message::ModifiersChanged(iced::keyboard::Modifiers::CTRL));
     let task = app.update(Message::Submit);
     assert!(task.units() > 0, "Raffi closes without confirmation");
-    let Some(DeferredAction::HyprDispatchBatch(batch)) = deferred_action(&app) else {
-        panic!("expected a dispatch batch");
-    };
-    assert_eq!(
-        batch,
-        vec![
-            vec![
-                "movetoworkspacesilent".to_string(),
-                "2,address:0xb2".to_string()
-            ],
-            vec!["focuswindow".to_string(), "address:0xb2".to_string()],
-        ]
-    );
+    assert!(matches!(
+        deferred_action(&app),
+        Some(DeferredAction::Hypr(HyprAction::MoveHere { address, workspace }))
+            if address == "0xb2" && workspace == "2"
+    ));
 }
 
 #[test]

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use super::actions::{kill_process_group, run_bounded, validate_snippet};
+use super::actions::{kill_process_group, run_bounded, run_bounded_status, validate_snippet};
 use super::placeholders::MAX_VALUE;
 
 const TIMEOUT: Duration = Duration::from_secs(2);
@@ -135,13 +135,125 @@ pub(super) fn default_to_hypr_paste(
     (explicit || target.is_ok()).then_some(target)
 }
 
-/// Run `hyprctl dispatch` with `args` in the current Hyprland session.
-pub(super) fn dispatch(args: &[String]) -> Result<(), String> {
-    let mut command = Command::new("hyprctl");
-    command.arg("dispatch").args(args);
-    let output =
-        run_bounded(command, TIMEOUT, 64 * 1024).map_err(|error| format!("hyprctl: {error}"))?;
-    checked_reply_for(&output, "dispatch")
+/// A window manager action run through `hyprctl` once Raffi has closed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum HyprAction {
+    Focus {
+        address: String,
+    },
+    /// Move the window to `workspace` without following it, then focus it.
+    MoveHere {
+        address: String,
+        workspace: String,
+    },
+    Exit,
+}
+
+impl HyprAction {
+    /// The Lua run by `hyprctl eval` (Hyprland 0.55+ with a Lua config).
+    /// Window actions assert first because acting on a missing window only
+    /// warns.
+    pub(super) fn lua(&self) -> String {
+        let window = |address: &str| {
+            format!(
+                "local w = hl.get_window(\"address:{address}\"); assert(w, \"window is gone\"); "
+            )
+        };
+        let focus = "hl.dispatch(hl.dsp.focus({ window = w }))";
+        match self {
+            Self::Focus { address } => format!("{}{focus}", window(address)),
+            Self::MoveHere { address, workspace } => format!(
+                "{}hl.dispatch(hl.dsp.window.move({{ window = w, workspace = {}, follow = false }})); {focus}",
+                window(address),
+                lua_quote(workspace)
+            ),
+            Self::Exit => "hl.dispatch(hl.dsp.exit())".into(),
+        }
+    }
+
+    /// The `hyprctl dispatch` arguments for hyprlang configs, run in order.
+    pub(super) fn legacy(&self) -> Vec<Vec<String>> {
+        let focus = |address: &str| vec!["focuswindow".into(), format!("address:{address}")];
+        match self {
+            Self::Focus { address } => vec![focus(address)],
+            Self::MoveHere { address, workspace } => vec![
+                vec![
+                    "movetoworkspacesilent".into(),
+                    format!("{workspace},address:{address}"),
+                ],
+                focus(address),
+            ],
+            Self::Exit => vec![vec!["exit".into()]],
+        }
+    }
+
+    /// Run the action in the current Hyprland session.
+    pub(super) fn run(&self) -> Result<(), String> {
+        self.run_with(|args| {
+            let mut command = Command::new("hyprctl");
+            command.args(args);
+            let (status, output) = run_bounded_status(command, TIMEOUT, 64 * 1024)
+                .map_err(|error| format!("hyprctl: {error}"))?;
+            Ok((
+                status.success(),
+                String::from_utf8_lossy(&output).into_owned(),
+            ))
+        })
+    }
+
+    /// Try the Lua form, falling back to `hyprctl dispatch` only when
+    /// Hyprland has no Lua support. `hyprctl` returns success and the reply.
+    fn run_with(
+        &self,
+        hyprctl: impl Fn(&[String]) -> Result<(bool, String), String>,
+    ) -> Result<(), String> {
+        let (success, reply) = hyprctl(&["eval".into(), self.lua()])?;
+        if !lua_unavailable(&reply) {
+            return checked_status(success, &reply);
+        }
+        crate::debug_log!(
+            "hyprctl eval unavailable ({}); using dispatch",
+            reply.trim()
+        );
+        self.legacy().into_iter().try_for_each(|args| {
+            let argv: Vec<String> = std::iter::once("dispatch".to_string())
+                .chain(args)
+                .collect();
+            let (success, reply) = hyprctl(&argv)?;
+            checked_status(success, &reply)
+        })
+    }
+}
+
+/// Whether an eval reply means Hyprland cannot run Lua: versions before 0.55
+/// do not know `eval`, and hyprlang configs reject it.
+fn lua_unavailable(reply: &str) -> bool {
+    let reply = reply.trim();
+    reply == "unknown request" || reply.starts_with("eval is only supported with the lua config")
+}
+
+fn checked_status(success: bool, reply: &str) -> Result<(), String> {
+    match checked_reply_for(reply.as_bytes(), "action") {
+        Ok(()) if !success => Err("hyprctl failed".into()),
+        result => result,
+    }
+}
+
+/// A Lua string literal for `value`. Control characters use decimal escapes
+/// so the expression stays on one line.
+fn lua_quote(value: &str) -> String {
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('"');
+    for c in value.chars() {
+        match c {
+            '\\' => quoted.push_str("\\\\"),
+            '"' => quoted.push_str("\\\""),
+            c if c.is_ascii_control() => quoted.push_str(&format!("\\{:03}", c as u32)),
+            c => quoted.push(c),
+        }
+    }
+    quoted.push('"');
+    quoted
 }
 
 /// Show `message` as a Hyprland notification; outside Hyprland it is only
@@ -628,6 +740,138 @@ printf '%s|' "$@" > "$OUT"
                 _ => return,
             }
         }
+    }
+
+    #[test]
+    fn test_hypr_action_renders_lua_and_legacy_forms() {
+        let focus = HyprAction::Focus {
+            address: "0x1a".into(),
+        };
+        assert_eq!(
+            focus.lua(),
+            r#"local w = hl.get_window("address:0x1a"); assert(w, "window is gone"); hl.dispatch(hl.dsp.focus({ window = w }))"#
+        );
+        assert_eq!(focus.legacy(), vec![vec!["focuswindow", "address:0x1a"]]);
+
+        let move_here = HyprAction::MoveHere {
+            address: "0x1a".into(),
+            workspace: "special:magic".into(),
+        };
+        assert_eq!(
+            move_here.lua(),
+            r#"local w = hl.get_window("address:0x1a"); assert(w, "window is gone"); hl.dispatch(hl.dsp.window.move({ window = w, workspace = "special:magic", follow = false })); hl.dispatch(hl.dsp.focus({ window = w }))"#
+        );
+        assert_eq!(
+            move_here.legacy(),
+            vec![
+                vec!["movetoworkspacesilent", "special:magic,address:0x1a"],
+                vec!["focuswindow", "address:0x1a"],
+            ]
+        );
+
+        assert_eq!(HyprAction::Exit.lua(), "hl.dispatch(hl.dsp.exit())");
+        assert_eq!(HyprAction::Exit.legacy(), vec![vec!["exit"]]);
+    }
+
+    #[test]
+    fn test_lua_quote_escapes_hostile_names() {
+        assert_eq!(lua_quote("name:web"), r#""name:web""#);
+        assert_eq!(
+            lua_quote(r#"name:a" }) os.exit() --\"#),
+            r#""name:a\" }) os.exit() --\\""#
+        );
+        assert_eq!(
+            lua_quote("a\nb\r\0\x1b\x7f9"),
+            r#""a\010b\013\000\027\1279""#
+        );
+        assert_eq!(lua_quote("\u{e9}t\u{e9}"), "\"\u{e9}t\u{e9}\"");
+    }
+
+    #[test]
+    fn test_hypr_action_falls_back_only_without_lua() {
+        let move_here = HyprAction::MoveHere {
+            address: "0x1a".into(),
+            workspace: "2".into(),
+        };
+        let run = |eval_reply: &'static str, eval_ok: bool, dispatch_reply: &'static str| {
+            let calls = std::cell::RefCell::new(Vec::new());
+            let result = move_here.run_with(|args| {
+                calls.borrow_mut().push(args.join(" "));
+                Ok(if args[0] == "eval" {
+                    (eval_ok, eval_reply.to_string())
+                } else {
+                    (true, dispatch_reply.to_string())
+                })
+            });
+            (result, calls.into_inner())
+        };
+
+        let (result, calls) = run("ok\n", true, "");
+        assert!(result.is_ok());
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].starts_with("eval local w"));
+
+        for reply in [
+            "unknown request",
+            "eval is only supported with the lua config manager",
+        ] {
+            let (result, calls) = run(reply, true, "ok");
+            assert!(result.is_ok(), "{reply}");
+            assert_eq!(
+                calls[1..],
+                [
+                    "dispatch movetoworkspacesilent 2,address:0x1a",
+                    "dispatch focuswindow address:0x1a",
+                ]
+            );
+        }
+
+        let (result, calls) = run("unknown request", true, "Invalid dispatcher");
+        assert_eq!(
+            result.unwrap_err(),
+            "Hyprland rejected the action: Invalid dispatcher"
+        );
+        assert_eq!(calls.len(), 2, "stops at the first failed dispatch");
+
+        let gone = "error: [string \"local w = ...\"]:1: window is gone";
+        let (result, calls) = run(gone, false, "ok");
+        assert_eq!(
+            result.unwrap_err(),
+            format!("Hyprland rejected the action: {gone}")
+        );
+        assert_eq!(calls.len(), 1, "Lua errors do not fall back");
+
+        let (result, calls) = run("error: unknown request in lua", false, "ok");
+        assert!(result.is_err());
+        assert_eq!(calls.len(), 1);
+
+        let (result, _) = run("ok", false, "ok");
+        assert_eq!(result.unwrap_err(), "hyprctl failed");
+    }
+
+    /// Exercises the real deferred path on a throwaway window:
+    /// `RAFFI_HYPR_TEST_ADDRESS=0x.. RAFFI_HYPR_TEST_WORKSPACE=2 cargo test --all-features -- --ignored live_hypr`
+    #[test]
+    #[ignore]
+    fn live_hypr_actions() {
+        let address = std::env::var("RAFFI_HYPR_TEST_ADDRESS").unwrap();
+        let workspace = std::env::var("RAFFI_HYPR_TEST_WORKSPACE").unwrap();
+        let slot = |action| {
+            std::sync::Mutex::new(Some(super::super::actions::DeferredAction::Hypr(action)))
+        };
+        super::super::actions::run_deferred(&slot(HyprAction::Focus {
+            address: address.clone(),
+        }))
+        .unwrap();
+        super::super::actions::run_deferred(&slot(HyprAction::MoveHere { address, workspace }))
+            .unwrap();
+        assert!(
+            super::super::actions::run_deferred(&slot(HyprAction::Focus {
+                address: "0xdead".into(),
+            }))
+            .unwrap_err()
+            .contains("window is gone")
+        );
     }
 
     #[test]

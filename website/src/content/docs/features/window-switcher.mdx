@@ -25,6 +25,10 @@ session the list shows "Window switching needs Hyprland", and when
 Raffi closes first, then asks Hyprland to switch. If the window has closed
 in the meantime, Raffi reports the error as a Hyprland notification.
 
+On Hyprland 0.55 or later with a Lua config, Raffi sends the action with
+`hyprctl eval`. Older versions and hyprlang configs do not support that, so
+Raffi falls back to `hyprctl dispatch`.
+
 Raffi's own window is left out of the list. Queries typed in this mode are
 not saved in the search history.
 

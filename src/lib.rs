@@ -476,7 +476,8 @@ pub struct SystemCommandsConfig {
     /// Default: `systemctl hibernate`.
     #[serde(default)]
     pub hibernate: Option<Vec<String>>,
-    /// Default: `hyprctl dispatch exit` on Hyprland, otherwise
+    /// Default: Hyprland's exit dispatcher on Hyprland (through `hyprctl eval`
+    /// with a Lua config, `hyprctl dispatch exit` otherwise), otherwise
     /// `loginctl terminate-session $XDG_SESSION_ID`.
     #[serde(default)]
     pub logout: Option<Vec<String>>,
