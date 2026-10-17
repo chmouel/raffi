@@ -15,10 +15,15 @@ use super::theme::ThemeColors;
 
 type HintSpan<'a> = iced::widget::text::Span<'a, (), iced::Font>;
 
-pub(super) fn file_browser_shortcut_message(character: &str) -> Option<Message> {
+pub(super) fn file_browser_shortcut_message(
+    character: &str,
+    modifiers: iced::keyboard::Modifiers,
+) -> Option<Message> {
     match character {
-        "o" => Some(Message::FileBrowserOpenSelected),
-        "b" => Some(Message::FileBrowserOpenFileManager),
+        "o" if modifiers.control() => Some(Message::FileBrowserOpenSelected),
+        "b" if modifiers.control() => Some(Message::FileBrowserOpenFileManager),
+        "y" if modifiers.control() && modifiers.alt() => Some(Message::FileBrowserCopyImage),
+        "y" if modifiers.control() => Some(Message::FileBrowserCopyPath),
         _ => None,
     }
 }
@@ -1867,6 +1872,12 @@ impl LauncherApp {
             hint_spans.push(span("Ctrl+B").size(fs.hint).color(t.accent));
             hint_spans.push(span(" file manager").size(fs.hint).color(t.text_muted));
             hint_spans.push(sep.clone());
+            hint_spans.push(span("Ctrl+Y").size(fs.hint).color(t.accent));
+            hint_spans.push(span(" copy path").size(fs.hint).color(t.text_muted));
+            hint_spans.push(sep.clone());
+            hint_spans.push(span("Ctrl+Alt+Y").size(fs.hint).color(t.accent));
+            hint_spans.push(span(" copy image").size(fs.hint).color(t.text_muted));
+            hint_spans.push(sep.clone());
             hint_spans.push(span("Ctrl+S").size(fs.hint).color(t.accent));
             hint_spans.push(
                 span(format!(
@@ -1990,8 +2001,8 @@ impl LauncherApp {
                 key: keyboard::Key::Character(ref c),
                 modifiers,
                 ..
-            }) if modifiers.control() && matches!(c.as_str(), "o" | "b") => {
-                file_browser_shortcut_message(c.as_str())
+            }) if modifiers.control() && matches!(c.as_str(), "o" | "b" | "y") => {
+                file_browser_shortcut_message(c.as_str(), modifiers)
             }
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Character(ref c),

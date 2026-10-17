@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use super::placeholders::MAX_VALUE;
 
 const CLIPBOARD_TIMEOUT: Duration = Duration::from_secs(2);
+const IMAGE_CLIPBOARD_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFERRED_TIMEOUT: Duration = Duration::from_secs(2);
 /// Typing a key per character is slow and each press is a command argument, so
 /// keep caret movement for `{cursor}` within a sane bound.
@@ -101,10 +102,50 @@ pub(super) fn copy_text_checked(text: &str) -> Result<(), String> {
     copy_with(argv, text, CLIPBOARD_TIMEOUT)
 }
 
+pub(super) fn copy_image_checked(path: &Path, mime_type: &str) -> Result<(), String> {
+    let tool = find_tool(&["wl-copy", "xclip"])
+        .ok_or("cannot copy image: install wl-clipboard or xclip")?;
+    let mut command = Command::new(tool);
+    if tool == "xclip" {
+        command
+            .args(["-selection", "clipboard", "-t"])
+            .arg(mime_type)
+            .arg("-i");
+    } else {
+        command.arg("--type").arg(mime_type);
+    }
+    copy_file_to_clipboard_with(&mut command, path, IMAGE_CLIPBOARD_TIMEOUT)
+}
+
 #[cfg(test)]
 pub(super) fn copy_text_with(argv: &[String], text: &str) -> Result<(), String> {
     let argv: Vec<&str> = argv.iter().map(String::as_str).collect();
     copy_with(&argv, text, CLIPBOARD_TIMEOUT)
+}
+
+fn copy_file_to_clipboard_with(
+    command: &mut Command,
+    path: &Path,
+    timeout: Duration,
+) -> Result<(), String> {
+    let input = std::fs::File::open(path).map_err(|error| format!("cannot read image: {error}"))?;
+    let name = program_name(&command.get_program().to_string_lossy()).to_string();
+    let mut child = command
+        .stdin(Stdio::from(input))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()
+        .map_err(|error| format!("cannot start {name}: {error}"))?;
+    let deadline = Instant::now() + timeout;
+    let status = match wait_until(&mut child, deadline) {
+        Ok(status) => status,
+        Err(error) => return Err(format!("{name} {error}")),
+    };
+    if !status.success() {
+        return Err(exit_error(&name, status));
+    }
+    Ok(())
 }
 
 fn copy_with(argv: &[&str], text: &str, timeout: Duration) -> Result<(), String> {
@@ -1072,6 +1113,25 @@ mod tests {
 
         let error = copy_with(&["sleep", "5"], "secret", Duration::from_millis(200)).unwrap_err();
         assert_eq!(error, "sleep timed out");
+    }
+
+    #[test]
+    fn test_copy_file_to_clipboard_preserves_binary_data() {
+        let dir = std::env::temp_dir().join(format!("raffi-image-copy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let input_path = dir.join("image.png");
+        let output_path = dir.join("clipboard");
+        let image = b"\x89PNG\r\n\x1a\n\x00\xff";
+        std::fs::write(&input_path, image).unwrap();
+
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "cat > \"$1\"", "copy-image"])
+            .arg(&output_path);
+        copy_file_to_clipboard_with(&mut command, &input_path, Duration::from_secs(5)).unwrap();
+
+        assert_eq!(std::fs::read(output_path).unwrap(), image);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

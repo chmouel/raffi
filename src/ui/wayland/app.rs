@@ -9,8 +9,8 @@ use iced::widget::scrollable::{self, AbsoluteOffset};
 use iced::Task;
 
 use super::actions::{
-    copy_text_checked, execute_action, execute_action_with_env, execute_file_action,
-    execute_snippet_action, open_in_file_manager, DeferredAction,
+    copy_image_checked, copy_text_checked, execute_action, execute_action_with_env,
+    execute_file_action, execute_snippet_action, open_in_file_manager, DeferredAction,
 };
 use super::browser::read_directory;
 use super::color::{color_inline_result, try_parse_color};
@@ -28,6 +28,7 @@ use super::emoji::{
     load_emoji_data_from_disk, resolve_emoji_file_names,
 };
 use super::help::{filter_help_entries, help_entries};
+use super::preview::image_mime_type;
 use super::script_filters::{
     execute_script_filter, execute_script_filter_preview, parse_script_filter_output,
     schedule_script_filter_preview, PreviewRequest,
@@ -90,6 +91,24 @@ pub(super) enum QueryMode {
         payload: String,
     },
     Standard,
+}
+
+fn checked_clipboard_copy_task(
+    path: String,
+    copy: impl FnOnce() -> Result<(), String> + Send + 'static,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            let (sender, receiver) = iced::futures::channel::oneshot::channel();
+            std::thread::spawn(move || {
+                let _ = sender.send(copy());
+            });
+            receiver
+                .await
+                .unwrap_or_else(|_| Err("copy worker stopped unexpectedly".into()))
+        },
+        move |result| Message::FileBrowserCopyCompleted(path, result),
+    )
 }
 
 /// Debug output keeps the payload of sensitive modes out of logs.
@@ -902,6 +921,17 @@ impl LauncherApp {
             Message::DragEvent(event) => self.handle_drag_event(event),
             Message::TabComplete => self.handle_tab_complete(),
             Message::FileBrowserToggleHidden => self.handle_file_browser_toggle_hidden(),
+            Message::FileBrowserCopyPath => self.handle_file_browser_copy_path(),
+            Message::FileBrowserCopyImage => self.handle_file_browser_copy_image(),
+            Message::FileBrowserCopyCompleted(path, result) => {
+                if self
+                    .selected_file_browser_entry()
+                    .is_some_and(|entry| entry.full_path == path)
+                {
+                    self.file_browser.error = result.err();
+                }
+                Task::none()
+            }
             Message::FileBrowserOpenSelected => self.handle_file_browser_open_selected(),
             Message::FileBrowserOpenFileManager => self.handle_file_browser_open_file_manager(),
             Message::FileBrowserCycleSort => self.handle_file_browser_cycle_sort(),
@@ -2844,14 +2874,52 @@ impl LauncherApp {
         Task::done(Message::SearchChanged(query))
     }
 
-    fn handle_file_browser_open_selected(&mut self) -> Task<Message> {
+    fn selected_file_browser_entry(&self) -> Option<&super::state::FileBrowserEntry> {
         if !self.file_browser.active {
-            return Task::none();
+            return None;
         }
         let entry_index = self
             .selected_index
             .saturating_sub(self.script_filter_offset());
-        let Some(entry) = self.file_browser.entries.get(entry_index) else {
+        self.file_browser.entries.get(entry_index)
+    }
+
+    fn handle_file_browser_copy_path(&mut self) -> Task<Message> {
+        let Some(entry) = self.selected_file_browser_entry() else {
+            return Task::none();
+        };
+        let path = entry.full_path.clone();
+        self.file_browser.error = None;
+        let copy = self.copy_job(path.clone());
+        checked_clipboard_copy_task(path, move || {
+            copy().map_err(|error| format!("Cannot copy path: {error}"))
+        })
+    }
+
+    fn handle_file_browser_copy_image(&mut self) -> Task<Message> {
+        let Some(entry) = self.selected_file_browser_entry() else {
+            return Task::none();
+        };
+        if entry.is_dir {
+            self.file_browser.error =
+                Some("Cannot copy image: selected entry is a directory".into());
+            return Task::none();
+        }
+        let Some(mime_type) = image_mime_type(Path::new(&entry.full_path)) else {
+            self.file_browser.error =
+                Some("Cannot copy image: selected entry is not a supported image".into());
+            return Task::none();
+        };
+        let path = entry.full_path.clone();
+        self.file_browser.error = None;
+        checked_clipboard_copy_task(path.clone(), move || {
+            copy_image_checked(Path::new(&path), mime_type)
+                .map_err(|error| format!("Cannot copy image: {error}"))
+        })
+    }
+
+    fn handle_file_browser_open_selected(&mut self) -> Task<Message> {
+        let Some(entry) = self.selected_file_browser_entry() else {
             return Task::none();
         };
         execute_file_action("open", &entry.full_path);
@@ -2864,13 +2932,8 @@ impl LauncherApp {
         if !self.file_browser.active || dir.is_empty() || !Path::new(dir).is_dir() {
             return Task::none();
         }
-        let entry_index = self
-            .selected_index
-            .saturating_sub(self.script_filter_offset());
         let selected = self
-            .file_browser
-            .entries
-            .get(entry_index)
+            .selected_file_browser_entry()
             .map(|entry| entry.full_path.as_str());
         open_in_file_manager(
             dir,

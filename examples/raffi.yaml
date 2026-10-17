@@ -582,6 +582,9 @@ addons:
   # pcmanfm...; else the first installed; else xdg-open). Without {value} the
   # directory is appended as the last argument. Nautilus, Dolphin, Nemo and
   # Caja also get the selected entry highlighted.
+  # Ctrl+Y copies the selected path regardless of the configured actions.
+  # Ctrl+Alt+Y copies a supported image file to the system clipboard (requires
+  # wl-copy or xclip).
   # sort sets the initial order: name, modified (alias: date) or created, the
   # last two newest first. Ctrl+S cycles through them while browsing.
   # sort_reverse: true flips the order (Z to A, or oldest first).

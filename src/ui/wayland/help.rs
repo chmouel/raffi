@@ -322,6 +322,16 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
                 "File browser: opens the current directory with the entry selected",
             ),
             shortcut(
+                "Ctrl+Y",
+                "Copy path",
+                "File browser: copies the selected path to the clipboard",
+            ),
+            shortcut(
+                "Ctrl+Alt+Y",
+                "Copy image",
+                "File browser: copies a supported image file to the clipboard",
+            ),
+            shortcut(
                 "Ctrl+S",
                 "Cycle sort order",
                 "File browser: name, modified date, created date",

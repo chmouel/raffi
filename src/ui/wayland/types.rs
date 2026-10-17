@@ -467,6 +467,9 @@ pub(crate) enum Message {
     DragEvent(super::dnd::DragEvent),
     TabComplete,
     FileBrowserToggleHidden,
+    FileBrowserCopyPath,
+    FileBrowserCopyImage,
+    FileBrowserCopyCompleted(String, std::result::Result<(), String>),
     /// Open the selected entry with xdg-open, directories included.
     FileBrowserOpenSelected,
     /// Open the directory being browsed in a file manager.

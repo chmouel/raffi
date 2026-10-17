@@ -1184,13 +1184,65 @@ fn test_file_browser_opens_current_dir_in_configured_file_manager() {
 
 #[test]
 fn test_file_browser_shortcuts_route_to_expected_messages() {
+    let control = iced::keyboard::Modifiers::CTRL;
+    let control_alt = control | iced::keyboard::Modifiers::ALT;
     assert!(matches!(
-        super::view::file_browser_shortcut_message("o"),
+        super::view::file_browser_shortcut_message("o", control),
         Some(Message::FileBrowserOpenSelected)
     ));
     assert!(matches!(
-        super::view::file_browser_shortcut_message("b"),
+        super::view::file_browser_shortcut_message("b", control),
         Some(Message::FileBrowserOpenFileManager)
+    ));
+    assert!(matches!(
+        super::view::file_browser_shortcut_message("y", control),
+        Some(Message::FileBrowserCopyPath)
+    ));
+    assert!(matches!(
+        super::view::file_browser_shortcut_message("y", control_alt),
+        Some(Message::FileBrowserCopyImage)
+    ));
+    assert!(
+        super::view::file_browser_shortcut_message("y", iced::keyboard::Modifiers::ALT).is_none()
+    );
+}
+
+#[test]
+fn test_file_browser_copy_image_rejects_unsupported_selection() {
+    let mut app = test_app(AddonsConfig::default());
+    app.file_browser.active = true;
+    app.file_browser
+        .entries
+        .push(super::state::FileBrowserEntry {
+            name: "notes.txt".into(),
+            full_path: "/tmp/notes.txt".into(),
+            is_dir: false,
+        });
+
+    let _ = app.update(Message::FileBrowserCopyImage);
+
+    assert_eq!(
+        app.file_browser.error.as_deref(),
+        Some("Cannot copy image: selected entry is not a supported image")
+    );
+}
+
+#[test]
+fn test_image_mime_type_uses_supported_file_extensions() {
+    assert_eq!(
+        super::preview::image_mime_type(std::path::Path::new("image.PNG")),
+        Some("image/png")
+    );
+    assert_eq!(
+        super::preview::image_mime_type(std::path::Path::new("image.tiff")),
+        Some("image/tiff")
+    );
+    assert_eq!(
+        super::preview::image_mime_type(std::path::Path::new("notes.txt")),
+        None
+    );
+    assert!(!super::preview::is_previewable_image_path(
+        std::path::Path::new("image.tiff")
     ));
 }
 
@@ -1773,6 +1825,8 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "Ctrl+H",
             "Ctrl+O",
             "Ctrl+B",
+            "Ctrl+Y",
+            "Ctrl+Alt+Y",
             "Ctrl+S",
             "Ctrl+.",
             "Alt+P/N",

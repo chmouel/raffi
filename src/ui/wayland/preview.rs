@@ -90,13 +90,36 @@ pub(crate) struct InspectedFile {
 
 /// Check if an extension corresponds to a previewable raster or vector image.
 pub(super) fn is_previewable_image_path(path: &Path) -> bool {
-    let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
-        return false;
-    };
     matches!(
-        ext.to_ascii_lowercase().as_str(),
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "svg"
+        image_mime_type(path),
+        Some(
+            "image/png"
+                | "image/jpeg"
+                | "image/gif"
+                | "image/webp"
+                | "image/bmp"
+                | "image/vnd.microsoft.icon"
+                | "image/svg+xml"
+        )
     )
+}
+
+pub(super) fn image_mime_type(path: &Path) -> Option<&'static str> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())?
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        "bmp" => Some("image/bmp"),
+        "ico" => Some("image/vnd.microsoft.icon"),
+        "svg" => Some("image/svg+xml"),
+        "tif" | "tiff" => Some("image/tiff"),
+        _ => None,
+    }
 }
 
 /// Format a byte count into a human-readable string (`B`, `KiB`, `MiB`, `GiB`).
@@ -856,6 +879,10 @@ impl LauncherApp {
         metadata.push(("Tab".to_string(), "Autocomplete path".to_string()));
         metadata.push(("Ctrl+O".to_string(), "Open with xdg-open".to_string()));
         metadata.push(("Ctrl+B".to_string(), "Show in file manager".to_string()));
+        metadata.push(("Ctrl+Y".to_string(), "Copy path".to_string()));
+        if !entry.is_dir && image_mime_type(Path::new(&entry.full_path)).is_some() {
+            metadata.push(("Ctrl+Alt+Y".to_string(), "Copy image".to_string()));
+        }
 
         let mut data = PreviewData {
             title: if entry.is_dir {
