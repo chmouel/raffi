@@ -314,14 +314,14 @@ Command that Ctrl+O uses to open the browsed directory. The directory is appende
 
 ```
 
-**`addons.file_browser.preview_command`** `string` (default: unset)
+**`addons.file_browser.preview_command`** `string` (default: the bundled previewer when `python3` is installed)
 
-Command that previews the selected entry in the preview pane. The path is appended as the last argument and exported as `$RAFFI_VALUE`; the command prints ANSI text or a [preview object](/features/script-filters/#preview-object) as JSON, and prints nothing or exits non-zero to keep the built-in preview. Raffi ships one in `scripts/file-preview`. See [Custom Previewer](/features/file-browser/#custom-previewer).
+Command that previews the selected entry in the preview pane. When unset, raffi runs the previewer it bundles from `scripts/file-preview`; `none` turns rich previews off. The path is appended as the last argument and exported as `$RAFFI_VALUE`; the command prints ANSI text or a [preview object](/features/script-filters/#preview-object) as JSON, and prints nothing or exits non-zero to keep the built-in preview. See [Rich Previews](/features/file-browser/#rich-previews).
 
   ```yaml
   addons:
     file_browser:
-      preview_command: "~/.config/raffi/scripts/file-preview/file-preview.py"
+      preview_command: "~/.config/raffi/scripts/file-preview.py"
 
 ```
 

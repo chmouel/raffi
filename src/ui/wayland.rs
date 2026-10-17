@@ -162,6 +162,10 @@ fn run_wayland_ui(
             app.view.preview_style = preview_style.clone();
             app.view.window_size = iced::Size::new(window_width, window_height);
             app.view.default_script_shell = default_script_shell.clone();
+            app.file_browser.preview_command = file_preview::FilePreviewCommand::resolve(
+                app.addons.file_browser.preview_command.as_deref(),
+                app.program_exists,
+            );
             app.hyprland = hyprland.clone();
             app.deferred_action = deferred_action_for_new.clone();
             (app, task)

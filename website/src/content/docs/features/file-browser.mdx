@@ -72,35 +72,42 @@ Start the file browser by typing one of these prefixes:
 
 <Image src={imageDetailsScreenshot} alt="Image preview scrolled down to file details" width={800} />
 
-### Custom Previewer
+### Rich Previews
 
-The built-in preview shows plain text, common image formats and directory listings. To preview anything else (PDF pages, video frames, ebook covers, archive listings, syntax-highlighted source, Markdown, JSON, CSV), point `preview_command` at a previewer script.
+The built-in preview shows plain text, common image formats and directory listings. When `python3` is installed, raffi also runs the previewer it bundles from [`scripts/file-preview`](https://github.com/chmouel/raffi/tree/main/scripts/file-preview), which adds PDF pages, video frames, ebook and album covers, archive listings, syntax-highlighted source, Markdown, JSON and CSV tables. Nothing needs to be installed or configured.
 
-Raffi ships one in [`scripts/file-preview`](https://github.com/chmouel/raffi/tree/main/scripts/file-preview). It needs only Python 3 and uses tools such as `bat`, `pdftoppm`, `ffmpegthumbnailer` or `ebook-meta` when they are installed; see its README for the full list.
+The previewer only needs Python 3. It uses tools such as `bat`, `pdftoppm`, `ffmpegthumbnailer` or `ebook-meta` when they are installed and falls back to plainer output without them; see its README for the full list. Without `python3` on your `PATH`, raffi keeps its plain preview.
 
-<Steps>
+When you select an entry, raffi shows its plain preview at once and swaps in the previewer's output when it arrives. Results are kept for the session and reused until the file changes.
 
-1. Copy the script into your config directory:
+The previewer follows the raffi theme: it picks the matching `bat` theme (Catppuccin, Nord, Dracula or Gruvbox) or bat's `ansi` theme, which is drawn with the raffi palette, and it ignores your terminal's `BAT_THEME`, `LS_COLORS` and `EZA_COLORS`. To keep a bat theme of your own, set `FILE_PREVIEW_BAT_THEME` in your environment.
 
-   ```bash
-   mkdir -p ~/.config/raffi/scripts/file-preview
-   cp scripts/file-preview/file-preview.py ~/.config/raffi/scripts/file-preview/
-   chmod +x ~/.config/raffi/scripts/file-preview/file-preview.py
-   ```
+Each new selection starts a short `python3` process once you stop moving through the list. To turn rich previews off, for example on a slow machine:
 
-2. Enable it:
+```yaml raffi.yaml
+addons:
+  file_browser:
+    preview_command: none
+```
 
-   ```yaml raffi.yaml
-   addons:
-     file_browser:
-       preview_command: "~/.config/raffi/scripts/file-preview/file-preview.py"
-   ```
+#### Customising the previewer
 
-</Steps>
+The bundled script is a single Python file. To change it, fetch it from the repository, edit your copy and point `preview_command` at it:
 
-When you select an entry, raffi shows its built-in preview at once and swaps in the command's output when it arrives. Results are kept for the session and reused until the file changes.
+```bash
+mkdir -p ~/.config/raffi/scripts
+curl -fsSL -o ~/.config/raffi/scripts/file-preview.py \
+  https://raw.githubusercontent.com/chmouel/raffi/main/scripts/file-preview/file-preview.py
+chmod +x ~/.config/raffi/scripts/file-preview.py
+```
 
-The bundled script follows the raffi theme: it picks the matching `bat` theme (Catppuccin, Nord, Dracula or Gruvbox) or bat's `ansi` theme, which is drawn with the raffi palette, and it ignores your terminal's `BAT_THEME`, `LS_COLORS` and `EZA_COLORS`. Set `FILE_PREVIEW_BAT_THEME` in the command to keep a bat theme of your own.
+```yaml raffi.yaml
+addons:
+  file_browser:
+    preview_command: "~/.config/raffi/scripts/file-preview.py"
+```
+
+Your copy no longer follows raffi upgrades.
 
 #### Writing your own previewer
 
@@ -385,14 +392,14 @@ addons:
     # file_manager: kitty yazi
 ```
 
-**`preview_command`** `string` (default: unset)
+**`preview_command`** `string` (default: the bundled previewer when `python3` is installed)
 
-Command that previews the selected entry in the preview pane, replacing the built-in preview when it prints something. See [Custom Previewer](#custom-previewer) for what it receives and may print. `~` and environment variables are expanded.
+Command that previews the selected entry in the preview pane, replacing the plain preview when it prints something. `none` turns rich previews off. See [Rich Previews](#rich-previews) and [Writing your own previewer](#writing-your-own-previewer) for what it receives and may print. `~` and environment variables are expanded.
 
 ```yaml raffi.yaml
 addons:
   file_browser:
-    preview_command: "~/.config/raffi/scripts/file-preview/file-preview.py"
+    preview_command: "~/.config/raffi/scripts/file-preview.py"
 ```
 
 

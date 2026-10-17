@@ -422,7 +422,7 @@
           "default": null
         },
         "preview_command": {
-          "description": "Command that previews the selected entry in the native preview pane.\nIt runs through `sh -c` with the path appended as the last argument\n(also in `$RAFFI_VALUE`) and prints ANSI text or a Script Filter\npreview object; no output or a non-zero exit keeps the built-in\npreview. Killed after 3 seconds.",
+          "description": "Command that previews the selected entry in the native preview pane.\nUnset uses the previewer bundled with raffi when python3 is\ninstalled; `none` turns it off. A command runs through `sh -c` with\nthe path appended as the last argument (also in `$RAFFI_VALUE`) and\nprints ANSI text or a Script Filter preview object; no output or a\nnon-zero exit keeps the built-in preview. Killed after 3 seconds.",
           "type": [
             "string",
             "null"

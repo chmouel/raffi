@@ -191,10 +191,11 @@ pub struct FileBrowserAddonConfig {
     #[serde(default)]
     pub show: FileBrowserShow,
     /// Command that previews the selected entry in the native preview pane.
-    /// It runs through `sh -c` with the path appended as the last argument
-    /// (also in `$RAFFI_VALUE`) and prints ANSI text or a Script Filter
-    /// preview object; no output or a non-zero exit keeps the built-in
-    /// preview. Killed after 3 seconds.
+    /// Unset uses the previewer bundled with raffi when python3 is
+    /// installed; `none` turns it off. A command runs through `sh -c` with
+    /// the path appended as the last argument (also in `$RAFFI_VALUE`) and
+    /// prints ANSI text or a Script Filter preview object; no output or a
+    /// non-zero exit keeps the built-in preview. Killed after 3 seconds.
     #[serde(default)]
     pub preview_command: Option<String>,
 }
@@ -1958,7 +1959,7 @@ const GENERIC_ICON_NAMES: &[&str] = &[
     "application-x-desktop",
 ];
 
-fn icon_cache_dir() -> PathBuf {
+pub(crate) fn icon_cache_dir() -> PathBuf {
     PathBuf::from(
         std::env::var("XDG_CACHE_HOME")
             .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default())),

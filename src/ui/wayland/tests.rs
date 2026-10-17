@@ -5681,13 +5681,9 @@ fn file_preview_app(command: Option<&str>) -> (LauncherApp, String, String, std:
     let dir = std::env::temp_dir().join(format!("raffi-file-preview-command-{unique}"));
     std::fs::create_dir_all(&dir).unwrap();
     let mut paths = Vec::new();
-    let mut app = test_app(AddonsConfig {
-        file_browser: crate::FileBrowserAddonConfig {
-            preview_command: command.map(str::to_string),
-            ..Default::default()
-        },
-        ..Default::default()
-    });
+    let mut app = test_app(AddonsConfig::default());
+    app.file_browser.preview_command =
+        command.map(|c| super::file_preview::FilePreviewCommand::Custom(c.into()));
     app.keyword_suggestions.clear();
     app.file_browser.active = true;
     for name in ["first.txt", "second.txt"] {
@@ -5715,7 +5711,9 @@ fn test_file_preview_command_is_idle_when_unset_or_pane_hidden() {
     let _ = app.ensure_file_browser_preview();
     assert_eq!(app.file_browser.preview_target, None);
 
-    app.addons.file_browser.preview_command = Some("cat".into());
+    app.file_browser.preview_command = Some(super::file_preview::FilePreviewCommand::Custom(
+        "cat".into(),
+    ));
     app.view.show_preview = false;
     let _ = app.ensure_file_browser_preview();
     assert_eq!(app.file_browser.preview_target, None);

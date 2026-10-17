@@ -317,6 +317,9 @@ pub(super) struct FileBrowserState {
     pub preview_target: Option<String>,
     /// The debounce for `preview_target` is over.
     pub preview_due: bool,
+    /// Resolved preview command; None when previews are off or python3
+    /// is missing for the bundled script.
+    pub preview_command: Option<super::file_preview::FilePreviewCommand>,
     /// A `preview_command` run is out; only one runs at a time.
     pub preview_inflight: bool,
     /// `preview_command` results, oldest first; kept for the session.

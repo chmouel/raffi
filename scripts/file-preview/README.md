@@ -1,27 +1,32 @@
 # File Preview Script
 
-A preview command for the Raffi file browser. It shows PDF pages, video thumbnails, album covers, ebook covers, archive listings, highlighted source code, tables and more in the preview pane, with a few metadata rows such as page count, duration or image dimensions.
+This script draws the rich previews in the Raffi file browser: PDF pages, video thumbnails, album and ebook covers, archive listings, highlighted source code and tables, with metadata rows such as page count, duration or image dimensions.
+
+Raffi carries a copy of the script inside its binary and runs it with `python3` when `preview_command` is unset, so you have nothing to install.
 
 ## Requirements
 
-- Python 3 (stdlib only, no pip dependencies)
-- Any of the optional tools listed below. Each one is detected at run time, and the script falls back to a Python implementation or to Raffi's built-in preview when it is missing.
+- Python 3, standard library only.
+- Optionally, the tools listed below. The script looks for each one at run time and falls back to Python code or to Raffi's built-in preview when it is missing.
 
-## Installation
+## Customising
+
+To change the script, fetch a copy, edit it and point `preview_command` at it. Raffi upgrades will not update your copy.
 
 ```bash
-mkdir -p ~/.config/raffi/scripts/file-preview
-cp scripts/file-preview/file-preview.py ~/.config/raffi/scripts/file-preview/
-chmod +x ~/.config/raffi/scripts/file-preview/file-preview.py
+mkdir -p ~/.config/raffi/scripts
+curl -fsSL -o ~/.config/raffi/scripts/file-preview.py \
+  https://raw.githubusercontent.com/chmouel/raffi/main/scripts/file-preview/file-preview.py
+chmod +x ~/.config/raffi/scripts/file-preview.py
 ```
-
-## Configuration
 
 ```yaml
 addons:
   file_browser:
-    preview_command: "~/.config/raffi/scripts/file-preview/file-preview.py"
+    preview_command: "~/.config/raffi/scripts/file-preview.py"
 ```
+
+Set `preview_command: none` to turn rich previews off.
 
 ## Supported Files
 
@@ -50,8 +55,6 @@ addons:
 | Source code and text | `bat` | Plain text with line numbers |
 | Other binary files | `file`, `hexyl` | Python hex dump |
 
-Syntax highlighting uses your `bat` configuration, including `BAT_THEME`.
-
 Optional tools and their usual package names: `bat`, `eza` or `lsd`, `glow` or `gum`, `jq`, `poppler` or `poppler-utils` (pdftoppm, pdfinfo, pdftotext), `ffmpeg`, `ffmpegthumbnailer`, `mediainfo`, `calibre` (ebook-meta), `imagemagick`, `libvips` or `libvips-tools` (vipsthumbnail), `perl-image-exiftool` or `libimage-exiftool-perl` (exiftool), `w3m`, `libxml2` or `libxml2-utils` (xmllint), `7zip` or `p7zip`, `libarchive` or `libarchive-tools` (bsdtar), `unrar`, `pandoc`, `fontconfig` (fc-scan), `hexyl` and `file`.
 
 ## Output
@@ -61,7 +64,7 @@ The script answers in one of two ways, as Raffi expects from a preview command:
 - A JSON preview object with a `badge`, ANSI coloured `text`, an `image`, `sections` (image and text blocks with headings) and `metadata` rows. Raffi adds the path, size, modification time and permissions rows itself.
 - No output and exit status 1 when the file is a FIFO, socket or device, when it is empty, or when no preview could be made. Raffi then shows its built-in preview.
 
-Text is capped at four screens (at least 200 lines), and every tool call has a timeout so the script answers well within Raffi's 3 second limit.
+The script caps text at four screens (at least 200 lines) and gives every tool call a timeout, so it answers within Raffi's 3 second limit.
 
 ## Colours
 
@@ -71,17 +74,17 @@ Previews follow the Raffi theme. Raffi draws the 16 basic ANSI colours with the 
 - renders Markdown with the `dracula` or `tokyo-night` glow/gum style for those themes, and `light` or `dark` for the others.
 - ignores your `BAT_THEME`, bat config theme, `LS_COLORS`, `LSCOLORS` and `EZA_COLORS`, so a terminal colour scheme does not leak into the launcher.
 
-To keep a bat theme of your own inside Raffi, set it in the preview command:
+To keep a bat theme of your own inside Raffi, export `FILE_PREVIEW_BAT_THEME` in the environment Raffi starts from, or set it in a custom preview command:
 
 ```yaml
-preview_command: "FILE_PREVIEW_BAT_THEME=Coldark-Dark ~/.config/raffi/scripts/file-preview/file-preview.py"
+preview_command: "FILE_PREVIEW_BAT_THEME=Coldark-Dark ~/.config/raffi/scripts/file-preview.py"
 ```
 
 Run from a terminal, without `RAFFI_THEME`, the script leaves your tool settings alone.
 
 ## Cache
 
-Thumbnails, extracted covers and previews that took more than a quarter of a second to build are stored in `$XDG_CACHE_HOME/raffi/file-preview` (`~/.cache/raffi/file-preview` by default). Entries are keyed on the file path, modification time, size, pane size and theme, so editing a file creates a new entry. The oldest entries are removed once the cache grows past 200 MiB or 2000 files.
+The script keeps thumbnails, extracted covers and any preview that took more than a quarter of a second to build in `$XDG_CACHE_HOME/raffi/file-preview` (`~/.cache/raffi/file-preview` by default). The cache key includes the file path, modification time, size, pane size and theme, so editing a file gives it a new entry. Past 200 MiB or 2000 files, the script deletes the oldest entries.
 
 To clear it, for example after installing a new tool:
 

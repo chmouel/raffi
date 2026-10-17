@@ -585,10 +585,12 @@ addons:
   # sort_reverse: true flips the order (Z to A, or oldest first).
   # show sets the initial listing: all, files or directories (alias: dirs).
   # Ctrl+. cycles through them while browsing.
-  # preview_command previews the selected entry with an external script (PDF
-  # pages, video frames, ebook covers, archives, highlighted source...). It
-  # gets the path as last argument and prints ANSI text or a preview JSON
-  # object; no output or a non-zero exit keeps the built-in preview. Copy
+  # preview_command previews the selected entry (PDF pages, video frames,
+  # ebook covers, archives, highlighted source...). Unset uses the previewer
+  # bundled with raffi when python3 is installed; "none" turns it off. A
+  # custom command gets the path as last argument and prints ANSI text or a
+  # preview JSON object; no output or a non-zero exit keeps the built-in
+  # preview. To customise the bundled one, copy
   # scripts/file-preview/file-preview.py from the raffi repository.
   # file_browser:
   #   enabled: true
@@ -600,7 +602,7 @@ addons:
   #   action: open
   #   secondary_action: copy
   #   file_manager: thunar
-  #   preview_command: "~/.config/raffi/scripts/file-preview/file-preview.py"
+  #   preview_command: "~/.config/raffi/scripts/file-preview.py"
 
   # Clipboard history browser (native UI only, off by default). Reads the
   # history stored by CopyQ, which must be running. Type "clip " to browse,

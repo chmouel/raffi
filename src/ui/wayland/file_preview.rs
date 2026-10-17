@@ -1,10 +1,13 @@
-//! File browser previews produced by the user's `preview_command`.
+//! File browser previews produced by a preview command: the bundled
+//! `scripts/file-preview` script, or the user's `preview_command`.
 //!
 //! The command gets the selected path and prints ANSI text or a Script Filter
 //! preview object. The built-in preview stays on screen until it answers.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::LazyLock;
 use std::time::{Duration, SystemTime};
 
 use iced::Task;
@@ -39,6 +42,66 @@ const PREVIEW_OBJECT_KEYS: &[&str] = &[
     "title", "subtitle", "badge", "icon", "text", "image", "sections", "metadata", "refresh",
     "dynamic",
 ];
+
+/// The bundled previewer, run with python3 unless `preview_command` says
+/// otherwise.
+const BUNDLED_SCRIPT: &str = include_str!("../../../scripts/file-preview/file-preview.py");
+
+/// `file-preview-<hash>.py`: the content hash means a raffi upgrade never
+/// runs an older copy. FNV-1a because it is stable across builds, unlike the
+/// std hasher.
+static BUNDLED_SCRIPT_NAME: LazyLock<String> = LazyLock::new(|| {
+    let hash = BUNDLED_SCRIPT
+        .bytes()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+        });
+    format!("file-preview-{hash:016x}.py")
+});
+
+/// Which command previews file browser entries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum FilePreviewCommand {
+    Bundled,
+    Custom(String),
+}
+
+impl FilePreviewCommand {
+    /// The `preview_command` setting: unset means the bundled script when
+    /// python3 is installed, `none` turns previews off.
+    pub fn resolve(config: Option<&str>, program_exists: fn(&str) -> bool) -> Option<Self> {
+        match config.map(str::trim) {
+            None | Some("") => program_exists("python3").then_some(Self::Bundled),
+            Some("none") => None,
+            Some(command) => Some(Self::Custom(command.to_string())),
+        }
+    }
+}
+
+/// Write the bundled script to `dir` unless it is already there, remove
+/// older copies, and return its path. The file is checked on every run, so
+/// deleting it is harmless.
+fn install_bundled_script(dir: &Path) -> std::io::Result<PathBuf> {
+    let name = BUNDLED_SCRIPT_NAME.as_str();
+    let path = dir.join(name);
+    if path.is_file() {
+        return Ok(path);
+    }
+    std::fs::create_dir_all(dir)?;
+    let tmp = dir.join(format!(".{name}.{}", std::process::id()));
+    std::fs::write(&tmp, BUNDLED_SCRIPT)?;
+    std::fs::rename(&tmp, &path)?;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let old = entry.file_name();
+            let old = old.to_string_lossy();
+            if old != name && old.starts_with("file-preview-") && old.ends_with(".py") {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    Ok(path)
+}
 
 /// A path as it was when previewed, so edits get a fresh preview.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,7 +253,7 @@ impl LauncherApp {
         if !self.view.show_preview || !self.file_browser.active {
             return None;
         }
-        self.addons.file_browser.preview_command.as_ref()?;
+        self.file_browser.preview_command.as_ref()?;
         self.selected_file_to_inspect().map(|(path, _)| path)
     }
 
@@ -247,10 +310,9 @@ impl LauncherApp {
         if !state.preview_due || state.preview_inflight {
             return Task::none();
         }
-        let (Some(path), Some(command)) = (
-            state.preview_target.clone(),
-            self.addons.file_browser.preview_command.clone(),
-        ) else {
+        let (Some(path), Some(command)) =
+            (state.preview_target.clone(), state.preview_command.clone())
+        else {
             return Task::none();
         };
         if state.script_preview(&path).is_some() {
@@ -260,13 +322,29 @@ impl LauncherApp {
             self.preview_viewport_width(),
             self.preview_viewport_height(),
         );
-        let mut request = FilePreviewRequest::new(
-            &crate::expand_config_value(&command),
-            &path,
-            pane,
-            self.view.preview_style.text,
-        );
+        let (command, script) = match command {
+            FilePreviewCommand::Custom(command) => (crate::expand_config_value(&command), None),
+            FilePreviewCommand::Bundled => match install_bundled_script(&crate::icon_cache_dir()) {
+                Ok(script) => (
+                    "python3 \"$RAFFI_FILE_PREVIEW_SCRIPT\"".to_string(),
+                    Some(script),
+                ),
+                Err(e) => {
+                    crate::debug_log!("file_preview: cannot write bundled script: {e}");
+                    self.file_browser.preview_command = None;
+                    return Task::none();
+                }
+            },
+        };
+        let mut request =
+            FilePreviewRequest::new(&command, &path, pane, self.view.preview_style.text);
         request.env.extend(self.view.theme.command_env());
+        if let Some(script) = script {
+            request.env.insert(
+                "RAFFI_FILE_PREVIEW_SCRIPT".into(),
+                script.to_string_lossy().into_owned(),
+            );
+        }
         let key = FilePreviewKey::of(&path);
         self.file_browser.preview_inflight = true;
         Task::perform(
@@ -309,7 +387,36 @@ impl LauncherApp {
 #[cfg(test)]
 mod tests {
     use super::super::types::PreparedPreviewBody;
-    use super::{parse_output, FilePreviewOutput, FilePreviewRequest, MAX_TEXT_LINES};
+    use super::{
+        install_bundled_script, parse_output, FilePreviewCommand, FilePreviewOutput,
+        FilePreviewRequest, BUNDLED_SCRIPT, MAX_TEXT_LINES,
+    };
+
+    #[test]
+    fn test_preview_command_defaults_to_bundled_script_with_python() {
+        let resolve = FilePreviewCommand::resolve;
+        assert_eq!(resolve(None, |_| true), Some(FilePreviewCommand::Bundled));
+        assert_eq!(resolve(None, |_| false), None);
+        assert_eq!(resolve(Some("none"), |_| true), None);
+        assert_eq!(
+            resolve(Some("~/bin/preview"), |_| false),
+            Some(FilePreviewCommand::Custom("~/bin/preview".into()))
+        );
+    }
+
+    #[test]
+    fn test_bundled_script_is_installed_once_and_replaces_old_copies() {
+        let dir = std::env::temp_dir().join(format!("raffi-bundled-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let old = dir.join("file-preview-0000000000000000.py");
+        std::fs::write(&old, "old").unwrap();
+
+        let path = install_bundled_script(&dir).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), BUNDLED_SCRIPT);
+        assert!(!old.exists());
+        assert_eq!(install_bundled_script(&dir).unwrap(), path);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn test_parse_output_reads_text_preview_objects_and_fallbacks() {
