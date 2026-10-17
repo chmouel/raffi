@@ -429,6 +429,13 @@ pub(crate) enum Message {
         usize,
         std::result::Result<Option<PreparedPreview>, ScriptFilterPreviewError>,
     ),
+    /// The debounce for previewing this file browser path is over.
+    FileBrowserPreviewDue(String),
+    /// Output of the file browser `preview_command` for this path.
+    FileBrowserPreview(
+        super::file_preview::FilePreviewKey,
+        super::file_preview::FilePreviewResult,
+    ),
     TextSnippetCommandResult(u64, std::result::Result<Vec<TextSnippet>, String>),
     TextSnippetSelected(usize),
     TextSnippetClipboard(u64, ClipboardData),

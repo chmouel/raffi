@@ -366,6 +366,11 @@ The `title` and `subtitle` fields support ANSI color codes for colored text:
 The [GitHub pull requests script](#github-pull-requests) uses colors to display the CI state of each pull request.
 </Aside>
 
+Titles, subtitles and preview text understand 16, 256 and 24-bit colours plus
+bold, dim, italic and underline. Other escape sequences, such as cursor
+movement or terminal hyperlinks, are removed, and tabs are expanded to 8
+columns, so output captured from tools like `bat` or `eza` displays cleanly.
+
 ## Examples
 
 ### Timezone Converter

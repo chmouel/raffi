@@ -9,6 +9,7 @@ use super::browser::read_directory;
 use super::clipboard::{ClipItem, ItemKind};
 use super::command_list::CommandItem;
 use super::devtools::DevRow;
+use super::file_preview::FilePreviewOutput;
 use super::help::HelpEntry;
 use super::snippets::SnippetIcon;
 use super::state::{
@@ -419,7 +420,7 @@ impl LauncherApp {
 
     /// Return `(path, show_hidden)` if the currently selected item references a local file
     /// that should be inspected for previewing.
-    fn selected_file_to_inspect(&self) -> Option<(String, bool)> {
+    pub(super) fn selected_file_to_inspect(&self) -> Option<(String, bool)> {
         if self.view.help_active {
             return None;
         }
@@ -855,7 +856,7 @@ impl LauncherApp {
         metadata.push(("Tab".to_string(), "Autocomplete path".to_string()));
         metadata.push(("Ctrl+O".to_string(), "Show in file manager".to_string()));
 
-        PreviewData {
+        let mut data = PreviewData {
             title: if entry.is_dir {
                 format!("{}/", entry.name)
             } else {
@@ -866,7 +867,27 @@ impl LauncherApp {
             icon,
             bodies: inspected.bodies,
             metadata,
+        };
+
+        // The preview command's output replaces the built-in body once it
+        // has answered; until then the built-in preview stays on screen.
+        match self.file_browser.script_preview(&entry.full_path) {
+            Some(Ok(Some(FilePreviewOutput::Text(content)))) => {
+                data.bodies = vec![PreviewBody::AnsiText {
+                    heading: None,
+                    content: content.clone(),
+                }];
+            }
+            Some(Ok(Some(FilePreviewOutput::Rich(preview)))) => {
+                self.apply_prepared_preview(&mut data, preview);
+            }
+            Some(Err(error)) => {
+                data.metadata
+                    .insert(1, ("Preview".to_string(), error.clone()));
+            }
+            Some(Ok(None)) | None => {}
         }
+        data
     }
 
     fn build_script_filter_preview(

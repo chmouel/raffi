@@ -190,6 +190,13 @@ pub struct FileBrowserAddonConfig {
     /// Ctrl+. cycles through them.
     #[serde(default)]
     pub show: FileBrowserShow,
+    /// Command that previews the selected entry in the native preview pane.
+    /// It runs through `sh -c` with the path appended as the last argument
+    /// (also in `$RAFFI_VALUE`) and prints ANSI text or a Script Filter
+    /// preview object; no output or a non-zero exit keeps the built-in
+    /// preview. Killed after 3 seconds.
+    #[serde(default)]
+    pub preview_command: Option<String>,
 }
 
 /// Order of file browser entries
@@ -297,6 +304,7 @@ impl Default for FileBrowserAddonConfig {
             sort: FileBrowserSort::default(),
             sort_reverse: false,
             show: FileBrowserShow::default(),
+            preview_command: None,
         }
     }
 }

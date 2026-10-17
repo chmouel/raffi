@@ -725,7 +725,7 @@ impl LauncherApp {
                     }
                     section = section.push(
                         container(
-                            rich_text(ansi_to_spans(&content, ps.text, ps.text_main))
+                            rich_text(ansi_to_spans(&content, ps.text, ps.text_main, ps.mono_font))
                                 .font(ps.mono_font),
                         )
                         .padding(12.0)
@@ -1057,13 +1057,18 @@ impl LauncherApp {
                 }
 
                 let mut text_col = Column::new();
-                text_col =
-                    text_col.push(rich_text(ansi_to_spans(&item.title, fs.item, t.text_main)));
+                text_col = text_col.push(rich_text(ansi_to_spans(
+                    &item.title,
+                    fs.item,
+                    t.text_main,
+                    iced::Font::default(),
+                )));
                 if let Some(subtitle) = &item.subtitle {
                     text_col = text_col.push(rich_text(ansi_to_spans(
                         subtitle,
                         fs.subtitle,
                         t.text_muted,
+                        iced::Font::default(),
                     )));
                 }
                 item_row = item_row.push(text_col.width(Length::Fill));

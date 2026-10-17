@@ -5646,3 +5646,154 @@ fn test_bluetooth_missing_program_and_history() {
     app.save_query_to_history();
     assert_eq!(app.history.items, before);
 }
+
+fn file_preview_app(command: Option<&str>) -> (LauncherApp, String, String, std::path::PathBuf) {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("raffi-file-preview-command-{unique}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut paths = Vec::new();
+    let mut app = test_app(AddonsConfig {
+        file_browser: crate::FileBrowserAddonConfig {
+            preview_command: command.map(str::to_string),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    app.keyword_suggestions.clear();
+    app.file_browser.active = true;
+    for name in ["first.txt", "second.txt"] {
+        let path = dir.join(name);
+        std::fs::write(&path, format!("{name} contents")).unwrap();
+        let full_path = path.to_string_lossy().into_owned();
+        paths.push(full_path.clone());
+        app.file_browser
+            .entries
+            .push(super::state::FileBrowserEntry {
+                name: name.into(),
+                full_path,
+                is_dir: false,
+            });
+    }
+    app.refresh_file_preview_cache();
+    let second = paths.pop().unwrap();
+    let first = paths.pop().unwrap();
+    (app, first, second, dir)
+}
+
+#[test]
+fn test_file_preview_command_is_idle_when_unset_or_pane_hidden() {
+    let (mut app, _, _, dir) = file_preview_app(None);
+    let _ = app.ensure_file_browser_preview();
+    assert_eq!(app.file_browser.preview_target, None);
+
+    app.addons.file_browser.preview_command = Some("cat".into());
+    app.view.show_preview = false;
+    let _ = app.ensure_file_browser_preview();
+    assert_eq!(app.file_browser.preview_target, None);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_file_preview_command_follows_selection_one_run_at_a_time() {
+    use super::file_preview::{FilePreviewKey, FilePreviewOutput};
+
+    let (mut app, first, second, dir) = file_preview_app(Some("cat"));
+    let _ = app.ensure_file_browser_preview();
+    assert_eq!(
+        app.file_browser.preview_target.as_deref(),
+        Some(first.as_str())
+    );
+    let _ = app.update(Message::FileBrowserPreviewDue(first.clone()));
+    assert!(app.file_browser.preview_inflight);
+
+    // Moving on while the first run is out: the second waits its debounce,
+    // and a late debounce for an entry no longer selected is ignored.
+    let _ = app.update(Message::MoveDown);
+    assert_eq!(
+        app.file_browser.preview_target.as_deref(),
+        Some(second.as_str())
+    );
+    let _ = app.update(Message::FileBrowserPreviewDue(first.clone()));
+    let _ = app.update(Message::FileBrowserPreviewDue(second.clone()));
+    assert!(app.file_browser.preview_due && app.file_browser.preview_inflight);
+
+    // The first result is cached and the queued run for the second starts.
+    let _ = app.update(Message::FileBrowserPreview(
+        FilePreviewKey::of(&first),
+        Ok(Some(FilePreviewOutput::Text("\x1b[1mfirst\x1b[0m".into()))),
+    ));
+    assert!(app.file_browser.preview_inflight);
+    let _ = app.update(Message::FileBrowserPreview(
+        FilePreviewKey::of(&second),
+        Ok(None),
+    ));
+    assert!(!app.file_browser.preview_inflight);
+
+    // Ok(None) keeps the built-in text preview.
+    let preview = app.resolve_selected_preview().unwrap();
+    assert!(matches!(
+        preview.bodies.as_slice(),
+        [PreviewBody::Text { content, .. }] if content.contains("second.txt contents")
+    ));
+
+    // Going back to a cached entry swaps in the command output without a rerun.
+    let _ = app.update(Message::MoveUp);
+    assert_eq!(
+        app.file_browser.preview_target.as_deref(),
+        Some(first.as_str())
+    );
+    assert!(!app.file_browser.preview_due);
+    let preview = app.resolve_selected_preview().unwrap();
+    assert!(matches!(
+        preview.bodies.as_slice(),
+        [PreviewBody::AnsiText { heading: None, content }] if content.contains("first")
+    ));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_file_preview_command_rich_output_and_errors_overlay_builtin_preview() {
+    use super::file_preview::{parse_output, FilePreviewKey};
+
+    let (mut app, first, second, dir) = file_preview_app(Some("cat"));
+    let rich = parse_output(
+        true,
+        br#"{"badge":"PDF","text":"page one","metadata":[["Pages","3"]]}"#,
+    );
+    let _ = app.update(Message::FileBrowserPreview(
+        FilePreviewKey::of(&first),
+        rich,
+    ));
+
+    let preview = app.resolve_selected_preview().unwrap();
+    assert_eq!(preview.badge.as_deref(), Some("PDF"));
+    assert!(matches!(
+        preview.bodies.as_slice(),
+        [PreviewBody::AnsiText { content, .. }] if content == "page one"
+    ));
+    assert!(preview
+        .metadata
+        .iter()
+        .any(|(label, value)| label == "Pages" && value == "3"));
+    assert!(preview.metadata.iter().any(|(label, _)| label == "Path"));
+
+    let _ = app.update(Message::MoveDown);
+    let _ = app.update(Message::FileBrowserPreview(
+        FilePreviewKey::of(&second),
+        Err("preview command timed out after 3s".into()),
+    ));
+    let preview = app.resolve_selected_preview().unwrap();
+    assert_eq!(preview.badge.as_deref(), Some("File"));
+    assert!(matches!(
+        preview.bodies.as_slice(),
+        [PreviewBody::Text { content, .. }] if content.contains("second.txt contents")
+    ));
+    assert!(preview
+        .metadata
+        .iter()
+        .any(|(label, value)| label == "Preview" && value.contains("timed out")));
+    std::fs::remove_dir_all(dir).unwrap();
+}

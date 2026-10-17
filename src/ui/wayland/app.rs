@@ -784,7 +784,8 @@ impl LauncherApp {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.update_inner(message);
         let preview = self.ensure_clipboard_preview();
-        Task::batch([task, preview])
+        let file_preview = self.ensure_file_browser_preview();
+        Task::batch([task, preview, file_preview])
     }
 
     fn update_inner(&mut self, message: Message) -> Task<Message> {
@@ -831,6 +832,10 @@ impl LauncherApp {
             }
             Message::ScriptFilterPreview(generation, config_index, index, result) => {
                 self.handle_script_filter_preview(generation, config_index, index, result)
+            }
+            Message::FileBrowserPreviewDue(path) => self.handle_file_browser_preview_due(path),
+            Message::FileBrowserPreview(key, result) => {
+                self.handle_file_browser_preview(key, result)
             }
             Message::TextSnippetCommandResult(generation, result) => {
                 self.handle_text_snippet_command_result(generation, result)

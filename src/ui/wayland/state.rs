@@ -312,6 +312,18 @@ pub(super) struct FileBrowserState {
     pub pressed_row: Option<usize>,
     /// A drag-and-drop session is in flight.
     pub dragging: bool,
+    /// Entry the `preview_command` should describe: the selection, while the
+    /// preview pane is shown.
+    pub preview_target: Option<String>,
+    /// The debounce for `preview_target` is over.
+    pub preview_due: bool,
+    /// A `preview_command` run is out; only one runs at a time.
+    pub preview_inflight: bool,
+    /// `preview_command` results, oldest first; kept for the session.
+    pub script_previews: Vec<(
+        super::file_preview::FilePreviewKey,
+        super::file_preview::FilePreviewResult,
+    )>,
 }
 
 impl FileBrowserState {
@@ -326,6 +338,17 @@ impl FileBrowserState {
         self.hovered_row = None;
         self.pressed_row = None;
         self.dragging = false;
+        self.preview_target = None;
+        self.preview_due = false;
+    }
+
+    /// Latest `preview_command` result for `path`.
+    pub fn script_preview(&self, path: &str) -> Option<&super::file_preview::FilePreviewResult> {
+        self.script_previews
+            .iter()
+            .rev()
+            .find(|(key, _)| key.path == path)
+            .map(|(_, result)| result)
     }
 }
 

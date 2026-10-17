@@ -421,6 +421,14 @@
           ],
           "default": null
         },
+        "preview_command": {
+          "description": "Command that previews the selected entry in the native preview pane.\nIt runs through `sh -c` with the path appended as the last argument\n(also in `$RAFFI_VALUE`) and prints ANSI text or a Script Filter\npreview object; no output or a non-zero exit keeps the built-in\npreview. Killed after 3 seconds.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "secondary_action": {
           "description": "Action on Ctrl+Enter for files and directories, with the same values as\n`action`. Defaults to `copy`.",
           "type": [

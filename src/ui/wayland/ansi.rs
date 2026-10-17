@@ -44,43 +44,32 @@ fn xterm_256(n: u8) -> iced::Color {
     }
 }
 
-pub(crate) fn ansi_to_spans<'a>(
-    s: &str,
-    font_size: f32,
-    default_color: iced::Color,
-) -> Vec<iced::widget::text::Span<'a, (), iced::Font>> {
-    let mut spans = Vec::new();
-    let mut fg = default_color;
-    let mut bold = false;
-    let mut underline = false;
-    let mut last_end = 0;
+/// SGR state applied to the text that follows it.
+#[derive(Clone, Copy)]
+struct Style {
+    fg: iced::Color,
+    bold: bool,
+    dim: bool,
+    italic: bool,
+    underline: bool,
+}
 
-    for cap in ANSI_SGR_RE.captures_iter(s) {
-        let m = cap.get(0).unwrap();
-        let before = &s[last_end..m.start()];
-        if !before.is_empty() {
-            let mut sp = span(before.to_owned()).size(font_size).color(fg);
-            if underline {
-                sp = sp.underline(true);
-            }
-            if bold {
-                sp = sp.font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..iced::Font::default()
-                });
-            }
-            spans.push(sp);
+impl Style {
+    fn reset(default_color: iced::Color) -> Self {
+        Self {
+            fg: default_color,
+            bold: false,
+            dim: false,
+            italic: false,
+            underline: false,
         }
-        last_end = m.end();
+    }
 
-        let params = &cap[1];
+    fn apply(&mut self, params: &str, default_color: iced::Color) {
         if params.is_empty() {
-            fg = default_color;
-            bold = false;
-            underline = false;
-            continue;
+            *self = Self::reset(default_color);
+            return;
         }
-
         let codes: Vec<u8> = params
             .split(';')
             .map(|part| part.parse().unwrap_or(u8::MAX))
@@ -88,19 +77,21 @@ pub(crate) fn ansi_to_spans<'a>(
         let mut i = 0;
         while i < codes.len() {
             match codes[i] {
-                0 => {
-                    fg = default_color;
-                    bold = false;
-                    underline = false;
+                0 => *self = Self::reset(default_color),
+                1 => self.bold = true,
+                2 => self.dim = true,
+                3 => self.italic = true,
+                4 => self.underline = true,
+                22 => {
+                    self.bold = false;
+                    self.dim = false;
                 }
-                1 => bold = true,
-                4 => underline = true,
-                22 => bold = false,
-                24 => underline = false,
-                39 => fg = default_color,
+                23 => self.italic = false,
+                24 => self.underline = false,
+                39 => self.fg = default_color,
                 code @ (30..=37 | 90..=97) => {
                     if let Some(color) = ansi_color(code) {
-                        fg = color;
+                        self.fg = color;
                     }
                 }
                 // Extended colours: `5;n` (256 palette) or `2;r;g;b`. Their
@@ -116,7 +107,7 @@ pub(crate) fn ansi_to_spans<'a>(
                     };
                     if code == 38 {
                         if let Some(color) = color {
-                            fg = color;
+                            self.fg = color;
                         }
                     }
                     i += used;
@@ -127,22 +118,120 @@ pub(crate) fn ansi_to_spans<'a>(
         }
     }
 
-    let tail = &s[last_end..];
-    if !tail.is_empty() || spans.is_empty() {
-        let mut sp = span(tail.to_owned()).size(font_size).color(fg);
-        if underline {
+    fn span<'a>(
+        &self,
+        content: String,
+        font_size: f32,
+        font: iced::Font,
+    ) -> iced::widget::text::Span<'a, (), iced::Font> {
+        let mut color = self.fg;
+        if self.dim {
+            color.a *= 0.6;
+        }
+        let mut sp = span(content).size(font_size).color(color);
+        if self.underline {
             sp = sp.underline(true);
         }
-        if bold {
+        if self.bold || self.italic {
             sp = sp.font(iced::Font {
-                weight: iced::font::Weight::Bold,
-                ..iced::Font::default()
+                weight: if self.bold {
+                    iced::font::Weight::Bold
+                } else {
+                    font.weight
+                },
+                style: if self.italic {
+                    iced::font::Style::Italic
+                } else {
+                    font.style
+                },
+                ..font
             });
         }
-        spans.push(sp);
+        sp
+    }
+}
+
+/// Turn ANSI text into styled spans. `font` is the font the text is drawn
+/// with, so bold and italic runs keep its family (monospace stays aligned).
+/// Escape sequences other than SGR colours and styles are dropped, tabs are
+/// expanded and carriage returns removed.
+pub(crate) fn ansi_to_spans<'a>(
+    s: &str,
+    font_size: f32,
+    default_color: iced::Color,
+    font: iced::Font,
+) -> Vec<iced::widget::text::Span<'a, (), iced::Font>> {
+    let s = sanitize(s);
+    let mut spans = Vec::new();
+    let mut style = Style::reset(default_color);
+    let mut last_end = 0;
+
+    for cap in ANSI_SGR_RE.captures_iter(&s) {
+        let m = cap.get(0).unwrap();
+        let before = &s[last_end..m.start()];
+        if !before.is_empty() {
+            spans.push(style.span(before.to_owned(), font_size, font));
+        }
+        last_end = m.end();
+        style.apply(&cap[1], default_color);
+    }
+
+    let tail = &s[last_end..];
+    if !tail.is_empty() || spans.is_empty() {
+        spans.push(style.span(tail.to_owned(), font_size, font));
     }
 
     spans
+}
+
+/// Escape sequences other than SGR: CSI, OSC (hyperlinks, titles), and the
+/// two- and three-byte forms such as charset selection.
+static ANSI_ESCAPE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[ -/][0-~]|[0-~])")
+        .unwrap()
+});
+
+const TAB_WIDTH: usize = 8;
+
+/// Keep only SGR sequences and printable text: other escapes and control
+/// characters are dropped, `\r` removed and tabs expanded to the next stop.
+fn sanitize(s: &str) -> String {
+    if !s.contains(|c: char| c.is_control() && c != '\n') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut column = 0;
+    let mut last_end = 0;
+    fn push_text(text: &str, out: &mut String, column: &mut usize) {
+        for c in text.chars() {
+            match c {
+                '\n' => {
+                    out.push(c);
+                    *column = 0;
+                }
+                '\t' => {
+                    let spaces = TAB_WIDTH - *column % TAB_WIDTH;
+                    out.extend(std::iter::repeat_n(' ', spaces));
+                    *column += spaces;
+                }
+                c if c.is_control() => {}
+                c => {
+                    out.push(c);
+                    *column += 1;
+                }
+            }
+        }
+    }
+    for m in ANSI_ESCAPE_RE.find_iter(s) {
+        push_text(&s[last_end..m.start()], &mut out, &mut column);
+        let sequence = m.as_str();
+        if ANSI_SGR_RE.is_match(sequence) && sequence.ends_with('m') {
+            out.push_str(sequence);
+        }
+        last_end = m.end();
+    }
+    push_text(&s[last_end..], &mut out, &mut column);
+    out
 }
 
 pub(crate) fn strip_ansi(s: &str) -> String {
@@ -151,10 +240,10 @@ pub(crate) fn strip_ansi(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ansi_to_spans, xterm_256};
+    use super::{ansi_to_spans, sanitize, xterm_256};
 
     fn colors(s: &str) -> Vec<iced::Color> {
-        ansi_to_spans(s, 12.0, iced::Color::WHITE)
+        ansi_to_spans(s, 12.0, iced::Color::WHITE, iced::Font::MONOSPACE)
             .into_iter()
             .map(|span| span.color.unwrap_or(iced::Color::WHITE))
             .collect()
@@ -179,5 +268,39 @@ mod tests {
             colors("\x1b[31ma\x1b[39mb"),
             vec![super::ansi_color(31).unwrap(), iced::Color::WHITE]
         );
+    }
+
+    #[test]
+    fn test_sanitize_drops_non_sgr_escapes_and_expands_tabs() {
+        let osc8 = "\x1b]8;;file:///tmp/a\x1b\\a\x1b]8;;\x1b\\";
+        assert_eq!(sanitize(osc8), "a");
+        assert_eq!(sanitize("\x1b[2K\x1b[1Gab\r\n\x1b(Bc"), "ab\nc");
+        assert_eq!(sanitize("\x1b[31mab\tc\x1b[0m"), "\x1b[31mab      c\x1b[0m");
+        assert_eq!(sanitize("x\ty\n\tz"), "x       y\n        z");
+    }
+
+    #[test]
+    fn test_bold_and_italic_keep_the_base_font_family() {
+        let spans = ansi_to_spans(
+            "\x1b[1ma\x1b[22;3mb\x1b[23;2mc",
+            12.0,
+            iced::Color::WHITE,
+            iced::Font::MONOSPACE,
+        );
+        let fonts: Vec<_> = spans.iter().map(|span| span.font).collect();
+        assert_eq!(
+            fonts[0].map(|f| (f.family, f.weight)),
+            Some((iced::font::Family::Monospace, iced::font::Weight::Bold))
+        );
+        assert_eq!(
+            fonts[1].map(|f| (f.family, f.weight, f.style)),
+            Some((
+                iced::font::Family::Monospace,
+                iced::font::Weight::Normal,
+                iced::font::Style::Italic
+            ))
+        );
+        assert_eq!(fonts[2], None);
+        assert!(spans[2].color.unwrap().a < 1.0);
     }
 }

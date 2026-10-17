@@ -72,6 +72,68 @@ Start the file browser by typing one of these prefixes:
 
 <Image src={imageDetailsScreenshot} alt="Image preview scrolled down to file details" width={800} />
 
+### Custom Previewer
+
+The built-in preview shows plain text, common image formats and directory listings. To preview anything else (PDF pages, video frames, ebook covers, archive listings, syntax-highlighted source, Markdown, JSON, CSV), point `preview_command` at a previewer script.
+
+Raffi ships one in [`scripts/file-preview`](https://github.com/chmouel/raffi/tree/main/scripts/file-preview). It needs only Python 3 and uses tools such as `bat`, `pdftoppm`, `ffmpegthumbnailer` or `ebook-meta` when they are installed; see its README for the full list.
+
+<Steps>
+
+1. Copy the script into your config directory:
+
+   ```bash
+   mkdir -p ~/.config/raffi/scripts/file-preview
+   cp scripts/file-preview/file-preview.py ~/.config/raffi/scripts/file-preview/
+   chmod +x ~/.config/raffi/scripts/file-preview/file-preview.py
+   ```
+
+2. Enable it:
+
+   ```yaml raffi.yaml
+   addons:
+     file_browser:
+       preview_command: "~/.config/raffi/scripts/file-preview/file-preview.py"
+   ```
+
+</Steps>
+
+When you select an entry, raffi shows its built-in preview at once and swaps in the command's output when it arrives. Results are kept for the session and reused until the file changes.
+
+#### Writing your own previewer
+
+Any executable works. Raffi runs the command with `sh -c`, adds the selected path as the last argument, and sets these environment variables:
+
+| Variable | Value |
+|---|---|
+| `RAFFI_PREVIEW` | `1` |
+| `RAFFI_VALUE` | Absolute path of the selected file or directory |
+| `RAFFI_PREVIEW_WIDTH`, `RAFFI_PREVIEW_HEIGHT` | Preview pane size in pixels |
+| `RAFFI_PREVIEW_COLUMNS`, `RAFFI_PREVIEW_LINES` | Preview pane size in text cells, for tools such as `bat --terminal-width` |
+
+The path is never pasted into the shell line, so file names containing quotes, spaces or `$(...)` are safe.
+
+The command can print one of two things:
+
+- Text, with ANSI colours and bold, dim, italic or underline styles. It replaces the built-in preview body. Output is cut after 1000 lines.
+- A JSON preview object, in the same format as a [Script Filter preview](/features/script-filters/#preview-object). Use it to show an image with metadata rows, or several sections. Any `metadata` rows go above raffi's own Path, Size and Modified rows.
+
+```json
+{
+  "badge": "PDF",
+  "image": {"path": "/home/me/.cache/thumbs/report.png"},
+  "metadata": [["Pages", "12"], ["Author", "Jane Doe"]]
+}
+```
+
+JSON is only treated as a preview object when every top-level key is a preview object field (`title`, `subtitle`, `badge`, `icon`, `text`, `image`, `sections`, `metadata`; `refresh` and `dynamic` are accepted and ignored). Anything else, such as a `package.json` printed with `cat`, is shown as text.
+
+If the command prints nothing or exits with a non-zero status, raffi keeps its built-in preview, so a previewer only needs to handle the types it knows. A command that runs longer than 3 seconds is stopped, and raffi shows the error in a `Preview` row.
+
+<Aside type="note">
+Terminal image protocols (kitty, sixel, iTerm2) do not work in the preview pane. To show an image, write it to a file and return its path in a JSON preview object.
+</Aside>
+
 ## Fuzzy Filtering
 
 Text after the last `/` fuzzy-filters the current directory listing:
@@ -318,6 +380,16 @@ addons:
     file_manager: dolphin
     # or a terminal file manager:
     # file_manager: kitty yazi
+```
+
+**`preview_command`** `string` (default: unset)
+
+Command that previews the selected entry in the preview pane, replacing the built-in preview when it prints something. See [Custom Previewer](#custom-previewer) for what it receives and may print. `~` and environment variables are expanded.
+
+```yaml raffi.yaml
+addons:
+  file_browser:
+    preview_command: "~/.config/raffi/scripts/file-preview/file-preview.py"
 ```
 
 

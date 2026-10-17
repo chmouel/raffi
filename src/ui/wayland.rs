@@ -13,6 +13,7 @@ mod currency;
 mod devtools;
 mod dnd;
 mod emoji;
+mod file_preview;
 mod help;
 mod hyprland;
 mod kill;
