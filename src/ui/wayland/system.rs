@@ -40,7 +40,8 @@ impl SystemEntry {
             DeferredAction::Hypr(_)
             | DeferredAction::HyprPaste(_)
             | DeferredAction::Signal(_)
-            | DeferredAction::Bluetooth(_) => String::new(),
+            | DeferredAction::Bluetooth(_)
+            | DeferredAction::Secret(_) => String::new(),
         }
     }
 }
@@ -107,7 +108,9 @@ fn program(action: &DeferredAction) -> Option<&str> {
         DeferredAction::Hypr(_) => Some("hyprctl"),
         DeferredAction::NiriQuit => Some("niri"),
         DeferredAction::SwayExit => Some("swaymsg"),
-        DeferredAction::HyprPaste(_) | DeferredAction::Signal(_) => None,
+        DeferredAction::HyprPaste(_) | DeferredAction::Signal(_) | DeferredAction::Secret(_) => {
+            None
+        }
         DeferredAction::Bluetooth(_) => Some("bluetoothctl"),
     }
 }
@@ -181,6 +184,8 @@ impl SystemEntry {
                 ("Command".to_string(), self.command_line()),
                 ("Enter".to_string(), enter),
             ],
+            badge: None,
+            domains: Vec::new(),
         }
     }
 }

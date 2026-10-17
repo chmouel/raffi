@@ -38,6 +38,9 @@
         "audio": {
           "$ref": "#/$defs/AudioAddonConfig"
         },
+        "bitwarden": {
+          "$ref": "#/$defs/BitwardenAddonConfig"
+        },
         "bluetooth": {
           "$ref": "#/$defs/BluetoothAddonConfig"
         },
@@ -77,6 +80,9 @@
         },
         "media": {
           "$ref": "#/$defs/MediaAddonConfig"
+        },
+        "pass": {
+          "$ref": "#/$defs/PassAddonConfig"
         },
         "script_filters": {
           "type": "array",
@@ -131,6 +137,45 @@
             "null"
           ],
           "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "BitwardenAddonConfig": {
+      "description": "Configuration for the Bitwarden addon, backed by rbw (native UI only)",
+      "type": "object",
+      "properties": {
+        "clipboard_timeout": {
+          "description": "Seconds before a copied secret is cleared from the clipboard\n(default: 45, 0 = never).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "trigger": {
+          "description": "Keyword that opens the vault list (default: `bw`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "type_delay_ms": {
+          "description": "Milliseconds to wait after Raffi closes before typing (default: 200).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
         }
       },
       "additionalProperties": false
@@ -674,6 +719,83 @@
       },
       "additionalProperties": false
     },
+    "PassAddonConfig": {
+      "description": "Configuration for the pass (password-store) addon (native UI only)",
+      "type": "object",
+      "properties": {
+        "clipboard_timeout": {
+          "description": "Seconds before a copied secret is cleared from the clipboard\n(default: 45, 0 = never).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "pinentry": {
+          "description": "Who asks for the GPG passphrase: `raffi` (default) or `agent`.",
+          "$ref": "#/$defs/PassPinentry"
+        },
+        "store_dir": {
+          "description": "Password store directory (default: `$PASSWORD_STORE_DIR`, else\n`~/.password-store`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "trigger": {
+          "description": "Keyword that opens the password list (default: `pass`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "type_delay_ms": {
+          "description": "Milliseconds to wait after Raffi closes before typing (default: 200).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "username_fields": {
+          "description": "`key: value` lines read as the username, tried in this order (default:\n`login`, `user`, `username`). Falls back to the entry file name.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "PassPinentry": {
+      "description": "Who asks for the GPG passphrase when a pass entry needs one",
+      "oneOf": [
+        {
+          "description": "Raffi shows its own masked prompt and hands the passphrase to gpg\nthrough loopback pinentry",
+          "type": "string",
+          "const": "raffi"
+        },
+        {
+          "description": "Raffi closes and gpg-agent shows its usual pinentry (smartcards,\nYubiKeys, or setups that forbid loopback)",
+          "type": "string",
+          "const": "agent"
+        }
+      ]
+    },
     "PreviewColorsConfig": {
       "description": "Colour overrides for the right-hand preview pane (hex: #RGB, #RRGGBB, or #RRGGBBAA).",
       "type": "object",
@@ -924,7 +1046,7 @@
       ]
     },
     "SortMode": {
-      "description": "Sort mode for launcher entries and text snippets by past use",
+      "description": "Sort mode for launcher entries, text snippets and password entries by past use",
       "oneOf": [
         {
           "description": "Sort by launch count (most frequently used first)",

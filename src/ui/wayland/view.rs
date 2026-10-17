@@ -269,11 +269,26 @@ impl LauncherApp {
         let t = self.view.theme;
         let fs = self.view.font_sizes;
 
-        let search_input = text_input(placeholder, &self.search_query)
+        // The master password or passphrase prompt reuses the search field,
+        // masked, and its text never goes through `SearchChanged`.
+        let prompt = self.vault.prompt.as_ref();
+        let (placeholder, value) = match prompt {
+            Some(prompt) => (prompt.purpose.placeholder(), prompt.buffer.expose()),
+            None => (placeholder, self.search_query.as_str()),
+        };
+        let secure = prompt.is_some();
+        let search_input = text_input(placeholder, value)
             .id(self.view.search_input_id.clone())
             // Enter is handled by the subscription alone, which knows about
             // key autorepeat; an `on_submit` here would deliver it twice.
-            .on_input(Message::SearchChanged)
+            .on_input(move |value| {
+                if secure {
+                    Message::PromptChanged(crate::secret::Secret::new(value))
+                } else {
+                    Message::SearchChanged(value)
+                }
+            })
+            .secure(secure)
             .padding(fs.input_padding)
             .size(fs.input)
             .style(move |_theme, status| {
@@ -1314,6 +1329,28 @@ impl LauncherApp {
                     .push(text(item.title.clone()).size(fs.item).color(t.text_main))
                     .push(subtitle);
                 item_row = item_row.push(text_col.width(Length::Fill));
+                let notes = self
+                    .command_list
+                    .is_extra_row(row)
+                    .then(|| super::bitwarden::NOTES_BADGE.to_string());
+                for badge in notes.iter().chain(&item.badge) {
+                    let accent = t.accent;
+                    item_row = item_row.push(
+                        container(text(badge.clone()).size(fs.subtitle).color(accent))
+                            .padding([3.0, 10.0])
+                            .style(move |_theme| container::Style {
+                                background: Some(iced::Background::Color(iced::Color {
+                                    a: 0.14,
+                                    ..accent
+                                })),
+                                border: iced::Border {
+                                    radius: 6.0.into(),
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            }),
+                    );
+                }
                 items_column = items_column.push(
                     button(item_row)
                         .on_press(Message::ItemClicked(special_item_idx))
@@ -1923,6 +1960,35 @@ impl LauncherApp {
             hint_spans.push(span("Ctrl+D").size(fs.hint).color(t.accent));
             hint_spans.push(span(" delete").size(fs.hint).color(t.text_muted));
         }
+        if self.vault.prompt.is_some() {
+            hint_spans.clear();
+            hint_spans.push(span("Enter").size(fs.hint).color(t.accent));
+            hint_spans.push(span(" unlock").size(fs.hint).color(t.text_muted));
+            hint_spans.push(sep.clone());
+            hint_spans.push(span("Esc").size(fs.hint).color(t.accent));
+            hint_spans.push(span(" cancel").size(fs.hint).color(t.text_muted));
+            return self.shell("", hint_spans, items_column);
+        }
+        if self.vault_addon().is_some() {
+            if !hint_spans.is_empty() {
+                hint_spans.push(sep.clone());
+            }
+            for (index, (key, label)) in [
+                ("Enter", " copy"),
+                ("Ctrl+Enter", " type"),
+                ("Ctrl+U", " user"),
+                ("Ctrl+O", " OTP"),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if index > 0 {
+                    hint_spans.push(sep.clone());
+                }
+                hint_spans.push(span(key).size(fs.hint).color(t.accent));
+                hint_spans.push(span(label).size(fs.hint).color(t.text_muted));
+            }
+        }
         if !hint_spans.is_empty() {
             hint_spans.push(sep.clone());
         }
@@ -2049,6 +2115,13 @@ impl LauncherApp {
                 modifiers,
                 ..
             }) if c.as_str() == "d" && modifiers.control() => Some(Message::ClipboardDelete),
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Character(ref c),
+                modifiers,
+                ..
+            }) if c.as_str() == "u" && modifiers.control() => Some(Message::VaultShortcut(
+                super::vault::EntryAction::Copy(super::vault::Field::Username),
+            )),
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 Some(Message::MouseReleased)
             }

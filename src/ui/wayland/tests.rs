@@ -47,6 +47,8 @@ fn test_app_with_fallbacks(addons: AddonsConfig, fallback_paths: Vec<String>) ->
     // Keep the user's snippet usage cache out of tests, both ways.
     app.text_snippets.mru_map.clear();
     app.text_snippets.mru_path = None;
+    app.vault.usage.clear();
+    app.vault.usage_path = None;
     app.program_exists = |_| true;
     app
 }
@@ -1811,6 +1813,8 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "audio",
             "kill",
             "bt",
+            "pass",
+            "bw",
             "dev",
             "math",
             "$",
@@ -1829,6 +1833,8 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "Ctrl+Alt+Y",
             "Ctrl+S",
             "Ctrl+.",
+            "Ctrl+U",
+            "Ctrl+O",
             "Alt+P/N",
             "Tab",
             "Backspace",
@@ -1852,7 +1858,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
     assert_eq!(entries[1].icon.as_deref(), Some("gist-icon"));
     assert_eq!(entries[1].completion.as_deref(), Some("gist "));
     assert_eq!(entries[0].completion.as_deref(), Some("~/"));
-    assert_eq!(entries[12].completion, None);
+    assert_eq!(entries[14].completion, None);
     // Shortcut rows are informational: they never arm a keyword.
     for entry in entries
         .iter()
@@ -1875,6 +1881,8 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
     addons.audio.enabled = false;
     addons.kill.enabled = false;
     addons.bluetooth.enabled = false;
+    addons.pass.enabled = false;
+    addons.bitwarden.enabled = false;
     addons.units.enabled = false;
     addons.color.enabled = false;
     addons.world_clock.enabled = false;
@@ -1931,6 +1939,8 @@ fn test_help_entries_skip_disabled_addons() {
     addons.audio.enabled = false;
     addons.kill.enabled = false;
     addons.bluetooth.enabled = false;
+    addons.pass.enabled = false;
+    addons.bitwarden.enabled = false;
     addons.units.enabled = false;
     addons.color.enabled = false;
     addons.world_clock.enabled = false;
@@ -4419,6 +4429,19 @@ fn test_system_logout_default_follows_session() {
 }
 
 #[test]
+fn test_vault_queries_are_saved_in_history_but_not_logged() {
+    let addons = AddonsConfig::default();
+    for query in ["bw github", "pass web/github"] {
+        let class = classify_query(query, &addons);
+        assert!(class.saved_in_history(), "{query}");
+        assert_eq!(loggable_query(query, &addons), "<redacted>");
+    }
+    assert!(!classify_query("sys reboot", &addons).saved_in_history());
+    assert!(!classify_query("clip secret", &clipboard_addons()).saved_in_history());
+    assert!(classify_query("firefox", &addons).saved_in_history());
+}
+
+#[test]
 fn test_system_queries_stay_out_of_history_and_logs() {
     let addons = AddonsConfig::default();
     assert_eq!(loggable_query("sys reboot", &addons), "<redacted>");
@@ -4566,7 +4589,7 @@ fn test_windows_load_then_filter_and_focus() {
 
     // Narrowing the query filters the loaded list without loading again.
     let task = app.update(Message::SearchChanged("win fire".into()));
-    assert_eq!(task.units(), 0);
+    assert!(task.units() > 0, "the list scrolls to the first match");
     assert_eq!(app.command_list.generation, generation);
     assert_eq!(command_list_titles(&app), vec!["Mozilla Firefox"]);
 
@@ -4603,11 +4626,7 @@ fn test_windows_status_rows_are_not_actionable() {
     let mut app = windows_app();
     app.compositor = || None;
     let task = app.update(Message::SearchChanged("win ".into()));
-    assert_eq!(
-        task.units(),
-        0,
-        "nothing is loaded without a supported compositor"
-    );
+    assert!(task.units() > 0, "the list scrolls to the status row");
     assert_eq!(
         app.command_list.status(),
         Some("Window switching needs Hyprland, niri or sway")
@@ -4943,7 +4962,7 @@ fn test_media_missing_playerctl_and_no_players() {
     let mut app = test_app(AddonsConfig::default());
     app.program_exists = |program| program != "playerctl";
     let task = app.update(Message::SearchChanged("media ".into()));
-    assert_eq!(task.units(), 0);
+    assert!(task.units() > 0, "the list scrolls to the status row");
     assert_eq!(app.command_list.status(), Some("playerctl not found"));
     let _ = app.update(Message::Submit);
     assert!(deferred_action(&app).is_none());
@@ -5130,7 +5149,7 @@ fn test_audio_missing_pactl() {
     let mut app = test_app(AddonsConfig::default());
     app.program_exists = |program| program != "pactl";
     let task = app.update(Message::SearchChanged("audio ".into()));
-    assert_eq!(task.units(), 0);
+    assert!(task.units() > 0, "the list scrolls to the status row");
     assert_eq!(app.command_list.status(), Some("pactl not found"));
     let _ = app.update(Message::Submit);
     assert!(deferred_action(&app).is_none());
@@ -5550,7 +5569,7 @@ fn test_kill_missing_program_and_history() {
     let mut app = test_app(AddonsConfig::default());
     app.program_exists = |program| program != "kill";
     let task = app.update(Message::SearchChanged("kill ".into()));
-    assert_eq!(task.units(), 0);
+    assert!(task.units() > 0, "the list scrolls to the status row");
     assert_eq!(app.command_list.status(), Some("kill not found"));
 
     let mut app = kill_app("kill firefox");
@@ -5773,7 +5792,7 @@ fn test_bluetooth_missing_program_and_history() {
     let mut app = test_app(AddonsConfig::default());
     app.program_exists = |program| program != "bluetoothctl";
     let task = app.update(Message::SearchChanged("bt ".into()));
-    assert_eq!(task.units(), 0);
+    assert!(task.units() > 0, "the list scrolls to the status row");
     assert_eq!(app.command_list.status(), Some("bluetoothctl not found"));
 
     let mut app = bluetooth_app("bt buds", true);
@@ -5930,4 +5949,426 @@ fn test_file_preview_command_rich_output_and_errors_overlay_builtin_preview() {
         .iter()
         .any(|(label, value)| label == "Preview" && value.contains("timed out")));
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+fn pass_app() -> LauncherApp {
+    use super::vault::{Outcome, Report};
+    let mut app = test_app(AddonsConfig::default());
+    app.history.max_items = 0;
+    let task = app.update(Message::SearchChanged("pass ".into()));
+    assert!(task.units() > 0, "the entries load");
+    let items = vec![
+        super::pass::command_item(
+            "pass:entry:web/github",
+            "web/github",
+            "web",
+            "dialog-password",
+        ),
+        super::pass::command_item(super::pass::LOCK_IDENTITY, "Lock", "", "dialog-password"),
+    ];
+    let generation = app.vault.generation;
+    let _ = app.update(Message::VaultDone(
+        generation,
+        Report {
+            outcome: Outcome::Loaded(items),
+            notice: None,
+        },
+    ));
+    assert_eq!(command_list_titles(&app), vec!["web/github", "Lock"]);
+    app
+}
+
+fn vault_report(outcome: super::vault::Outcome) -> super::vault::Report {
+    super::vault::Report {
+        outcome,
+        notice: None,
+    }
+}
+
+fn ready_job() -> super::vault::Outcome {
+    use super::vault::{EntryAction, Field, JobSettings, Outcome, SecretJob};
+    Outcome::Ready(SecretJob::fetched(
+        EntryAction::Copy(Field::Password),
+        crate::secret::Secret::new("hunter2".into()),
+        JobSettings {
+            clipboard_timeout: 45,
+            type_delay: std::time::Duration::ZERO,
+        },
+    ))
+}
+
+/// Select the pass entry and get asked for the passphrase.
+fn pass_prompting() -> LauncherApp {
+    use super::vault::{Outcome, Purpose};
+    let mut app = pass_app();
+    select_identity(&mut app, "pass:entry:web/github");
+    assert!(
+        app.update(Message::Submit).units() > 0,
+        "the entry decrypts"
+    );
+    let generation = app.vault.generation;
+    let _ = app.update(Message::VaultDone(
+        generation,
+        vault_report(Outcome::Prompt(Purpose::GpgPassphrase, None)),
+    ));
+    assert!(app.vault.prompt.is_some());
+    app
+}
+
+#[test]
+fn test_vault_prompt_keeps_the_passphrase_out_of_the_query_and_logs() {
+    let mut app = pass_prompting();
+    assert_eq!(
+        app.command_list.status(),
+        Some("Enter the GPG passphrase and press Enter (Escape cancels)")
+    );
+    let typed = Message::PromptChanged(crate::secret::Secret::new("hunter2".into()));
+    assert!(!format!("{typed:?}").contains("hunter2"));
+    let _ = app.update(typed);
+    assert_eq!(app.search_query, "pass ");
+    assert!(!format!("{:?}", app.vault).contains("hunter2"));
+
+    // The list and the query are frozen while the prompt is open.
+    let selected = app.selected_index;
+    let _ = app.update(Message::MoveDown);
+    let _ = app.update(Message::SearchChanged("pass x".into()));
+    let _ = app.update(Message::HistoryPrevious);
+    assert_eq!(app.selected_index, selected);
+    assert_eq!(app.search_query, "pass ");
+
+    // Enter sends the passphrase once and empties the field.
+    assert!(app.update(Message::Submit).units() > 0);
+    let prompt = app.vault.prompt.as_ref().unwrap();
+    assert!(prompt.buffer.is_empty());
+    assert_eq!(app.command_list.status(), Some("Decrypting..."));
+    assert_eq!(app.update(Message::Submit).units(), 0, "ignored while busy");
+}
+
+#[test]
+fn test_vault_wrong_passphrase_asks_again() {
+    use super::secret_io::SecretError;
+    use super::vault::{Outcome, Purpose};
+    let mut app = pass_prompting();
+    let _ = app.update(Message::PromptChanged(crate::secret::Secret::new(
+        "wrong".into(),
+    )));
+    let _ = app.update(Message::Submit);
+    let generation = app.vault.generation;
+    let _ = app.update(Message::VaultDone(
+        generation,
+        vault_report(Outcome::Prompt(
+            Purpose::GpgPassphrase,
+            Some(SecretError::BadPassphrase),
+        )),
+    ));
+    let prompt = app.vault.prompt.as_ref().unwrap();
+    assert!(prompt.buffer.is_empty());
+    assert_eq!(
+        app.command_list.status(),
+        Some("Bad passphrase, try again (Escape cancels)")
+    );
+
+    // The right one resumes the copy, which runs once Raffi has closed.
+    let _ = app.update(Message::PromptChanged(crate::secret::Secret::new(
+        "right".into(),
+    )));
+    let _ = app.update(Message::Submit);
+    let generation = app.vault.generation;
+    let _ = app.update(Message::VaultDone(generation, vault_report(ready_job())));
+    assert!(app.vault.prompt.is_none());
+    assert!(matches!(
+        *app.deferred_action.lock().unwrap(),
+        Some(DeferredAction::Secret(_))
+    ));
+}
+
+#[test]
+fn test_vault_escape_closes_the_prompt_and_drops_the_late_result() {
+    let mut app = pass_prompting();
+    let _ = app.update(Message::PromptChanged(crate::secret::Secret::new(
+        "secret".into(),
+    )));
+    let _ = app.update(Message::Submit);
+    let generation = app.vault.generation;
+
+    assert_eq!(app.update(Message::Cancel).units(), 0, "Raffi stays open");
+    assert!(app.vault.prompt.is_none());
+    assert_eq!(app.command_list.addon, Some(CommandListAddon::Pass));
+    assert_eq!(command_list_titles(&app), vec!["web/github", "Lock"]);
+
+    let _ = app.update(Message::VaultDone(generation, vault_report(ready_job())));
+    assert!(app.deferred_action.lock().unwrap().is_none());
+}
+
+#[test]
+fn test_vault_lock_and_leaving_the_list_drop_a_running_fetch() {
+    let mut app = pass_app();
+    select_identity(&mut app, "pass:entry:web/github");
+    let _ = app.update(Message::Submit);
+    let fetch = app.vault.generation;
+    select_identity(&mut app, super::pass::LOCK_IDENTITY);
+    assert!(
+        app.update(Message::Submit).units() > 0,
+        "Lock runs while busy"
+    );
+    let _ = app.update(Message::VaultDone(fetch, vault_report(ready_job())));
+    assert!(app.deferred_action.lock().unwrap().is_none());
+
+    let mut app = pass_app();
+    select_identity(&mut app, "pass:entry:web/github");
+    let _ = app.update(Message::Submit);
+    let fetch = app.vault.generation;
+    let _ = app.update(Message::SearchChanged("fire".into()));
+    assert!(!app.vault.busy());
+    let _ = app.update(Message::VaultDone(fetch, vault_report(ready_job())));
+    assert!(app.deferred_action.lock().unwrap().is_none());
+}
+
+#[test]
+fn test_vault_shortcuts_pick_the_action_and_tools_are_checked() {
+    use super::vault::{EntryAction, Field, OpKind};
+    let mut app = pass_app();
+    select_identity(&mut app, "pass:entry:web/github");
+    let _ = app.update(Message::FileBrowserOpenSelected);
+    assert_eq!(
+        app.vault.running.as_ref().map(|op| op.kind.clone()),
+        Some(OpKind::Entry(
+            EntryAction::Copy(Field::Otp),
+            "web/github".into()
+        ))
+    );
+
+    let mut app = test_app(AddonsConfig::default());
+    app.program_exists = |program| program != "rbw";
+    assert!(
+        app.update(Message::SearchChanged("bw ".into())).units() > 0,
+        "the list scrolls to the status row"
+    );
+    assert_eq!(app.command_list.status(), Some("rbw not found"));
+}
+
+#[test]
+fn test_vault_failed_action_keeps_the_selected_entry() {
+    use super::secret_io::SecretError;
+    use super::vault::{EntryAction, Field, OpKind, Outcome};
+    let mut app = test_app(AddonsConfig::default());
+    app.program_exists = |_| true;
+    let _ = app.update(Message::SearchChanged("bw ".into()));
+    let items = ["github", "bank"]
+        .map(|name| {
+            super::pass::command_item(&format!("bw:item:{name}"), name, "", "dialog-password")
+        })
+        .to_vec();
+    let load = app.vault.generation;
+    let _ = app.update(Message::VaultDone(
+        load,
+        vault_report(Outcome::Loaded(items)),
+    ));
+    select_identity(&mut app, "bw:item:bank");
+
+    let _ = app.update(Message::FileBrowserOpenSelected);
+    let fetch = app.vault.generation;
+    let _ = app.update(Message::VaultDone(
+        fetch,
+        vault_report(Outcome::Failed(SecretError::NoOtp)),
+    ));
+    assert_eq!(command_list_titles(&app)[0], SecretError::NoOtp.message());
+
+    // The error row pushed the rows down; Enter still copies from bank.
+    let _ = app.update(Message::Submit);
+    assert_eq!(
+        app.vault.running.as_ref().map(|op| op.kind.clone()),
+        Some(OpKind::Entry(
+            EntryAction::Copy(Field::Password),
+            "bank".into()
+        ))
+    );
+}
+
+#[test]
+fn test_vault_locked_bitwarden_unlocks_with_rbw_then_escape_cancels() {
+    use super::vault::{OpKind, Outcome};
+    let mut app = test_app(AddonsConfig::default());
+    app.program_exists = |_| true;
+    assert!(app.update(Message::SearchChanged("bw ".into())).units() > 0);
+    let load = app.vault.generation;
+
+    // A locked vault restarts the load behind rbw's pinentry.
+    assert!(
+        app.update(Message::VaultDone(load, vault_report(Outcome::NeedsUnlock)))
+            .units()
+            > 0
+    );
+    assert!(app.vault.unlocking);
+    assert_eq!(
+        app.vault.running.as_ref().map(|op| op.kind.clone()),
+        Some(OpKind::Load)
+    );
+    assert_eq!(
+        app.command_list.status(),
+        Some("Unlocking with rbw: answer the pinentry window (Escape cancels)")
+    );
+
+    // Escape stops the unlock and leaves the mode instead of closing Raffi;
+    // a late result is dropped.
+    let unlock = app.vault.generation;
+    let _ = app.update(Message::Cancel);
+    assert!(!app.vault.busy());
+    assert!(!app.vault.unlocking);
+    assert_eq!(app.command_list.addon, None);
+    let _ = app.update(Message::VaultDone(
+        unlock,
+        vault_report(Outcome::Loaded(Vec::new())),
+    ));
+    assert!(command_list_titles(&app).is_empty());
+}
+
+/// The Bitwarden list with these logins, as `rbw list --raw` gives them.
+fn bw_app(list: &str) -> LauncherApp {
+    use super::vault::Outcome;
+    let mut app = test_app(AddonsConfig::default());
+    app.history.max_items = 0;
+    app.program_exists = |_| true;
+    let _ = app.update(Message::SearchChanged("bw ".into()));
+    let items = super::bitwarden::parse_items(list.as_bytes(), &Default::default()).unwrap();
+    let load = app.vault.generation;
+    let _ = app.update(Message::VaultDone(
+        load,
+        vault_report(Outcome::Loaded(items)),
+    ));
+    app
+}
+
+const BW_LIST: &str = r#"[
+    {"id":"bank","name":"bank","user":"me","folder":null,"uris":["https://mybank.example"],"type":"Login"},
+    {"id":"gh","name":"code host","user":"me","folder":null,
+     "uris":["androidapp://com.github.android","https://accounts.github.com/login"],"type":"Login"},
+    {"id":"lab","name":"gitlab","user":"me","folder":null,"uris":["https://gitlab.com"],"type":"Login"}
+]"#;
+
+#[test]
+fn test_vault_pasted_url_lists_the_site_first() {
+    let mut app = bw_app(BW_LIST);
+    let _ = app.update(Message::SearchChanged(
+        "bw https://login.github.com/session?return=1".into(),
+    ));
+    assert_eq!(command_list_titles(&app), vec!["code host"]);
+
+    // A bare domain works too, and fuzzy matches follow the site's rows.
+    let _ = app.update(Message::SearchChanged("bw gitlab.com".into()));
+    assert_eq!(command_list_titles(&app)[0], "gitlab");
+}
+
+#[test]
+fn test_vault_query_change_snaps_to_first_result() {
+    let mut app = bw_app(BW_LIST);
+    let task = app.update(Message::SearchChanged("bw ba".into()));
+
+    assert!(task.units() > 0, "the list scrolls to its first result");
+    assert_eq!(command_list_titles(&app)[0], "bank");
+    assert_eq!(app.selected_index, 0);
+
+    app.command_list.items.truncate(1);
+    let task = app.update(Message::SearchChanged("bw an".into()));
+    assert!(task.units() > 0, "a single row still resets scrolling");
+    app.command_list.items.clear();
+    let task = app.update(Message::SearchChanged("bw zz".into()));
+    assert!(task.units() > 0, "an empty list still resets scrolling");
+}
+
+#[test]
+fn test_vault_notes_search_adds_rows_below_the_matches() {
+    use std::collections::HashSet;
+    let mut app = bw_app(BW_LIST);
+    let _ = app.update(Message::SearchChanged("bw ba".into()));
+    assert_eq!(app.vault.search_query, None, "too short to search");
+
+    let _ = app.update(Message::SearchChanged("bw ban".into()));
+    assert_eq!(app.vault.search_query.as_deref(), Some("ban"));
+    let first = app.vault.search_generation;
+    let _ = app.update(Message::SearchChanged("bw bank".into()));
+    let second = app.vault.search_generation;
+    assert_ne!(first, second);
+
+    // A result for an older filter is dropped.
+    let found = HashSet::from(["bw:item:lab".to_string(), "bw:item:bank".to_string()]);
+    let _ = app.update(Message::VaultSearchDone(first, found.clone()));
+    assert_eq!(command_list_titles(&app), vec!["bank"]);
+
+    let selected = app.selected_index;
+    let _ = app.update(Message::VaultSearchDone(second, found));
+    assert_eq!(command_list_titles(&app), vec!["bank", "gitlab"]);
+    assert_eq!(app.selected_index, selected);
+    assert!(!app.command_list.is_extra_row(0), "bank matched by name");
+    assert!(app.command_list.is_extra_row(1));
+
+    // Another filter drops the rows it found.
+    let _ = app.update(Message::SearchChanged("bw bankq".into()));
+    assert!(command_list_titles(&app).is_empty());
+}
+
+#[test]
+fn test_vault_notes_search_is_dropped_with_the_list() {
+    use super::vault::Outcome;
+    let mut app = bw_app(BW_LIST);
+    let _ = app.update(Message::SearchChanged("bw recovery".into()));
+    let stale = app.vault.search_generation;
+    assert!(app.vault.search_query.is_some());
+
+    let _ = app.update(Message::SearchChanged("fire".into()));
+    assert_eq!(app.vault.search_query, None);
+
+    // Back in the list, the search restarts once the rows load and the
+    // late result of the first one is dropped.
+    let _ = app.update(Message::SearchChanged("bw recovery".into()));
+    assert_eq!(app.vault.search_query, None, "not while loading");
+    let items = super::bitwarden::parse_items(BW_LIST.as_bytes(), &Default::default()).unwrap();
+    let load = app.vault.generation;
+    let _ = app.update(Message::VaultDone(
+        load,
+        vault_report(Outcome::Loaded(items)),
+    ));
+    assert!(app.vault.search_query.is_some());
+    assert_ne!(app.vault.search_generation, stale);
+    let _ = app.update(Message::VaultSearchDone(
+        stale,
+        std::collections::HashSet::from(["bw:item:bank".to_string()]),
+    ));
+    assert!(command_list_titles(&app).is_empty());
+}
+
+#[test]
+fn test_vault_recently_used_entries_come_first() {
+    use super::vault::Outcome;
+    let mut app = bw_app(BW_LIST);
+    app.sort_mode = SortMode::Recency;
+    assert_eq!(
+        command_list_titles(&app),
+        vec!["bank", "code host", "gitlab"]
+    );
+    select_identity(&mut app, "bw:item:lab");
+    let _ = app.update(Message::Submit);
+    let fetch = app.vault.generation;
+    let _ = app.update(Message::VaultDone(fetch, vault_report(ready_job())));
+    assert!(app.vault.usage.contains_key("bw:item:lab"));
+
+    // Opened again, the copied item leads; Lock and Sync stay last.
+    let _ = app.update(Message::SearchChanged("fire".into()));
+    let _ = app.update(Message::SearchChanged("bw ".into()));
+    let mut items = super::bitwarden::parse_items(BW_LIST.as_bytes(), &Default::default()).unwrap();
+    items.push(super::pass::command_item(
+        super::bitwarden::LOCK_IDENTITY,
+        "Lock vault",
+        "",
+        "dialog-password",
+    ));
+    let load = app.vault.generation;
+    let _ = app.update(Message::VaultDone(
+        load,
+        vault_report(Outcome::Loaded(items)),
+    ));
+    assert_eq!(
+        command_list_titles(&app),
+        vec!["gitlab", "bank", "code host", "Lock vault"]
+    );
 }

@@ -554,6 +554,7 @@ pub(super) struct LauncherApp {
     pub history: HistoryState,
     pub emoji: EmojiState,
     pub command_list: super::command_list::CommandListState,
+    pub vault: super::vault::VaultState,
     pub devtools: DevtoolsState,
     pub clipboard: ClipboardState,
     pub fallbacks: Vec<ResolvedFallback>,

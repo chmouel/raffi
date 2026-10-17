@@ -29,6 +29,10 @@ pub(super) struct HelpEntry {
     pub completion: Option<String>,
 }
 
+/// Keys of the password manager lists, shown in their help rows.
+const VAULT_KEYS: &str =
+    "Enter copies the password, Ctrl+Enter types it, Ctrl+U copies the username and Ctrl+O the OTP code";
+
 /// Build the help rows for every enabled addon.
 ///
 /// The order mirrors [`super::app::route_query`] precedence so the help list
@@ -181,6 +185,30 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             title: "Bluetooth".to_string(),
             usage: format!("{trigger} <device>, Enter connects, or disconnects when pressed twice"),
             icon: Some(super::app::BLUETOOTH_ICON.to_string()),
+            completion: Some(format!("{trigger} ")),
+        });
+    }
+
+    if addons.pass.enabled {
+        let trigger = addons.pass.trigger();
+        entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
+            trigger: trigger.to_string(),
+            title: "Password store".to_string(),
+            usage: format!("{trigger} <entry>, {VAULT_KEYS}"),
+            icon: Some(super::app::PASS_ICON.to_string()),
+            completion: Some(format!("{trigger} ")),
+        });
+    }
+
+    if addons.bitwarden.enabled {
+        let trigger = addons.bitwarden.trigger();
+        entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
+            trigger: trigger.to_string(),
+            title: "Bitwarden".to_string(),
+            usage: format!("{trigger} <item>, {VAULT_KEYS}"),
+            icon: Some(super::app::BITWARDEN_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
         });
     }
@@ -359,6 +387,20 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             "Delete clipboard entry",
             "Clipboard history: remove the selected item from CopyQ",
         ));
+    }
+    if addons.pass.enabled || addons.bitwarden.enabled {
+        entries.extend([
+            shortcut(
+                "Ctrl+U",
+                "Copy username",
+                "Password managers: copies the username of the selected entry",
+            ),
+            shortcut(
+                "Ctrl+O",
+                "Copy OTP code",
+                "Password managers: copies the current one-time code",
+            ),
+        ]);
     }
     entries.extend([
         shortcut("Alt+P/N", "Search history", "Previous / next query"),

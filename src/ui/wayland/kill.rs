@@ -247,6 +247,8 @@ fn process_item(process: &Process) -> CommandItem {
                 "Press twice to send SIGKILL".to_string(),
             ),
         ],
+        badge: None,
+        domains: Vec::new(),
     }
 }
 

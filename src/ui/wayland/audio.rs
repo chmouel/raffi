@@ -360,6 +360,8 @@ fn device_item(kind: Kind, device: &Device, is_default: bool, keep_open: bool) -
             keep_open,
             progress: None,
         }),
+        badge: None,
+        domains: Vec::new(),
     }
 }
 

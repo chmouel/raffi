@@ -36,6 +36,7 @@ export default defineConfig({
           items: [
             { label: 'UI Modes', slug: 'features/ui-modes' },
             { label: 'Audio Switcher', slug: 'features/audio-switcher' },
+            { label: 'Bitwarden', slug: 'features/bitwarden' },
             { label: 'Bluetooth', slug: 'features/bluetooth' },
             { label: 'Calculator', slug: 'features/calculator' },
             { label: 'Clipboard History', slug: 'features/clipboard-history' },
@@ -45,6 +46,7 @@ export default defineConfig({
             { label: 'File Browser', slug: 'features/file-browser' },
             { label: 'Kill Process', slug: 'features/kill-process' },
             { label: 'Media Controls', slug: 'features/media-controls' },
+            { label: 'Password Store', slug: 'features/password-store' },
             { label: 'Script Filters', slug: 'features/script-filters' },
             { label: 'System Commands', slug: 'features/system-commands' },
             { label: 'Text Snippets', slug: 'features/text-snippets' },

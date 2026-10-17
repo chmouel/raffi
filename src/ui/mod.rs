@@ -152,6 +152,13 @@ pub fn get_snippet_mru_cache_path() -> Result<PathBuf> {
     Ok(path)
 }
 
+/// Get the password manager usage cache file path
+pub fn get_vault_mru_cache_path() -> Result<PathBuf> {
+    let mut path = get_mru_cache_path()?;
+    path.set_file_name("vault.cache");
+    Ok(path)
+}
+
 /// Get the command history cache file path
 pub fn get_history_cache_path() -> Result<PathBuf> {
     let cache_dir = std::env::var("XDG_CACHE_HOME")

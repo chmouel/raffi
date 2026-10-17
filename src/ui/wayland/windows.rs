@@ -130,6 +130,8 @@ fn window_item(window: Window) -> CommandItem {
         primary: Some(action(window.focus)),
         secondary: window.move_here.map(action),
         details,
+        badge: None,
+        domains: Vec::new(),
     }
 }
 

@@ -345,6 +345,8 @@ pub(super) fn power_item(adapter: &Adapter, keep_open: bool) -> CommandItem {
             ),
             ("Enter".to_string(), format!("bluetoothctl power {next}")),
         ],
+        badge: None,
+        domains: Vec::new(),
     }
 }
 
@@ -384,6 +386,8 @@ pub(super) fn device_item(
             primary: None,
             secondary: None,
             details,
+            badge: None,
+            domains: Vec::new(),
         };
     };
     let battery = info.battery.map(|percent| format!("{percent}% battery"));
@@ -449,6 +453,8 @@ pub(super) fn device_item(
         primary: Some(primary),
         secondary: None,
         details,
+        badge: None,
+        domains: Vec::new(),
     }
 }
 

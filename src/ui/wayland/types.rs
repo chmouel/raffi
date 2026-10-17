@@ -526,6 +526,15 @@ pub(crate) enum Message {
     ClipboardToggleImages,
     ClipboardDelete,
     ClipboardDeleteDone(u64, std::result::Result<String, String>),
+    /// Text typed in the masked password prompt, never shown by `Debug`.
+    PromptChanged(crate::secret::Secret),
+    /// A password manager operation started with this generation finished.
+    VaultDone(u64, super::vault::Report),
+    /// The Bitwarden notes search started with this generation found these
+    /// rows.
+    VaultSearchDone(u64, std::collections::HashSet<String>),
+    /// Run this action on the selected password manager entry.
+    VaultShortcut(super::vault::EntryAction),
 }
 
 /// Clipboard text fetched for snippet previews. `None` or a missing history

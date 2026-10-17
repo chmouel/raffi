@@ -1642,6 +1642,18 @@ impl LauncherApp {
     }
 }
 
+fn vault_key_rows() -> Vec<(String, String)> {
+    [
+        ("Enter", "Copy the password"),
+        ("Ctrl+Enter", "Type the password"),
+        ("Ctrl+U", "Copy the username"),
+        ("Ctrl+O", "Copy the OTP code"),
+    ]
+    .into_iter()
+    .map(|(key, action)| (key.to_string(), action.to_string()))
+    .collect()
+}
+
 /// Inspect `AddonsConfig` to provide rich metadata for a keyword suggestion or `Ctrl+/` help entry.
 fn describe_addon_by_keyword(
     keyword: &str,
@@ -1835,6 +1847,18 @@ fn describe_addon_by_keyword(
                 ("Requires".to_string(), "bluetoothctl".to_string()),
             ],
         );
+    }
+
+    if addons.pass.enabled && keyword == addons.pass.trigger() {
+        let mut rows = vault_key_rows();
+        rows.push(("Requires".to_string(), "pass, gpg".to_string()));
+        return ("Password Store".to_string(), rows);
+    }
+
+    if addons.bitwarden.enabled && keyword == addons.bitwarden.trigger() {
+        let mut rows = vault_key_rows();
+        rows.push(("Requires".to_string(), "rbw".to_string()));
+        return ("Bitwarden".to_string(), rows);
     }
 
     if addons.devtools.enabled && keyword == addons.devtools.trigger() {

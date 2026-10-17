@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::process::Command;
 use std::time::Duration;
 
@@ -6,6 +7,7 @@ use fuzzy_matcher::FuzzyMatcher;
 use iced::keyboard::Modifiers;
 
 use super::actions::{run_bounded, DeferredAction};
+use super::url_match::{base_domain, query_host, uri_host};
 
 const KEPT_OPEN_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -19,6 +21,8 @@ pub(super) enum CommandListAddon {
     Audio,
     Kill,
     Bluetooth,
+    Pass,
+    Bitwarden,
 }
 
 impl CommandListAddon {
@@ -31,6 +35,8 @@ impl CommandListAddon {
             Self::Audio => "audio",
             Self::Kill => "kill",
             Self::Bluetooth => "bluetooth",
+            Self::Pass => "pass",
+            Self::Bitwarden => "bitwarden",
         }
     }
 
@@ -42,6 +48,8 @@ impl CommandListAddon {
             Self::Audio => "Audio",
             Self::Kill => "Process",
             Self::Bluetooth => "Bluetooth",
+            Self::Pass => "Password",
+            Self::Bitwarden => "Bitwarden",
         }
     }
 
@@ -53,6 +61,8 @@ impl CommandListAddon {
             Self::Audio => "Loading audio devices...",
             Self::Kill => "Loading processes...",
             Self::Bluetooth => "Loading Bluetooth devices...",
+            Self::Pass => "Loading password store...",
+            Self::Bitwarden => "Loading Bitwarden vault...",
         }
     }
 }
@@ -90,6 +100,11 @@ pub(super) struct CommandItem {
     /// Run with Ctrl+Enter; the primary action when absent.
     pub secondary: Option<CommandAction>,
     pub details: Vec<(String, String)>,
+    /// Short tag shown as a pill at the end of the row.
+    pub badge: Option<String>,
+    /// Base domains of the sites the row is for; a filter naming one of
+    /// them, such as a pasted URL, lists the row first.
+    pub domains: Vec<String>,
 }
 
 impl CommandItem {
@@ -114,6 +129,8 @@ impl CommandItem {
             primary: None,
             secondary: None,
             details: Vec::new(),
+            badge: None,
+            domains: Vec::new(),
         }
     }
 }
@@ -159,6 +176,16 @@ pub(super) struct CommandListState {
     /// Bumped when leaving the mode, so actions finishing after the list was
     /// left alone, even when it was opened again.
     pub session: u64,
+    /// Single row shown over everything else, such as a password prompt.
+    pub overlay: Option<String>,
+    /// Identities an outside search, such as rbw's notes search, found for
+    /// a query; listed after the local matches while the query is the same.
+    pub extra: Option<(String, HashSet<String>)>,
+    /// Rows from this one on come only from `extra`.
+    pub extra_start: usize,
+    /// Past use of rows by identity, higher first: the order with no
+    /// filter, and the tie-break between equally good matches.
+    pub usage: HashMap<String, u64>,
 }
 
 impl CommandListState {
@@ -176,6 +203,9 @@ impl CommandListState {
         self.armed = None;
         self.refreshing = false;
         self.error = None;
+        self.overlay = None;
+        self.extra = None;
+        self.usage.clear();
         self.generation = self.generation.wrapping_add(1);
         self.session = self.session.wrapping_add(1);
     }
@@ -194,7 +224,7 @@ impl CommandListState {
     pub fn row_count(&self) -> usize {
         if !self.is_active() {
             0
-        } else if self.loading || self.notice.is_some() {
+        } else if self.loading || self.notice.is_some() || self.overlay.is_some() {
             1
         } else {
             self.filtered.len()
@@ -204,7 +234,9 @@ impl CommandListState {
     /// The text of the loading or notice row, when one replaces the list.
     pub fn status(&self) -> Option<&str> {
         let addon = self.addon?;
-        if self.loading {
+        if let Some(overlay) = &self.overlay {
+            Some(overlay)
+        } else if self.loading {
             Some(addon.loading_text())
         } else {
             self.notice.as_deref()
@@ -221,9 +253,31 @@ impl CommandListState {
     }
 
     pub fn set_query(&mut self, query: String) {
+        if self
+            .extra
+            .as_ref()
+            .is_some_and(|(searched, _)| *searched != query)
+        {
+            self.extra = None;
+        }
         self.query = query;
         self.armed = None;
         self.refilter();
+    }
+
+    /// List the rows with these identities after the local matches of
+    /// `query`, unless the query has changed since.
+    pub fn set_extra(&mut self, query: String, identities: HashSet<String>) {
+        if query != self.query {
+            return;
+        }
+        self.extra = Some((query, identities));
+        self.refilter();
+    }
+
+    /// Whether `row` is listed only because of the outside search.
+    pub fn is_extra_row(&self, row: usize) -> bool {
+        self.extra.is_some() && row >= self.extra_start
     }
 
     pub fn set_items(&mut self, mut items: Vec<CommandItem>) {
@@ -279,6 +333,7 @@ impl CommandListState {
         self.error = None;
         self.notice = None;
         self.armed = None;
+        self.extra = None;
         self.generation
     }
 
@@ -297,7 +352,23 @@ impl CommandListState {
     }
 
     fn refilter(&mut self) {
-        filter_items_into(&self.items, &self.query, &self.matcher, &mut self.filtered);
+        filter_items_into(
+            &self.items,
+            &self.query,
+            &self.matcher,
+            &self.usage,
+            &mut self.filtered,
+        );
+        self.extra_start = self.filtered.len();
+        let Some((_, identities)) = &self.extra else {
+            return;
+        };
+        let shown: HashSet<usize> = self.filtered.iter().copied().collect();
+        let extra =
+            self.items.iter().enumerate().filter(|(index, item)| {
+                identities.contains(&item.identity) && !shown.contains(index)
+            });
+        self.filtered.extend(extra.map(|(index, _)| index));
     }
 
     /// The confirmation verb shown on `item` while it is armed.
@@ -365,25 +436,64 @@ pub(super) fn filter_items_into(
     items: &[CommandItem],
     query: &str,
     matcher: &SkimMatcherV2,
+    usage: &HashMap<String, u64>,
     out: &mut Vec<usize>,
 ) {
     out.clear();
+    let used = |item: &CommandItem| usage.get(&item.identity).copied().unwrap_or(0);
     if query.is_empty() {
         out.extend(0..items.len());
+        if !usage.is_empty() {
+            // Rows without match text, such as errors, stay on top.
+            out.sort_by_key(|&index| {
+                let item = &items[index];
+                (!item.match_text.is_empty(), std::cmp::Reverse(used(item)))
+            });
+        }
         return;
     }
-    let mut scored: Vec<(usize, i64)> = items
+    let domain = query_host(query).map(|host| base_domain(&host));
+    // Rows without match text, then rows for the site a URL names, then
+    // fuzzy matches by score; past use breaks ties.
+    let mut ranked: Vec<(usize, u8, i64)> = items
         .iter()
         .enumerate()
         .filter_map(|(index, item)| {
             if item.match_text.is_empty() {
-                return Some((index, i64::MAX));
+                return Some((index, 0, 0));
+            }
+            if domain
+                .as_ref()
+                .is_some_and(|domain| item.domains.contains(domain))
+            {
+                return Some((index, 1, 0));
             }
             matcher
                 .fuzzy_match(&item.match_text, query)
-                .map(|score| (index, score))
+                .map(|score| (index, 2, score))
         })
         .collect();
-    scored.sort_by_key(|&(_, score)| std::cmp::Reverse(score));
-    out.extend(scored.iter().map(|&(index, _)| index));
+    ranked.sort_by_key(|&(index, rank, score)| {
+        (
+            rank,
+            std::cmp::Reverse(score),
+            std::cmp::Reverse(used(&items[index])),
+        )
+    });
+    out.extend(ranked.iter().map(|&(index, _, _)| index));
+}
+
+/// Base domains of the sites in `uris`, without repeats.
+pub(super) fn domains_of<'a>(uris: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    let mut domains: Vec<String> = Vec::new();
+    for domain in uris
+        .into_iter()
+        .filter_map(uri_host)
+        .map(|host| base_domain(&host))
+    {
+        if !domains.contains(&domain) {
+            domains.push(domain);
+        }
+    }
+    domains
 }

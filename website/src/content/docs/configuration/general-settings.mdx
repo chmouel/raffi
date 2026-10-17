@@ -126,12 +126,12 @@ Maximum number of search query history entries.
 
 **`sort_mode`** `string` (default: `hybrid`)
 
-Controls how launcher entries and [text snippets](/features/text-snippets/#snippet-keywords-and-search) are ordered by past use. With no search query they are listed in this order; while typing, it breaks ties between equally good matches. Valid options:
+Controls how launcher entries, [text snippets](/features/text-snippets/#snippet-keywords-and-search), [password store](/features/password-store/) entries and [Bitwarden](/features/bitwarden/) logins are ordered by past use. With no search query they are listed in this order; while typing, it breaks ties between equally good matches. Valid options:
   - `frequency` - Sort by launch count (most frequently used first)
   - `recency` - Sort by last-used time (most recently used first)
   - `hybrid` - Combined score: 40% frequency + 60% recency (default)
 
-  The MRU cache at `~/.cache/raffi/mru.cache` stores both launch counts and timestamps. Existing caches using the old format are migrated automatically on next use. Snippet use is kept separately in `~/.cache/raffi/snippets.cache`.
+  The MRU cache at `~/.cache/raffi/mru.cache` stores both launch counts and timestamps. Existing caches using the old format are migrated automatically on next use. Snippet use is kept separately in `~/.cache/raffi/snippets.cache`, and password entry use in `~/.cache/raffi/vault.cache`.
 
 
 **`clipboard_history`** `string` (default: `auto`)

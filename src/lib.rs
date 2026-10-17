@@ -14,6 +14,8 @@ use serde::Deserialize;
 use serde_yaml::Value;
 
 pub mod debug;
+#[cfg(feature = "wayland")]
+pub mod secret;
 pub mod ui;
 
 /// Represents the configuration for each Raffi entry.
@@ -751,6 +753,125 @@ impl Default for BluetoothAddonConfig {
     }
 }
 
+/// Who asks for the GPG passphrase when a pass entry needs one
+#[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PassPinentry {
+    /// Raffi shows its own masked prompt and hands the passphrase to gpg
+    /// through loopback pinentry
+    #[default]
+    Raffi,
+    /// Raffi closes and gpg-agent shows its usual pinentry (smartcards,
+    /// YubiKeys, or setups that forbid loopback)
+    Agent,
+}
+
+/// Configuration for the pass (password-store) addon (native UI only)
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
+pub struct PassAddonConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Keyword that opens the password list (default: `pass`).
+    #[serde(default)]
+    pub trigger: Option<String>,
+    /// Password store directory (default: `$PASSWORD_STORE_DIR`, else
+    /// `~/.password-store`).
+    #[serde(default)]
+    pub store_dir: Option<String>,
+    /// Who asks for the GPG passphrase: `raffi` (default) or `agent`.
+    #[serde(default)]
+    pub pinentry: PassPinentry,
+    /// `key: value` lines read as the username, tried in this order (default:
+    /// `login`, `user`, `username`). Falls back to the entry file name.
+    #[serde(default)]
+    pub username_fields: Option<Vec<String>>,
+    /// Seconds before a copied secret is cleared from the clipboard
+    /// (default: 45, 0 = never).
+    #[serde(default)]
+    pub clipboard_timeout: Option<u64>,
+    /// Milliseconds to wait after Raffi closes before typing (default: 200).
+    #[serde(default)]
+    pub type_delay_ms: Option<u64>,
+}
+
+impl PassAddonConfig {
+    pub fn trigger(&self) -> &str {
+        self.trigger.as_deref().unwrap_or("pass")
+    }
+
+    pub fn username_fields(&self) -> Vec<String> {
+        self.username_fields
+            .clone()
+            .unwrap_or_else(|| ["login", "user", "username"].map(String::from).to_vec())
+    }
+
+    pub fn clipboard_timeout(&self) -> u64 {
+        self.clipboard_timeout.unwrap_or(45)
+    }
+
+    pub fn type_delay_ms(&self) -> u64 {
+        self.type_delay_ms.unwrap_or(200)
+    }
+}
+
+impl Default for PassAddonConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            trigger: None,
+            store_dir: None,
+            pinentry: PassPinentry::default(),
+            username_fields: None,
+            clipboard_timeout: None,
+            type_delay_ms: None,
+        }
+    }
+}
+
+/// Configuration for the Bitwarden addon, backed by rbw (native UI only)
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
+pub struct BitwardenAddonConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Keyword that opens the vault list (default: `bw`).
+    #[serde(default)]
+    pub trigger: Option<String>,
+    /// Seconds before a copied secret is cleared from the clipboard
+    /// (default: 45, 0 = never).
+    #[serde(default)]
+    pub clipboard_timeout: Option<u64>,
+    /// Milliseconds to wait after Raffi closes before typing (default: 200).
+    #[serde(default)]
+    pub type_delay_ms: Option<u64>,
+}
+
+impl BitwardenAddonConfig {
+    pub fn trigger(&self) -> &str {
+        self.trigger.as_deref().unwrap_or("bw")
+    }
+
+    pub fn clipboard_timeout(&self) -> u64 {
+        self.clipboard_timeout.unwrap_or(45)
+    }
+
+    pub fn type_delay_ms(&self) -> u64 {
+        self.type_delay_ms.unwrap_or(200)
+    }
+}
+
+impl Default for BitwardenAddonConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            trigger: None,
+            clipboard_timeout: None,
+            type_delay_ms: None,
+        }
+    }
+}
+
 /// Container for all addon configurations
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
@@ -783,6 +904,10 @@ pub struct AddonsConfig {
     pub kill: KillAddonConfig,
     #[serde(default)]
     pub bluetooth: BluetoothAddonConfig,
+    #[serde(default)]
+    pub pass: PassAddonConfig,
+    #[serde(default)]
+    pub bitwarden: BitwardenAddonConfig,
     #[serde(default)]
     pub devtools: DevtoolsAddonConfig,
     #[serde(default)]
@@ -861,7 +986,7 @@ pub struct PreviewConfig {
     pub colors: Option<PreviewColorsConfig>,
 }
 
-/// Sort mode for launcher entries and text snippets by past use
+/// Sort mode for launcher entries, text snippets and password entries by past use
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum SortMode {
@@ -3962,6 +4087,32 @@ shell:
         assert!(!config.enabled);
         assert_eq!(config.trigger(), "blue");
         assert!(config.close_on_action);
+    }
+
+    #[test]
+    fn test_password_addon_config_parsing() {
+        let defaults = AddonsConfig::default();
+        assert!(defaults.pass.enabled);
+        assert_eq!(defaults.pass.trigger(), "pass");
+        assert_eq!(defaults.pass.pinentry, PassPinentry::Raffi);
+        assert_eq!(
+            defaults.pass.username_fields(),
+            vec!["login", "user", "username"]
+        );
+        assert_eq!(defaults.pass.clipboard_timeout(), 45);
+        assert_eq!(defaults.bitwarden.trigger(), "bw");
+
+        let config: AddonsConfig = serde_yaml::from_str(
+            "pass:\n  pinentry: agent\n  store_dir: ~/secrets\n  username_fields: [email]\n  clipboard_timeout: 0\nbitwarden:\n  trigger: vault\n  type_delay_ms: 500\n",
+        )
+        .unwrap();
+        assert_eq!(config.pass.pinentry, PassPinentry::Agent);
+        assert_eq!(config.pass.store_dir.as_deref(), Some("~/secrets"));
+        assert_eq!(config.pass.username_fields(), vec!["email"]);
+        assert_eq!(config.pass.clipboard_timeout(), 0);
+        assert_eq!(config.bitwarden.trigger(), "vault");
+        assert_eq!(config.bitwarden.type_delay_ms(), 500);
+        assert!(serde_yaml::from_str::<PassAddonConfig>("pinentry: tty\n").is_err());
     }
 
     #[test]

@@ -28,11 +28,13 @@ use super::emoji::{
     load_emoji_data_from_disk, resolve_emoji_file_names,
 };
 use super::help::{filter_help_entries, help_entries};
+use super::pass::PassContext;
 use super::preview::image_mime_type;
 use super::script_filters::{
     execute_script_filter, execute_script_filter_preview, parse_script_filter_output,
     schedule_script_filter_preview, PreviewRequest,
 };
+use super::secret_io::{SecretError, SystemRunner};
 use super::snippets::{
     compute_previews, execute_text_snippet_command, expand_final, fetch_clipboard, filter_snippets,
     missing_clipboard, parse_snippet_file, snippet_mru_key,
@@ -51,12 +53,20 @@ use super::support::{
 use super::system::system_entries;
 use super::types::InlineProvider;
 use super::units::{try_parse_unit_conversion, units_inline_result};
+use super::vault::{
+    Backend, EntryAction, Field, JobSettings, Op, OpKind, Outcome, PromptState, Report, Request,
+    VaultAddon,
+};
 use super::world_clock::{current_time_inline_result, try_parse_time_query};
-use crate::ui::{get_mru_cache_path, get_snippet_mru_cache_path, FontSizes};
+use crate::secret::Secret;
+use crate::ui::{
+    get_mru_cache_path, get_snippet_mru_cache_path, get_vault_mru_cache_path, FontSizes,
+};
 use crate::{
     read_desktop_icon_map, read_icon_map, resolve_launcher_icon_path, AddonsConfig, RaffiConfig,
     SortMode,
 };
+use std::time::Duration;
 
 #[derive(Clone, PartialEq, Eq)]
 pub(super) enum QueryMode {
@@ -160,7 +170,8 @@ impl std::fmt::Debug for QueryMode {
 }
 
 /// How a query is handled, worked out before anything filters or logs it.
-/// `sensitive` queries stay out of search history and debug logs.
+/// `sensitive` queries stay out of debug logs, and out of search history
+/// unless [`QueryClass::saved_in_history`] lets them in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct QueryClass {
     pub mode: QueryMode,
@@ -179,6 +190,15 @@ impl Default for QueryClass {
 }
 
 impl QueryClass {
+    /// pass and Bitwarden queries are saved: they only filter entry names,
+    /// and secrets never reach the query.
+    pub(super) fn saved_in_history(&self) -> bool {
+        match &self.mode {
+            QueryMode::CommandList { addon, .. } if VaultAddon::of(*addon).is_some() => true,
+            _ => !self.sensitive,
+        }
+    }
+
     /// The query as it may appear in debug logs.
     pub(super) fn loggable_query(&self, query: &str, addons: &AddonsConfig) -> String {
         match &self.mode {
@@ -374,7 +394,56 @@ pub(super) const MEDIA_ICON: &str = "multimedia-player";
 pub(super) const AUDIO_ICON: &str = "audio-speakers";
 pub(super) const KILL_ICON: &str = "utilities-system-monitor";
 pub(super) const BLUETOOTH_ICON: &str = "bluetooth-active";
+pub(super) const PASS_ICON: &str = "dialog-password";
+pub(super) const BITWARDEN_ICON: &str = "bitwarden";
 pub(super) const DEVTOOLS_ICON: &str = "utilities-terminal";
+
+/// Whether `message` comes from the user acting on the list or the query,
+/// which the password prompt must not let through.
+fn is_user_input(message: &Message) -> bool {
+    matches!(
+        message,
+        Message::SearchChanged(_)
+            | Message::MoveUp
+            | Message::MoveDown
+            | Message::SubmitRepeat
+            | Message::ItemClicked(_)
+            | Message::InlineSelected(_)
+            | Message::CurrencyResultCopied
+            | Message::MultiCurrencyResultCopied(_)
+            | Message::ScriptFilterItemSelected(_)
+            | Message::TextSnippetSelected(_)
+            | Message::WebSearchSelected
+            | Message::FileBrowserItemSelected(_)
+            | Message::FileBrowserRowPressed { .. }
+            | Message::FileBrowserRowReleased(_)
+            | Message::TabComplete
+            | Message::FileBrowserToggleHidden
+            | Message::FileBrowserCopyPath
+            | Message::FileBrowserCopyImage
+            | Message::FileBrowserOpenSelected
+            | Message::FileBrowserOpenFileManager
+            | Message::FileBrowserCycleSort
+            | Message::FileBrowserCycleShow
+            | Message::HistoryPrevious
+            | Message::HistoryNext
+            | Message::ToggleHelp
+            | Message::TogglePreview
+            | Message::PreviewScrollDown
+            | Message::PreviewScrollUp
+            | Message::HelpEntrySelected(_)
+            | Message::EmojiSelected(_)
+            | Message::CommandListSelected(_)
+            | Message::DevtoolsSelected(_)
+            | Message::FallbackSelected(_)
+            | Message::KeywordSuggestionSelected(_)
+            | Message::ClipboardSelected(_)
+            | Message::ClipboardRefresh
+            | Message::ClipboardToggleImages
+            | Message::ClipboardDelete
+            | Message::VaultShortcut(_)
+    )
+}
 
 /// The query as it may appear in debug logs: sensitive searches such as the
 /// clipboard can contain copied secrets, so only their trigger is kept.
@@ -521,6 +590,24 @@ pub(super) fn route_query(query: &str, addons: &AddonsConfig) -> QueryMode {
         }
     }
 
+    if addons.pass.enabled {
+        if let Some(query) = extract_keyword_query(input, addons.pass.trigger()) {
+            return QueryMode::CommandList {
+                addon: CommandListAddon::Pass,
+                query,
+            };
+        }
+    }
+
+    if addons.bitwarden.enabled {
+        if let Some(query) = extract_keyword_query(input, addons.bitwarden.trigger()) {
+            return QueryMode::CommandList {
+                addon: CommandListAddon::Bitwarden,
+                query,
+            };
+        }
+    }
+
     if addons.devtools.enabled {
         if let Some(payload) = extract_raw_keyword_payload(input, addons.devtools.trigger()) {
             return QueryMode::Devtools { payload };
@@ -655,6 +742,22 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
             keyword: addons.bluetooth.trigger().to_string(),
             subtitle: "Connect Bluetooth devices or turn Bluetooth on and off".to_string(),
             icon: Some(BLUETOOTH_ICON.to_string()),
+        });
+    }
+
+    if addons.pass.enabled && matches(addons.pass.trigger()) {
+        suggestions.push(KeywordSuggestion {
+            keyword: addons.pass.trigger().to_string(),
+            subtitle: "Copy or type passwords from pass".to_string(),
+            icon: Some(PASS_ICON.to_string()),
+        });
+    }
+
+    if addons.bitwarden.enabled && matches(addons.bitwarden.trigger()) {
+        suggestions.push(KeywordSuggestion {
+            keyword: addons.bitwarden.trigger().to_string(),
+            subtitle: "Copy or type passwords from Bitwarden".to_string(),
+            icon: Some(BITWARDEN_ICON.to_string()),
         });
     }
 
@@ -807,6 +910,12 @@ impl LauncherApp {
                 },
                 emoji: EmojiState::default(),
                 command_list: Default::default(),
+                vault: {
+                    let mut vault = super::vault::VaultState::default();
+                    vault.usage_path = get_vault_mru_cache_path().ok();
+                    vault.usage = load_mru_map(vault.usage_path.as_deref());
+                    vault
+                },
                 devtools: DevtoolsState::default(),
                 clipboard: ClipboardState::default(),
                 fallbacks,
@@ -828,12 +937,21 @@ impl LauncherApp {
 
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.update_inner(message);
+        self.sync_vault();
         let preview = self.ensure_clipboard_preview();
         let file_preview = self.ensure_file_browser_preview();
         Task::batch([task, preview, file_preview])
     }
 
     fn update_inner(&mut self, message: Message) -> Task<Message> {
+        if self.vault.prompt.is_some() {
+            match message {
+                Message::Submit => return self.submit_vault_prompt(),
+                Message::Cancel => return self.cancel_vault_prompt(),
+                ref message if is_user_input(message) => return Task::none(),
+                _ => {}
+            }
+        }
         match message {
             Message::SearchChanged(query) => self.handle_search_changed(query),
             Message::MoveUp => self.move_selection(-1),
@@ -845,7 +963,39 @@ impl LauncherApp {
                 if self.view.help_active {
                     return self.close_help();
                 }
+                // Escape stops an unlock, a slow fetch or a sync and returns
+                // to the list, or leaves the mode if it never loaded.
+                let unlocking = self.vault.unlocking;
+                if let Some(kind) = self
+                    .vault
+                    .running
+                    .as_ref()
+                    .map(|op| op.kind.clone())
+                    .filter(|kind| unlocking || matches!(kind, OpKind::Entry(..) | OpKind::Sync))
+                {
+                    self.vault.abort();
+                    if kind == OpKind::Load {
+                        return self.handle_search_changed(String::new());
+                    }
+                    return Task::none();
+                }
                 iced::exit()
+            }
+            Message::PromptChanged(value) => {
+                let busy = self.vault.busy();
+                if let Some(prompt) = self.vault.prompt.as_mut().filter(|_| !busy) {
+                    prompt.buffer = value;
+                }
+                Task::none()
+            }
+            Message::VaultDone(generation, report) => self.handle_vault_done(generation, report),
+            Message::VaultSearchDone(generation, identities) => {
+                self.handle_vault_search_done(generation, identities);
+                Task::none()
+            }
+            Message::VaultShortcut(action) => self.handle_vault_shortcut(action),
+            Message::FileBrowserOpenSelected if self.vault_addon().is_some() => {
+                self.handle_vault_shortcut(EntryAction::Copy(Field::Otp))
             }
             Message::ItemClicked(index) => {
                 if index != self.selected_index {
@@ -1188,6 +1338,7 @@ impl LauncherApp {
                     drag.disarm();
                 }
                 tasks.push(self.handle_command_list_query(addon, query));
+                tasks.push(self.snap_to_selection());
                 return Task::batch(tasks);
             }
             QueryMode::Devtools { payload } => {
@@ -1746,7 +1897,378 @@ impl LauncherApp {
                 }
                 self.load_bluetooth(false)
             }
+            CommandListAddon::Bitwarden if !entered => self.search_vault_notes(),
+            CommandListAddon::Pass if !entered => Task::none(),
+            CommandListAddon::Pass | CommandListAddon::Bitwarden => {
+                let exists = self.program_exists;
+                let missing = match addon {
+                    CommandListAddon::Pass if !exists("pass") => Some("pass"),
+                    CommandListAddon::Pass if !exists("gpg") && !exists("gpg2") => Some("gpg"),
+                    CommandListAddon::Bitwarden if !exists("rbw") => Some("rbw"),
+                    _ => None,
+                };
+                if let Some(tool) = missing {
+                    self.command_list.set_notice(format!("{tool} not found"));
+                    return Task::none();
+                }
+                let Some(vault) = VaultAddon::of(addon) else {
+                    return Task::none();
+                };
+                self.command_list.usage = self.vault_usage();
+                self.command_list.begin_load();
+                self.start_vault(
+                    Op {
+                        addon: vault,
+                        kind: OpKind::Load,
+                    },
+                    None,
+                )
+            }
         }
+    }
+
+    /// How much each password manager row was used, by identity.
+    fn vault_usage(&self) -> HashMap<String, u64> {
+        let map = &self.vault.usage;
+        let (max_count, min_ts, max_ts) = mru_bounds(map);
+        map.keys()
+            .map(|key| {
+                let score = mru_sort_key(key, map, &self.sort_mode, max_count, min_ts, max_ts);
+                (key.clone(), score)
+            })
+            .collect()
+    }
+
+    /// The password manager whose list is shown, if any.
+    pub(super) fn vault_addon(&self) -> Option<VaultAddon> {
+        self.command_list.addon.and_then(VaultAddon::of)
+    }
+
+    /// Drop the password manager operation once its list is left, and show
+    /// its prompt or progress over the list.
+    fn sync_vault(&mut self) {
+        let active = self.vault_addon();
+        let pending = self
+            .vault
+            .prompt
+            .as_ref()
+            .map(|prompt| prompt.op.addon)
+            .or_else(|| self.vault.running.as_ref().map(|op| op.addon));
+        if pending.is_some() && pending != active {
+            self.vault.abort();
+        }
+        if active != Some(VaultAddon::Bitwarden) {
+            self.vault.stop_search();
+        }
+        self.command_list.overlay = active.and_then(|_| self.vault.overlay());
+    }
+
+    /// Search Bitwarden notes, URIs and custom fields for the filter after a
+    /// pause in typing, once the list is shown.
+    fn search_vault_notes(&mut self) -> Task<Message> {
+        let query = self.command_list.query.clone();
+        if self.vault.search_query.as_ref() == Some(&query)
+            || self
+                .command_list
+                .extra
+                .as_ref()
+                .is_some_and(|(searched, _)| *searched == query)
+        {
+            return Task::none();
+        }
+        self.vault.stop_search();
+        let term = query.trim().to_string();
+        if self.vault_addon() != Some(VaultAddon::Bitwarden)
+            || term.chars().count() < super::bitwarden::SEARCH_MIN_CHARS
+            || self.command_list.loading
+            || self.command_list.notice.is_some()
+            || self.vault.busy()
+        {
+            return Task::none();
+        }
+        let (generation, cancel) = self.vault.begin_search(query);
+        Task::perform(
+            async move {
+                let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                std::thread::spawn(move || {
+                    std::thread::sleep(super::bitwarden::SEARCH_DEBOUNCE);
+                    let found = if cancel.is_cancelled() {
+                        Default::default()
+                    } else {
+                        let runner = SystemRunner { cancel };
+                        super::bitwarden::search(&runner, &term).unwrap_or_else(|error| {
+                            crate::debug_log!("vault: notes search failed: {}", error.message());
+                            Default::default()
+                        })
+                    };
+                    let _ = sender.send(found);
+                });
+                receiver.await.unwrap_or_default()
+            },
+            move |found| Message::VaultSearchDone(generation, found),
+        )
+    }
+
+    fn handle_vault_search_done(
+        &mut self,
+        generation: u64,
+        identities: std::collections::HashSet<String>,
+    ) {
+        let Some(query) = self.vault.finish_search(generation) else {
+            return;
+        };
+        if self.vault_addon() != Some(VaultAddon::Bitwarden) {
+            return;
+        }
+        crate::debug_log!("vault: notes search found {}", identities.len());
+        self.command_list.set_extra(query, identities);
+    }
+
+    /// Start `op` off the UI thread, with what the user typed in the prompt
+    /// if it follows one.
+    fn start_vault(&mut self, op: Op, credential: Option<Secret>) -> Task<Message> {
+        self.run_vault(op, credential, false)
+    }
+
+    /// Start `op`, after `rbw unlock` when `unlock_first` is set.
+    fn run_vault(
+        &mut self,
+        op: Op,
+        credential: Option<Secret>,
+        unlock_first: bool,
+    ) -> Task<Message> {
+        let addon = op.addon;
+        let request = Request {
+            backend: match addon {
+                VaultAddon::Pass => Backend::Pass(PassContext::new(&self.addons.pass)),
+                VaultAddon::Bitwarden => Backend::Bitwarden,
+            },
+            settings: match addon {
+                VaultAddon::Pass => JobSettings {
+                    clipboard_timeout: self.addons.pass.clipboard_timeout(),
+                    type_delay: Duration::from_millis(self.addons.pass.type_delay_ms()),
+                },
+                VaultAddon::Bitwarden => JobSettings {
+                    clipboard_timeout: self.addons.bitwarden.clipboard_timeout(),
+                    type_delay: Duration::from_millis(self.addons.bitwarden.type_delay_ms()),
+                },
+            },
+            op: op.clone(),
+            credential,
+            unlock_first,
+        };
+        crate::debug_log!("vault: starting {}", op.log_name());
+        // A search racing with Lock could ask for the master password again.
+        self.vault.stop_search();
+        let (generation, cancel) = self.vault.begin(op);
+        self.vault.unlocking = unlock_first;
+        Task::perform(
+            async move {
+                let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                std::thread::spawn(move || {
+                    let runner = SystemRunner { cancel };
+                    let _ = sender.send(super::vault::run(&runner, request));
+                });
+                receiver.await.unwrap_or_else(|_| {
+                    Report::failed(SecretError::Tool("stopped unexpectedly".to_string()))
+                })
+            },
+            move |report| Message::VaultDone(generation, report),
+        )
+    }
+
+    fn submit_vault_prompt(&mut self) -> Task<Message> {
+        if self.vault.busy() {
+            return Task::none();
+        }
+        let Some(prompt) = self.vault.prompt.as_mut() else {
+            return Task::none();
+        };
+        if prompt.buffer.is_empty() {
+            return Task::none();
+        }
+        let credential = std::mem::take(&mut prompt.buffer);
+        prompt.error = None;
+        let op = prompt.op.clone();
+        self.start_vault(op, Some(credential))
+    }
+
+    /// Close the prompt; leave the mode when the list never loaded.
+    fn cancel_vault_prompt(&mut self) -> Task<Message> {
+        let loading = self
+            .vault
+            .prompt
+            .as_ref()
+            .is_some_and(|prompt| prompt.op.kind == OpKind::Load);
+        self.vault.abort();
+        if loading {
+            return self.handle_search_changed(String::new());
+        }
+        Task::none()
+    }
+
+    fn handle_vault_done(&mut self, generation: u64, report: Report) -> Task<Message> {
+        let Some(op) = self.vault.finish(generation) else {
+            crate::debug_log!("vault: dropping a stale result");
+            return Task::none();
+        };
+        if !matches!(report.outcome, Outcome::Prompt(..)) {
+            self.vault.prompt = None;
+        }
+        // Uncover the rows so the rows added below keep the selection.
+        self.sync_vault();
+        let ready = matches!(report.outcome, Outcome::Ready(_));
+        if let Some(notice) = &report.notice {
+            if ready {
+                super::hyprland::notify(notice);
+            } else {
+                self.set_command_list_front(super::command_list::CommandItem::info(
+                    "notice",
+                    notice.clone(),
+                    "dialog-information",
+                ));
+            }
+        }
+        match report.outcome {
+            Outcome::Loaded(items) => {
+                let selected = self
+                    .command_list
+                    .item(self.selected_index)
+                    .map(|item| item.identity.clone());
+                self.set_command_list_items(items);
+                self.selected_index = selected
+                    .and_then(|identity| self.command_list.position(&identity))
+                    .unwrap_or(0);
+                self.search_vault_notes()
+            }
+            Outcome::Ready(job) => {
+                crate::debug_log!("vault: running {} after close", op.log_name());
+                self.save_query_to_history();
+                if let Some(identity) = op.identity() {
+                    record_mru_use(&mut self.vault.usage, identity);
+                    save_mru_map(self.vault.usage_path.as_deref(), &self.vault.usage);
+                }
+                if let Ok(mut slot) = self.deferred_action.lock() {
+                    *slot = Some(super::actions::DeferredAction::Secret(job));
+                }
+                iced::exit()
+            }
+            Outcome::Done if op.kind == OpKind::Lock => iced::exit(),
+            Outcome::Done => {
+                self.command_list.begin_refresh();
+                self.start_vault(
+                    Op {
+                        addon: op.addon,
+                        kind: OpKind::Load,
+                    },
+                    None,
+                )
+            }
+            Outcome::NeedsUnlock => self.run_vault(op, None, true),
+            Outcome::Prompt(purpose, error) => {
+                self.vault.prompt = Some(PromptState {
+                    purpose,
+                    op,
+                    buffer: Secret::default(),
+                    error: error.map(|error| error.message()),
+                });
+                Task::none()
+            }
+            Outcome::Failed(SecretError::Cancelled) => Task::none(),
+            Outcome::Failed(error) => {
+                crate::debug_log!("vault: {} failed: {}", op.log_name(), error.message());
+                if op.kind == OpKind::Load {
+                    self.command_list.set_notice(error.message());
+                } else {
+                    self.set_command_list_front(super::command_list::CommandItem::info(
+                        "error",
+                        error.message(),
+                        "dialog-error",
+                    ));
+                }
+                Task::none()
+            }
+        }
+    }
+
+    fn handle_vault_shortcut(&mut self, action: EntryAction) -> Task<Message> {
+        match self.vault_addon() {
+            Some(addon) => match self.selected_index.checked_sub(self.command_list_offset()) {
+                Some(row) => self.select_vault_row(addon, row, Some(action)),
+                None => Task::none(),
+            },
+            None => Task::none(),
+        }
+    }
+
+    /// Rows shown above the command list, counted like `activate_index`.
+    fn command_list_offset(&self) -> usize {
+        let snippets = if self.text_snippets.loading {
+            1
+        } else if self.text_snippets.active {
+            self.text_snippets.filtered.len()
+        } else {
+            0
+        };
+        let emoji = if self.emoji.active {
+            self.emoji.filtered.len()
+        } else {
+            0
+        };
+        let clipboard = if self.clipboard.active {
+            self.clipboard.row_count()
+        } else {
+            0
+        };
+        self.keyword_suggestions.len() + self.script_filter_offset() + snippets + emoji + clipboard
+    }
+
+    /// Run `action` on the entry at `row`, or the Lock or Sync row. Without
+    /// an action, Enter copies the password and Ctrl+Enter types it.
+    fn select_vault_row(
+        &mut self,
+        addon: VaultAddon,
+        row: usize,
+        action: Option<EntryAction>,
+    ) -> Task<Message> {
+        let Some(item) = self.command_list.item(row) else {
+            return Task::none();
+        };
+        let identity = item.identity.as_str();
+        let (lock, sync, entry) = match addon {
+            VaultAddon::Pass => (
+                super::pass::LOCK_IDENTITY,
+                super::pass::SYNC_IDENTITY,
+                super::pass::entry_name(identity),
+            ),
+            VaultAddon::Bitwarden => (
+                super::bitwarden::LOCK_IDENTITY,
+                super::bitwarden::SYNC_IDENTITY,
+                super::bitwarden::item_id(identity),
+            ),
+        };
+        let kind = if identity == lock && action.is_none() {
+            OpKind::Lock
+        } else if identity == sync && action.is_none() {
+            OpKind::Sync
+        } else if let Some(entry) = entry {
+            let action = action.unwrap_or(if self.view.current_modifiers.control() {
+                EntryAction::Type
+            } else {
+                EntryAction::Copy(Field::Password)
+            });
+            OpKind::Entry(action, entry.to_string())
+        } else {
+            return Task::none();
+        };
+        if kind == OpKind::Lock {
+            // Lock wins over whatever Raffi runs. A pinentry rbw already
+            // shows stays open, and answering it unlocks again.
+            self.vault.abort();
+        } else if self.vault.busy() {
+            return Task::none();
+        }
+        self.start_vault(Op { addon, kind }, None)
     }
 
     fn load_bluetooth(&mut self, refresh: bool) -> Task<Message> {
@@ -1837,7 +2359,10 @@ impl LauncherApp {
                 CommandListAddon::Audio => self.load_audio(true),
                 CommandListAddon::Kill => self.load_command_list(super::kill::load_processes, true),
                 CommandListAddon::Bluetooth => self.load_bluetooth(true),
-                CommandListAddon::System | CommandListAddon::Windows => Task::none(),
+                CommandListAddon::System
+                | CommandListAddon::Windows
+                | CommandListAddon::Pass
+                | CommandListAddon::Bitwarden => Task::none(),
             },
             Err(error) => {
                 crate::debug_log!("{}: action failed: {error}", addon.name());
@@ -1850,10 +2375,6 @@ impl LauncherApp {
                     Some(item) => format!("{} failed: {error}", item.title),
                     None => error,
                 };
-                let selected = self
-                    .command_list
-                    .item(self.selected_index)
-                    .map(|item| item.identity.clone());
                 // A failed signal usually means the process is gone or was
                 // replaced, and a timed out connection may still have
                 // changed the device, so the list reloads under the error
@@ -1870,20 +2391,28 @@ impl LauncherApp {
                     error,
                     "dialog-error",
                 ));
-                if let Some(row) = selected.and_then(|id| self.command_list.position(&id)) {
-                    self.selected_index = row;
-                }
                 refresh
             }
         }
     }
 
+    /// Show `item` above the list. The highlight stays on the same entry, so
+    /// the next key never acts on the row that slid under it.
     fn set_command_list_front(&mut self, mut item: super::command_list::CommandItem) {
         item.icon = item
             .icon_names
             .iter()
             .find_map(|name| self.resolve_icon_name(name));
+        let offset = self.command_list_offset();
+        let selected = self
+            .selected_index
+            .checked_sub(offset)
+            .and_then(|row| self.command_list.item(row))
+            .map(|item| item.identity.clone());
         self.command_list.show_error(item);
+        if let Some(row) = selected.and_then(|id| self.command_list.position(&id)) {
+            self.selected_index = offset + row;
+        }
     }
 
     /// What `item` shows while its action runs with Raffi kept open.
@@ -1972,15 +2501,15 @@ impl LauncherApp {
 
     fn snap_to_selection(&self) -> Task<Message> {
         let total = self.total_items();
-        if total > 1 {
-            let offset = self.selected_index as f32 / (total - 1) as f32;
-            snap_to(
-                self.view.scrollable_id.clone(),
-                scrollable::RelativeOffset { x: 0.0, y: offset },
-            )
+        let offset = if total > 1 {
+            self.selected_index as f32 / (total - 1) as f32
         } else {
-            Task::none()
-        }
+            0.0
+        };
+        snap_to(
+            self.view.scrollable_id.clone(),
+            scrollable::RelativeOffset { x: 0.0, y: offset },
+        )
     }
 
     fn activate_index(&mut self, index: usize) -> Task<Message> {
@@ -3037,6 +3566,9 @@ impl LauncherApp {
         let Some(addon) = self.command_list.addon else {
             return Task::none();
         };
+        if let Some(vault) = VaultAddon::of(addon) {
+            return self.select_vault_row(vault, row, None);
+        }
         match self.command_list.select(row, self.view.current_modifiers) {
             Selection::Ignore => Task::none(),
             Selection::Armed => {
@@ -3437,7 +3969,7 @@ impl LauncherApp {
     }
 
     pub(super) fn save_query_to_history(&mut self) {
-        if self.query_class.sensitive {
+        if !self.query_class.saved_in_history() {
             return;
         }
         let query = self.search_query.trim().to_string();

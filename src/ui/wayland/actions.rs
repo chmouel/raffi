@@ -15,7 +15,7 @@ const DEFERRED_TIMEOUT: Duration = Duration::from_secs(2);
 /// keep caret movement for `{cursor}` within a sane bound.
 const MAX_CURSOR_MOVES: usize = 1000;
 
-fn find_tool(candidates: &[&'static str]) -> Option<&'static str> {
+pub(super) fn find_tool(candidates: &[&'static str]) -> Option<&'static str> {
     std::env::var_os("PATH").and_then(|paths| {
         for dir in std::env::split_paths(&paths) {
             for candidate in candidates {
@@ -178,7 +178,7 @@ fn copy_with(argv: &[&str], text: &str, timeout: Duration) -> Result<(), String>
     }
 }
 
-fn program_name(program: &str) -> &str {
+pub(super) fn program_name(program: &str) -> &str {
     Path::new(program)
         .file_name()
         .and_then(|name| name.to_str())
@@ -242,6 +242,8 @@ pub(super) enum DeferredAction {
     Signal(super::kill::SignalTarget),
     /// `bluetoothctl` with these arguments, failing on the errors it prints.
     Bluetooth(Vec<String>),
+    /// Copy or type a password manager secret.
+    Secret(super::vault::SecretJob),
 }
 
 impl DeferredAction {
@@ -255,6 +257,7 @@ impl DeferredAction {
             Self::Hypr(action) => action.run(),
             Self::Signal(target) => super::kill::send_signal(target),
             Self::Bluetooth(args) => super::bluetooth::run_action(args),
+            Self::Secret(job) => job.run(),
         }
     }
 
@@ -267,6 +270,7 @@ impl DeferredAction {
             Self::Hypr(_) => "hyprctl",
             Self::Signal(_) => "kill",
             Self::Bluetooth(_) => "bluetoothctl",
+            Self::Secret(_) => "secret",
         }
     }
 

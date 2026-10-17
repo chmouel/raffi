@@ -1,0 +1,156 @@
+---
+title: Bitwarden
+description: Copy or type passwords from your Bitwarden vault with rbw
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Type `bw ` (with the trailing space) to list the logins in your Bitwarden
+vault. Each row shows the item name, with the username and folder
+underneath. Words after the keyword filter the list. Only login items are
+listed, and the list never holds passwords: those are read from the vault
+when you pick an item. Items with a TOTP code show an OTP pill, so you know
+Ctrl+O will work.
+
+<Aside type="note">
+The Bitwarden addon is only available in native mode and needs
+[rbw](https://github.com/doy/rbw), an unofficial Bitwarden client whose
+background agent keeps the vault unlocked, so lists and copies are quick.
+The addon is on by default. When `rbw` is not installed the list says
+"rbw not found".
+</Aside>
+
+| Key        | Action                                        |
+|------------|-----------------------------------------------|
+| Enter      | Copy the password                             |
+| Ctrl+Enter | Type the password                             |
+| Ctrl+U     | Copy the username                             |
+| Ctrl+O     | Copy the TOTP code                            |
+
+Escape stops a slow read and returns to the list. Raffi closes before it
+copies or types anything, so typing goes to the window you were in. Copies
+are cleared from the clipboard after 45 seconds, unless something else was
+copied meanwhile.
+
+## Searching
+
+The logins you copy or type most come first, ordered by the
+[`sort_mode`](/configuration/general-settings/) used for launchers
+(`hybrid` by default, `recency` for most recent first). While you type,
+past use only decides between equally good matches.
+
+The filter is matched against the item name, the username and every saved
+URI. Paste a URL, such as `bw https://login.github.com/session`, and the
+items saved for that site come first. Sites match by base domain, like
+Bitwarden's default: a saved `github.com` or `accounts.github.com` both
+match `login.github.com`. Raffi works out the base domain with a short
+built-in list of country suffixes (`co.uk`, `com.au` and similar) rather
+than the full public suffix list, and ignores per-URI match settings.
+
+After a short pause in typing, with three characters or more, Raffi also
+asks `rbw search` for items whose notes, URIs or visible custom fields
+contain the filter. Those items are added below the others with a "notes"
+pill. rbw does that search on its side and only returns the item list, so
+the notes never reach Raffi. Hidden custom fields are not searched. When
+the vault is locked the search is skipped instead of asking for the master
+password.
+
+## Setting up rbw
+
+Configure rbw once in a terminal:
+
+```sh
+rbw config set email you@example.com
+# Self-hosted or EU server only:
+rbw config set base_url https://vault.example.com
+# A graphical pinentry, so Raffi can unlock without a terminal:
+rbw config set pinentry pinentry-gnome3
+rbw login
+```
+
+The official server may refuse logins from rbw until the device is
+registered: run `rbw register` and give it the personal API key from the
+Bitwarden web vault. Any graphical pinentry works (`pinentry-qt`,
+`pinentry-gtk`, `pinentry-bemenu`, ...); the default `pinentry` may pick a
+terminal one, which cannot show up when Raffi runs from a key binding.
+
+## Unlocking
+
+When the vault is locked, Raffi says "Unlocking with rbw" and runs
+`rbw unlock`, which asks for the master password in rbw's pinentry window.
+Raffi never sees the password. Once unlocked, Raffi carries on with what you
+asked for, loading the list or copying the item. A wrong password is asked
+again by pinentry; cancelling it shows "Unlock cancelled". Escape in Raffi
+stops waiting, but the pinentry window stays open: cancel it, because
+answering it later still unlocks rbw, even after Lock vault.
+
+rbw locks the vault after an hour without use. Change it in rbw, in
+seconds:
+
+```sh
+rbw config set lock_timeout 900
+```
+
+## Lock and sync
+
+The list ends with two extra rows:
+
+| Row         | Enter                                    |
+|-------------|------------------------------------------|
+| Lock vault  | Run `rbw lock`, then close Raffi         |
+| Sync vault  | Run `rbw sync`, then reload the list     |
+
+## Security notes
+
+- The master password goes from pinentry to the rbw agent, which holds the
+  unlocked keys in memory until it locks. Raffi reads only the item you
+  picked, with `rbw get --raw`. That output holds the whole item, notes and
+  password history included; Raffi keeps the username, password and
+  whether there is a TOTP secret, and never logs the rest.
+- What you type after `bw ` goes into the search history (Alt+P) when you
+  copy or type an item, so the history file can show which items you looked
+  up. Debug logs leave it out.
+- Raffi keeps when and how often you used each item in
+  `~/.cache/raffi/vault.cache`, by item id; no names or secrets.
+- The notes search passes the filter to `rbw search` on its command line,
+  where your other processes can see it while it runs. Raffi checks the
+  vault is unlocked just before it searches; if rbw locks in that instant,
+  rbw's pinentry may ask for the master password.
+- `rbw list` doesn't say which items have a TOTP code, so the OTP pill comes
+  from rbw's local cache (`~/.cache/rbw/`), where each TOTP secret is stored
+  encrypted or left empty. Raffi only checks whether it is there and
+  decrypts nothing. If rbw changes that file, the pills disappear and the
+  rest keeps working.
+- rbw matches an item by name when no item has the id Raffi asked for, as
+  after the item was deleted. Raffi refuses an answer for another item and
+  says "Entry not found". The TOTP code is read with a second call,
+  `rbw code`, right after that check; an item deleted in between by a sync
+  could still let rbw match another one by name.
+- With `wl-copy` 2.3 or newer the copy is marked sensitive, which clipboard
+  managers such as cliphist honour. That is only a hint: other managers,
+  `xclip` and `xsel` may keep the password in their history. Tools that keep
+  the clipboard alive after its owner exits, such as wl-clip-persist, also
+  defeat the 45 second clearing.
+- Clearing the clipboard later needs `timeout` from coreutils. Without it
+  Raffi refuses to copy; set `clipboard_timeout: 0` to copy without
+  clearing.
+- Typing uses `wtype` or `ydotool` after a short delay (`type_delay_ms`).
+  Raffi cannot check which window has the focus by then.
+
+To open the list from a key binding, pass the keyword as the initial query:
+
+```sh
+raffi -u native -i "bw "
+```
+
+## Configuration
+
+```yaml
+addons:
+  bitwarden:
+    clipboard_timeout: 45
+    type_delay_ms: 200
+```
+
+See the [addon reference](/reference/addon-configuration/#bitwarden) for
+every field.

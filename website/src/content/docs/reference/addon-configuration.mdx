@@ -13,7 +13,7 @@ The native UI includes several built-in addons that can be configured under the 
 ## Keywords
 
 Script filters, web searches, text snippets, the emoji picker, the clipboard
-history browser, system commands, the window switcher, media controls, the audio switcher, the process killer, Bluetooth and developer tools are reached by
+history browser, system commands, the window switcher, media controls, the audio switcher, the process killer, Bluetooth, the password store, Bitwarden and developer tools are reached by
 typing their keyword followed by a space. Typing `sn` on its own searches your
 launchers as usual, while `sn ` enters the snippet source.
 
@@ -1144,6 +1144,90 @@ addons:
   bluetooth:
     trigger: "blue"
     close_on_action: true
+```
+
+## Password Store
+
+Copies or types passwords from [pass](https://www.passwordstore.org/).
+See [Password Store](/features/password-store/) for usage.
+
+### Configuration
+
+**`addons.pass.enabled`** `boolean` (default: `true`)
+
+**`addons.pass.trigger`** `string` (default: `pass`)
+
+Keyword that opens the entry list. Type it followed by a space. Web
+searches with the same keyword take precedence.
+
+**`addons.pass.store_dir`** `string` (default: `$PASSWORD_STORE_DIR`, else `~/.password-store`)
+
+Password store directory. `~` is expanded.
+
+**`addons.pass.pinentry`** `raffi` | `agent` (default: `raffi`)
+
+Who asks for the GPG passphrase when gpg-agent doesn't have it cached:
+Raffi's own masked prompt, or gpg-agent's pinentry after Raffi closes. Use
+`agent` for smartcards and YubiKeys, or when loopback pinentry is disabled.
+
+**`addons.pass.username_fields`** `string[]` (default: `[login, user, username]`)
+
+`key: value` lines read as the username, tried in this order: the first
+field found in the entry wins, wherever its line sits. Without one, the
+entry's file name is used.
+
+**`addons.pass.clipboard_timeout`** `integer` (default: `45`)
+
+Seconds before a copied secret is cleared from the clipboard. `0` never
+clears it.
+
+**`addons.pass.type_delay_ms`** `integer` (default: `200`)
+
+Milliseconds to wait after Raffi closes before typing, so the previous
+window has the focus back.
+
+### Example
+
+```yaml
+addons:
+  pass:
+    store_dir: ~/work/password-store
+    pinentry: agent
+    clipboard_timeout: 20
+```
+
+## Bitwarden
+
+Copies or types passwords from a Bitwarden vault with
+[rbw](https://github.com/doy/rbw). The vault lock timeout is set in rbw
+(`rbw config set lock_timeout`), not here.
+See [Bitwarden](/features/bitwarden/) for usage.
+
+### Configuration
+
+**`addons.bitwarden.enabled`** `boolean` (default: `true`)
+
+**`addons.bitwarden.trigger`** `string` (default: `bw`)
+
+Keyword that opens the vault list. Type it followed by a space. Web
+searches with the same keyword take precedence.
+
+**`addons.bitwarden.clipboard_timeout`** `integer` (default: `45`)
+
+Seconds before a copied secret is cleared from the clipboard. `0` never
+clears it.
+
+**`addons.bitwarden.type_delay_ms`** `integer` (default: `200`)
+
+Milliseconds to wait after Raffi closes before typing.
+
+### Example
+
+```yaml
+addons:
+  bitwarden:
+    trigger: vault
+    clipboard_timeout: 20
 ```
 
 ## Developer Tools

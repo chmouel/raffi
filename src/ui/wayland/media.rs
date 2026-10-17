@@ -173,6 +173,8 @@ pub(super) fn media_items(players: &[Player], keep_open: bool) -> Vec<CommandIte
                     progress: None,
                 }),
                 secondary: None,
+                badge: None,
+                domains: Vec::new(),
             });
         }
     }
@@ -219,6 +221,8 @@ fn header_item(player: &Player) -> CommandItem {
         primary: None,
         secondary: None,
         details,
+        badge: None,
+        domains: Vec::new(),
     }
 }
 
