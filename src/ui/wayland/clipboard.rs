@@ -19,6 +19,7 @@ const PRELUDE: &str = include_str!("copyq/prelude.js");
 const LIST_SCRIPT: &str = include_str!("copyq/list.js");
 const PREVIEW_SCRIPT: &str = include_str!("copyq/preview.js");
 const SELECT_SCRIPT: &str = include_str!("copyq/select.js");
+const DELETE_SCRIPT: &str = include_str!("copyq/delete.js");
 
 /// Rows scanned per `copyq eval` while listing or searching.
 pub(super) const PAGE_SIZE: usize = 400;
@@ -368,6 +369,25 @@ impl CopyQ {
                 .unwrap_or_else(|| "CopyQ could not copy the item".into()))
         }
     }
+
+    /// Remove `item` from the clipboard history.
+    pub(crate) fn delete(&self, item: &ItemRef) -> Result<(), String> {
+        let output = self.eval(
+            DELETE_SCRIPT,
+            &[&item.tab, &item.id, &item.row.to_string()],
+            SELECT_TIMEOUT,
+            64 * 1024,
+        )?;
+        let reply: SelectReply = serde_json::from_slice(&output)
+            .map_err(|_| "CopyQ returned an unexpected reply".to_string())?;
+        if reply.ok {
+            Ok(())
+        } else {
+            Err(reply
+                .error
+                .unwrap_or_else(|| "CopyQ could not remove the item".into()))
+        }
+    }
 }
 
 fn copyq_error(error: String) -> String {
@@ -596,6 +616,7 @@ fn image_title(formats: &[String]) -> String {
 }
 
 /// Collapse whitespace and keep at most `max_chars` characters.
+/// Text without spaces uses a tighter limit so it fits in a list row.
 pub(crate) fn one_line(text: &str, max_chars: usize) -> String {
     let mut line = String::new();
     for (index, word) in text.split_whitespace().enumerate() {
@@ -607,8 +628,13 @@ pub(crate) fn one_line(text: &str, max_chars: usize) -> String {
             break;
         }
     }
-    if line.chars().count() > max_chars {
-        line = line.chars().take(max_chars).collect();
+    let effective_max = if line.contains(' ') {
+        max_chars
+    } else {
+        max_chars / 2
+    };
+    if line.chars().count() > effective_max {
+        line = line.chars().take(effective_max).collect();
         line.push('…');
     }
     line
@@ -634,7 +660,13 @@ mod tests {
     #[test]
     fn test_scripts_have_no_backslashes() {
         // CopyQ would expand them as escape sequences in a command-line script.
-        for script in [PRELUDE, LIST_SCRIPT, PREVIEW_SCRIPT, SELECT_SCRIPT] {
+        for script in [
+            PRELUDE,
+            LIST_SCRIPT,
+            PREVIEW_SCRIPT,
+            SELECT_SCRIPT,
+            DELETE_SCRIPT,
+        ] {
             assert!(!script.contains('\\'));
         }
     }
@@ -804,6 +836,11 @@ mod tests {
         image.formats = vec!["image/png".into(), "text/plain".into()];
         assert_eq!(image.title(), "Image (PNG)");
         assert_eq!(one_line(&"word ".repeat(100), 10), "word word …");
+        assert_eq!(
+            one_line(&"a".repeat(200), 160),
+            format!("{}…", "a".repeat(80))
+        );
+        assert_eq!(one_line(&"b".repeat(50), 160), "b".repeat(50));
     }
 
     #[test]
@@ -866,9 +903,15 @@ mod tests {
 
         let stale = ItemRef {
             id: "0".repeat(64),
-            ..reference
+            ..reference.clone()
         };
         assert!(copyq.select(&stale).unwrap_err().contains("no longer"));
+        assert!(copyq.delete(&stale).unwrap_err().contains("no longer"));
+
+        copyq.delete(&reference).unwrap();
+        let after = copyq.list_page("", 0, "", false, 0).unwrap();
+        assert_eq!(after.total, page.total - 1);
+        assert!(after.items.iter().all(|item| item.id != reference.id));
         assert!(copyq
             .list_page("", 0, "zz-no-match-zz", false, 0)
             .unwrap()

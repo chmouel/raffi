@@ -999,6 +999,10 @@ impl LauncherApp {
             }
             Message::ClipboardRefresh => self.handle_clipboard_refresh(),
             Message::ClipboardToggleImages => self.handle_clipboard_toggle_images(),
+            Message::ClipboardDelete => self.handle_clipboard_delete(),
+            Message::ClipboardDeleteDone(session, result) => {
+                self.handle_clipboard_delete_done(session, result)
+            }
         }
     }
 

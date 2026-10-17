@@ -354,6 +354,11 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             "Show only images",
             "Clipboard history: switch between all items and images only",
         ));
+        entries.push(shortcut(
+            "Ctrl+D",
+            "Delete clipboard entry",
+            "Clipboard history: remove the selected item from CopyQ",
+        ));
     }
     entries.extend([
         shortcut("Alt+P/N", "Search history", "Previous / next query"),

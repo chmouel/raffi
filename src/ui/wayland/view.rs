@@ -606,6 +606,7 @@ impl LauncherApp {
                 .size(ps.text)
                 .color(ps.text_main)
                 .font(ps.mono_font)
+                .wrapping(iced::widget::text::Wrapping::WordOrGlyph)
         };
 
         let mut col = Column::new().spacing(14).width(Length::Fill);
@@ -1247,24 +1248,6 @@ impl LauncherApp {
                         .style(item_button_style(t, is_selected, t.text_muted)),
                 );
                 special_item_idx += 1;
-            } else if let Some(error) = &state.error {
-                let error_row = Row::new()
-                    .spacing(16)
-                    .align_y(iced::Alignment::Center)
-                    .push(text(error.clone()).size(fs.item).color(t.text_muted));
-                items_column = items_column.push(
-                    button(error_row)
-                        .padding(fs.item_padding)
-                        .width(Length::Fill)
-                        .style(move |_theme, _status| button::Style {
-                            text_color: t.text_muted,
-                            border: iced::Border {
-                                radius: 8.0.into(),
-                                ..Default::default()
-                            },
-                            ..Default::default()
-                        }),
-                );
             }
 
             for item in &state.items {
@@ -1904,6 +1887,17 @@ impl LauncherApp {
             if !hint_spans.is_empty() {
                 hint_spans.push(sep.clone());
             }
+            // A row inside the list would be scrolled out of view, so errors
+            // about a listed item are shown here instead.
+            if let Some(error) = self
+                .clipboard
+                .error
+                .as_ref()
+                .filter(|_| !self.clipboard.items.is_empty())
+            {
+                hint_spans.push(span(error.as_str()).size(fs.hint).color(t.ansi[1]));
+                hint_spans.push(sep.clone());
+            }
             if self.clipboard.loading && !self.clipboard.items.is_empty() {
                 hint_spans.push(
                     span(format!(
@@ -1925,6 +1919,9 @@ impl LauncherApp {
                 " images only"
             };
             hint_spans.push(span(images).size(fs.hint).color(t.text_muted));
+            hint_spans.push(sep.clone());
+            hint_spans.push(span("Ctrl+D").size(fs.hint).color(t.accent));
+            hint_spans.push(span(" delete").size(fs.hint).color(t.text_muted));
         }
         if !hint_spans.is_empty() {
             hint_spans.push(sep.clone());
@@ -2047,6 +2044,11 @@ impl LauncherApp {
                 modifiers,
                 ..
             }) if c.as_str() == "i" && modifiers.control() => Some(Message::ClipboardToggleImages),
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Character(ref c),
+                modifiers,
+                ..
+            }) if c.as_str() == "d" && modifiers.control() => Some(Message::ClipboardDelete),
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 Some(Message::MouseReleased)
             }

@@ -524,6 +524,8 @@ pub(crate) enum Message {
     ),
     ClipboardRefresh,
     ClipboardToggleImages,
+    ClipboardDelete,
+    ClipboardDeleteDone(u64, std::result::Result<String, String>),
 }
 
 /// Clipboard text fetched for snippet previews. `None` or a missing history

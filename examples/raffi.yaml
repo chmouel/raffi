@@ -615,6 +615,7 @@ addons:
   # all its formats (text, HTML, images, file lists); Ctrl+Enter pastes it
   # into the previous window on Hyprland. Ctrl+R refreshes the list and
   # Ctrl+I shows only images; "clipimg " opens it with only images.
+  # Ctrl+D deletes the selected entry from CopyQ.
   # Rows show the copy time when CopyQ stores it (its "Show Copy Time"
   # command). action and secondary_action accept copy or hypr_paste.
   # clipboard:

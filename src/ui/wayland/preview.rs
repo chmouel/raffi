@@ -1352,6 +1352,7 @@ impl LauncherApp {
             "Show only images"
         };
         metadata.push(("Ctrl+I".to_string(), images.to_string()));
+        metadata.push(("Ctrl+D".to_string(), "Delete this entry".to_string()));
         metadata.push(("Ctrl+R".to_string(), "Refresh the list".to_string()));
 
         PreviewData {

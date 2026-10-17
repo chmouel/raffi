@@ -349,4 +349,54 @@ impl LauncherApp {
             }
         }
     }
+
+    pub(super) fn handle_clipboard_delete(&mut self) -> Task<Message> {
+        if !self.clipboard.active || self.view.help_active {
+            return Task::none();
+        }
+        let state = &self.clipboard;
+        if state.pending {
+            return Task::none();
+        }
+        let Some(index) = self.selected_clipboard_item() else {
+            return Task::none();
+        };
+        let item = &state.items[index];
+        let reference = item.reference(&state.tab);
+        let id = item.id.clone();
+        let session = state.session;
+        self.clipboard.pending = true;
+        self.clipboard.error = None;
+        Task::perform(
+            async move { CopyQ::default().delete(&reference) },
+            move |result| Message::ClipboardDeleteDone(session, result.map(|()| id.clone())),
+        )
+    }
+
+    pub(super) fn handle_clipboard_delete_done(
+        &mut self,
+        session: u64,
+        result: Result<String, String>,
+    ) -> Task<Message> {
+        let state = &mut self.clipboard;
+        if !state.active || session != state.session || !state.pending {
+            return Task::none();
+        }
+        state.pending = false;
+        match result {
+            Ok(id) => {
+                state.items.retain(|item| item.id != id);
+                state.previews.retain(|(cached, _)| *cached != id);
+                if state.preview_inflight.as_deref() == Some(id.as_str()) {
+                    state.preview_inflight = None;
+                }
+                state.total = state.total.saturating_sub(1);
+                self.clamp_clipboard_selection();
+            }
+            Err(error) => {
+                self.clipboard.error = Some(error);
+            }
+        }
+        Task::none()
+    }
 }
