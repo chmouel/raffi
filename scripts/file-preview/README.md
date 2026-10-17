@@ -63,9 +63,25 @@ The script answers in one of two ways, as Raffi expects from a preview command:
 
 Text is capped at four screens (at least 200 lines), and every tool call has a timeout so the script answers well within Raffi's 3 second limit.
 
+## Colours
+
+Previews follow the Raffi theme. Raffi draws the 16 basic ANSI colours with the theme's palette and passes the theme to the script in `RAFFI_THEME` and `RAFFI_THEME_MODE`. The script then:
+
+- picks a matching bat theme: `Catppuccin Mocha`, `Catppuccin Latte`, `Nord`, `Dracula` or `gruvbox-dark`. Themes bat does not ship (`dark`, `light`, `tokyo-night`, `rose-pine`, `kanagawa`) use bat's `ansi` theme, which takes its colours from the Raffi palette. An older bat without the matching theme also gets `ansi`.
+- renders Markdown with the `dracula` or `tokyo-night` glow/gum style for those themes, and `light` or `dark` for the others.
+- ignores your `BAT_THEME`, bat config theme, `LS_COLORS`, `LSCOLORS` and `EZA_COLORS`, so a terminal colour scheme does not leak into the launcher.
+
+To keep a bat theme of your own inside Raffi, set it in the preview command:
+
+```yaml
+preview_command: "FILE_PREVIEW_BAT_THEME=Coldark-Dark ~/.config/raffi/scripts/file-preview/file-preview.py"
+```
+
+Run from a terminal, without `RAFFI_THEME`, the script leaves your tool settings alone.
+
 ## Cache
 
-Thumbnails, extracted covers and previews that took more than a quarter of a second to build are stored in `$XDG_CACHE_HOME/raffi/file-preview` (`~/.cache/raffi/file-preview` by default). Entries are keyed on the file path, modification time, size and pane size, so editing a file creates a new entry. The oldest entries are removed once the cache grows past 200 MiB or 2000 files.
+Thumbnails, extracted covers and previews that took more than a quarter of a second to build are stored in `$XDG_CACHE_HOME/raffi/file-preview` (`~/.cache/raffi/file-preview` by default). Entries are keyed on the file path, modification time, size, pane size and theme, so editing a file creates a new entry. The oldest entries are removed once the cache grows past 200 MiB or 2000 files.
 
 To clear it, for example after installing a new tool:
 

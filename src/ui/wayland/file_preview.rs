@@ -260,12 +260,13 @@ impl LauncherApp {
             self.preview_viewport_width(),
             self.preview_viewport_height(),
         );
-        let request = FilePreviewRequest::new(
+        let mut request = FilePreviewRequest::new(
             &crate::expand_config_value(&command),
             &path,
             pane,
             self.view.preview_style.text,
         );
+        request.env.extend(self.view.theme.command_env());
         let key = FilePreviewKey::of(&path);
         self.file_browser.preview_inflight = true;
         Task::perform(

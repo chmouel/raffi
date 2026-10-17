@@ -478,5 +478,58 @@ class MediaTests(PreviewTestCase):
         self.assertEqual(metadata(preview), {"Tables": "1", "Views": "1"})
 
 
+class ThemeTests(unittest.TestCase):
+    def setUp(self):
+        theme_env = dict.fromkeys(fp.THEME_ENV, "")
+        env = patch.dict(os.environ, theme_env)
+        env.start()
+        self.addCleanup(env.stop)
+        fp.bat_themes.cache_clear()
+        self.addCleanup(fp.bat_themes.cache_clear)
+
+    def bat_args(self, **env: str) -> list[str]:
+        """The --theme arguments highlight() gives bat under `env`."""
+        calls = []
+
+        def fake_run(cmd, timeout=None, input=None, env=None):
+            calls.append(cmd)
+            return "Catppuccin Mocha\nNord\n" if "--list-themes" in cmd else "x"
+
+        with patch.dict(os.environ, env), patch.object(fp, "run", fake_run):
+            fp.highlight(["x"], "a.py", PANE)
+        return [arg for arg in calls[-1] if arg.startswith("--theme")]
+
+    def test_bat_theme_follows_raffi(self):
+        self.assertEqual(self.bat_args(), [])
+        self.assertEqual(
+            self.bat_args(RAFFI_THEME="catppuccin-mocha"), ["--theme=Catppuccin Mocha"]
+        )
+        # Themes bat lacks, here or in an older release, use the Raffi palette.
+        self.assertEqual(self.bat_args(RAFFI_THEME="tokyo-night"), ["--theme=ansi"])
+        self.assertEqual(
+            self.bat_args(RAFFI_THEME="catppuccin-latte"), ["--theme=ansi"]
+        )
+        self.assertEqual(
+            self.bat_args(RAFFI_THEME="nord", FILE_PREVIEW_BAT_THEME="Coldark-Dark"),
+            ["--theme=Coldark-Dark"],
+        )
+
+    def test_glamour_style_follows_raffi(self):
+        self.assertEqual(fp.glamour_style(), "dark")
+        with patch.dict(
+            os.environ, {"RAFFI_THEME": "light", "RAFFI_THEME_MODE": "light"}
+        ):
+            self.assertEqual(fp.glamour_style(), "light")
+        with patch.dict(os.environ, {"RAFFI_THEME": "tokyo-night"}):
+            self.assertEqual(fp.glamour_style(), "tokyo-night")
+
+    def test_user_ls_colours_are_dropped_inside_raffi(self):
+        cmd = ["sh", "-c", 'printf %s "${LS_COLORS-unset}"']
+        with patch.dict(os.environ, {"LS_COLORS": "di=38;5;208"}):
+            self.assertEqual(fp.run(cmd, env=fp.plain_color_env()), "di=38;5;208")
+            with patch.dict(os.environ, {"RAFFI_THEME": "nord"}):
+                self.assertEqual(fp.run(cmd, env=fp.plain_color_env()), "unset")
+
+
 if __name__ == "__main__":
     unittest.main()

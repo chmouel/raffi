@@ -17,12 +17,17 @@ one, the script falls back to the standard library or gives up on that type.
 Generated thumbnails and slow previews are cached in
 $XDG_CACHE_HOME/raffi/file-preview.
 
+Colours follow the Raffi theme (RAFFI_THEME, RAFFI_THEME_MODE): bat, glow and
+gum get a matching theme, and the user's own LS_COLORS and EZA_COLORS are
+ignored. Set FILE_PREVIEW_BAT_THEME to force a bat theme.
+
 Debug mode: set DEBUG=1 to log to stderr.
 """
 
 import bz2
 import contextlib
 import csv
+import functools
 import gzip
 import hashlib
 import html
@@ -105,9 +110,12 @@ def run(
     cmd: list[str],
     timeout: float = TOOL_TIMEOUT,
     input: str | bytes | None = None,
-    env: dict[str, str] | None = None,
+    env: dict[str, str | None] | None = None,
 ) -> str | None:
-    """Run a tool and return its stdout, or None when it is missing or fails."""
+    """Run a tool and return its stdout, or None when it is missing or fails.
+
+    `env` is added to the environment; a None value removes that variable.
+    """
     if shutil.which(cmd[0]) is None:
         debug(f"{cmd[0]}: not installed")
         return None
@@ -122,7 +130,7 @@ def run(
             stdin=subprocess.PIPE if data is not None else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            env={**os.environ, **env} if env else None,
+            env=merge_env(env) if env else None,
             start_new_session=True,
         )
     except OSError as e:
@@ -141,6 +149,11 @@ def run(
         debug(f"{cmd[0]}: exit status {proc.returncode}")
         return None
     return out.decode("utf-8", errors="replace")
+
+
+def merge_env(env: dict[str, str | None]) -> dict[str, str]:
+    merged = {**os.environ, **env}
+    return {k: v for k, v in merged.items() if v is not None}
 
 
 @dataclass(frozen=True)
@@ -171,6 +184,60 @@ def env_int(name: str, default: int) -> int:
     except ValueError:
         return default
     return value if value > 0 else default
+
+
+# --- Theme ------------------------------------------------------------------
+
+# Raffi passes its theme in RAFFI_THEME and RAFFI_THEME_MODE. Inside Raffi the
+# tools get a matching theme and the user's own colour settings are dropped, so
+# the preview matches the launcher. Basic ANSI colours are drawn with the Raffi
+# theme's palette, which is why "ansi" is the fallback bat theme. Run from a
+# terminal, without RAFFI_THEME, the user's settings apply as usual.
+
+BAT_THEMES = {
+    "catppuccin-mocha": "Catppuccin Mocha",
+    "catppuccin-latte": "Catppuccin Latte",
+    "nord": "Nord",
+    "dracula": "Dracula",
+    "gruvbox": "gruvbox-dark",
+}
+GLAMOUR_STYLES = {"dracula": "dracula", "tokyo-night": "tokyo-night"}
+USER_COLOR_ENV = ("EZA_COLORS", "LS_COLORS", "LSCOLORS")
+THEME_ENV = ("RAFFI_THEME", "RAFFI_THEME_MODE", "FILE_PREVIEW_BAT_THEME")
+
+
+def raffi_theme() -> str | None:
+    return os.environ.get("RAFFI_THEME") or None
+
+
+@functools.cache
+def bat_themes() -> frozenset[str]:
+    return frozenset(split_lines(run(["bat", "--list-themes", "--color=never"]) or ""))
+
+
+def bat_theme() -> str | None:
+    """The bat --theme to use, or None to keep the user's bat config."""
+    if forced := os.environ.get("FILE_PREVIEW_BAT_THEME"):
+        return forced
+    theme = raffi_theme()
+    if theme is None:
+        return None
+    wanted = BAT_THEMES.get(theme, "ansi")
+    # Older bat releases lack some themes; Catppuccin arrived in 0.25.
+    return wanted if wanted == "ansi" or wanted in bat_themes() else "ansi"
+
+
+def glamour_style() -> str:
+    """Markdown style for glow and gum format."""
+    theme = raffi_theme()
+    if theme in GLAMOUR_STYLES:
+        return GLAMOUR_STYLES[theme]
+    return "light" if os.environ.get("RAFFI_THEME_MODE") == "light" else "dark"
+
+
+def plain_color_env() -> dict[str, str | None]:
+    """Inside Raffi, drop the user's ls colours so the theme palette applies."""
+    return dict.fromkeys(USER_COLOR_ENV) if raffi_theme() else {}
 
 
 # --- Text helpers -----------------------------------------------------------
@@ -519,6 +586,8 @@ def highlight(lines: list[str], name: str, pane: Pane, lang: str | None = None) 
         f"--terminal-width={pane.columns}",
         f"--file-name={name}",
     ]
+    if theme := bat_theme():
+        cmd.append(f"--theme={theme}")
     if lang:
         cmd.append(f"--language={lang}")
     out = run(cmd, input="\n".join(lines) + "\n")
@@ -764,11 +833,13 @@ def markdown_preview(path: Path, pane: Pane) -> Preview:
         return None
     text, _ = read
     rendered = run(
-        ["glow", "-s", "dark", "-w", str(pane.columns), "-"],
+        ["glow", "-s", glamour_style(), "-w", str(pane.columns), "-"],
         input=text,
         env={"CLICOLOR_FORCE": "1"},
     ) or run(
-        ["gum", "format", "--type=markdown"], input=text, env={"CLICOLOR_FORCE": "1"}
+        ["gum", "format", "--type=markdown", f"--theme={glamour_style()}"],
+        input=text,
+        env={"CLICOLOR_FORCE": "1"},
     )
     if rendered and rendered.strip():
         lines = squeeze_blank(split_lines(rendered))
@@ -2452,13 +2523,15 @@ def directory_preview(path: Path, pane: Pane) -> Preview:
     ignore = "|".join(IGNORED_DIRS)
     tree = run(
         ["eza", "--tree", "--level=2", "--all", "--color=always", "--icons=never",
-         "--group-directories-first", f"--ignore-glob={ignore}", str(path)]
+         "--group-directories-first", f"--ignore-glob={ignore}", str(path)],
+        env=plain_color_env(),
     )  # fmt: skip
     if tree is None:
         globs = [arg for name in IGNORED_DIRS for arg in ("--ignore-glob", name)]
         tree = run(
             ["lsd", "--tree", "--depth=2", "--almost-all", "--color=always", "--icon=never",
-             "--group-directories-first", *globs, str(path)]
+             "--group-directories-first", *globs, str(path)],
+            env=plain_color_env(),
         )  # fmt: skip
     if tree is not None:
         lines = cap_lines(split_lines(tree)[1:], pane, "entries")
@@ -2479,7 +2552,8 @@ SLOW_PREVIEW = 0.25
 
 
 def preview_cache_file(path: Path, pane: Pane) -> Path:
-    key = cache_key(path, pane.width, pane.columns, pane.lines)
+    theme = [os.environ.get(name, "") for name in THEME_ENV]
+    key = cache_key(path, pane.width, pane.columns, pane.lines, *theme)
     return CACHE_DIR / f"{key}.json"
 
 

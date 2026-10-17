@@ -2327,7 +2327,8 @@ impl LauncherApp {
             self.preview_viewport_width().round() as u32,
             self.preview_viewport_height().round() as u32,
         );
-        let request = PreviewRequest::new(config, &self.script_filter.query, item, pane);
+        let mut request = PreviewRequest::new(config, &self.script_filter.query, item, pane);
+        request.env.extend(self.view.theme.command_env());
         execute_script_filter_preview(request, generation, config_index, index)
     }
 

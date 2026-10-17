@@ -2215,6 +2215,12 @@ fn test_theme_colors_presets_and_overrides() {
         let colors = ThemeColors::from_mode_with_overrides(mode, None);
         assert_ne!(colors.text_main, colors.bg_base);
         assert_ne!(colors.text_muted, colors.bg_base);
+        // RAFFI_THEME must name the preset the way the config does.
+        assert_eq!(
+            colors.name.parse::<crate::ThemeMode>().ok().as_ref(),
+            Some(mode)
+        );
+        assert_eq!(colors.light, mode.is_light());
     }
 
     let overrides = crate::ThemeColorsConfig {
@@ -2228,6 +2234,26 @@ fn test_theme_colors_presets_and_overrides() {
         customized.bg_input,
         ThemeColors::from_mode_with_overrides(&crate::ThemeMode::TokyoNight, None).bg_input
     );
+    let env: std::collections::HashMap<_, _> = customized.command_env().into_iter().collect();
+    assert_eq!(env["RAFFI_THEME"], "tokyo-night");
+    assert_eq!(env["RAFFI_THEME_MODE"], "dark");
+    assert_eq!(env["RAFFI_THEME_ACCENT"], "#112233");
+}
+
+#[test]
+fn test_preview_ansi_palette_swaps_unreadable_colours() {
+    use super::theme::PreviewStyle;
+    let config = crate::PreviewConfig::default();
+    // Palette black sits on a dark background: unreadable, so muted.
+    let dark = ThemeColors::from_mode_with_overrides(&crate::ThemeMode::Dark, None);
+    let style = PreviewStyle::resolve(&dark, &config, None);
+    assert_eq!(style.ansi[0], style.text_muted);
+    assert_eq!(style.ansi[1], dark.ansi[1]);
+    // Light palettes put a pale colour in slot 0 and a dark one in slot 7.
+    let latte = ThemeColors::from_mode_with_overrides(&crate::ThemeMode::CatppuccinLatte, None);
+    let style = PreviewStyle::resolve(&latte, &config, None);
+    assert_eq!(style.ansi[0], style.text_muted);
+    assert_eq!(style.ansi[7], latte.ansi[7]);
 }
 
 #[test]

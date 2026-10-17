@@ -100,6 +100,8 @@ Raffi ships one in [`scripts/file-preview`](https://github.com/chmouel/raffi/tre
 
 When you select an entry, raffi shows its built-in preview at once and swaps in the command's output when it arrives. Results are kept for the session and reused until the file changes.
 
+The bundled script follows the raffi theme: it picks the matching `bat` theme (Catppuccin, Nord, Dracula or Gruvbox) or bat's `ansi` theme, which is drawn with the raffi palette, and it ignores your terminal's `BAT_THEME`, `LS_COLORS` and `EZA_COLORS`. Set `FILE_PREVIEW_BAT_THEME` in the command to keep a bat theme of your own.
+
 #### Writing your own previewer
 
 Any executable works. Raffi runs the command with `sh -c`, adds the selected path as the last argument, and sets these environment variables:
@@ -110,12 +112,13 @@ Any executable works. Raffi runs the command with `sh -c`, adds the selected pat
 | `RAFFI_VALUE` | Absolute path of the selected file or directory |
 | `RAFFI_PREVIEW_WIDTH`, `RAFFI_PREVIEW_HEIGHT` | Preview pane size in pixels |
 | `RAFFI_PREVIEW_COLUMNS`, `RAFFI_PREVIEW_LINES` | Preview pane size in text cells, for tools such as `bat --terminal-width` |
+| `RAFFI_THEME`, `RAFFI_THEME_MODE`, `RAFFI_THEME_FG`, ... | The current theme, see [Terminal Colours](/features/themes/#terminal-colours) |
 
 The path is never pasted into the shell line, so file names containing quotes, spaces or `$(...)` are safe.
 
 The command can print one of two things:
 
-- Text, with ANSI colours and bold, dim, italic or underline styles. It replaces the built-in preview body. Output is cut after 1000 lines.
+- Text, with ANSI colours and bold, dim, italic or underline styles. The 16 basic colours are drawn with the theme's palette, so output from `bat --theme=ansi`, `eza` or `jq -C` matches the theme. It replaces the built-in preview body. Output is cut after 1000 lines.
 - A JSON preview object, in the same format as a [Script Filter preview](/features/script-filters/#preview-object). Use it to show an image with metadata rows, or several sections. Any `metadata` rows go above raffi's own Path, Size and Modified rows.
 
 ```json

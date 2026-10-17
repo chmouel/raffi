@@ -725,8 +725,14 @@ impl LauncherApp {
                     }
                     section = section.push(
                         container(
-                            rich_text(ansi_to_spans(&content, ps.text, ps.text_main, ps.mono_font))
-                                .font(ps.mono_font),
+                            rich_text(ansi_to_spans(
+                                &content,
+                                ps.text,
+                                ps.text_main,
+                                ps.mono_font,
+                                &ps.ansi,
+                            ))
+                            .font(ps.mono_font),
                         )
                         .padding(12.0)
                         .width(Length::Fill)
@@ -1062,6 +1068,7 @@ impl LauncherApp {
                     fs.item,
                     t.text_main,
                     iced::Font::default(),
+                    &self.view.preview_style.ansi,
                 )));
                 if let Some(subtitle) = &item.subtitle {
                     text_col = text_col.push(rich_text(ansi_to_spans(
@@ -1069,6 +1076,7 @@ impl LauncherApp {
                         fs.subtitle,
                         t.text_muted,
                         iced::Font::default(),
+                        &self.view.preview_style.ansi,
                     )));
                 }
                 item_row = item_row.push(text_col.width(Length::Fill));

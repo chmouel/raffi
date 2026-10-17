@@ -85,6 +85,20 @@ general:
   </TabItem>
 </Tabs>
 
+## Terminal Colours
+
+Each theme also has its own 16-colour terminal palette, taken from the theme's terminal port. Raffi uses it for basic ANSI colours in previews and Script Filter titles, so `\e[31m` is the theme's red rather than a generic one. 256-colour and 24-bit colours are drawn as given. A palette colour that would be unreadable on the preview background, such as black on a dark theme, is replaced: a bright colour by its normal shade, otherwise by the muted text colour.
+
+Preview commands and Script Filter previews receive the theme in the environment, so they can match their own colours to it:
+
+| Variable | Value |
+|---|---|
+| `RAFFI_THEME` | Theme name, such as `catppuccin-mocha` or `dark` |
+| `RAFFI_THEME_MODE` | `dark` or `light` |
+| `RAFFI_THEME_FG`, `RAFFI_THEME_MUTED`, `RAFFI_THEME_ACCENT`, `RAFFI_THEME_BG` | Main text, muted text, accent and background colours as `#rrggbb`, after any `theme_colors` overrides |
+
+The [bundled file previewer](/features/file-browser/#custom-previewer) uses these to pick a matching `bat` and Markdown theme.
+
 ## Custom Colors
 
 Individual theme colors can be customized under `theme_colors`. Only the colors you specify are overridden; the rest come from the base theme.

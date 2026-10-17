@@ -260,6 +260,7 @@ added:
 | `RAFFI_TITLE` | the item's title without ANSI codes |
 | `RAFFI_QUERY` | the text typed after the keyword |
 | `RAFFI_PREVIEW_WIDTH`, `RAFFI_PREVIEW_HEIGHT` | preview pane size in pixels |
+| `RAFFI_THEME`, `RAFFI_THEME_MODE`, `RAFFI_THEME_FG`, ... | the current theme, see [Terminal Colours](/features/themes/#terminal-colours) |
 
 The config `env` and the item's `variables` are exported too. The call is
 debounced while you move through the list, killed after 3 seconds, and its
@@ -367,7 +368,8 @@ The [GitHub pull requests script](#github-pull-requests) uses colors to display 
 </Aside>
 
 Titles, subtitles and preview text understand 16, 256 and 24-bit colours plus
-bold, dim, italic and underline. Other escape sequences, such as cursor
+bold, dim, italic and underline. The 16 basic colours come from the
+[theme's palette](/features/themes/#terminal-colours). Other escape sequences, such as cursor
 movement or terminal hyperlinks, are removed, and tabs are expanded to 8
 columns, so output captured from tools like `bat` or `eza` displays cleanly.
 

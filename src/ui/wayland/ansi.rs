@@ -5,33 +5,14 @@ use regex::Regex;
 
 static ANSI_SGR_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\x1b\[([0-9;]*)m").unwrap());
 
-fn ansi_color(code: u8) -> Option<iced::Color> {
-    match code {
-        30 => Some(iced::Color::from_rgb(0.0, 0.0, 0.0)),
-        31 => Some(iced::Color::from_rgb(0.8, 0.2, 0.2)),
-        32 => Some(iced::Color::from_rgb(0.2, 0.8, 0.2)),
-        33 => Some(iced::Color::from_rgb(0.8, 0.8, 0.2)),
-        34 => Some(iced::Color::from_rgb(0.3, 0.3, 0.9)),
-        35 => Some(iced::Color::from_rgb(0.8, 0.2, 0.8)),
-        36 => Some(iced::Color::from_rgb(0.2, 0.8, 0.8)),
-        37 => Some(iced::Color::from_rgb(0.9, 0.9, 0.9)),
-        90 => Some(iced::Color::from_rgb(0.5, 0.5, 0.5)),
-        91 => Some(iced::Color::from_rgb(1.0, 0.3, 0.3)),
-        92 => Some(iced::Color::from_rgb(0.3, 1.0, 0.3)),
-        93 => Some(iced::Color::from_rgb(1.0, 1.0, 0.3)),
-        94 => Some(iced::Color::from_rgb(0.5, 0.5, 1.0)),
-        95 => Some(iced::Color::from_rgb(1.0, 0.3, 1.0)),
-        96 => Some(iced::Color::from_rgb(0.3, 1.0, 1.0)),
-        97 => Some(iced::Color::from_rgb(1.0, 1.0, 1.0)),
-        _ => None,
-    }
-}
+/// The 16 basic terminal colours, normal (0-7) then bright (8-15). They
+/// come from the theme, so `\e[31m` is the theme's red.
+pub(crate) type AnsiPalette = [iced::Color; 16];
 
 /// Colour of an xterm 256-colour palette index.
-fn xterm_256(n: u8) -> iced::Color {
+fn xterm_256(n: u8, palette: &AnsiPalette) -> iced::Color {
     match n {
-        0..=7 => ansi_color(30 + n).unwrap_or(iced::Color::WHITE),
-        8..=15 => ansi_color(90 + n - 8).unwrap_or(iced::Color::WHITE),
+        0..=15 => palette[usize::from(n)],
         16..=231 => {
             let n = n - 16;
             let level = |v: u8| if v == 0 { 0 } else { 55 + v * 40 };
@@ -65,7 +46,7 @@ impl Style {
         }
     }
 
-    fn apply(&mut self, params: &str, default_color: iced::Color) {
+    fn apply(&mut self, params: &str, default_color: iced::Color, palette: &AnsiPalette) {
         if params.is_empty() {
             *self = Self::reset(default_color);
             return;
@@ -89,16 +70,13 @@ impl Style {
                 23 => self.italic = false,
                 24 => self.underline = false,
                 39 => self.fg = default_color,
-                code @ (30..=37 | 90..=97) => {
-                    if let Some(color) = ansi_color(code) {
-                        self.fg = color;
-                    }
-                }
+                code @ 30..=37 => self.fg = palette[usize::from(code - 30)],
+                code @ 90..=97 => self.fg = palette[usize::from(code - 90 + 8)],
                 // Extended colours: `5;n` (256 palette) or `2;r;g;b`. Their
                 // arguments must be skipped, not read as SGR codes.
                 code @ (38 | 48) => {
                     let (color, used) = match codes.get(i + 1) {
-                        Some(5) => (codes.get(i + 2).map(|&n| xterm_256(n)), 2),
+                        Some(5) => (codes.get(i + 2).map(|&n| xterm_256(n, palette)), 2),
                         Some(2) => match codes.get(i + 2..i + 5) {
                             Some(&[r, g, b]) => (Some(iced::Color::from_rgb8(r, g, b)), 4),
                             _ => (None, 4),
@@ -160,6 +138,7 @@ pub(crate) fn ansi_to_spans<'a>(
     font_size: f32,
     default_color: iced::Color,
     font: iced::Font,
+    palette: &AnsiPalette,
 ) -> Vec<iced::widget::text::Span<'a, (), iced::Font>> {
     let s = sanitize(s);
     let mut spans = Vec::new();
@@ -173,7 +152,7 @@ pub(crate) fn ansi_to_spans<'a>(
             spans.push(style.span(before.to_owned(), font_size, font));
         }
         last_end = m.end();
-        style.apply(&cap[1], default_color);
+        style.apply(&cap[1], default_color, palette);
     }
 
     let tail = &s[last_end..];
@@ -240,10 +219,22 @@ pub(crate) fn strip_ansi(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ansi_to_spans, sanitize, xterm_256};
+    use super::{ansi_to_spans, sanitize, xterm_256, AnsiPalette};
+
+    /// Entry `i` is `rgb(i, i, i)`, so tests can tell which one was used.
+    const PALETTE: AnsiPalette = {
+        let mut palette = [iced::Color::BLACK; 16];
+        let mut i = 0;
+        while i < 16 {
+            let v = i as f32 / 255.0;
+            palette[i] = iced::Color::from_rgb(v, v, v);
+            i += 1;
+        }
+        palette
+    };
 
     fn colors(s: &str) -> Vec<iced::Color> {
-        ansi_to_spans(s, 12.0, iced::Color::WHITE, iced::Font::MONOSPACE)
+        ansi_to_spans(s, 12.0, iced::Color::WHITE, iced::Font::MONOSPACE, &PALETTE)
             .into_iter()
             .map(|span| span.color.unwrap_or(iced::Color::WHITE))
             .collect()
@@ -260,13 +251,21 @@ mod tests {
 
     #[test]
     fn test_256_colour_background_and_default_reset() {
-        assert_eq!(colors("\x1b[38;5;196mx"), vec![xterm_256(196)]);
-        assert_eq!(xterm_256(196), iced::Color::from_rgb8(255, 0, 0));
+        assert_eq!(colors("\x1b[38;5;196mx"), vec![xterm_256(196, &PALETTE)]);
+        assert_eq!(xterm_256(196, &PALETTE), iced::Color::from_rgb8(255, 0, 0));
         // Backgrounds are ignored, including their arguments.
         assert_eq!(colors("\x1b[48;2;31;32;33mx"), vec![iced::Color::WHITE]);
         assert_eq!(
             colors("\x1b[31ma\x1b[39mb"),
-            vec![super::ansi_color(31).unwrap(), iced::Color::WHITE]
+            vec![PALETTE[1], iced::Color::WHITE]
+        );
+    }
+
+    #[test]
+    fn test_basic_colours_come_from_the_theme_palette() {
+        assert_eq!(
+            colors("\x1b[30ma\x1b[37mb\x1b[90mc\x1b[97md\x1b[38;5;12me"),
+            vec![PALETTE[0], PALETTE[7], PALETTE[8], PALETTE[15], PALETTE[12]]
         );
     }
 
@@ -286,6 +285,7 @@ mod tests {
             12.0,
             iced::Color::WHITE,
             iced::Font::MONOSPACE,
+            &PALETTE,
         );
         let fonts: Vec<_> = spans.iter().map(|span| span.font).collect();
         assert_eq!(
