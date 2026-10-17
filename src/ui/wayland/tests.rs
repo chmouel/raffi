@@ -1,7 +1,7 @@
 use super::actions::DeferredAction;
 use super::app::{
     classify_query, fido_restart, fido_updir, is_single_insert, keyword_suggestions,
-    loggable_query, route_query, QueryMode,
+    loggable_query, route_query, tilde_path, QueryMode,
 };
 use super::command_list::CommandListAddon;
 use super::help::{filter_help_entries, help_entries, HelpSection};
@@ -1183,6 +1183,18 @@ fn test_file_browser_opens_current_dir_in_configured_file_manager() {
 }
 
 #[test]
+fn test_file_browser_shortcuts_route_to_expected_messages() {
+    assert!(matches!(
+        super::view::file_browser_shortcut_message("o"),
+        Some(Message::FileBrowserOpenSelected)
+    ));
+    assert!(matches!(
+        super::view::file_browser_shortcut_message("b"),
+        Some(Message::FileBrowserOpenFileManager)
+    ));
+}
+
+#[test]
 fn test_file_browser_cycle_sort_reorders_entries() {
     let dir = std::env::temp_dir().join(format!("raffi-fb-sort-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -1760,6 +1772,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "Ctrl+P",
             "Ctrl+H",
             "Ctrl+O",
+            "Ctrl+B",
             "Ctrl+S",
             "Ctrl+.",
             "Alt+P/N",
@@ -3036,6 +3049,15 @@ fn test_backspace_on_trailing_slash_goes_up_and_selects_previous_dir() {
     assert_eq!(selected.name, "gamma");
 
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn test_tilde_path_shortens_home() {
+    let home = "/home/user/";
+    assert_eq!(tilde_path("/home/user/Documents", home), "~/Documents");
+    assert_eq!(tilde_path("/home/user", home), "~");
+    assert_eq!(tilde_path("/home/username/x", home), "/home/username/x");
+    assert_eq!(tilde_path("/etc", ""), "/etc");
 }
 
 #[test]

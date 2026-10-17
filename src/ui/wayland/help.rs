@@ -313,6 +313,11 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             ),
             shortcut(
                 "Ctrl+O",
+                "Open with xdg-open",
+                "File browser: opens the selected file or directory",
+            ),
+            shortcut(
+                "Ctrl+B",
                 "Open in file manager",
                 "File browser: opens the current directory with the entry selected",
             ),

@@ -295,7 +295,7 @@ Edit paths the way Emacs fido-mode does. Backspace on a trailing `/` goes up to 
 
 **`addons.file_browser.action`** `string` (default: `open`)
 
-Action run when pressing Enter (or clicking) on a file. Enter on a directory always navigates into it. Accepts `open` (xdg-open), `copy` (copy the full path), `insert` (type the full path into the focused app), or a shell command where `{value}` is replaced by the full path (also available as `$RAFFI_VALUE`).
+Action run when pressing Enter (or clicking) on a file. Enter on a directory always navigates into it, and Ctrl+O always opens the selection with `xdg-open`. Accepts `open` (xdg-open), `copy` (copy the full path), `insert` (type the full path into the focused app), or a shell command where `{value}` is replaced by the full path (also available as `$RAFFI_VALUE`).
 
 **`addons.file_browser.secondary_action`** `string` (default: `copy`)
 
@@ -303,7 +303,7 @@ Action run when pressing Ctrl+Enter (or Ctrl+click) on a file or directory. Acce
 
 **`addons.file_browser.file_manager`** `string` (default: autodetected)
 
-Command that Ctrl+O uses to open the browsed directory. The directory is appended as the last argument, or replaces `{value}` when present. Nautilus, Dolphin, Nemo and Caja (given as a bare program name or path) open with the selected entry highlighted through `--select`. When unset, raffi uses the desktop's own file manager (Dolphin, Nautilus, Thunar, Nemo, Caja, PCManFM...) if installed, then the first installed one, then `xdg-open`.
+Command that Ctrl+B uses to open the browsed directory. The directory is appended as the last argument, or replaces `{value}` when present. Nautilus, Dolphin, Nemo and Caja (given as a bare program name or path) open with the selected entry highlighted through `--select`. When unset, raffi uses the desktop's own file manager (Dolphin, Nautilus, Thunar, Nemo, Caja, PCManFM...) if installed, then the first installed one, then `xdg-open`.
 
   ```yaml
   addons:
@@ -336,7 +336,8 @@ Command that previews the selected entry in the preview pane. When unset, raffi 
 - Backspace on a trailing `/`: Go up to the parent directory
 - `~/` or `/` after a `/`: Start over from home or the root
 - Ctrl+H: Toggle hidden file visibility
-- Ctrl+O: Open the current directory in a file manager
+- Ctrl+O: Open the selected file or directory with `xdg-open`
+- Ctrl+B: Open the current directory in a file manager
 - Ctrl+S: Cycle the sort order (name, modified, created)
 - Ctrl+.: Cycle the listing between all entries, files only and directories only
 

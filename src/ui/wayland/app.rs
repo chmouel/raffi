@@ -319,6 +319,17 @@ pub(super) fn fido_updir(old: &str, new: &str, home: &str) -> Option<(String, St
     Some((parent, left.to_string()))
 }
 
+/// `path` as it should appear in the input: under `home`, it starts with `~`.
+pub(super) fn tilde_path(path: &str, home: &str) -> String {
+    let home = home.trim_end_matches('/');
+    match path.strip_prefix(home) {
+        Some(rest) if !home.is_empty() && (rest.is_empty() || rest.starts_with('/')) => {
+            format!("~{rest}")
+        }
+        _ => path.to_string(),
+    }
+}
+
 /// Emacs-style restart: typing `/` after a `/` or a `/~` drops everything
 /// before it, so `~/Documents/~/` becomes `~/` and `~/Documents//` becomes `/`.
 pub(super) fn fido_restart(old: &str, new: &str) -> Option<String> {
@@ -891,6 +902,7 @@ impl LauncherApp {
             Message::DragEvent(event) => self.handle_drag_event(event),
             Message::TabComplete => self.handle_tab_complete(),
             Message::FileBrowserToggleHidden => self.handle_file_browser_toggle_hidden(),
+            Message::FileBrowserOpenSelected => self.handle_file_browser_open_selected(),
             Message::FileBrowserOpenFileManager => self.handle_file_browser_open_file_manager(),
             Message::FileBrowserCycleSort => self.handle_file_browser_cycle_sort(),
             Message::FileBrowserCycleShow => self.handle_file_browser_cycle_show(),
@@ -2733,7 +2745,10 @@ impl LauncherApp {
         if let Some(entry) = self.file_browser.entries.get(index) {
             let secondary = self.view.current_modifiers.control();
             if entry.is_dir && !secondary {
-                let new_query = format!("{}/", entry.full_path);
+                let new_query = format!(
+                    "{}/",
+                    tilde_path(&entry.full_path, &std::env::var("HOME").unwrap_or_default())
+                );
                 self.search_query = new_query.clone();
                 return Task::done(Message::SearchChanged(new_query));
             }
@@ -2773,10 +2788,11 @@ impl LauncherApp {
             self.file_browser.entries.get(entry_index)
         };
         if let Some(entry) = entry {
+            let path = tilde_path(&entry.full_path, &std::env::var("HOME").unwrap_or_default());
             let new_query = if entry.is_dir {
-                format!("{}/", entry.full_path)
+                format!("{path}/")
             } else {
-                entry.full_path.clone()
+                path
             };
             self.search_query = new_query.clone();
             let input_id = self.view.search_input_id.clone();
@@ -2826,6 +2842,21 @@ impl LauncherApp {
         self.file_browser.show = self.file_browser.show.next();
         let query = self.search_query.clone();
         Task::done(Message::SearchChanged(query))
+    }
+
+    fn handle_file_browser_open_selected(&mut self) -> Task<Message> {
+        if !self.file_browser.active {
+            return Task::none();
+        }
+        let entry_index = self
+            .selected_index
+            .saturating_sub(self.script_filter_offset());
+        let Some(entry) = self.file_browser.entries.get(entry_index) else {
+            return Task::none();
+        };
+        execute_file_action("open", &entry.full_path);
+        self.save_query_to_history();
+        iced::exit()
     }
 
     fn handle_file_browser_open_file_manager(&mut self) -> Task<Message> {

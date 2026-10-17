@@ -15,6 +15,14 @@ use super::theme::ThemeColors;
 
 type HintSpan<'a> = iced::widget::text::Span<'a, (), iced::Font>;
 
+pub(super) fn file_browser_shortcut_message(character: &str) -> Option<Message> {
+    match character {
+        "o" => Some(Message::FileBrowserOpenSelected),
+        "b" => Some(Message::FileBrowserOpenFileManager),
+        _ => None,
+    }
+}
+
 fn item_button_style(
     t: ThemeColors,
     is_selected: bool,
@@ -1856,7 +1864,7 @@ impl LauncherApp {
             hint_spans.push(span("Ctrl+H").size(fs.hint).color(t.accent));
             hint_spans.push(span(" toggle hidden").size(fs.hint).color(t.text_muted));
             hint_spans.push(sep.clone());
-            hint_spans.push(span("Ctrl+O").size(fs.hint).color(t.accent));
+            hint_spans.push(span("Ctrl+B").size(fs.hint).color(t.accent));
             hint_spans.push(span(" file manager").size(fs.hint).color(t.text_muted));
             hint_spans.push(sep.clone());
             hint_spans.push(span("Ctrl+S").size(fs.hint).color(t.accent));
@@ -1982,8 +1990,8 @@ impl LauncherApp {
                 key: keyboard::Key::Character(ref c),
                 modifiers,
                 ..
-            }) if c.as_str() == "o" && modifiers.control() => {
-                Some(Message::FileBrowserOpenFileManager)
+            }) if modifiers.control() && matches!(c.as_str(), "o" | "b") => {
+                file_browser_shortcut_message(c.as_str())
             }
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Character(ref c),

@@ -57,7 +57,8 @@ Start the file browser by typing one of these prefixes:
 | **Backspace** | On a trailing `/`, go up to the parent directory |
 | **`~/`** or **`/`** after a `/` | Start over from your home directory or the root |
 | **Ctrl+H** | Toggle hidden file visibility |
-| **Ctrl+O** | Open the current directory in a file manager |
+| **Ctrl+O** | Open the selected file or directory with `xdg-open` |
+| **Ctrl+B** | Open the current directory in a file manager |
 | **Ctrl+S** | Cycle the sort order: name, modified date, created date |
 | **Ctrl+.** | Cycle the listing: all entries, files only, directories only |
 | **Ctrl+J** / **Ctrl+K** | Scroll the right-hand preview pane down / up |
@@ -291,12 +292,12 @@ raffi is a drag source only: it does not accept files dropped **into** it.
 
 ### Open in File Manager
 
-Press **Ctrl+O** to open the directory you are browsing in a graphical file manager. With Nautilus, Dolphin, Nemo and Caja the entry selected in raffi is also selected in the file manager; other file managers just open the directory. Raffi picks your desktop's own file manager when it is installed (Dolphin on KDE, Nautilus on GNOME, Thunar on XFCE, Nemo on Cinnamon, Caja on MATE, PCManFM on LXQt/LXDE, and so on). On other sessions such as Hyprland or Sway it uses the first one it finds, and falls back to `xdg-open`. Set [`file_manager`](#configuration) to choose one yourself.
+Press **Ctrl+B** to open the directory you are browsing in a graphical file manager. With Nautilus, Dolphin, Nemo and Caja the entry selected in raffi is also selected in the file manager; other file managers just open the directory. Raffi picks your desktop's own file manager when it is installed (Dolphin on KDE, Nautilus on GNOME, Thunar on XFCE, Nemo on Cinnamon, Caja on MATE, PCManFM on LXQt/LXDE, and so on). On other sessions such as Hyprland or Sway it uses the first one it finds, and falls back to `xdg-open`. Set [`file_manager`](#configuration) to choose one yourself.
 
 ```text Example
 ~/Projects/myapp/src/
 Selected: main.rs
-[Ctrl+O] → Opens ~/Projects/myapp/src/ in your file manager with main.rs selected
+[Ctrl+B] → Opens ~/Projects/myapp/src/ in your file manager with main.rs selected
 ```
 
 ### Autocomplete
@@ -378,7 +379,7 @@ Set to `false` to edit the path as plain text: Backspace deletes one character a
 
 **`action`** `string` (default: `open`)
 
-What Enter (or a click) does on a file. Enter on a directory always navigates into it. Accepted values:
+What Enter (or a click) does on a file. Enter on a directory always navigates into it. **Ctrl+O** always opens the selected file or directory with `xdg-open`, whatever this is set to. Accepted values:
 
 - `open`: open the file with `xdg-open`
 - `copy`: copy the full path to the clipboard
@@ -399,7 +400,7 @@ addons:
 
 **`file_manager`** `string` (default: autodetected)
 
-Command used by **Ctrl+O** to open the current directory. The directory is appended as the last argument, or replaces `{value}` if present (it is also exported as `$RAFFI_VALUE`). When the value is just `nautilus`, `dolphin`, `nemo` or `caja` (or a path to one), raffi passes `--select` with the selected entry instead. When unset, raffi detects a file manager as described in [Open in File Manager](#open-in-file-manager).
+Command used by **Ctrl+B** to open the current directory. The directory is appended as the last argument, or replaces `{value}` if present (it is also exported as `$RAFFI_VALUE`). When the value is just `nautilus`, `dolphin`, `nemo` or `caja` (or a path to one), raffi passes `--select` with the selected entry instead. When unset, raffi detects a file manager as described in [Open in File Manager](#open-in-file-manager).
 
 ```yaml raffi.yaml
 addons:

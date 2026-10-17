@@ -467,6 +467,8 @@ pub(crate) enum Message {
     DragEvent(super::dnd::DragEvent),
     TabComplete,
     FileBrowserToggleHidden,
+    /// Open the selected entry with xdg-open, directories included.
+    FileBrowserOpenSelected,
     /// Open the directory being browsed in a file manager.
     FileBrowserOpenFileManager,
     /// Switch the file browser to the next sort mode.

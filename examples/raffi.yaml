@@ -576,7 +576,8 @@ addons:
   # action (Enter on a file) and secondary_action (Ctrl+Enter or Ctrl+click on
   # a file or directory) accept "open" (xdg-open), "copy", "insert", or a shell
   # command where {value} is the full path.
-  # Ctrl+O opens the browsed directory in a file manager. Leave file_manager
+  # Ctrl+O opens the selected file or directory with xdg-open, whatever action
+  # says. Ctrl+B opens the browsed directory in a file manager. Leave file_manager
   # unset to autodetect (desktop's own: dolphin, nautilus, thunar, nemo, caja,
   # pcmanfm...; else the first installed; else xdg-open). Without {value} the
   # directory is appended as the last argument. Nautilus, Dolphin, Nemo and

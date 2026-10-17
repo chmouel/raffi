@@ -414,7 +414,7 @@
           "default": true
         },
         "file_manager": {
-          "description": "File manager opened with Ctrl+O on the browsed directory. `{value}` is\nreplaced by the directory, otherwise it is appended as the last\nargument. Nautilus, Dolphin, Nemo and Caja also get the selected entry\nhighlighted. Autodetected when unset.",
+          "description": "File manager opened with Ctrl+B on the browsed directory. `{value}` is\nreplaced by the directory, otherwise it is appended as the last\nargument. Nautilus, Dolphin, Nemo and Caja also get the selected entry\nhighlighted. Autodetected when unset.",
           "type": [
             "string",
             "null"

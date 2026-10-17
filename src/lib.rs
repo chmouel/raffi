@@ -173,7 +173,7 @@ pub struct FileBrowserAddonConfig {
     /// `action`. Defaults to `copy`.
     #[serde(default)]
     pub secondary_action: Option<String>,
-    /// File manager opened with Ctrl+O on the browsed directory. `{value}` is
+    /// File manager opened with Ctrl+B on the browsed directory. `{value}` is
     /// replaced by the directory, otherwise it is appended as the last
     /// argument. Nautilus, Dolphin, Nemo and Caja also get the selected entry
     /// highlighted. Autodetected when unset.

@@ -854,7 +854,8 @@ impl LauncherApp {
             describe_file_action(config.secondary_action()),
         ));
         metadata.push(("Tab".to_string(), "Autocomplete path".to_string()));
-        metadata.push(("Ctrl+O".to_string(), "Show in file manager".to_string()));
+        metadata.push(("Ctrl+O".to_string(), "Open with xdg-open".to_string()));
+        metadata.push(("Ctrl+B".to_string(), "Show in file manager".to_string()));
 
         let mut data = PreviewData {
             title: if entry.is_dir {
