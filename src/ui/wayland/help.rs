@@ -348,12 +348,19 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             "Completes the keyword or file browser path",
         ),
     ]);
-    if file_browser.enabled && file_browser.backspace_updir {
-        entries.push(shortcut(
-            "Backspace",
-            "Parent directory",
-            "File browser: on a trailing / goes up one directory",
-        ));
+    if file_browser.enabled && file_browser.fido_style {
+        entries.extend([
+            shortcut(
+                "Backspace",
+                "Parent directory",
+                "File browser: on a trailing / goes up one directory",
+            ),
+            shortcut(
+                "~/ or / after /",
+                "Home or root",
+                "File browser: starts the path over from ~/ or /",
+            ),
+        ]);
     }
     entries.extend([
         shortcut("Ctrl+/", "Keyword and shortcut help", "Opens this list"),

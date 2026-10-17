@@ -404,12 +404,12 @@
           ],
           "default": null
         },
-        "backspace_updir": {
-          "description": "Backspace on a trailing `/` jumps to the parent directory, like\nEmacs fido/ido mode.",
+        "enabled": {
           "type": "boolean",
           "default": true
         },
-        "enabled": {
+        "fido_style": {
+          "description": "Edit paths the way Emacs fido-mode does: Backspace on a trailing `/`\ngoes up to the parent directory, and typing `~/` or `/` right after a\n`/` starts over from home or the root. Off, the input is plain text.",
           "type": "boolean",
           "default": true
         },

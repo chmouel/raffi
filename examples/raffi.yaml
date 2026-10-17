@@ -569,9 +569,10 @@ addons:
       url: "https://github.com/search?q={query}&type=repositories"
       icon: "github"
 
-  # File browser: type "/" or "~/" to browse. Backspace on a trailing "/" jumps
-  # to the parent directory (like Emacs fido/ido mode); set backspace_updir to
-  # false for a plain delete.
+  # File browser: type "/" or "~/" to browse. fido_style (on by default) edits
+  # paths the way Emacs fido-mode does: Backspace on a trailing "/" goes up to
+  # the parent directory, and typing "~/" or "/" right after a "/" starts over
+  # from home or the root. Set it to false to edit the path as plain text.
   # action (Enter on a file) and secondary_action (Ctrl+Enter or Ctrl+click on
   # a file or directory) accept "open" (xdg-open), "copy", "insert", or a shell
   # command where {value} is the full path.
@@ -598,7 +599,7 @@ addons:
   #   sort: name
   #   sort_reverse: false
   #   show: all
-  #   backspace_updir: true
+  #   fido_style: true
   #   action: open
   #   secondary_action: copy
   #   file_manager: thunar

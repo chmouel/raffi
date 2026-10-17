@@ -160,10 +160,11 @@ pub struct FileBrowserAddonConfig {
     pub enabled: bool,
     #[serde(default)]
     pub show_hidden: Option<bool>,
-    /// Backspace on a trailing `/` jumps to the parent directory, like
-    /// Emacs fido/ido mode.
+    /// Edit paths the way Emacs fido-mode does: Backspace on a trailing `/`
+    /// goes up to the parent directory, and typing `~/` or `/` right after a
+    /// `/` starts over from home or the root. Off, the input is plain text.
     #[serde(default = "default_true")]
-    pub backspace_updir: bool,
+    pub fido_style: bool,
     /// Action on Enter for files: `open` (xdg-open), `copy`, `insert`, or a
     /// shell command where `{value}` is the full path. Defaults to `open`.
     #[serde(default)]
@@ -298,7 +299,7 @@ impl Default for FileBrowserAddonConfig {
         Self {
             enabled: true,
             show_hidden: None,
-            backspace_updir: true,
+            fido_style: true,
             action: None,
             secondary_action: None,
             file_manager: None,

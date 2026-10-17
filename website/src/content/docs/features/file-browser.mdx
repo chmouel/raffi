@@ -55,6 +55,7 @@ Start the file browser by typing one of these prefixes:
 | **Ctrl+Enter** | Run `secondary_action` on a file or directory (copy path by default) |
 | **Tab** | Autocomplete selected entry into search bar |
 | **Backspace** | On a trailing `/`, go up to the parent directory |
+| **`~/`** or **`/`** after a `/` | Start over from your home directory or the root |
 | **Ctrl+H** | Toggle hidden file visibility |
 | **Ctrl+O** | Open the current directory in a file manager |
 | **Ctrl+S** | Cycle the sort order: name, modified date, created date |
@@ -239,6 +240,17 @@ With the input ending in `/`, press **Backspace** to jump to the parent director
 [Backspace] → Input becomes: ~/Projects/myapp/  (src/ selected)
 ```
 
+### Jump Home or to the Root
+
+After a `/`, type `~/` to start over from your home directory, or a second `/` to start over from the root, as in Emacs.
+
+```text Example
+~/Projects/myapp/src/~/   → Input becomes: ~/
+~/Projects/myapp/src//    → Input becomes: /
+```
+
+Both shortcuts come from the [`fido_style`](#configuration-options) option, which is on by default.
+
 ### Copy Path
 
 1. Navigate to file or directory
@@ -311,7 +323,7 @@ addons:
     sort: name
     sort_reverse: false
     show: all
-    backspace_updir: true
+    fido_style: true
     action: open
     secondary_action: copy
     file_manager: thunar
@@ -354,9 +366,14 @@ Which entries the listing starts with. Press Ctrl+. to cycle through the modes w
 When directories are hidden you can still type a path such as `~/src/` to enter one, and Tab completes the best hidden match when no visible row matches what you typed. Symlinks count as files, so `directories` hides a link to a directory.
 
 
-**`backspace_updir`** `boolean` (default: `true`)
+**`fido_style`** `boolean` (default: `true`)
 
-When the input ends with `/`, Backspace jumps to the parent directory instead of deleting the slash, like Emacs fido/ido mode. The directory you just left is selected in the parent listing. On `~/` it goes up to the parent of your home directory, and on `/` it is a plain delete. Set to `false` to make Backspace always delete one character.
+Edit paths the way Emacs fido-mode (and ido or vertico) does, so you rarely delete a path one character at a time:
+
+- Backspace on a trailing `/` goes up to the parent directory and selects the one you left (see [Go Up a Directory](#go-up-a-directory)). On `~/` it goes to the parent of your home directory; on `/` it deletes the slash.
+- Typing `~/` right after a `/` starts over from your home directory, and a second `/` starts over from the root (see [Jump Home or to the Root](#jump-home-or-to-the-root)).
+
+Set to `false` to edit the path as plain text: Backspace deletes one character and slashes stay as typed.
 
 
 **`action`** `string` (default: `open`)

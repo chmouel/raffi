@@ -1,7 +1,7 @@
 use super::actions::DeferredAction;
 use super::app::{
-    classify_query, fido_updir, is_single_insert, keyword_suggestions, loggable_query, route_query,
-    QueryMode,
+    classify_query, fido_restart, fido_updir, is_single_insert, keyword_suggestions,
+    loggable_query, route_query, QueryMode,
 };
 use super::command_list::CommandListAddon;
 use super::help::{filter_help_entries, help_entries, HelpSection};
@@ -1765,6 +1765,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "Alt+P/N",
             "Tab",
             "Backspace",
+            "~/ or / after /",
             "Ctrl+/",
             "Esc",
             "Enter",
@@ -3038,11 +3039,44 @@ fn test_backspace_on_trailing_slash_goes_up_and_selects_previous_dir() {
 }
 
 #[test]
-fn test_backspace_updir_disabled_is_a_plain_delete() {
+fn test_fido_restart_on_home_or_root_after_a_slash() {
+    assert_eq!(
+        fido_restart("~/Documents/~", "~/Documents/~/"),
+        Some("~/".into())
+    );
+    assert_eq!(
+        fido_restart("/usr/share/", "/usr/share//"),
+        Some("/".into())
+    );
+    // A name ending in ~, a backup file for instance, is a plain directory.
+    assert_eq!(fido_restart("~/notes~", "~/notes~/"), None);
+    // Only typing at the end restarts.
+    assert_eq!(fido_restart("~/a/~/b", "~/a/~//b"), None);
+}
+
+#[test]
+fn test_typing_home_after_a_path_restarts_the_file_browser() {
+    let dir = updir_test_dir();
+    let base = dir.to_string_lossy().into_owned();
+    let mut app = test_app(AddonsConfig::default());
+
+    let _ = app.update(Message::SearchChanged(format!("{base}/gamma/~")));
+    let _ = app.update(Message::SearchChanged(format!("{base}/gamma/~/")));
+    assert_eq!(app.search_query, "~/");
+    assert!(app.file_browser.active);
+
+    let _ = app.update(Message::SearchChanged("~//".into()));
+    assert_eq!(app.search_query, "/");
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn test_fido_style_disabled_is_a_plain_delete() {
     let dir = updir_test_dir();
     let base = dir.to_string_lossy().into_owned();
     let mut addons = AddonsConfig::default();
-    addons.file_browser.backspace_updir = false;
+    addons.file_browser.fido_style = false;
     let mut app = test_app(addons);
 
     let _ = app.update(Message::SearchChanged(format!("{base}/gamma/")));

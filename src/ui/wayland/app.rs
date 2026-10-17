@@ -319,6 +319,21 @@ pub(super) fn fido_updir(old: &str, new: &str, home: &str) -> Option<(String, St
     Some((parent, left.to_string()))
 }
 
+/// Emacs-style restart: typing `/` after a `/` or a `/~` drops everything
+/// before it, so `~/Documents/~/` becomes `~/` and `~/Documents//` becomes `/`.
+pub(super) fn fido_restart(old: &str, new: &str) -> Option<String> {
+    if new.strip_suffix('/') != Some(old) {
+        return None;
+    }
+    if old.ends_with("/~") {
+        Some("~/".to_string())
+    } else if old.ends_with('/') {
+        Some("/".to_string())
+    } else {
+        None
+    }
+}
+
 /// Theme icon names for the clipboard keywords; rows show no icon when the
 /// theme lacks them.
 pub(super) const CLIPBOARD_ICON: &str = "copyq";
@@ -958,23 +973,25 @@ impl LauncherApp {
             return Task::none();
         }
 
-        let updir = if self.addons.file_browser.enabled
-            && self.addons.file_browser.backspace_updir
+        let fido = self.addons.file_browser.enabled
+            && self.addons.file_browser.fido_style
             && self.file_browser.active
             && !self.history.search_in_progress
-            && !self.view.help_active
-        {
-            fido_updir(
-                &self.search_query,
-                &query,
-                &std::env::var("HOME").unwrap_or_default(),
-            )
+            && !self.view.help_active;
+        let mut restarted = false;
+        let (query, left_dir) = if !fido {
+            (query, None)
+        } else if let Some((parent, left)) = fido_updir(
+            &self.search_query,
+            &query,
+            &std::env::var("HOME").unwrap_or_default(),
+        ) {
+            (parent, Some(left))
+        } else if let Some(restart) = fido_restart(&self.search_query, &query) {
+            restarted = true;
+            (restart, None)
         } else {
-            None
-        };
-        let (query, left_dir) = match updir {
-            Some((parent, left)) => (parent, Some(left)),
-            None => (query, None),
+            (query, None)
         };
 
         self.history.search_in_progress = false;
@@ -1052,6 +1069,9 @@ impl LauncherApp {
                 self.currency.clear();
                 let Some(left_dir) = left_dir else {
                     self.refresh_file_preview_cache();
+                    if restarted {
+                        tasks.push(move_cursor_to_end(self.view.search_input_id.clone()));
+                    }
                     return Task::batch(tasks);
                 };
                 if let Some(position) = self

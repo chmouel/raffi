@@ -282,14 +282,14 @@ Which entries the listing starts with: `all`, `files` or `directories` (`dirs` a
 
 ```
 
-**`addons.file_browser.backspace_updir`** `boolean` (default: `true`)
+**`addons.file_browser.fido_style`** `boolean` (default: `true`)
 
-When the input ends with `/`, Backspace jumps to the parent directory (like Emacs fido/ido mode) and selects the directory you left. Set to `false` for a plain delete.
+Edit paths the way Emacs fido-mode does. Backspace on a trailing `/` goes up to the parent directory and selects the one you left, and typing `~/` or `/` right after a `/` starts over from your home directory or the root. Set to `false` to edit the path as plain text.
 
   ```yaml
   addons:
     file_browser:
-      backspace_updir: false
+      fido_style: false
 
 ```
 
@@ -334,6 +334,7 @@ Command that previews the selected entry in the preview pane. When unset, raffi 
 - Ctrl+Enter: Run `secondary_action` on a file or directory (copy path by default)
 - Tab: Autocomplete selected entry into search bar
 - Backspace on a trailing `/`: Go up to the parent directory
+- `~/` or `/` after a `/`: Start over from home or the root
 - Ctrl+H: Toggle hidden file visibility
 - Ctrl+O: Open the current directory in a file manager
 - Ctrl+S: Cycle the sort order (name, modified, created)
