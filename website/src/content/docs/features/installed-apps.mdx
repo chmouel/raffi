@@ -1,0 +1,55 @@
+---
+title: Installed Apps
+description: List the applications installed on your system next to your launchers
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Raffi can list the applications installed on your system, read from their
+`.desktop` files, next to the launchers you configured. Turn it on with:
+
+```yaml
+addons:
+  apps:
+    enabled: true
+```
+
+Apps come after your launchers and are searched, sorted by use and shown
+with their icons like any launcher. An app is left out when one of your
+launchers has the same name or runs the same command, so a launcher you
+wrote for Firefox wins over the Firefox desktop entry.
+
+Desktop actions are listed as their own rows, titled with the app name
+first, such as "Firefox: New Private Window" or "Kitty: New Window". Set
+`actions: false` to list the apps only.
+
+When no launcher is configured at all, Raffi already lists the installed
+apps on its own, whatever `enabled` is set to. `actions` applies there too.
+
+## Which apps are listed
+
+Raffi reads the `applications` folder of `$XDG_DATA_HOME` and of each
+`$XDG_DATA_DIRS` entry, in that order. When two folders hold the same
+desktop file, the first one wins, so a copy in
+`~/.local/share/applications` replaces or hides the system one.
+
+An app is skipped when:
+
+- its file sets `NoDisplay=true` or `Hidden=true`,
+- it is not of `Type=Application`,
+- its `TryExec` program is not installed,
+- `OnlyShowIn` or `NotShowIn` rule it out for the desktop named in
+  `$XDG_CURRENT_DESKTOP`.
+
+Apps marked `Terminal=true`, such as htop, open in the terminal found by the
+[terminal addon](/features/terminal/). They are left out when no terminal is
+found or when `addons.terminal.enabled` is false.
+
+<Aside type="note">
+With [`main_view`](/configuration/general-settings/#main-view) set, apps
+show only when `launchers` is in the list, since they are part of the
+launchers.
+</Aside>
+
+See the [addon reference](/reference/addon-configuration/#installed-apps)
+for every field.

@@ -762,6 +762,30 @@ impl Default for AudioAddonConfig {
     }
 }
 
+/// Configuration for listing installed applications next to the launchers
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
+pub struct AppsAddonConfig {
+    /// List the installed desktop applications after the launchers
+    /// (default: false). Apps named like a launcher, or running the same
+    /// command, are left out.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Also list the actions applications declare, such as Firefox's
+    /// "New Private Window" (default: true).
+    #[serde(default = "default_true")]
+    pub actions: bool,
+}
+
+impl Default for AppsAddonConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            actions: true,
+        }
+    }
+}
+
 /// Configuration for the run in terminal addon (native UI only)
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
@@ -1005,6 +1029,8 @@ pub struct AddonsConfig {
     pub media: MediaAddonConfig,
     #[serde(default)]
     pub audio: AudioAddonConfig,
+    #[serde(default)]
+    pub apps: AppsAddonConfig,
     #[serde(default)]
     pub terminal: TerminalAddonConfig,
     #[serde(default)]
@@ -2203,50 +2229,177 @@ fn parse_desktop_exec(exec: &str) -> Option<(String, Vec<String>)> {
     Some((binary, tokens))
 }
 
-fn parse_desktop_entry_file(
-    path: &Path,
-    binary_checker: &impl BinaryChecker,
-) -> Option<RaffiConfig> {
-    let contents = fs::read_to_string(path).ok()?;
-    let keys = parse_desktop_entry_keys(&contents);
+/// What a scan of the installed desktop applications lists.
+pub(crate) struct DesktopScan {
+    /// List the actions applications declare, as their own entries.
+    pub actions: bool,
+    /// Terminal command line prefix for `Terminal=true` applications, left
+    /// out when there is none.
+    pub terminal: Option<Vec<String>>,
+    /// Desktop names from `XDG_CURRENT_DESKTOP`, for `OnlyShowIn` and
+    /// `NotShowIn`.
+    pub desktops: Vec<String>,
+}
 
-    if keys.get("Type").map(String::as_str) != Some("Application") {
-        return None;
-    }
-    if keys.get("Hidden").is_some_and(|value| parse_bool(value))
-        || keys.get("NoDisplay").is_some_and(|value| parse_bool(value))
-        || keys.get("Terminal").is_some_and(|value| parse_bool(value))
-    {
-        return None;
-    }
-
-    let exec = keys.get("Exec")?;
-    let name = keys.get("Name")?;
-    let (binary, args) = parse_desktop_exec(exec)?;
-
-    if let Some(try_exec) = keys.get("TryExec") {
-        if !binary_checker.exists(try_exec) {
-            return None;
+impl DesktopScan {
+    fn from_addons(addons: &AddonsConfig) -> Self {
+        let terminal = &addons.terminal;
+        Self {
+            actions: addons.apps.actions,
+            terminal: terminal
+                .enabled
+                .then(|| terminal::resolve_default(terminal.command.as_deref()))
+                .flatten(),
+            desktops: std::env::var("XDG_CURRENT_DESKTOP")
+                .unwrap_or_default()
+                .split(':')
+                .filter(|desktop| !desktop.is_empty())
+                .map(str::to_string)
+                .collect(),
         }
     }
-    if !binary_checker.exists(&binary) {
-        return None;
+
+    /// Whether an entry with these `OnlyShowIn` and `NotShowIn` values shows
+    /// on the current desktop.
+    fn shows_on_desktop(&self, keys: &HashMap<String, String>) -> bool {
+        let listed = |key: &str| {
+            keys.get(key).map(|value| {
+                value.split(';').any(|name| {
+                    self.desktops
+                        .iter()
+                        .any(|desktop| !name.is_empty() && desktop.eq_ignore_ascii_case(name))
+                })
+            })
+        };
+        listed("OnlyShowIn") != Some(false) && listed("NotShowIn") != Some(true)
     }
 
-    Some(RaffiConfig {
-        binary: Some(binary),
-        args: (!args.is_empty()).then_some(args),
-        icon: keys.get("Icon").cloned(),
-        description: Some(name.clone()),
-        ..Default::default()
-    })
+    /// The command line running `exec`, through the terminal when
+    /// `in_terminal`; None when it cannot run.
+    fn command(
+        &self,
+        exec: &str,
+        in_terminal: bool,
+        binary_checker: &impl BinaryChecker,
+    ) -> Option<(String, Vec<String>)> {
+        let (binary, args) = parse_desktop_exec(exec)?;
+        if !binary_checker.exists(&binary) {
+            return None;
+        }
+        if !in_terminal {
+            return Some((binary, args));
+        }
+        let mut argv = terminal::exec_argv(self.terminal.as_deref()?, &binary, &args);
+        let program = argv.remove(0);
+        Some((program, argv))
+    }
+}
+
+/// The groups of a desktop entry file, in order, with their keys.
+fn parse_desktop_groups(contents: &str) -> Vec<(String, HashMap<String, String>)> {
+    let mut groups: Vec<(String, HashMap<String, String>)> = Vec::new();
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some(name) = trimmed
+            .strip_prefix('[')
+            .and_then(|rest| rest.strip_suffix(']'))
+        {
+            groups.push((name.to_string(), HashMap::new()));
+            continue;
+        }
+        if let (Some((_, keys)), Some((key, value))) = (groups.last_mut(), trimmed.split_once('='))
+        {
+            keys.entry(key.trim().to_string())
+                .or_insert_with(|| value.trim().to_string());
+        }
+    }
+    groups
+}
+
+/// The launcher entries of a desktop entry file: the application, then its
+/// actions when the scan lists them.
+fn parse_desktop_entry_file(
+    path: &Path,
+    scan: &DesktopScan,
+    binary_checker: &impl BinaryChecker,
+) -> Vec<RaffiConfig> {
+    let Ok(contents) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let groups = parse_desktop_groups(&contents);
+    let group = |name: &str| {
+        groups
+            .iter()
+            .find(|(group, _)| group == name)
+            .map(|(_, keys)| keys)
+    };
+    let Some(keys) = group("Desktop Entry") else {
+        return Vec::new();
+    };
+
+    if keys.get("Type").map(String::as_str) != Some("Application")
+        || keys.get("Hidden").is_some_and(|value| parse_bool(value))
+        || keys.get("NoDisplay").is_some_and(|value| parse_bool(value))
+        || !scan.shows_on_desktop(keys)
+    {
+        return Vec::new();
+    }
+    let Some(name) = keys.get("Name") else {
+        return Vec::new();
+    };
+    if keys
+        .get("TryExec")
+        .is_some_and(|try_exec| !binary_checker.exists(try_exec))
+    {
+        return Vec::new();
+    }
+    let in_terminal = keys.get("Terminal").is_some_and(|value| parse_bool(value));
+    let icon = keys.get("Icon").cloned();
+    let entry = |description: String, exec: &str, icon: Option<String>| {
+        let (binary, args) = scan.command(exec, in_terminal, binary_checker)?;
+        Some(RaffiConfig {
+            binary: Some(binary),
+            args: (!args.is_empty()).then_some(args),
+            icon,
+            description: Some(description),
+            ..Default::default()
+        })
+    };
+
+    let mut entries = Vec::new();
+    entries.extend(
+        keys.get("Exec")
+            .and_then(|exec| entry(name.clone(), exec, icon.clone())),
+    );
+    if scan.actions {
+        let actions = keys.get("Actions").map(String::as_str).unwrap_or_default();
+        for id in actions.split(';').filter(|id| !id.is_empty()) {
+            let Some(action) = group(&format!("Desktop Action {id}")) else {
+                continue;
+            };
+            let (Some(action_name), Some(exec)) = (action.get("Name"), action.get("Exec")) else {
+                continue;
+            };
+            entries.extend(entry(
+                format!("{name}: {action_name}"),
+                exec,
+                action.get("Icon").cloned().or_else(|| icon.clone()),
+            ));
+        }
+    }
+    entries
 }
 
 fn detect_desktop_entries_from_dirs(
     dirs: &[PathBuf],
+    scan: &DesktopScan,
     binary_checker: &impl BinaryChecker,
 ) -> Vec<RaffiConfig> {
     let mut seen = HashSet::new();
+    let mut ids = HashSet::new();
     let mut entries = Vec::new();
 
     for dir in dirs {
@@ -2256,6 +2409,7 @@ fn detect_desktop_entries_from_dirs(
 
         for entry in walkdir::WalkDir::new(dir)
             .follow_links(true)
+            .sort_by_file_name()
             .into_iter()
             .filter_map(Result::ok)
         {
@@ -2265,19 +2419,29 @@ fn detect_desktop_entries_from_dirs(
             if entry.path().extension().and_then(|ext| ext.to_str()) != Some("desktop") {
                 continue;
             }
-
-            let Some(config) = parse_desktop_entry_file(entry.path(), binary_checker) else {
+            // The first file with a desktop file ID wins, even when it
+            // hides the application: that is how a user file overrides
+            // a system one.
+            let id = entry
+                .path()
+                .strip_prefix(dir)
+                .unwrap_or(entry.path())
+                .to_string_lossy()
+                .replace('/', "-");
+            if !ids.insert(id) {
                 continue;
-            };
+            }
 
-            let key = format!(
-                "{}\u{1f}{}\u{1f}{}",
-                config.description.as_deref().unwrap_or_default(),
-                config.binary.as_deref().unwrap_or_default(),
-                config.args.as_deref().unwrap_or(&[]).join("\u{1f}")
-            );
-            if seen.insert(key) {
-                entries.push(config);
+            for config in parse_desktop_entry_file(entry.path(), scan, binary_checker) {
+                let key = format!(
+                    "{}\u{1f}{}\u{1f}{}",
+                    config.description.as_deref().unwrap_or_default(),
+                    config.binary.as_deref().unwrap_or_default(),
+                    config.args.as_deref().unwrap_or(&[]).join("\u{1f}")
+                );
+                if seen.insert(key) {
+                    entries.push(config);
+                }
             }
         }
     }
@@ -2291,8 +2455,33 @@ fn detect_desktop_entries_from_dirs(
     entries
 }
 
-fn detect_desktop_entries(binary_checker: &impl BinaryChecker) -> Vec<RaffiConfig> {
-    detect_desktop_entries_from_dirs(&desktop_entry_dirs(), binary_checker)
+fn detect_desktop_entries(
+    scan: &DesktopScan,
+    binary_checker: &impl BinaryChecker,
+) -> Vec<RaffiConfig> {
+    detect_desktop_entries_from_dirs(&desktop_entry_dirs(), scan, binary_checker)
+}
+
+/// Add the installed applications after the launchers, leaving out those
+/// named like a launcher or running the same command.
+fn merge_apps(entries: &mut Vec<RaffiConfig>, apps: Vec<RaffiConfig>) {
+    let launchers = entries.len();
+    for app in apps {
+        let duplicate = entries[..launchers].iter().any(|launcher| {
+            let same_name = matches!(
+                (&launcher.description, &app.description),
+                (Some(left), Some(right)) if left.eq_ignore_ascii_case(right)
+            );
+            let same_command = launcher.binary.is_some()
+                && launcher.binary == app.binary
+                && launcher.args.as_deref().unwrap_or_default()
+                    == app.args.as_deref().unwrap_or_default();
+            same_name || same_command
+        });
+        if !duplicate {
+            entries.push(app);
+        }
+    }
 }
 
 const DEFAULT_ICON_PATH: &str = "assets/default_icon.svg";
@@ -2829,17 +3018,25 @@ pub fn run(args: Args) -> Result<()> {
     debug_log!("config: loaded {} entries", parsed_config.entries.len());
 
     if parsed_config.entries.is_empty() {
-        let detected_entries = detect_desktop_entries(&DefaultBinaryChecker);
+        let scan = DesktopScan::from_addons(&parsed_config.addons);
+        let detected_entries = detect_desktop_entries(&scan, &DefaultBinaryChecker);
         if detected_entries.is_empty() {
             eprintln!("{}", no_valid_config_message(configfile));
             std::process::exit(1);
         }
 
-        eprintln!(
-            "No valid launchers found in {configfile}; using {} auto-detected desktop applications.",
-            detected_entries.len()
-        );
+        if !parsed_config.addons.apps.enabled {
+            eprintln!(
+                "No valid launchers found in {configfile}; using {} auto-detected desktop applications.",
+                detected_entries.len()
+            );
+        }
         parsed_config.entries = detected_entries;
+    } else if parsed_config.addons.apps.enabled {
+        let scan = DesktopScan::from_addons(&parsed_config.addons);
+        let apps = detect_desktop_entries(&scan, &DefaultBinaryChecker);
+        debug_log!("config: {} installed applications", apps.len());
+        merge_apps(&mut parsed_config.entries, apps);
     }
 
     // Merge general config: CLI flags override config values
@@ -4784,7 +4981,7 @@ Terminal=true
         let checker = MockBinaryChecker {
             binaries: vec!["firefox".to_string()],
         };
-        let detected = detect_desktop_entries_from_dirs(&[apps_dir], &checker);
+        let detected = detect_desktop_entries_from_dirs(&[apps_dir], &plain_scan(), &checker);
 
         assert_eq!(detected.len(), 1);
         assert_eq!(detected[0].description.as_deref(), Some("Firefox"));
@@ -4792,6 +4989,125 @@ Terminal=true
         assert!(detected[0].args.as_deref().unwrap_or(&[]).is_empty());
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    fn plain_scan() -> DesktopScan {
+        DesktopScan {
+            actions: false,
+            terminal: None,
+            desktops: Vec::new(),
+        }
+    }
+
+    fn descriptions(entries: &[RaffiConfig]) -> Vec<&str> {
+        entries
+            .iter()
+            .map(|entry| entry.description.as_deref().unwrap_or_default())
+            .collect()
+    }
+
+    #[test]
+    fn test_detect_desktop_entries_actions_desktops_and_terminal() {
+        let dir = temp_test_dir("desktop-scan");
+        let user_dir = dir.join("user/applications");
+        let system_dir = dir.join("system/applications");
+        fs::create_dir_all(&user_dir).unwrap();
+        fs::create_dir_all(&system_dir).unwrap();
+        let files = [
+            (
+                &system_dir,
+                "firefox.desktop",
+                "[Desktop Entry]\nType=Application\nName=Firefox\nExec=firefox %u\nIcon=firefox\n\
+                 Actions=private;broken;\n\n[Desktop Action private]\nName=New Private Window\n\
+                 Exec=firefox --private-window %u\n\n[Desktop Action broken]\nName=Broken\n",
+            ),
+            (
+                &system_dir,
+                "gnome-only.desktop",
+                "[Desktop Entry]\nType=Application\nName=Gnome Only\nExec=firefox\nOnlyShowIn=GNOME;\n",
+            ),
+            (
+                &system_dir,
+                "not-hypr.desktop",
+                "[Desktop Entry]\nType=Application\nName=Not Hyprland\nExec=firefox\nNotShowIn=Hyprland;\n",
+            ),
+            (
+                &system_dir,
+                "htop.desktop",
+                "[Desktop Entry]\nType=Application\nName=Htop\nExec=htop -t\nTerminal=true\n",
+            ),
+            (
+                &system_dir,
+                "overridden.desktop",
+                "[Desktop Entry]\nType=Application\nName=Overridden\nExec=firefox\n",
+            ),
+            (
+                &user_dir,
+                "overridden.desktop",
+                "[Desktop Entry]\nType=Application\nName=Overridden\nExec=firefox\nNoDisplay=true\n",
+            ),
+        ];
+        for (dir, name, contents) in files {
+            fs::write(dir.join(name), contents).unwrap();
+        }
+        let checker = MockBinaryChecker {
+            binaries: vec!["firefox".to_string(), "htop".to_string()],
+        };
+        let dirs = [user_dir, system_dir];
+
+        let scan = DesktopScan {
+            actions: true,
+            terminal: Some(vec!["foot".to_string()]),
+            desktops: vec!["hyprland".to_string()],
+        };
+        let detected = detect_desktop_entries_from_dirs(&dirs, &scan, &checker);
+        assert_eq!(
+            descriptions(&detected),
+            ["Firefox", "Firefox: New Private Window", "Htop"]
+        );
+        assert_eq!(
+            detected[1].args.as_deref(),
+            Some(&["--private-window".to_string()][..])
+        );
+        assert_eq!(detected[1].icon.as_deref(), Some("firefox"));
+        assert_eq!(detected[2].binary.as_deref(), Some("foot"));
+        assert_eq!(
+            detected[2].args.as_deref(),
+            Some(&["htop".to_string(), "-t".to_string()][..])
+        );
+
+        let detected = detect_desktop_entries_from_dirs(&dirs, &plain_scan(), &checker);
+        // OnlyShowIn hides an entry unless the desktop is listed.
+        assert_eq!(descriptions(&detected), ["Firefox", "Not Hyprland"]);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_merge_apps_skips_launcher_duplicates() {
+        let launcher = |description: &str, binary: &str, args: Option<&[&str]>| RaffiConfig {
+            description: Some(description.to_string()),
+            binary: Some(binary.to_string()),
+            args: args.map(|args| args.iter().map(|arg| arg.to_string()).collect()),
+            ..Default::default()
+        };
+        let mut entries = vec![
+            launcher("firefox", "firefox", None),
+            launcher("Files", "nautilus", Some(&["--new-window"])),
+        ];
+        merge_apps(
+            &mut entries,
+            vec![
+                launcher("Firefox", "/usr/bin/firefox", None),
+                launcher("Nautilus", "nautilus", Some(&["--new-window"])),
+                launcher("Nautilus: Open", "nautilus", None),
+                launcher("Htop", "htop", Some(&[])),
+            ],
+        );
+        assert_eq!(
+            descriptions(&entries),
+            ["firefox", "Files", "Nautilus: Open", "Htop"]
+        );
     }
 
     #[test]

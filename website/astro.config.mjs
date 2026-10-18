@@ -45,6 +45,7 @@ export default defineConfig({
             { label: 'Currency Converter', slug: 'features/currency-converter' },
             { label: 'Developer Tools', slug: 'features/developer-tools' },
             { label: 'File Browser', slug: 'features/file-browser' },
+            { label: 'Installed Apps', slug: 'features/installed-apps' },
             { label: 'Kill Process', slug: 'features/kill-process' },
             { label: 'Media Controls', slug: 'features/media-controls' },
             { label: 'Password Store', slug: 'features/password-store' },

@@ -35,6 +35,9 @@
       "description": "Container for all addon configurations",
       "type": "object",
       "properties": {
+        "apps": {
+          "$ref": "#/$defs/AppsAddonConfig"
+        },
         "audio": {
           "$ref": "#/$defs/AudioAddonConfig"
         },
@@ -119,6 +122,23 @@
         },
         "world_clock": {
           "$ref": "#/$defs/WorldClockAddonConfig"
+        }
+      },
+      "additionalProperties": false
+    },
+    "AppsAddonConfig": {
+      "description": "Configuration for listing installed applications next to the launchers",
+      "type": "object",
+      "properties": {
+        "actions": {
+          "description": "Also list the actions applications declare, such as Firefox's\n\"New Private Window\" (default: true).",
+          "type": "boolean",
+          "default": true
+        },
+        "enabled": {
+          "description": "List the installed desktop applications after the launchers\n(default: false). Apps named like a launcher, or running the same\ncommand, are left out.",
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false

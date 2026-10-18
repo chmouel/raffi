@@ -346,6 +346,14 @@ addons:
   #   volume_step: 5      # Percent changed by Volume up and down
   #   max_volume: 100     # Highest volume Volume up and "vol N" will set
 
+  # Installed applications. List the .desktop apps of your system next to
+  # your launchers, with their actions such as "Firefox: New Private Window".
+  # Apps with the same name or command as a launcher are skipped. Without
+  # any launcher configured, apps are listed even when this is off.
+  # apps:
+  #   enabled: false
+  #   actions: true       # Also list desktop actions
+
   # Run in terminal (native UI only). Type "> htop" to run htop in a
   # terminal. The terminal is found automatically (xdg-terminal-exec,
   # $TERMINAL, then kitty, foot, alacritty, wezterm, ghostty, konsole,

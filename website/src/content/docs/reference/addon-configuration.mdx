@@ -1138,6 +1138,31 @@ addons:
     volume_step: 10
 ```
 
+## Installed Apps
+
+Lists the applications installed on the system next to your launchers.
+See [Installed Apps](/features/installed-apps/) for usage.
+
+### Configuration
+
+**`addons.apps.enabled`** `boolean` (default: `false`)
+
+Add the `.desktop` applications to the launcher list. When no launcher is
+configured at all, the apps are listed whatever this is set to.
+
+**`addons.apps.actions`** `boolean` (default: `true`)
+
+Also list each app's desktop actions, such as "Firefox: New Private Window".
+
+### Example
+
+```yaml
+addons:
+  apps:
+    enabled: true
+    actions: false
+```
+
 ## Run in Terminal
 
 Runs a typed command in a terminal window.

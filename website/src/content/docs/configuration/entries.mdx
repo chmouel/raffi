@@ -7,6 +7,8 @@ description: Define applications, commands, and scripts in your Raffi launcher
 
 Entries are the core of Raffi's configuration. Each entry represents an application, command, or script that appears in the launcher. Entries live in `~/.config/raffi/launchers.yaml`, where each top-level key is an entry. They can also go under a `launchers:` key in `raffi.yaml`, see [Configuration Files](/configuration/overview#configuration-files).
 
+You don't need an entry for every application: [Installed Apps](/features/installed-apps/) lists the apps installed on your system next to your entries, leaving out those an entry already covers.
+
 ## Entry Structure
 
 Each entry is identified by a unique key and contains configuration fields:

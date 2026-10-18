@@ -95,6 +95,15 @@ pub fn shell_argv(prefix: &[String], shell: &str, command: &str, hold: bool) -> 
     argv
 }
 
+/// Run `program` with `args` in the terminal, as for desktop entries with
+/// `Terminal=true`.
+pub fn exec_argv(prefix: &[String], program: &str, args: &[String]) -> Vec<String> {
+    let mut argv = prefix.to_vec();
+    argv.push(program.to_string());
+    argv.extend(args.iter().cloned());
+    argv
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,5 +181,13 @@ mod tests {
             .output()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&output.stdout), "it's /home/x\n");
+    }
+
+    #[test]
+    fn test_exec_argv() {
+        assert_eq!(
+            exec_argv(&strings(&["foot"]), "htop", &strings(&["-d", "10"])),
+            strings(&["foot", "htop", "-d", "10"])
+        );
     }
 }
