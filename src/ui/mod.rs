@@ -137,6 +137,11 @@ pub fn get_ui(ui_type: UIType) -> Box<dyn UI> {
 
 /// Get the MRU cache file path
 pub fn get_mru_cache_path() -> Result<PathBuf> {
+    // Unit tests launch entries and type queries; keep them away from the
+    // user's usage and history caches, which derive from this path.
+    if cfg!(test) {
+        anyhow::bail!("usage caches are disabled in tests");
+    }
     let cache_dir = std::env::var("XDG_CACHE_HOME")
         .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()));
     let mut path = PathBuf::from(cache_dir);
