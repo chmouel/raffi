@@ -958,7 +958,55 @@ impl LauncherApp {
         self.sync_vault();
         let preview = self.ensure_clipboard_preview();
         let file_preview = self.ensure_file_browser_preview();
-        Task::batch([task, preview, file_preview])
+        let tab_preview = self.ensure_tab_preview();
+        Task::batch([task, preview, file_preview, tab_preview])
+    }
+
+    /// Look up the page preview of the selected browser tab, one at a time.
+    fn ensure_tab_preview(&mut self) -> Task<Message> {
+        let tab = (self.view.show_preview
+            && self.command_list.addon == Some(CommandListAddon::BrowserTabs))
+        .then(|| {
+            self.selected_index
+                .checked_sub(self.command_list_offset())
+                .and_then(|row| self.command_list.item(row))
+                .and_then(super::browser_tabs::tab_target)
+        })
+        .flatten();
+        let Some(tab) = tab else {
+            self.command_list.preview_wanted.clear();
+            return Task::none();
+        };
+        self.command_list.preview_wanted.set(&tab.url);
+        if self.command_list.preview_inflight.is_some()
+            || self.command_list.previews.contains_key(&tab.url)
+        {
+            return Task::none();
+        }
+        let url = tab.url.clone();
+        let browser = crate::browser_host::Browser {
+            id: tab.browser_id.clone(),
+            name: String::new(),
+            pid: tab.browser_pid,
+        };
+        let service = self.addons.browser_tabs.favicon_service;
+        let session = self.command_list.session;
+        let wanted = self.command_list.preview_wanted.clone();
+        self.command_list.preview_inflight = Some(url.clone());
+        Task::perform(
+            {
+                let url = url.clone();
+                async move {
+                    let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                    std::thread::spawn(move || {
+                        let _ =
+                            sender.send(super::tab_preview::load(&url, &browser, service, &wanted));
+                    });
+                    receiver.await.ok().flatten()
+                }
+            },
+            move |bodies| Message::TabPreviewLoaded(session, url.clone(), bodies),
+        )
     }
 
     fn update_inner(&mut self, message: Message) -> Task<Message> {
@@ -1146,6 +1194,17 @@ impl LauncherApp {
             }
             Message::CommandListActionDone(addon, session, identity, result) => {
                 self.handle_command_list_action_done(addon, session, identity, result)
+            }
+            Message::TabPreviewLoaded(session, url, bodies) => {
+                if session == self.command_list.session {
+                    if self.command_list.preview_inflight.as_ref() == Some(&url) {
+                        self.command_list.preview_inflight = None;
+                    }
+                    if let Some(bodies) = bodies {
+                        self.command_list.previews.insert(url, bodies);
+                    }
+                }
+                Task::none()
             }
             Message::FaviconsFetched(session, fetched) => {
                 if fetched

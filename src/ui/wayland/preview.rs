@@ -52,6 +52,9 @@ pub(crate) enum PreviewBody {
     },
     /// Scaled image or SVG preview (for File Browser images or QuickLook image paths).
     Image { path: String },
+    /// Image at the pane width and its own height, up to half the pane
+    /// (for a browser tab's page image).
+    Thumbnail { path: String },
     /// Scaled image decoded from memory (for clipboard history images).
     ImageData { handle: iced::widget::image::Handle },
     /// Giant centered glyph/emoji hero display.
@@ -1223,7 +1226,10 @@ impl LauncherApp {
                 .addon
                 .map(|addon| addon.badge().to_string()),
             icon: item.icon.clone().map(PreviewIcon::File),
-            bodies: Vec::new(),
+            bodies: super::browser_tabs::tab_target(item)
+                .and_then(|tab| self.command_list.previews.get(&tab.url))
+                .cloned()
+                .unwrap_or_default(),
             metadata: item.details.clone(),
         }
     }

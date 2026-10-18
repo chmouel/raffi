@@ -647,7 +647,8 @@ pub struct BrowserTabsAddonConfig {
     pub trigger: Option<String>,
     /// Where to download site icons the browsers have not stored themselves
     /// (default: `twenty`). Downloading sends the domains of open tabs to
-    /// that service; `none` keeps favicons to the browsers' own.
+    /// that service; `none` keeps favicons to the browsers' own and stops
+    /// fetching the selected page for its preview.
     #[serde(default)]
     pub favicon_service: FaviconService,
 }
@@ -661,7 +662,7 @@ pub enum FaviconService {
     Twenty,
     /// Google's favicon service
     Google,
-    /// Never download; only use the icons the browsers stored
+    /// Never download; only use what the browsers stored
     None,
 }
 

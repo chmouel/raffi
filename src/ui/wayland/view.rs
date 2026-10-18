@@ -777,6 +777,16 @@ impl LauncherApp {
                 PreviewBody::ImageData { handle } => {
                     col = col.push(memory_image(handle, viewport_height));
                 }
+                PreviewBody::Thumbnail { path } => {
+                    col = col.push(
+                        container(
+                            image(PathBuf::from(path))
+                                .width(Length::Fill)
+                                .content_fit(iced::ContentFit::Contain),
+                        )
+                        .max_height(viewport_height / 2.0),
+                    );
+                }
                 PreviewBody::HeroGlyph { glyph } => {
                     col = col.push(
                         container(text(glyph).size(ps.hero_glyph))

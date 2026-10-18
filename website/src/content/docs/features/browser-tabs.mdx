@@ -108,6 +108,23 @@ addons:
 A site visited for the first time may only get its icon on a later opening,
 because the browser writes new icons to its database in batches.
 
+## Page preview
+
+With the preview pane open (Ctrl+P), the selected tab shows the description
+and image of its page, like a link preview in a chat app. For Firefox and
+its forks Raffi reads them from the browser history first. Otherwise, once
+the selection rests on a tab, Raffi fetches the page itself and reads its
+`og:description` and `og:image` tags. That request carries none of your
+browser cookies, so a page behind a login shows what it shows logged out.
+Fetched details are cached for a day in `~/.cache/raffi/previews`, and
+images are kept there until they go a week without being shown.
+
+Only pages on named hosts that resolve to public addresses are fetched,
+redirects included, never addresses such as `192.168.1.1` or names on your
+local network. Images are scaled down when saved, and SVG images are not
+shown. With `favicon_service: none` nothing is downloaded: tabs show
+only what Firefox stored, without its image.
+
 ## Switching windows
 
 The extension switches the tab and asks the browser to bring its window

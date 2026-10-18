@@ -652,7 +652,9 @@ addons:
   # closes it. Needs the Vicinae browser extension and a one-time
   # `raffi --install-browser-host`. Site icons come from the browser
   # profiles, then from favicon_service (twenty, google or none to stay
-  # offline), which receives the domains of the open tabs.
+  # offline), which receives the domains of the open tabs. The preview pane
+  # shows the selected page's description and image, fetched from the site
+  # unless favicon_service is none.
   # browser_tabs:
   #   enabled: true
   #   trigger: tabs

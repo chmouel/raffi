@@ -6419,6 +6419,50 @@ fn test_route_query_browser_tabs_trigger() {
 }
 
 #[test]
+fn test_browser_tabs_show_the_page_preview_of_the_selected_tab() {
+    let mut app = browser_tabs_app("tabs ");
+    assert!(app.view.show_preview);
+    let raffi = "https://github.com/chmouel/raffi".to_string();
+    assert_eq!(app.command_list.preview_inflight, Some(raffi.clone()));
+    let body = super::preview::PreviewBody::Text {
+        heading: None,
+        content: "Fast launcher".into(),
+        truncated: false,
+    };
+
+    let _ = app.update(Message::MoveDown);
+    let session = app.command_list.session;
+    let _ = app.update(Message::TabPreviewLoaded(
+        session.wrapping_add(1),
+        raffi.clone(),
+        Some(vec![body.clone()]),
+    ));
+    assert!(app.command_list.previews.is_empty(), "stale session");
+
+    let _ = app.update(Message::TabPreviewLoaded(
+        session,
+        raffi,
+        Some(vec![body.clone()]),
+    ));
+    assert_eq!(
+        app.command_list.preview_inflight.as_deref(),
+        Some("https://mail.example.com/inbox"),
+        "the row selected meanwhile is looked up next"
+    );
+    assert!(app.resolve_selected_preview().unwrap().bodies.is_empty());
+    let _ = app.update(Message::MoveUp);
+    assert_eq!(app.resolve_selected_preview().unwrap().bodies, vec![body]);
+
+    let wanted = app.command_list.preview_wanted.clone();
+    assert!(wanted.is("https://github.com/chmouel/raffi"));
+    let _ = app.update(Message::TogglePreview);
+    assert!(
+        !wanted.is("https://github.com/chmouel/raffi"),
+        "a hidden preview stops pending lookups"
+    );
+}
+
+#[test]
 fn test_browser_tabs_enter_switches_after_close() {
     let mut app = browser_tabs_app("tabs ");
     assert_eq!(command_list_titles(&app), vec!["Raffi", "Mail"]);

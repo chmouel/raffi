@@ -506,6 +506,9 @@ pub(crate) enum Message {
     /// Site icons were downloaded for the browser tab list of this session;
     /// `true` when any arrived.
     FaviconsFetched(u64, bool),
+    /// The preview of the page at the URL for the browser tab list of this
+    /// session; None when the row was left before it was looked up.
+    TabPreviewLoaded(u64, String, Option<Vec<super::preview::PreviewBody>>),
     DevtoolsSelected(usize),
     /// Hash rows computed for the `dev` query with this generation.
     DevtoolsHashes(u64, Vec<super::devtools::DevRow>),

@@ -21,7 +21,7 @@ use super::url_match::uri_host;
 
 /// How long a host the service had no icon for is left alone.
 const MISS_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
-const FETCH_TIMEOUT: Duration = Duration::from_secs(5);
+pub(super) const FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_FETCHES: usize = 32;
 const FETCH_THREADS: usize = 4;
 const MAX_ICON_BYTES: u64 = 512 * 1024;
@@ -49,6 +49,15 @@ pub(super) fn host_key(url: &str) -> Option<String> {
     valid.then_some(host)
 }
 
+/// `name` under Raffi's cache directory.
+pub(super) fn cache_dir_named(name: &str) -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))?;
+    Some(base.join("raffi").join(name))
+}
+
 /// Whether `host` is a name rather than an address, so asking a service
 /// or the site about it reveals nothing about the local network.
 pub(super) fn is_named(host: &str) -> bool {
@@ -58,22 +67,18 @@ pub(super) fn is_named(host: &str) -> bool {
 }
 
 fn cache_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .filter(|dir| !dir.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))?;
-    Some(base.join("raffi").join("favicons"))
+    cache_dir_named("favicons")
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum Cached {
+pub(super) enum Cached {
     Icon(PathBuf),
     /// The service had none recently.
     Miss,
     Unknown,
 }
 
-fn cached(dir: &Path, host: &str) -> Cached {
+pub(super) fn cached(dir: &Path, host: &str) -> Cached {
     if let Some(path) = EXTENSIONS
         .iter()
         .map(|extension| dir.join(format!("{host}.{extension}")))
@@ -117,7 +122,7 @@ fn extension(data: &[u8]) -> Option<&'static str> {
 /// Cache `data` as the icon of `host`, through a temporary file so a row
 /// never reads half an image. Raster images too large to decode cheaply are
 /// refused.
-fn store(dir: &Path, host: &str, data: &[u8]) -> Option<PathBuf> {
+pub(super) fn store(dir: &Path, host: &str, data: &[u8]) -> Option<PathBuf> {
     let extension = extension(data)?;
     if !fits(data, MAX_ICON_SIDE) {
         return None;
@@ -144,7 +149,7 @@ fn fits(data: &[u8], side: u32) -> bool {
         .is_some_and(|(width, height)| width <= side && height <= side)
 }
 
-fn mark_miss(dir: &Path, host: &str) {
+pub(super) fn mark_miss(dir: &Path, host: &str) {
     if fs::create_dir_all(dir).is_ok() {
         let _ = fs::write(dir.join(format!("{host}.none")), "");
     }
@@ -152,7 +157,7 @@ fn mark_miss(dir: &Path, host: &str) {
 
 /// The favicon databases `browser` uses: the ones its process has open,
 /// else those of its profiles.
-fn databases(browser: &Browser, home: &Path, config: &Path) -> Vec<(PathBuf, bool)> {
+pub(super) fn databases(browser: &Browser, home: &Path, config: &Path) -> Vec<(PathBuf, bool)> {
     let mut found: Vec<(PathBuf, bool)> = Vec::new();
     if let Some(Ok(entries)) = browser
         .pid
@@ -181,7 +186,7 @@ fn databases(browser: &Browser, home: &Path, config: &Path) -> Vec<(PathBuf, boo
 /// Open a browser database without waiting on, or taking, its lock: the
 /// browsers keep theirs locked while running. Changes still in the
 /// write-ahead log are not seen.
-fn open(path: &Path) -> rusqlite::Result<Connection> {
+pub(super) fn open(path: &Path) -> rusqlite::Result<Connection> {
     let mut uri = String::from("file:");
     for byte in path.to_string_lossy().bytes() {
         if byte.is_ascii_alphanumeric() || b"/-._~".contains(&byte) {
@@ -316,16 +321,17 @@ pub(super) fn service_url(service: FaviconService, host: &str) -> Option<String>
     }
 }
 
-fn download(agent: &ureq::Agent, url: &str) -> Option<Vec<u8>> {
+/// The body at `url`, or None past `limit` bytes.
+pub(super) fn download(agent: &ureq::Agent, url: &str, limit: u64) -> Option<Vec<u8>> {
     let response = agent.get(url).call().ok()?;
     let mut data = Vec::new();
     response
         .into_body()
         .into_reader()
-        .take(MAX_ICON_BYTES + 1)
+        .take(limit + 1)
         .read_to_end(&mut data)
         .ok()?;
-    (data.len() as u64 <= MAX_ICON_BYTES).then_some(data)
+    (data.len() as u64 <= limit).then_some(data)
 }
 
 /// Download the icons the last [`lookup`] did not find. Returns whether any
@@ -353,7 +359,7 @@ pub(super) fn fetch_pending(service: FaviconService) -> bool {
             scope.spawn(|| {
                 while let Some(host) = hosts.get(next.fetch_add(1, Ordering::Relaxed)) {
                     let icon = service_url(service, host)
-                        .and_then(|url| download(&agent, &url))
+                        .and_then(|url| download(&agent, &url, MAX_ICON_BYTES))
                         .and_then(|data| store(&dir, host, &data));
                     match icon {
                         Some(_) => fetched.store(true, Ordering::Relaxed),

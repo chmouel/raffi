@@ -216,7 +216,7 @@
           "default": true
         },
         "favicon_service": {
-          "description": "Where to download site icons the browsers have not stored themselves\n(default: `twenty`). Downloading sends the domains of open tabs to\nthat service; `none` keeps favicons to the browsers' own.",
+          "description": "Where to download site icons the browsers have not stored themselves\n(default: `twenty`). Downloading sends the domains of open tabs to\nthat service; `none` keeps favicons to the browsers' own and stops\nfetching the selected page for its preview.",
           "$ref": "#/$defs/FaviconService"
         },
         "trigger": {
@@ -477,7 +477,7 @@
           "const": "google"
         },
         {
-          "description": "Never download; only use the icons the browsers stored",
+          "description": "Never download; only use what the browsers stored",
           "type": "string",
           "const": "none"
         }

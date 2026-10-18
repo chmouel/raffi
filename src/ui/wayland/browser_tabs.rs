@@ -27,7 +27,18 @@ pub(super) struct TabAction {
     pub operation: TabOperation,
     /// The browser process, whose window is raised after a switch.
     pub browser_pid: Option<u32>,
+    /// The browser, such as `firefox`, whose profiles hold its history.
+    pub browser_id: String,
     pub title: String,
+    pub url: String,
+}
+
+/// The tab `item` switches to, for rows that are tabs.
+pub(super) fn tab_target(item: &CommandItem) -> Option<&TabAction> {
+    match &item.primary.as_ref()?.action {
+        DeferredAction::BrowserTab(action) => Some(action),
+        _ => None,
+    }
 }
 
 /// The tabs of every connected browser, or the steps to connect one.
@@ -261,7 +272,9 @@ fn tab_item(
             tab_id: tab.id,
             operation,
             browser_pid: browser.pid,
+            browser_id: browser.id.clone(),
             title: tab.title.clone(),
+            url: tab.url.clone(),
         }),
         confirm: None,
         keep_open,
@@ -484,7 +497,9 @@ mod tests {
                 tab_id: 2,
                 operation: TabOperation::Focus,
                 browser_pid: Some(9),
+                browser_id: "firefox".to_string(),
                 title: String::new(),
+                url: "https://www.github.com/chmouel/raffi".to_string(),
             }
         );
         assert!(!github.primary.as_ref().unwrap().keep_open);

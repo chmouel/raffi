@@ -190,6 +190,12 @@ pub(super) struct CommandListState {
     /// Past use of rows by identity, higher first: the order with no
     /// filter, and the tie-break between equally good matches.
     pub usage: HashMap<String, u64>,
+    /// Preview bodies by page URL for the browser tab rows.
+    pub previews: HashMap<String, Vec<super::preview::PreviewBody>>,
+    /// The page URL whose preview is being looked up.
+    pub preview_inflight: Option<String>,
+    /// The page URL the preview pane wants, empty for none.
+    pub preview_wanted: super::tab_preview::Wanted,
 }
 
 impl CommandListState {
@@ -210,6 +216,9 @@ impl CommandListState {
         self.overlay = None;
         self.extra = None;
         self.usage.clear();
+        self.previews.clear();
+        self.preview_inflight = None;
+        self.preview_wanted.clear();
         self.generation = self.generation.wrapping_add(1);
         self.session = self.session.wrapping_add(1);
     }
