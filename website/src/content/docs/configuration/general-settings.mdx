@@ -54,6 +54,15 @@ Disables icon loading for faster startup.
   Equivalent to `-I` or `--no-icons` flag.
 
 
+**`renderer`** `string` (default: `cpu`)
+
+How the native UI draws its window. Valid options:
+  - `cpu` - Software rendering (default). Skips GPU driver setup, so the window opens sooner.
+  - `gpu` - Vulkan/OpenGL rendering through wgpu.
+
+  An `ICED_BACKEND` environment variable (`tiny-skia` or `wgpu`) takes precedence. See [Startup performance](#startup-performance).
+
+
 **`show_preview`** `boolean` (default: `false` for launchers, automatic for addons)
 
 Controls the Alfred-style right-hand preview and details pane in the native UI.
@@ -315,6 +324,19 @@ Background color for selected items.
 
 Border color.
 
+
+## Startup performance
+
+To see where startup time goes, run `raffi -d /tmp/raffi.log` and look for
+the `startup:` lines (milliseconds since Raffi started).
+
+Large or SVG launcher icons are converted to small PNG copies in
+`~/.cache/raffi/icon-thumbnails` on first use, so later launches skip decoding
+them. `raffi --refresh-cache` clears these copies along with the icon cache.
+
+If you use `renderer: gpu`, Vulkan layers installed by other programs (Steam,
+for example) are loaded on every launch. Setting `VK_LOADER_LAYERS_DISABLE=all`
+in Raffi's environment skips them.
 
 ## Example Configurations
 

@@ -714,6 +714,10 @@
           "description": "Appearance of the right-hand preview pane (font, size, colours, width)",
           "$ref": "#/$defs/PreviewConfig"
         },
+        "renderer": {
+          "description": "Renderer for the native UI: `cpu` (default, faster to open) or `gpu`.\nAn `ICED_BACKEND` environment variable takes precedence.",
+          "$ref": "#/$defs/Renderer"
+        },
         "show_preview": {
           "description": "Show the Alfred-style right-hand preview pane in native mode.\nBy default, previews are shown automatically for addons (snippets, file browser,\nscript filters, etc.) and hidden for standard launcher entries unless `show_preview: true`\nis set in `general` or on the launcher entry. Can also be toggled at runtime with Ctrl+P.",
           "type": [
@@ -1076,6 +1080,21 @@
         }
       },
       "additionalProperties": false
+    },
+    "Renderer": {
+      "description": "How the native UI draws its window",
+      "oneOf": [
+        {
+          "description": "Software rendering: opens faster because no GPU driver has to be loaded",
+          "type": "string",
+          "const": "cpu"
+        },
+        {
+          "description": "GPU rendering through Vulkan, falling back to software if no GPU is usable",
+          "type": "string",
+          "const": "gpu"
+        }
+      ]
     },
     "ScriptFilterConfig": {
       "description": "Configuration for a script filter addon",

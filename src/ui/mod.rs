@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use anyhow::Result;
 
 use crate::{
-    AddonsConfig, ClipboardHistory, PreviewConfig, RaffiConfig, SortMode, ThemeColorsConfig,
-    ThemeMode, UIType,
+    AddonsConfig, ClipboardHistory, PreviewConfig, RaffiConfig, Renderer, SortMode,
+    ThemeColorsConfig, ThemeMode, UIType,
 };
 
 mod fuzzel;
@@ -14,6 +14,8 @@ mod wayland;
 use self::fuzzel::FuzzelUI;
 #[cfg(feature = "wayland")]
 use self::wayland::WaylandUI;
+#[cfg(feature = "wayland")]
+pub(crate) use self::wayland::THUMBNAIL_DIR_NAME;
 
 /// Font and padding sizes derived from the base font_size.
 /// All sizes scale proportionally from the base.
@@ -78,6 +80,7 @@ pub struct UISettings {
     pub app_name: Option<String>,
     pub theme: ThemeMode,
     pub theme_colors: Option<ThemeColorsConfig>,
+    pub renderer: Renderer,
     pub max_history: u32,
     pub font_sizes: FontSizes,
     pub font_family: Option<String>,
@@ -102,6 +105,7 @@ impl Default for UISettings {
             app_name: None,
             theme: ThemeMode::Dark,
             theme_colors: None,
+            renderer: Renderer::default(),
             max_history: 10,
             font_sizes: FontSizes::default_sizes(),
             font_family: None,

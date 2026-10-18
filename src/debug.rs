@@ -1,10 +1,13 @@
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 static DEBUG_FILE: OnceLock<Mutex<File>> = OnceLock::new();
+static START: OnceLock<Instant> = OnceLock::new();
 
 pub fn init(path: &str) {
+    START.get_or_init(Instant::now);
     match OpenOptions::new().create(true).append(true).open(path) {
         Ok(file) => {
             let _ = DEBUG_FILE.set(Mutex::new(file));
@@ -15,6 +18,11 @@ pub fn init(path: &str) {
 
 pub fn is_enabled() -> bool {
     DEBUG_FILE.get().is_some()
+}
+
+/// Milliseconds since the debug log was opened, for startup timings.
+pub fn elapsed_ms() -> u128 {
+    START.get().map_or(0, |start| start.elapsed().as_millis())
 }
 
 pub fn write_debug(msg: &str) {

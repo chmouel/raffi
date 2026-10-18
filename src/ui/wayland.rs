@@ -35,6 +35,7 @@ mod system;
 mod tab_preview;
 mod terminal;
 mod theme;
+mod thumbnails;
 mod types;
 mod units;
 mod url_match;
@@ -48,6 +49,7 @@ mod tests;
 
 use anyhow::Result;
 use iced::{window, Task};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::{UISettings, UI};
@@ -55,6 +57,7 @@ use crate::{AddonsConfig, RaffiConfig};
 
 use self::state::{LauncherApp, SharedSelection};
 use self::theme::ThemeColors;
+pub(crate) use self::thumbnails::DIR_NAME as THUMBNAIL_DIR_NAME;
 
 /// Wayland UI implementation using iced
 pub struct WaylandUI;
@@ -75,20 +78,57 @@ fn configure_preview_visibility(view: &mut state::ViewState, show_preview: Optio
     view.show_launcher_preview = show_preview == Some(true);
 }
 
+/// Set when Raffi exported `ICED_BACKEND` itself and must take it back.
+static RENDERER_OVERRIDE: AtomicBool = AtomicBool::new(false);
+
+/// iced reads its renderer only from `ICED_BACKEND`. Must run before any
+/// thread starts, since setting the environment is not thread safe.
+fn select_renderer(renderer: crate::Renderer) {
+    if std::env::var_os("ICED_BACKEND").is_some() {
+        return;
+    }
+    if renderer == crate::Renderer::Cpu {
+        std::env::set_var("ICED_BACKEND", "tiny-skia");
+        RENDERER_OVERRIDE.store(true, Ordering::SeqCst);
+    }
+}
+
+/// Drop Raffi's `ICED_BACKEND` once the window exists, so programs launched
+/// from Raffi do not inherit it. Threads are running by then, but Rust's own
+/// environment readers and `Command` spawns take the same lock, and Raffi's
+/// own background threads (font scan, thumbnails) do not call C `getenv`.
+pub(super) fn release_renderer_override() {
+    if RENDERER_OVERRIDE.swap(false, Ordering::SeqCst) {
+        std::env::remove_var("ICED_BACKEND");
+    }
+}
+
+/// Load the system fonts in the background: iced scans every installed font
+/// on first use, which otherwise delays the window behind GPU and config setup.
+fn prewarm_fonts() {
+    std::thread::spawn(|| {
+        let _ = iced::advanced::graphics::text::font_system();
+        crate::debug_log!("startup: fonts loaded at {}ms", crate::debug::elapsed_ms());
+    });
+}
+
 /// Run the Wayland UI with the provided configurations and return the selected item.
 fn run_wayland_ui(
     configs: &[RaffiConfig],
     addons: &AddonsConfig,
     settings: &UISettings,
 ) -> Result<String> {
+    select_renderer(settings.renderer);
+    prewarm_fonts();
     crate::debug_log!(
-        "wayland: starting UI: {}x{} theme={:?} sort_mode={:?} no_icons={} max_history={}",
+        "wayland: starting UI: {}x{} theme={:?} sort_mode={:?} no_icons={} max_history={} renderer={:?}",
         settings.window_width,
         settings.window_height,
         settings.theme,
         settings.sort_mode,
         settings.no_icons,
-        settings.max_history
+        settings.max_history,
+        settings.renderer
     );
     let theme_colors =
         ThemeColors::from_mode_with_overrides(&settings.theme, settings.theme_colors.as_ref());
@@ -204,6 +244,7 @@ fn run_wayland_ui(
     }
 
     let result = app.run();
+    release_renderer_override();
 
     if let Err(error) = result {
         return Err(anyhow::anyhow!("Failed to run UI: {:?}", error));

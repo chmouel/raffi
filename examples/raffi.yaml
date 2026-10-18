@@ -63,6 +63,7 @@ version: 1
 #     text_muted: "#6c7086"
 #     selection_bg: "#45475a"
 #     border: "#585b70"
+#   renderer: cpu            # Native UI renderer: cpu (default, opens fastest) or gpu; ICED_BACKEND overrides it
 
 # Launchers live in launchers.yaml next to this file, see examples/launchers.yaml.
 # A `launchers:` section here still works and takes precedence over launchers.yaml.

@@ -916,10 +916,12 @@ impl LauncherApp {
         let launcher_icon_paths = if no_icons {
             vec![None; configs.len()]
         } else {
-            configs
+            let mut paths: Vec<Option<String>> = configs
                 .iter()
                 .map(|config| resolve_launcher_icon_path(config, &icon_map, &desktop_icon_map))
-                .collect()
+                .collect();
+            super::thumbnails::substitute(&mut paths);
+            paths
         };
 
         let initial_query = initial_query.unwrap_or_default();
@@ -3714,6 +3716,11 @@ impl LauncherApp {
         &mut self,
         handles: Option<super::dnd::RawWaylandHandles>,
     ) -> Task<Message> {
+        super::release_renderer_override();
+        crate::debug_log!(
+            "startup: window created at {}ms",
+            crate::debug::elapsed_ms()
+        );
         let Some(handles) = handles else {
             crate::debug_log!("dnd: no Wayland window, drag-and-drop disabled");
             return Task::none();

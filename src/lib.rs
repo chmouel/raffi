@@ -1153,6 +1153,17 @@ pub enum SortMode {
     Hybrid,
 }
 
+/// How the native UI draws its window
+#[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Renderer {
+    /// Software rendering: opens faster because no GPU driver has to be loaded
+    #[default]
+    Cpu,
+    /// GPU rendering through Vulkan, falling back to software if no GPU is usable
+    Gpu,
+}
+
 /// Clipboard manager used for `{clipboard:N}` snippet placeholders
 #[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -1184,6 +1195,10 @@ pub struct GeneralConfig {
     pub theme: Option<String>,
     #[serde(default)]
     pub theme_colors: Option<ThemeColorsConfig>,
+    /// Renderer for the native UI: `cpu` (default, faster to open) or `gpu`.
+    /// An `ICED_BACKEND` environment variable takes precedence.
+    #[serde(default)]
+    pub renderer: Renderer,
     #[serde(default)]
     pub max_history: Option<u32>,
     #[serde(default)]
@@ -2781,6 +2796,13 @@ pub fn clear_icon_cache() -> Result<()> {
     if Path::new(&cache_path).exists() {
         fs::remove_file(&cache_path).context("Failed to remove icon cache file")?;
     }
+    #[cfg(feature = "wayland")]
+    {
+        let thumbnails = icon_cache_dir().join(ui::THUMBNAIL_DIR_NAME);
+        if thumbnails.exists() {
+            fs::remove_dir_all(&thumbnails).context("Failed to remove icon thumbnails")?;
+        }
+    }
     Ok(())
 }
 
@@ -3140,6 +3162,7 @@ pub fn run(args: Args) -> Result<()> {
         app_name: args.app_name.clone(),
         theme,
         theme_colors: parsed_config.general.theme_colors.clone(),
+        renderer: general.renderer,
         max_history,
         font_sizes,
         font_family: general.font_family.clone(),
