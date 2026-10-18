@@ -45,12 +45,13 @@ Validate the configuration file and `launchers.yaml` next to it against the JSON
   ```
 
 
-**`--schema`** `boolean` (default: `false`)
+**`--generate-schemas`** `boolean` (default: `false`)
 
-Print the JSON Schema of the configuration format to stdout and exit.
+Write or refresh both JSON Schema files next to the selected config file and
+exit. Use `--configfile` to choose the config directory.
 
   ```bash
-  raffi --schema > raffi-schema.json
+  raffi --generate-schemas --configfile /path/to/raffi.yaml
   ```
 
 

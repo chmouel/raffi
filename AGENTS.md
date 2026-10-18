@@ -54,7 +54,8 @@ When changing behavior, keep the surrounding docs and examples aligned.
 - `run()` in `src/lib.rs` is the main runtime path:
   - resolve config path
   - optionally clear caches
-  - auto-write `raffi-schema.json` next to the user config if missing
+  - auto-write `raffi-schema.json` and `launchers-schema.json` next to the user
+    config if missing or outdated
   - read and normalize config
   - choose UI backend
   - execute the selected launcher or script

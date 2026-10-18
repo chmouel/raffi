@@ -1266,8 +1266,11 @@ pub struct Args {
         short = "t"
     )]
     pub theme: Option<String>,
-    #[options(help = "print JSON Schema for the config format to stdout")]
-    pub schema: bool,
+    #[options(
+        help = "write both JSON Schemas beside the config file and exit",
+        no_short
+    )]
+    pub generate_schemas: bool,
     #[options(
         help = "validate the config file against the JSON Schema and exit",
         no_short
@@ -2651,20 +2654,25 @@ fn generate_launchers_schema() -> String {
 }
 
 /// Write `schema` to `schema_path` when missing or out of date.
-fn write_schema_if_changed(schema_path: &Path, schema: &str) {
+fn write_schema_if_changed(schema_path: &Path, schema: &str) -> Result<()> {
     if fs::read_to_string(schema_path).is_ok_and(|current| current == schema) {
-        return;
+        return Ok(());
     }
     let dir = schema_path.parent().unwrap_or(Path::new("."));
-    if fs::create_dir_all(dir).is_err() {
-        return;
-    }
-    if let Err(e) = fs::write(schema_path, schema) {
-        eprintln!(
-            "Warning: could not write schema file {}: {e}",
-            schema_path.display()
-        );
-    }
+    fs::create_dir_all(dir)
+        .with_context(|| format!("could not create schema directory {}", dir.display()))?;
+    fs::write(schema_path, schema)
+        .with_context(|| format!("could not write schema file {}", schema_path.display()))
+}
+
+fn write_schemas_for_config(configfile: &str) -> Result<()> {
+    let config_dir = Path::new(configfile).parent().unwrap_or(Path::new("."));
+    write_schema_if_changed(&config_dir.join("raffi-schema.json"), &generate_schema())?;
+    write_schema_if_changed(
+        &config_dir.join("launchers-schema.json"),
+        &generate_launchers_schema(),
+    )?;
+    Ok(())
 }
 
 pub fn run(args: Args) -> Result<()> {
@@ -2675,11 +2683,6 @@ pub fn run(args: Args) -> Result<()> {
 
     if args.version {
         println!("raffi version {}", env!("CARGO_PKG_VERSION"));
-        return Ok(());
-    }
-
-    if args.schema {
-        println!("{}", generate_schema());
         return Ok(());
     }
 
@@ -2700,6 +2703,11 @@ pub fn run(args: Args) -> Result<()> {
     debug_log!("config: using file {configfile}");
     let config_exists = Path::new(configfile).exists();
     let launchers_path = launchers_file_for(configfile);
+
+    if args.generate_schemas {
+        write_schemas_for_config(configfile)?;
+        return Ok(());
+    }
 
     if args.check_config {
         let mut checks = Vec::new();
@@ -2729,12 +2737,9 @@ pub fn run(args: Args) -> Result<()> {
     }
 
     // Keep the schema files next to the config in sync with this binary
-    let config_dir = Path::new(configfile).parent().unwrap_or(Path::new("."));
-    write_schema_if_changed(&config_dir.join("raffi-schema.json"), &generate_schema());
-    write_schema_if_changed(
-        &config_dir.join("launchers-schema.json"),
-        &generate_launchers_schema(),
-    );
+    if let Err(e) = write_schemas_for_config(configfile) {
+        eprintln!("Warning: could not write schema files next to config: {e:#}");
+    }
 
     let mut parsed_config = if config_exists {
         read_config(configfile, &args).context("Failed to read config")?
@@ -3184,7 +3189,7 @@ mod tests {
             app_name: None,
             initial_query: None,
             theme: None,
-            schema: false,
+            generate_schemas: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -3242,7 +3247,7 @@ mod tests {
             app_name: None,
             initial_query: None,
             theme: None,
-            schema: false,
+            generate_schemas: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -3314,7 +3319,7 @@ mod tests {
             app_name: None,
             initial_query: None,
             theme: None,
-            schema: false,
+            generate_schemas: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -3373,7 +3378,7 @@ mod tests {
             app_name: None,
             initial_query: None,
             theme: None,
-            schema: false,
+            generate_schemas: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -3459,7 +3464,7 @@ mod tests {
             app_name: None,
             initial_query: None,
             theme: None,
-            schema: false,
+            generate_schemas: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -3656,7 +3661,7 @@ mod tests {
             app_name: None,
             initial_query: None,
             theme: None,
-            schema: false,
+            generate_schemas: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -3694,7 +3699,7 @@ mod tests {
             app_name: None,
             initial_query: None,
             theme: None,
-            schema: false,
+            generate_schemas: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -3751,7 +3756,7 @@ mod tests {
             app_name: None,
             initial_query: None,
             theme: None,
-            schema: false,
+            generate_schemas: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -3791,7 +3796,7 @@ mod tests {
             app_name: None,
             initial_query: None,
             theme: None,
-            schema: false,
+            generate_schemas: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -3827,7 +3832,7 @@ mod tests {
             app_name: None,
             initial_query: None,
             theme: None,
-            schema: false,
+            generate_schemas: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -3959,7 +3964,7 @@ mod tests {
             app_name: None,
             initial_query: None,
             theme: None,
-            schema: false,
+            generate_schemas: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -4024,7 +4029,7 @@ mod tests {
             app_name: None,
             initial_query: None,
             theme: None,
-            schema: false,
+            generate_schemas: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -4103,7 +4108,7 @@ mod tests {
             app_name: None,
             initial_query: None,
             theme: None,
-            schema: false,
+            generate_schemas: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -4147,7 +4152,7 @@ mod tests {
             app_name: None,
             initial_query: None,
             theme: None,
-            schema: false,
+            generate_schemas: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -4187,7 +4192,7 @@ mod tests {
             app_name: None,
             initial_query: None,
             theme: None,
-            schema: false,
+            generate_schemas: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -4230,7 +4235,7 @@ mod tests {
                 app_name: None,
                 initial_query: None,
                 theme: None,
-                schema: false,
+                generate_schemas: false,
                 check_config: false,
                 debug_file: None,
                 install_browser_host: false,
@@ -4424,7 +4429,7 @@ shell:
             app_name: None,
             initial_query: None,
             theme: None,
-            schema: false,
+            generate_schemas: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -4470,7 +4475,7 @@ shell:
             app_name: None,
             initial_query: None,
             theme: None,
-            schema: false,
+            generate_schemas: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -4515,7 +4520,7 @@ shell:
             app_name: None,
             initial_query: None,
             theme: None,
-            schema: false,
+            generate_schemas: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -4852,8 +4857,39 @@ Icon=firefox
         assert_eq!(
             include_str!("../examples/raffi-schema.json").trim_end(),
             generate_schema(),
-            "regenerate with: cargo run -- --schema > examples/raffi-schema.json"
+            "regenerate with: cargo run -- --generate-schemas --configfile examples/raffi.yaml"
         );
+    }
+
+    #[test]
+    fn test_example_launchers_schema_is_up_to_date() {
+        assert_eq!(
+            include_str!("../examples/launchers-schema.json").trim_end(),
+            generate_launchers_schema(),
+            "regenerate with: cargo run -- --generate-schemas --configfile examples/raffi.yaml"
+        );
+    }
+
+    #[test]
+    fn test_generate_schemas_writes_both_next_to_config() {
+        let dir = temp_test_dir("generate-schemas");
+        let configfile = dir.join("raffi.yaml");
+        run(Args {
+            configfile: Some(configfile.to_string_lossy().into_owned()),
+            generate_schemas: true,
+            ..Args::default()
+        })
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(dir.join("raffi-schema.json")).unwrap(),
+            generate_schema()
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("launchers-schema.json")).unwrap(),
+            generate_launchers_schema()
+        );
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -5037,11 +5073,11 @@ launchers:
         let dir = temp_test_dir("schema-refresh");
         let path = dir.join("raffi-schema.json");
 
-        write_schema_if_changed(&path, &generate_schema());
+        write_schema_if_changed(&path, &generate_schema()).unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), generate_schema());
 
         fs::write(&path, "{}").unwrap();
-        write_schema_if_changed(&path, &generate_schema());
+        write_schema_if_changed(&path, &generate_schema()).unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), generate_schema());
         let _ = fs::remove_dir_all(dir);
     }

@@ -427,6 +427,12 @@ addons:
 
 Raffi generates JSON Schemas for both files and keeps copies named `raffi-schema.json` and `launchers-schema.json` next to your config file. The copies are rewritten whenever they no longer match the running version of Raffi.
 
+To explicitly write or refresh both schemas beside a config file, run:
+
+```bash
+raffi --generate-schemas --configfile /path/to/raffi.yaml
+```
+
 Point your editor at them by adding this line at the top of each file (supported by any editor using [yaml-language-server](https://github.com/redhat-developer/yaml-language-server)):
 
 ```yaml title="raffi.yaml"

@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Map_of_RaffiConfig",
+  "type": "object",
+  "additionalProperties": {
+    "$ref": "#/$defs/RaffiConfig"
+  },
+  "$defs": {
+    "RaffiConfig": {
+      "description": "Represents the configuration for each Raffi entry.",
+      "type": "object",
+      "properties": {
+        "args": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "binary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "disabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "icon": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ifenveq": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "ifenvnotset": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ifenvset": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ifexist": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "script": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "show_preview": {
+          "description": "Show the right-hand preview pane when this launcher entry is selected (default: false).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

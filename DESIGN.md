@@ -188,7 +188,10 @@ Current cache artifacts:
 - `history.cache`: prior search queries for native history navigation
 - `emoji/`: downloaded emoji datasets
 
-On startup, `run()` also writes `raffi-schema.json` next to the user config if it does not already exist. That improves editor support for YAML authoring.
+On startup, `run()` writes `raffi-schema.json` and `launchers-schema.json` next
+to the user config when either file is missing or outdated.
+`--generate-schemas` explicitly writes both files and exits. These schemas
+improve editor support for YAML authoring.
 
 ## Sorting and Ranking
 
@@ -226,7 +229,8 @@ Behavior changes usually need updates in more than one place:
 - `README.md` for high-level user-facing behavior
 - `website/src/content/docs/` for detailed docs
 - `examples/raffi.yaml` for canonical config examples
-- `examples/raffi-schema.json` when config structs change
+- `examples/raffi-schema.json` and `examples/launchers-schema.json` when config
+  structs change
 - `src/ui/wayland/tests.rs` or nearby unit tests when routing or ranking behavior changes
 
 ## Design Constraints
