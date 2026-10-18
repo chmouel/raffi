@@ -1,7 +1,12 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::sync::LazyLock;
 
+use evalexpr::{
+    eval_with_context, ContextWithMutableFunctions, ContextWithMutableVariables, Function,
+    HashMapContext, Value,
+};
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
 
@@ -63,13 +68,98 @@ pub(super) fn try_evaluate_math(query: &str) -> Option<CalculatorResult> {
         return None;
     }
 
-    match meval::eval_str(trimmed) {
-        Ok(result) if result.is_finite() => Some(CalculatorResult {
+    match eval_math(trimmed) {
+        Some(result) if result.is_finite() => Some(CalculatorResult {
             expression: trimmed.to_string(),
             result,
         }),
         _ => None,
     }
+}
+
+/// Evaluate a mathematical expression with the semantics the calculator has
+/// always had: `^` is exponentiation, arithmetic happens in f64, and the
+/// functions `sqrt`, `sin`, `cos`, `tan`, `log` (base 10), `ln`, `exp`,
+/// `abs`, `floor`, `ceil` plus the `pi` and `e` constants are available.
+fn eval_math(expression: &str) -> Option<f64> {
+    static MATH_CONTEXT: LazyLock<HashMapContext> = LazyLock::new(|| {
+        let mut context = HashMapContext::new();
+        for (name, function) in [
+            ("sqrt", f64::sqrt as fn(f64) -> f64),
+            ("sin", f64::sin),
+            ("cos", f64::cos),
+            ("tan", f64::tan),
+            ("log", f64::log10),
+            ("ln", f64::ln),
+            ("exp", f64::exp),
+            ("abs", f64::abs),
+            ("floor", f64::floor),
+            ("ceil", f64::ceil),
+        ] {
+            context
+                .set_function(
+                    name.into(),
+                    Function::new(move |argument: &Value| {
+                        Ok(Value::Float(function(argument.as_number()?)))
+                    }),
+                )
+                .expect("context accepts function definitions");
+        }
+        context
+            .set_value("pi".into(), Value::Float(std::f64::consts::PI))
+            .expect("context accepts value definitions");
+        context
+            .set_value("e".into(), Value::Float(std::f64::consts::E))
+            .expect("context accepts value definitions");
+        context
+    });
+
+    let floated = force_float_literals(expression);
+    eval_with_context(&floated, &*MATH_CONTEXT)
+        .ok()?
+        .as_number()
+        .ok()
+}
+
+/// Rewrite an expression so arithmetic stays in f64: evalexpr evaluates `/`
+/// and `%` with integer semantics when both operands are integers, so plain
+/// integer literals gain a `.0` suffix. Scientific-notation literals are
+/// left untouched.
+fn force_float_literals(expression: &str) -> String {
+    let chars: Vec<char> = expression.chars().collect();
+    let mut out = String::with_capacity(expression.len() + 4);
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i].is_ascii_digit() {
+            let start = i;
+            while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') {
+                i += 1;
+            }
+            // Exponent part of a scientific-notation literal, as in `1e-3`.
+            if i < chars.len() && (chars[i] == 'e' || chars[i] == 'E') {
+                let mut j = i + 1;
+                if j < chars.len() && (chars[j] == '+' || chars[j] == '-') {
+                    j += 1;
+                }
+                if j < chars.len() && chars[j].is_ascii_digit() {
+                    i = j;
+                    while i < chars.len() && chars[i].is_ascii_digit() {
+                        i += 1;
+                    }
+                }
+            }
+            let run: String = chars[start..i].iter().collect();
+            let is_float = run.contains('.') || run.contains('e') || run.contains('E');
+            out.push_str(&run);
+            if !is_float {
+                out.push_str(".0");
+            }
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    out
 }
 
 pub(super) fn format_calculator_value(result: f64) -> String {
@@ -402,5 +492,84 @@ mod tests {
         assert!(try_evaluate_math("1/0").is_none());
         assert!(try_evaluate_math("*5").is_none());
         assert!(try_evaluate_math("x+5").is_none());
+        assert!(try_evaluate_math("2++2").is_none());
+        assert!(try_evaluate_math("1 +").is_none());
+    }
+
+    /// Expressions documented on the website's calculator page.
+    #[test]
+    fn test_try_evaluate_math_documented_examples() {
+        let cases = [
+            ("5 + 3", 8.0),
+            ("10 - 4", 6.0),
+            ("7 * 6", 42.0),
+            ("20 / 4", 5.0),
+            ("17 % 5", 2.0),
+            ("2 ^ 8", 256.0),
+            ("2 ^ 10", 1024.0),
+            ("sqrt(16)", 4.0),
+            ("log(100)", 2.0),
+            ("abs(-5)", 5.0),
+            ("floor(3.7)", 3.0),
+            ("ceil(3.2)", 4.0),
+            ("cos(0)", 1.0),
+            ("tan(0)", 0.0),
+            ("sqrt(16) + abs(-5)", 9.0),
+            ("2 + 3 * 4", 14.0),
+            ("(2 + 3) * 4", 20.0),
+            ("sqrt(16) * 5", 20.0),
+            ("2 ^ 3 + sqrt(9)", 11.0),
+            ("abs(-5) * floor(3.7)", 15.0),
+            ("sqrt(144)", 12.0),
+            ("floor(3.9)", 3.0),
+            ("ceil(2.1)", 3.0),
+            ("exp(0)", 1.0),
+            ("ln(1)", 0.0),
+        ];
+        for (expression, expected) in cases {
+            let result = try_evaluate_math(expression)
+                .unwrap_or_else(|| panic!("no result for {expression}"));
+            assert!(
+                (result.result - expected).abs() < 1e-9,
+                "{expression} = {}, expected {expected}",
+                result.result
+            );
+        }
+
+        let exp_ln = try_evaluate_math("exp(ln(10))").expect("exp(ln(10))");
+        assert!((exp_ln.result - 10.0).abs() < 1e-9);
+        let ln = try_evaluate_math("ln(2.718)").expect("ln(2.718)");
+        assert!((ln.result - 1.0).abs() < 0.001);
+        let exp = try_evaluate_math("exp(1)").expect("exp(1)");
+        assert!((exp.result - std::f64::consts::E).abs() < 1e-9);
+    }
+
+    /// Semantics carried over from meval: float division, `pi`/`e`
+    /// constants, scientific notation, and `^` as power rather than xor.
+    #[test]
+    fn test_try_evaluate_math_meval_semantics() {
+        let half = try_evaluate_math("1/2").expect("1/2");
+        assert!((half.result - 0.5).abs() < 1e-9);
+
+        let quarter = try_evaluate_math("10/4").expect("10/4");
+        assert!((quarter.result - 2.5).abs() < 1e-9);
+
+        let pi = try_evaluate_math("2*pi").expect("2*pi");
+        assert!((pi.result - 2.0 * std::f64::consts::PI).abs() < 1e-9);
+
+        let e = try_evaluate_math("2*e").expect("2*e");
+        assert!((e.result - 2.0 * std::f64::consts::E).abs() < 1e-9);
+
+        let scientific = try_evaluate_math("1e3*2").expect("1e3*2");
+        assert!((scientific.result - 2000.0).abs() < 1e-9);
+
+        let negative_exponent = try_evaluate_math("1e-3+1").expect("1e-3+1");
+        assert!((negative_exponent.result - 1.001).abs() < 1e-9);
+
+        let big = try_evaluate_math("999999999999999999999 * 2");
+        assert!(
+            big.is_some(),
+            "huge literals must not overflow integer math"
+        );
     }
 }

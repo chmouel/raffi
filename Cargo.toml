@@ -18,7 +18,7 @@ wayland = [
   "iced",
   "ureq",
   "regex",
-  "meval",
+  "evalexpr",
   "chrono",
   "shlex",
   "wayland-client",
@@ -42,7 +42,6 @@ iced = { version = "0.14", features = [
   "image",
   "svg",
 ], optional = true }
-meval = { version = "0.2", optional = true }
 ureq = { version = "3", features = ["json"], optional = true }
 regex = { version = "1.12", optional = true }
 shlex = { version = "2.0", optional = true }
@@ -54,3 +53,4 @@ calloop = { version = "0.14", optional = true }
 calloop-wayland-source = { version = "0.4", optional = true }
 base64 = { version = "0.22", optional = true }
 jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"], optional = true }
+evalexpr = { version = "13.1.0", optional = true }

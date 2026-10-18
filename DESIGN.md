@@ -146,7 +146,7 @@ This structure matters because several addons can use overlapping prefixes. The 
 Native-only addons are configured under `addons` and activated from the search box.
 
 - Calculator:
-  - inline evaluation using `meval`
+  - inline evaluation using `evalexpr`
   - only activates for expression-like input
 - Currency converter:
   - parses trigger-based queries such as `$10 to eur`
