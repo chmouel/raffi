@@ -152,8 +152,11 @@ addons:
     # For compositor-specific window focus commands, see scripts/herdr/README.md.
 
     # GitHub pull requests with CI status. Install scripts/github/pr.py first.
-    # "pr" lists your open pull requests, "pr owner/repo" those of a repository.
-    # The preview pane shows checks, review state and description.
+    # "pr" lists your open pull requests, "pr owner/repo" those of a repository,
+    # "pr review", "pr assigned" and "pr involved" the ones that concern you.
+    # The preview pane shows reviewers, merge state, checks, closed issues,
+    # description, latest comments and changed files. Each row exports
+    # PR_URL, PR_REPO, PR_NUMBER and PR_BRANCH to the actions.
     # See scripts/github/README.md for aliases and settings.
     # - name: "Pull Requests"
     #   keyword: "pr"

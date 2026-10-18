@@ -25,6 +25,18 @@ def node(number, title, ci_state=None, draft=False):
 
 PULLS = [node(1, "Fix login", "FAILURE"), node(2, "Add docs", draft=True)]
 
+
+def check_run(name, status, conclusion=None, workflow=None):
+    run = {"workflowRun": {"workflow": {"name": workflow}}} if workflow else None
+    return {
+        "__typename": "CheckRun",
+        "name": name,
+        "status": status,
+        "conclusion": conclusion,
+        "checkSuite": run,
+    }
+
+
 VIEW = {
     "number": 7,
     "title": "Add feature",
@@ -32,41 +44,111 @@ VIEW = {
     "state": "OPEN",
     "isDraft": False,
     "author": {"login": "alice"},
+    "repository": {"nameWithOwner": "owner/repo"},
     "headRefName": "feature",
     "baseRefName": "main",
     "reviewDecision": "APPROVED",
-    "labels": [{"name": "bug"}],
+    "mergeable": "MERGEABLE",
+    "mergeStateStatus": "CLEAN",
+    "autoMergeRequest": {"mergeMethod": "SQUASH", "enabledBy": {"login": "bob"}},
+    "milestone": {"title": "v1.0"},
+    "assignees": {"nodes": [{"login": "alice"}]},
+    "labels": {"nodes": [{"name": "bug"}]},
+    "reviewRequests": {"nodes": [{"requestedReviewer": {"name": "core"}}]},
+    "latestReviews": {
+        "nodes": [
+            {"author": {"login": "bob"}, "state": "APPROVED"},
+            {"author": {"login": "carol"}, "state": "CHANGES_REQUESTED"},
+        ]
+    },
+    "reviewThreads": {"nodes": [{"isResolved": False}, {"isResolved": True}]},
+    "comments": {
+        "nodes": [
+            {
+                "author": {"login": "bob"},
+                "createdAt": "2026-01-01T00:00:00Z",
+                "body": "first",
+            },
+            {
+                "author": {"__typename": "Bot", "login": "codecov"},
+                "createdAt": "2026-01-01T01:00:00Z",
+                "body": "coverage",
+            },
+            {
+                "author": {"login": "ci-robot"},
+                "createdAt": "2026-01-01T01:30:00Z",
+                "body": "/approve",
+            },
+            {
+                "author": {"login": "carol"},
+                "createdAt": "2026-01-01T02:00:00Z",
+                "body": "second",
+            },
+        ]
+    },
+    "closingIssuesReferences": {
+        "nodes": [
+            {
+                "number": 3,
+                "title": "Broken",
+                "state": "OPEN",
+                "repository": {"nameWithOwner": "owner/repo"},
+            },
+            {
+                "number": 9,
+                "title": "Upstream",
+                "state": "CLOSED",
+                "repository": {"nameWithOwner": "other/lib"},
+            },
+        ]
+    },
     "additions": 10,
     "deletions": 2,
-    "changedFiles": 1,
+    "changedFiles": 3,
+    "files": {
+        "totalCount": 3,
+        "nodes": [
+            {"path": "a.py", "additions": 8, "deletions": 0, "changeType": "ADDED"},
+            {"path": "b.py", "additions": 2, "deletions": 2, "changeType": "MODIFIED"},
+        ],
+    },
     "createdAt": "2026-01-01T00:00:00Z",
     "updatedAt": "2026-01-02T00:00:00Z",
     "body": "Intro\r\n<!-- template hint -->\n\n\n\nDetails",
-    "statusCheckRollup": [
-        {
-            "__typename": "CheckRun",
-            "name": "lint",
-            "status": "COMPLETED",
-            "conclusion": "SUCCESS",
-        },
-        {
-            "__typename": "CheckRun",
-            "name": "e2e",
-            "workflowName": "CI",
-            "status": "IN_PROGRESS",
-            "conclusion": "",
-        },
-        {"__typename": "StatusContext", "context": "ci/legacy", "state": "FAILURE"},
-    ],
+    "commits": {
+        "totalCount": 2,
+        "nodes": [
+            {
+                "commit": {
+                    "messageHeadline": "Add feature",
+                    "statusCheckRollup": {
+                        "contexts": {
+                            "nodes": [
+                                check_run("lint", "COMPLETED", "SUCCESS"),
+                                check_run("e2e", "IN_PROGRESS", workflow="CI"),
+                                {
+                                    "__typename": "StatusContext",
+                                    "context": "ci/legacy",
+                                    "state": "FAILURE",
+                                },
+                            ]
+                        }
+                    },
+                }
+            }
+        ],
+    },
 }
 
 
 class ParseQueryTests(unittest.TestCase):
     def test_targets(self):
         cases = {
-            "": (None, ""),
-            "myprs fix": (None, "fix"),
-            "raffi docs": (None, "raffi docs"),
+            "": ("myprs", ""),
+            "myprs fix": ("myprs", "fix"),
+            "review": ("review", ""),
+            "involved docs": ("involved", "docs"),
+            "raffi docs": ("myprs", "raffi docs"),
             "owner/repo fix login": ("owner/repo", "fix login"),
             "pac fix": ("tektoncd/pipelines-as-code", "fix"),
         }
@@ -95,7 +177,16 @@ class ListItemsTests(unittest.TestCase):
         self.assertEqual(
             [item["title"] for item in items[1:]], ["PR #1: Fix login - alice"]
         )
-        self.assertIn("\x1b[31mCI: Failed\x1b[0m - Open", items[1]["subtitle"])
+        self.assertIn("\x1b[31mCI: Failed\x1b[0m \u00b7 Open", items[1]["subtitle"])
+        self.assertEqual(
+            items[1]["variables"],
+            {
+                "PR_URL": "https://github.com/owner/repo/pull/1",
+                "PR_REPO": "owner/repo",
+                "PR_NUMBER": "1",
+                "PR_BRANCH": "",
+            },
+        )
 
     def test_own_pulls_show_repository_and_draft(self):
         items, _ = self.list("docs", {"search": {"nodes": [*PULLS, {}]}})
@@ -103,6 +194,28 @@ class ListItemsTests(unittest.TestCase):
         self.assertEqual(items[0]["arg"], "https://github.com/pulls")
         self.assertEqual(items[1]["title"], "PR #2: Add docs - owner/repo")
         self.assertTrue(items[1]["subtitle"].startswith("Draft"))
+
+    def test_modes_search_their_own_pull_requests(self):
+        items, run_gh = self.list("review", {"search": {"nodes": PULLS}})
+
+        self.assertIn("q=is:pr is:open review-requested:@me", run_gh.call_args.args)
+        self.assertEqual(items[0]["arg"], "https://github.com/pulls/review-requested")
+
+    def test_subtitle_shows_review_conflicts_threads_and_size(self):
+        pull = dict(
+            PULLS[0],
+            reviewDecision="CHANGES_REQUESTED",
+            mergeable="CONFLICTING",
+            reviewThreads={"nodes": [{"isResolved": False}]},
+            additions=5,
+            deletions=1,
+        )
+        subtitle = pr.ANSI.sub("", pr.build_item(pull, False)["subtitle"])
+
+        self.assertIn(
+            "Changes requested \u00b7 Conflicts \u00b7 \U0001f4ac 1 unresolved \u00b7 +5 -1",
+            subtitle,
+        )
 
     def test_errors_become_items(self):
         self.assertEqual(pr.list_items("owner/")[0]["title"], "Invalid repository")
@@ -116,25 +229,55 @@ class PreviewTests(unittest.TestCase):
 
         self.assertEqual(preview["title"], "#7 Add feature")
         self.assertEqual(preview["badge"], "Open")
-        self.assertIn(["Review", "Approved"], preview["metadata"])
-        self.assertIn(["Changes", "+10 -2 in 1 file"], preview["metadata"])
-        checks, description = preview["sections"]
+        metadata = dict(preview["metadata"])
+        self.assertEqual(metadata["Review"], "Approved")
+        self.assertEqual(metadata["Reviewers"], "\u2713 bob, \u2717 carol, \u23f3 core")
+        self.assertEqual(metadata["Merge"], "Ready, auto-merge (squash) by bob")
+        self.assertEqual(metadata["Threads"], "1 unresolved")
+        self.assertEqual(metadata["Commits"], "2 commits, last: Add feature")
+        self.assertEqual(metadata["Milestone"], "v1.0")
+        self.assertEqual(metadata["Changes"], "+10 -2 in 3 files")
+        checks, closes, description, *comments, files = preview["sections"]
         self.assertEqual(checks["heading"], "Checks: 1 failed, 1 pending, 1 passed")
         self.assertEqual(
             pr.ANSI.sub("", checks["content"]).splitlines(),
             ["\uf057 ci/legacy", "\uf017 CI / e2e", "\uf058 lint"],
         )
+        self.assertEqual(
+            pr.ANSI.sub("", closes["content"]).splitlines(),
+            ["#3 [open] Broken", "other/lib#9 [closed] Upstream"],
+        )
         self.assertEqual(description["content"], "Intro\n\nDetails")
+        self.assertEqual(
+            [c["content"] for c in comments], ["second", "first"], "bots skipped"
+        )
+        self.assertEqual(files["heading"], "Files (3)")
+        self.assertEqual(
+            pr.ANSI.sub("", files["content"]).splitlines(),
+            ["A a.py +8 -0", "M b.py +2 -2", "\u2026 and 1 more"],
+        )
         self.assertEqual(preview["refresh"], pr.PREVIEW_REFRESH_SECONDS)
 
+    def test_merged_and_conflicting_states(self):
+        merged = dict(VIEW, state="MERGED", mergedAt=None)
+        conflicting = dict(VIEW, mergeable="CONFLICTING", autoMergeRequest=None)
+
+        self.assertEqual(pr.merge_state(merged), "Merged")
+        self.assertEqual(pr.merge_state(conflicting), "Conflicts")
+
     def test_no_refresh_once_checks_are_done(self):
-        done = dict(
-            VIEW, isDraft=True, body="", statusCheckRollup=VIEW["statusCheckRollup"][:1]
-        )
+        commit = VIEW["commits"]["nodes"][0]["commit"]
+        lint = commit["statusCheckRollup"]["contexts"]["nodes"][:1]
+        rollup = {"contexts": {"nodes": lint}}
+        commits = {
+            "totalCount": 1,
+            "nodes": [{"commit": dict(commit, statusCheckRollup=rollup)}],
+        }
+        done = dict(VIEW, isDraft=True, body="", commits=commits)
         preview = pr.build_preview(done)
 
         self.assertEqual(preview["badge"], "Draft")
-        self.assertEqual(preview["sections"][1]["content"], "(no description)")
+        self.assertEqual(preview["sections"][2]["content"], "(no description)")
         self.assertNotIn("refresh", preview)
 
     def test_main_prints_preview_when_raffi_asks(self):
@@ -142,19 +285,30 @@ class PreviewTests(unittest.TestCase):
         env = {"RAFFI_PREVIEW": "1", "RAFFI_VALUE": VIEW["url"]}
         with (
             patch.dict(os.environ, env),
-            patch.object(pr, "run_gh", return_value=VIEW) as run_gh,
+            patch.object(
+                pr,
+                "run_gh",
+                return_value={"data": {"repository": {"pullRequest": VIEW}}},
+            ) as run_gh,
             redirect_stdout(stdout),
         ):
             self.assertEqual(pr.main(["--repo", "owner/repo", "query"]), 0)
 
-        self.assertEqual(run_gh.call_args.args[:3], ("pr", "view", VIEW["url"]))
-        self.assertNotIn("items", json.loads(stdout.getvalue()))
+        args = run_gh.call_args.args
+        self.assertEqual(args[:2], ("api", "graphql"))
+        self.assertIn("number=7", args)
+        self.assertNotIn("--cache", args)
+        self.assertEqual(json.loads(stdout.getvalue())["title"], "#7 Add feature")
 
     def test_preview_error_is_shown_in_the_pane(self):
         with patch.object(pr, "run_gh", side_effect=pr.GhError("offline")):
             preview = pr.preview(VIEW["url"])
 
         self.assertIn("offline", preview["text"])
+        self.assertEqual(pr.preview("nope")["text"], "Not a pull request URL.")
+        missing = {"data": {"repository": {"pullRequest": None}}}
+        with patch.object(pr, "run_gh", return_value=missing):
+            self.assertIn("not found", pr.preview(VIEW["url"])["text"])
 
 
 class MarkdownTests(unittest.TestCase):
@@ -215,7 +369,7 @@ class AvatarTests(unittest.TestCase):
             self.assertEqual(path, f"{tmp}/octo.svg")
             svg = Path(path).read_text()
             preview = pr.build_preview(
-                dict(VIEW, url="https://github.com/octo/r/pull/7")
+                dict(VIEW, repository={"nameWithOwner": "octo/r"})
             )
 
         urlopen.assert_called_once()

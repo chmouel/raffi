@@ -405,7 +405,8 @@ tz New York
 
 <Image src={scriptFilterPrScreenshot} alt="GitHub PR browser" width={800} />
 
-The [`scripts/github/pr.py`](https://github.com/chmouel/raffi/blob/main/scripts/github/pr.py) script in the repository lists open pull requests with their CI status, using the [GitHub CLI](https://cli.github.com).
+The [`scripts/github/pr.py`](https://github.com/chmouel/raffi/blob/main/scripts/github/pr.py) script in the repository lists open pull requests with their CI status, review decision, conflicts,
+unresolved threads and size, using the [GitHub CLI](https://cli.github.com).
 
 Install the script:
 
@@ -432,6 +433,8 @@ Usage:
 ```text
 pr
 # Lists your open pull requests across all repositories
+pr review
+# Pull requests waiting for your review (also: assigned, involved)
 pr owner/repo login
 # Lists open pull requests of owner/repo matching "login"
 # Enter: open the pull request in the browser
@@ -439,13 +442,15 @@ pr owner/repo login
 ```
 
 Add `args: ["--repo", "owner/repo"]` to give a repository its own keyword, and
-`ALIAS_<name>` variables in `env` for short repository names.
+`ALIAS_<name>` variables in `env` for short repository names. Each row exports
+`PR_URL`, `PR_REPO`, `PR_NUMBER` and `PR_BRANCH` to the actions.
 
 Each pull request shows the avatar of its repository owner, cached under
 `~/.cache/raffi/github-avatars/`. With the preview pane open, the selected pull
-request shows its branches, review state, labels, checks and its description
-with the markdown rendered in colour. It refreshes every 20 seconds while a
-check is still running.
+request shows its branches, each reviewer's verdict, merge state, unresolved
+threads, checks, the issues it closes, its description with the markdown
+rendered in colour, the latest comments from people and the changed files. It
+refreshes every 20 seconds while a check is still running.
 
 See the script's
 [README](https://github.com/chmouel/raffi/blob/main/scripts/github/README.md)
