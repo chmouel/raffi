@@ -1300,13 +1300,17 @@ impl LauncherApp {
                 let error_row = Row::new()
                     .spacing(16)
                     .align_y(iced::Alignment::Center)
-                    .push(text(error.clone()).size(fs.item).color(t.text_muted));
+                    .push(
+                        text(format!("Snippet failed: {error}"))
+                            .size(fs.item)
+                            .color(t.ansi[1]),
+                    );
 
                 let error_button = button(error_row)
                     .padding(fs.item_padding)
                     .width(Length::Fill)
                     .style(move |_theme, _status| button::Style {
-                        text_color: t.text_muted,
+                        text_color: t.ansi[1],
                         border: iced::Border {
                             radius: 8.0.into(),
                             ..Default::default()
@@ -2034,7 +2038,18 @@ impl LauncherApp {
         let sep = span("  ·  ").size(fs.hint).color(t.border);
         let mut hint_spans: Vec<HintSpan<'_>> = Vec::new();
 
+        if self.main_view.active && !self.main_view.stops.is_empty() {
+            hint_spans.push(span("Ctrl+Tab").size(fs.hint).color(t.accent));
+            hint_spans.push(
+                span(format!(" {}", self.main_view_focus_label()))
+                    .size(fs.hint)
+                    .color(t.text_main),
+            );
+        }
         if self.history.max_items > 0 {
+            if !hint_spans.is_empty() {
+                hint_spans.push(sep.clone());
+            }
             hint_spans.push(span("Alt+P").size(fs.hint).color(t.accent));
             hint_spans.push(span("/").size(fs.hint).color(t.text_muted));
             hint_spans.push(span("N").size(fs.hint).color(t.accent));
@@ -2197,6 +2212,11 @@ impl LauncherApp {
                 key: keyboard::Key::Named(Named::Escape),
                 ..
             }) => Some(Message::Cancel),
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(Named::Tab),
+                modifiers,
+                ..
+            }) if modifiers.control() => Some(Message::MainViewCycle(modifiers.shift())),
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Named(Named::Tab),
                 ..

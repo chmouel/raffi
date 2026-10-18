@@ -45,7 +45,7 @@ version: 1
 #     - addons.web_searches."Google"           # Opens Google search with the current query
 #     - addons.web_searches."DuckDuckGo"       # Opens DuckDuckGo search with the current query
 #     - addons.script_filters."Search Google"  # Switches to the script filter mode
-#   main_view:               # Mix addon results into the main list (native UI only)
+#   main_view:               # Mix addon results into the main list (native UI only); Ctrl+Tab shows one source at a time
 #     - launchers            # Keep launchers; once main_view is set they only show if listed
 #     - browser_tabs         # Typing "gmail" lists matching tabs, up to 5 per addon
 #     - windows              # Also: system, media, audio, bluetooth, pass

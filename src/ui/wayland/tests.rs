@@ -6937,3 +6937,111 @@ fn test_main_view_reloads_after_any_action_of_its_addon() {
     let _ = app.update(Message::MainViewLoaded(0, earlier, Ok(Vec::new())));
     assert_eq!(app.total_items(), 1, "the older load is dropped");
 }
+
+#[test]
+fn test_main_view_ctrl_tab_focuses_each_source_then_all() {
+    let mut addons = AddonsConfig::default();
+    addons.web_searches.push(WebSearchConfig {
+        name: "Google".into(),
+        keyword: "g".into(),
+        url: "https://google.com/search?q={query}".into(),
+        icon: None,
+    });
+    let mut app = test_app_with_fallbacks(addons, vec!["addons.web_searches.Google".into()]);
+    app.configs = firefox_launcher();
+    let entries = ["browser_tabs", "launchers", "system"].map(String::from);
+    let _ = app.configure_main_view(Some(&entries));
+    load_main_view_tabs(&mut app);
+    let _ = app.update(Message::SearchChanged(String::new()));
+    assert_eq!(app.total_items(), 1, "the launcher, tabs wait for a query");
+    assert_eq!(app.main_view_focus_label(), "All");
+
+    let _ = app.update(Message::MainViewCycle(false));
+    assert_eq!(app.main_view_focus_label(), "Tabs");
+    assert!(app.filtered_configs.is_empty(), "launchers are hidden");
+    assert_eq!(app.total_items(), 2, "every tab, without a query");
+
+    let _ = app.update(Message::SearchChanged("mail".into()));
+    assert_eq!(app.main_view_focus_label(), "Tabs", "the focus stays");
+    assert_eq!(app.fallback_count(), 0, "fallbacks only show in All");
+    assert_eq!(app.total_items(), 1);
+    assert_eq!(app.resolve_selected_preview().unwrap().title, "Mail");
+
+    let _ = app.update(Message::MainViewCycle(false));
+    assert_eq!(app.main_view_focus_label(), "Launchers");
+    assert_eq!(app.filtered_configs, vec![0]);
+    assert_eq!(app.total_items(), 1, "no tab row");
+
+    let _ = app.update(Message::MainViewCycle(false));
+    assert_eq!(app.main_view_focus_label(), "System");
+    let _ = app.update(Message::MainViewCycle(false));
+    assert_eq!(app.main_view_focus_label(), "All");
+    assert_eq!(app.total_items(), 1 + 1 + 1, "tab, launcher and fallback");
+
+    let _ = app.update(Message::MoveDown);
+    let _ = app.update(Message::MainViewCycle(true));
+    assert_eq!(app.main_view_focus_label(), "System", "Shift goes back");
+    assert_eq!(app.selected_index, 0);
+
+    let _ = app.update(Message::ToggleHelp);
+    assert!(app
+        .help_entries
+        .iter()
+        .any(|entry| entry.trigger == "Ctrl+Tab"));
+}
+
+#[test]
+fn test_main_view_focus_lists_every_match_without_inline_rows() {
+    let mut addons = AddonsConfig::default();
+    addons.text_snippets.push(TextSnippetSourceConfig {
+        name: "Notes".into(),
+        keyword: "nt".into(),
+        icon: None,
+        snippets: Some(Vec::new()),
+        file: None,
+        command: None,
+        directory: None,
+        args: Vec::new(),
+        action: None,
+        secondary_action: None,
+        placeholders: false,
+        restore_clipboard: false,
+    });
+    let mut app = main_view_app(&["launchers", "text_snippets.Notes"], Vec::new(), addons);
+    let snippets = (0..8)
+        .map(|index| TextSnippet {
+            name: format!("mail {index}"),
+            value: format!("1+{index}"),
+            keyword: None,
+            icon: None,
+        })
+        .collect();
+    let _ = app.update(Message::MainViewSnippetsLoaded(0, Ok(snippets)));
+    let _ = app.update(Message::SearchChanged("mail".into()));
+    assert_eq!(app.total_items(), super::main_view::MAX_ROWS);
+
+    let _ = app.update(Message::MainViewCycle(false));
+    let _ = app.update(Message::MainViewCycle(false));
+    assert_eq!(app.main_view_focus_label(), "Notes");
+    assert_eq!(app.total_items(), 8, "no cap on a focused source");
+    let _ = app.update(Message::SearchChanged(String::new()));
+    assert_eq!(app.total_items(), 8);
+
+    let _ = app.update(Message::SearchChanged("1+1".into()));
+    assert!(app.inline_result.is_none(), "inline rows only show in All");
+    let _ = app.update(Message::MainViewCycle(false));
+    assert!(app.inline_result.is_some());
+}
+
+#[test]
+fn test_ctrl_tab_completes_where_the_main_view_does_not_show() {
+    let mut app = test_app(snippet_addons());
+    let _ = app.update(Message::SearchChanged("sn".into()));
+    let _ = app.update(Message::MainViewCycle(false));
+    assert_eq!(app.search_query, "sn ", "no main_view configured");
+
+    let mut app = main_view_app(&["text_snippets.Snippets"], Vec::new(), snippet_addons());
+    let _ = app.update(Message::SearchChanged("sn em".into()));
+    let _ = app.update(Message::MainViewCycle(false));
+    assert_eq!(app.main_view.focus, None, "keyword modes keep their list");
+}

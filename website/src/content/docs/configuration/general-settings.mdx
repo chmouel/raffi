@@ -219,6 +219,8 @@ general:
 
 Typing a trigger (`tabs gmail`) still opens the addon's full list, and fallbacks still show below the main list.
 
+Ctrl+Tab narrows the main list to one source at a time, in the order of `main_view`, and comes back to all of them after the last one. Ctrl+Shift+Tab goes the other way. The footer shows which one is current, for instance `Ctrl+Tab Tabs` or `Ctrl+Tab All`. A single source lists all of its matches with no 5-row limit, and shows its rows before you type anything, except script filters, which still need a query. Fallbacks, keyword suggestions and inline results such as the calculator only show when all sources are listed. The choice stays while you type and lasts until Raffi closes.
+
 ## Font and Typography
 
 **`font_size`** `number` (default: `20`)

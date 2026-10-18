@@ -26,8 +26,8 @@ use super::emoji::{
     download_and_load_emoji_data, emoji_fallback_entries, filter_emoji_into,
     load_emoji_data_from_disk, resolve_emoji_file_names,
 };
-use super::help::{filter_help_entries, help_entries};
-use super::main_view::{Block, MAIN_VIEW_SESSION};
+use super::help::{add_main_view_shortcut, filter_help_entries, help_entries};
+use super::main_view::{Block, Focus, MAIN_VIEW_SESSION};
 use super::pass::PassContext;
 use super::preview::image_mime_type;
 use super::script_filters::{
@@ -454,6 +454,7 @@ fn is_user_input(message: &Message) -> bool {
             | Message::FileBrowserRowPressed { .. }
             | Message::FileBrowserRowReleased(_)
             | Message::TabComplete
+            | Message::MainViewCycle(_)
             | Message::FileBrowserToggleHidden
             | Message::FileBrowserCopyPath
             | Message::FileBrowserCopyImage
@@ -1147,6 +1148,7 @@ impl LauncherApp {
             Message::WaylandHandles(handles) => self.handle_wayland_handles(handles),
             Message::DragEvent(event) => self.handle_drag_event(event),
             Message::TabComplete => self.handle_tab_complete(),
+            Message::MainViewCycle(backwards) => self.handle_main_view_cycle(backwards),
             Message::FileBrowserToggleHidden => self.handle_file_browser_toggle_hidden(),
             Message::FileBrowserCopyPath => self.handle_file_browser_copy_path(),
             Message::FileBrowserCopyImage => self.handle_file_browser_copy_image(),
@@ -1315,6 +1317,9 @@ impl LauncherApp {
         let class = classify_query(&query, &self.addons);
         let log_query = class.loggable_query(&query, &self.addons);
         self.search_query = query.clone();
+        self.main_view.active = matches!(class.mode, QueryMode::Standard);
+        // Ctrl+Tab on one source lists only its rows.
+        let focused = self.main_view.focused().is_some();
         self.invalidate_inline_copy();
         self.filter_items(&query, &log_query);
         self.inline_result = match class.inline_provider {
@@ -1335,7 +1340,8 @@ impl LauncherApp {
                     .and_then(generator_inline_result)
             }
             _ => None,
-        };
+        }
+        .filter(|_| !focused);
         self.selected_index = 0;
 
         if let Some(index) = self.history.index {
@@ -1361,7 +1367,7 @@ impl LauncherApp {
             self.command_list.clear();
         }
         self.devtools.clear();
-        self.keyword_suggestions = if matches!(qmode, QueryMode::Standard) {
+        self.keyword_suggestions = if matches!(qmode, QueryMode::Standard) && !focused {
             keyword_suggestions(&query, &self.addons)
         } else {
             Vec::new()
@@ -1502,7 +1508,9 @@ impl LauncherApp {
             }
         }
 
-        if let Some(task) = self.handle_currency_query(&query, &mut tasks) {
+        if focused {
+            self.currency.clear();
+        } else if let Some(task) = self.handle_currency_query(&query, &mut tasks) {
             return task;
         }
 
@@ -3448,6 +3456,16 @@ impl LauncherApp {
         iced::exit()
     }
 
+    /// Ctrl+Tab: narrow the main view to its next source, or back to all
+    /// of them; Tab completion where the main view does not show.
+    fn handle_main_view_cycle(&mut self, backwards: bool) -> Task<Message> {
+        if self.view.help_active || !self.main_view.active || self.main_view.stops.is_empty() {
+            return self.handle_tab_complete();
+        }
+        self.main_view.cycle(backwards);
+        self.handle_search_changed(self.search_query.clone())
+    }
+
     fn handle_tab_complete(&mut self) -> Task<Message> {
         if self.view.help_active {
             return self.update(Message::HelpEntrySelected(self.selected_index));
@@ -3826,7 +3844,9 @@ impl LauncherApp {
     }
 
     pub(super) fn filter_items(&mut self, query: &str, log_query: &str) {
-        if self.main_view.hide_launchers {
+        if self.main_view.hide_launchers
+            || matches!(self.main_view.focused(), Some(Focus::Source(_)))
+        {
             self.filtered_configs.clear();
         } else if query.is_empty() {
             self.filtered_configs = (0..self.configs.len()).collect();
@@ -3901,6 +3921,7 @@ impl LauncherApp {
             && !self.search_query.trim().is_empty()
             && !self.is_in_addon_mode()
             && self.keyword_suggestions.is_empty()
+            && self.main_view.focused().is_none()
         {
             self.fallbacks.len()
         } else {
@@ -4021,6 +4042,9 @@ impl LauncherApp {
         self.view.help_active = true;
         if self.help_entries.is_empty() {
             self.help_entries = help_entries(&self.addons);
+            if !self.main_view.stops.is_empty() {
+                add_main_view_shortcut(&mut self.help_entries);
+            }
         }
         self.filtered_configs.clear();
         self.keyword_suggestions.clear();

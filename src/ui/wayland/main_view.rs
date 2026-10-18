@@ -153,6 +153,14 @@ pub(super) enum Block {
     AfterLaunchers,
 }
 
+/// What Ctrl+Tab narrows the main view to; None in `MainViewState::focus`
+/// is the mixed list of everything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Focus {
+    Launchers,
+    Source(usize),
+}
+
 #[derive(Default)]
 pub(super) struct MainViewState {
     /// Set when `main_view` is configured without `launchers`.
@@ -160,9 +168,14 @@ pub(super) struct MainViewState {
     /// Sources listed before `launchers`; all of them when it is not listed.
     pub launchers_at: usize,
     pub sources: Vec<Source>,
-    /// Trimmed standard query the sources are filtered with; empty outside
-    /// the standard mode, which hides every source row.
+    /// Trimmed standard query the sources are filtered with.
     pub query: String,
+    /// Whether the standard mode shows, the only one with main view rows.
+    pub active: bool,
+    /// What Ctrl+Tab cycles through in config order, before coming back to
+    /// everything; empty when `main_view` is not configured.
+    pub stops: Vec<Focus>,
+    pub focus: Option<Focus>,
     /// Command list sources acted on in their addon's mode, reloaded when
     /// they show again.
     pub stale: HashSet<usize>,
@@ -172,12 +185,14 @@ impl MainViewState {
     pub fn new(entries: &[Entry]) -> Self {
         let mut state = Self {
             hide_launchers: !entries.contains(&Entry::Launchers),
+            active: true,
             ..Default::default()
         };
         for entry in entries {
             let source = match *entry {
                 Entry::Launchers => {
                     state.launchers_at = state.sources.len();
+                    state.stops.push(Focus::Launchers);
                     continue;
                 }
                 Entry::List(addon) => {
@@ -203,12 +218,44 @@ impl MainViewState {
                     results: None,
                 },
             };
+            state.stops.push(Focus::Source(state.sources.len()));
             state.sources.push(source);
         }
         if state.hide_launchers {
             state.launchers_at = state.sources.len();
         }
         state
+    }
+
+    /// Move the focus to the next stop, or the previous one, everything
+    /// coming after the last stop.
+    pub fn cycle(&mut self, backwards: bool) {
+        let all = self.stops.len();
+        let at = self
+            .focus
+            .and_then(|focus| self.stops.iter().position(|&stop| stop == focus))
+            .unwrap_or(all);
+        let next = if backwards {
+            (at + all) % (all + 1)
+        } else {
+            (at + 1) % (all + 1)
+        };
+        self.focus = self.stops.get(next).copied();
+    }
+
+    /// The focus while the standard mode shows.
+    pub fn focused(&self) -> Option<Focus> {
+        self.focus.filter(|_| self.active)
+    }
+
+    /// Whether `source` lists rows now: on its own whatever the query,
+    /// or mixed with the others once there is one.
+    pub fn shows(&self, source: usize) -> bool {
+        self.active
+            && match self.focus {
+                None => !self.query.is_empty(),
+                Some(focus) => focus == Focus::Source(source),
+            }
     }
 
     fn block_range(&self, block: Block) -> std::ops::Range<usize> {
@@ -218,9 +265,10 @@ impl MainViewState {
         }
     }
 
-    /// Rows `source` shows for the current query.
+    /// Rows `source` shows for the current query, all of its matches when
+    /// it has the focus.
     pub fn source_rows(&self, source: usize) -> usize {
-        if self.query.is_empty() {
+        if !self.shows(source) {
             return 0;
         }
         let count = match &self.sources[source] {
@@ -231,7 +279,11 @@ impl MainViewState {
                 results.as_ref().map_or(0, |result| result.items.len())
             }
         };
-        count.min(MAX_ROWS)
+        if self.focus.is_some() {
+            count
+        } else {
+            count.min(MAX_ROWS)
+        }
     }
 
     pub fn row_count(&self, block: Block) -> usize {
@@ -268,15 +320,16 @@ impl MainViewState {
 
 /// Filter a snippet source with the main view query, ranked by `usage`.
 fn filter_main_view_snippets(main_view: &mut MainViewState, source: usize, usage: &[u64]) {
+    let shows = main_view.shows(source);
     let query = &main_view.query;
     if let Some(Source::Snippets {
         items, filtered, ..
     }) = main_view.sources.get_mut(source)
     {
-        *filtered = if query.is_empty() {
-            Vec::new()
-        } else {
+        *filtered = if shows {
             filter_snippets(items, query, usage)
+        } else {
+            Vec::new()
         };
     }
 }
@@ -522,11 +575,11 @@ impl LauncherApp {
             .collect();
         let mut tasks = Vec::new();
         for source in sources {
-            if self.main_view.query.is_empty() {
-                self.main_view.stale.insert(source);
-            } else {
+            if self.main_view.shows(source) {
                 self.main_view.stale.remove(&source);
                 tasks.push(self.load_main_view_source(source, false));
+            } else {
+                self.main_view.stale.insert(source);
             }
         }
         Task::batch(tasks)
@@ -593,11 +646,11 @@ impl LauncherApp {
         };
     }
 
-    /// Read the clipboard entries a snippet source's previews need, once a
-    /// query shows its rows.
+    /// Read the clipboard entries a snippet source's previews need, once its
+    /// rows show.
     fn fetch_main_view_clipboard(&mut self, source: usize) -> Task<Message> {
         let history = self.text_snippets.clipboard_history;
-        let query_empty = self.main_view.query.is_empty();
+        let hidden = !self.main_view.shows(source);
         let Some(Source::Snippets {
             config_index,
             items,
@@ -612,7 +665,7 @@ impl LauncherApp {
             .text_snippets
             .get(*config_index)
             .is_some_and(|config| config.placeholders);
-        if query_empty || !placeholders || clipboard.fetching {
+        if hidden || !placeholders || clipboard.fetching {
             return Task::none();
         }
         let needs = missing_clipboard(items, &clipboard.data);
@@ -664,18 +717,19 @@ impl LauncherApp {
             .collect()
     }
 
-    /// Filter every source with `query`, the trimmed standard mode query or
-    /// an empty one in any other mode.
+    /// Filter every source with `query`, the trimmed standard mode query.
+    /// Sources load and script filters run only while they show.
     pub(super) fn refresh_main_view(&mut self, query: &str) -> Task<Message> {
         self.main_view.query = query.to_string();
         let mut tasks = Vec::new();
         for source in 0..self.main_view.sources.len() {
+            let shows = self.main_view.shows(source);
             match &mut self.main_view.sources[source] {
                 Source::List(list) => {
                     if list.query != query {
                         list.set_query(query.to_string());
                     }
-                    if !query.is_empty() && self.main_view.stale.remove(&source) {
+                    if shows && self.main_view.stale.remove(&source) {
                         tasks.push(self.load_main_view_source(source, false));
                     }
                 }
@@ -684,16 +738,19 @@ impl LauncherApp {
                     filter_main_view_snippets(&mut self.main_view, source, &usage);
                     tasks.push(self.fetch_main_view_clipboard(source));
                 }
-                Source::ScriptFilter { .. } => tasks.push(self.run_main_view_script_filter(source)),
+                Source::ScriptFilter { .. } => {
+                    // A hidden one forgets its results, never shown for a stale query.
+                    let query = if shows { query } else { "" };
+                    tasks.push(self.run_main_view_script_filter(source, query.to_string()));
+                }
             }
         }
         Task::batch(tasks)
     }
 
-    /// Run a script filter source for the current query once typing pauses.
-    /// Earlier results stay listed until the new ones arrive.
-    fn run_main_view_script_filter(&mut self, source: usize) -> Task<Message> {
-        let query = self.main_view.query.clone();
+    /// Run a script filter source for `query` once typing pauses. Earlier
+    /// results stay listed until the new ones arrive.
+    fn run_main_view_script_filter(&mut self, source: usize, query: String) -> Task<Message> {
         let Some(Source::ScriptFilter {
             generation,
             live,
@@ -819,6 +876,40 @@ impl LauncherApp {
             }
         }
         Task::none()
+    }
+
+    /// Name of the current Ctrl+Tab stop, shown in the footer.
+    pub(super) fn main_view_focus_label(&self) -> String {
+        let Some(Focus::Source(source)) = self.main_view.focus else {
+            let label = if self.main_view.focus.is_some() {
+                "Launchers"
+            } else {
+                "All"
+            };
+            return label.to_string();
+        };
+        match &self.main_view.sources[source] {
+            Source::List(list) => match list.addon {
+                Some(CommandListAddon::BrowserTabs) => "Tabs",
+                Some(CommandListAddon::Windows) => "Windows",
+                Some(CommandListAddon::Pass) => "Passwords",
+                Some(addon) => addon.badge(),
+                None => "",
+            }
+            .to_string(),
+            Source::Snippets { config_index, .. } => self
+                .addons
+                .text_snippets
+                .get(*config_index)
+                .map(|config| config.name.clone())
+                .unwrap_or_default(),
+            Source::ScriptFilter { config_index, .. } => self
+                .addons
+                .script_filters
+                .get(*config_index)
+                .map(|config| config.name.clone())
+                .unwrap_or_default(),
+        }
     }
 
     /// Index of the first main view row of `block`.

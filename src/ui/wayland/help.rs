@@ -464,6 +464,26 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
     entries
 }
 
+/// List Ctrl+Tab after Tab, for a configured `general.main_view`.
+pub(super) fn add_main_view_shortcut(entries: &mut Vec<HelpEntry>) {
+    let at = entries
+        .iter()
+        .position(|entry| entry.section == HelpSection::KeyboardShortcuts && entry.trigger == "Tab")
+        .map_or(entries.len(), |index| index + 1);
+    entries.insert(
+        at,
+        HelpEntry {
+            section: HelpSection::KeyboardShortcuts,
+            trigger: "Ctrl+Tab".to_string(),
+            title: "Cycle main view sources".to_string(),
+            usage: "Lists one main_view source at a time, then all of them; Shift goes back"
+                .to_string(),
+            icon: None,
+            completion: None,
+        },
+    );
+}
+
 /// Return the indices of the help rows matching `query`.
 ///
 /// Matching is a case-insensitive substring test over the trigger, title and

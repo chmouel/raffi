@@ -466,6 +466,8 @@ pub(crate) enum Message {
     /// Lifecycle of a drag-and-drop session started from the file browser.
     DragEvent(super::dnd::DragEvent),
     TabComplete,
+    /// Ctrl+Tab (backwards with Shift): focus the next main view source.
+    MainViewCycle(bool),
     FileBrowserToggleHidden,
     FileBrowserCopyPath,
     FileBrowserCopyImage,
