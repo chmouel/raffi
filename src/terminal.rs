@@ -80,7 +80,7 @@ pub fn resolve_default(configured: Option<&[String]>) -> Option<Vec<String>> {
 /// With `hold`, the window waits for Enter once the command exits.
 pub fn shell_argv(prefix: &[String], shell: &str, command: &str, hold: bool) -> Vec<String> {
     let script = if hold {
-        r#"eval "$1"; rc=$?; printf '\n[exited %s] press Enter to close' "$rc"; read -r _"#
+        r#"( eval "$1" ); rc=$?; printf '\n[exited %s] press Enter to close' "$rc"; read -r _"#
     } else {
         r#"eval "$1""#
     };
@@ -172,7 +172,7 @@ mod tests {
             ])
         );
         let held = shell_argv(&prefix, "bash", command, true);
-        assert!(held[4].starts_with(r#"eval "$1"; "#) && held[4].contains("read -r _"));
+        assert!(held[4].starts_with(r#"( eval "$1" ); "#) && held[4].contains("read -r _"));
         assert_eq!(held.last().map(String::as_str), Some(command));
 
         let output = std::process::Command::new("sh")
@@ -181,6 +181,42 @@ mod tests {
             .output()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&output.stdout), "it's /home/x\n");
+    }
+
+    #[test]
+    fn test_hold_waits_whatever_the_command_does() {
+        use std::io::Write;
+        for shell in ["bash", "zsh", "sh"] {
+            if !crate::find_binary(shell) {
+                continue;
+            }
+            for (command, status) in [
+                ("exit 7", 7),
+                ("exec true", 0),
+                ("set -e; false; echo unreachable", 1),
+                ("exec </dev/null", 0),
+            ] {
+                let argv = shell_argv(&[], shell, command, true);
+                let mut child = std::process::Command::new(&argv[0])
+                    .args(&argv[1..])
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .spawn()
+                    .unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                assert!(
+                    child.try_wait().unwrap().is_none(),
+                    "{shell}: {command} closed without waiting"
+                );
+                child.stdin.take().unwrap().write_all(b"\n").unwrap();
+                let output = child.wait_with_output().unwrap();
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                assert!(
+                    stdout.contains(&format!("[exited {status}]")),
+                    "{shell}: {command}: {stdout:?}"
+                );
+            }
+        }
     }
 
     #[test]
