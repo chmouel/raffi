@@ -244,10 +244,17 @@ pub(super) enum DeferredAction {
     Bluetooth(Vec<String>),
     /// Copy or type a password manager secret.
     Secret(super::vault::SecretJob),
+    /// Switch to or close a browser tab.
+    BrowserTab(super::browser_tabs::TabAction),
+    /// Point the browsers' native messaging manifests at Raffi; `force`
+    /// replaces those of other hosts such as Vicinae.
+    BrowserHostSetup {
+        force: bool,
+    },
 }
 
 impl DeferredAction {
-    fn run(&self) -> Result<(), String> {
+    pub(super) fn run(&self) -> Result<(), String> {
         match self {
             Self::HyprPaste(target) => target.paste(),
             Self::Command(argv) => run_detached(argv, DEFERRED_TIMEOUT),
@@ -258,6 +265,10 @@ impl DeferredAction {
             Self::Signal(target) => super::kill::send_signal(target),
             Self::Bluetooth(args) => super::bluetooth::run_action(args),
             Self::Secret(job) => job.run(),
+            Self::BrowserTab(action) => super::browser_tabs::run(action),
+            Self::BrowserHostSetup { force } => {
+                crate::browser_host::install_current(*force).map(|_| ())
+            }
         }
     }
 
@@ -271,6 +282,7 @@ impl DeferredAction {
             Self::Signal(_) => "kill",
             Self::Bluetooth(_) => "bluetoothctl",
             Self::Secret(_) => "secret",
+            Self::BrowserTab(_) | Self::BrowserHostSetup { .. } => "browser tabs",
         }
     }
 

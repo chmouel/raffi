@@ -44,6 +44,9 @@
         "bluetooth": {
           "$ref": "#/$defs/BluetoothAddonConfig"
         },
+        "browser_tabs": {
+          "$ref": "#/$defs/BrowserTabsAddonConfig"
+        },
         "calculator": {
           "$ref": "#/$defs/CalculatorAddonConfig"
         },
@@ -195,6 +198,29 @@
         },
         "trigger": {
           "description": "Keyword that opens the Bluetooth list (default: `bt`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "BrowserTabsAddonConfig": {
+      "description": "Configuration for the browser tabs addon, fed by the Vicinae browser\nextension (native UI only)",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "favicon_service": {
+          "description": "Where to download site icons the browsers have not stored themselves\n(default: `twenty`). Downloading sends the domains of open tabs to\nthat service; `none` keeps favicons to the browsers' own.",
+          "$ref": "#/$defs/FaviconService"
+        },
+        "trigger": {
+          "description": "Keyword that opens the tab list (default: `tabs`).",
           "type": [
             "string",
             "null"
@@ -436,6 +462,26 @@
         }
       },
       "additionalProperties": false
+    },
+    "FaviconService": {
+      "description": "Service asked for the favicons of sites the browsers have none for",
+      "oneOf": [
+        {
+          "description": "twenty-icons.com, the Vicinae default",
+          "type": "string",
+          "const": "twenty"
+        },
+        {
+          "description": "Google's favicon service",
+          "type": "string",
+          "const": "google"
+        },
+        {
+          "description": "Never download; only use the icons the browsers stored",
+          "type": "string",
+          "const": "none"
+        }
+      ]
     },
     "FileBrowserAddonConfig": {
       "description": "Configuration for the file browser addon",

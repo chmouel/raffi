@@ -79,6 +79,131 @@ impl Compositor {
     }
 }
 
+/// How long to wait for a browser window to show the tab it switched to.
+const RAISE_WAIT: Duration = Duration::from_secs(1);
+const RAISE_POLL: Duration = Duration::from_millis(100);
+
+/// A window with the process owning it, for raising a browser window.
+#[derive(Debug)]
+pub(super) struct ProcessWindow {
+    pid: Option<i64>,
+    title: String,
+    focus: DeferredAction,
+}
+
+impl Compositor {
+    fn process_windows(self) -> Result<Vec<ProcessWindow>, String> {
+        let program = self.program();
+        let mut command = Command::new(program);
+        command.args(match self {
+            Self::Hyprland => &["clients", "-j"][..],
+            Self::Niri => &["msg", "--json", "windows"][..],
+            Self::Sway => &["-t", "get_tree", "-r"][..],
+        });
+        let output = run_bounded(command, TIMEOUT, MAX_OUTPUT)
+            .map_err(|error| format!("{program}: {error}"))?;
+        process_windows(self, &output)
+    }
+}
+
+/// The windows in the output of `hyprctl clients -j`, `niri msg --json
+/// windows` or `swaymsg -t get_tree -r`.
+pub(super) fn process_windows(
+    compositor: Compositor,
+    output: &[u8],
+) -> Result<Vec<ProcessWindow>, String> {
+    let invalid = |_| format!("{} returned invalid window data", compositor.program());
+    Ok(match compositor {
+        Compositor::Hyprland => serde_json::from_slice::<Vec<Client>>(output)
+            .map_err(invalid)?
+            .into_iter()
+            .filter(|client| client.mapped && valid_address(&client.address))
+            .map(|client| ProcessWindow {
+                pid: Some(client.pid),
+                title: client.title,
+                focus: DeferredAction::Hypr(HyprAction::Focus {
+                    address: client.address,
+                }),
+            })
+            .collect(),
+        Compositor::Niri => serde_json::from_slice::<Vec<NiriWindow>>(output)
+            .map_err(invalid)?
+            .into_iter()
+            .map(|window| ProcessWindow {
+                pid: window.pid,
+                title: window.title.unwrap_or_default(),
+                focus: DeferredAction::Command(niri_action(&[
+                    "focus-window",
+                    "--id",
+                    &window.id.to_string(),
+                ])),
+            })
+            .collect(),
+        Compositor::Sway => {
+            let tree: SwayNode = serde_json::from_slice(output).map_err(invalid)?;
+            let mut windows = Vec::new();
+            sway_windows(&tree, None, None, &mut windows);
+            windows
+                .into_iter()
+                .map(|window| ProcessWindow {
+                    pid: window.node.pid,
+                    title: window.node.name.clone().unwrap_or_default(),
+                    focus: DeferredAction::Command(sway_command(
+                        &window.node.id.to_string(),
+                        "focus",
+                    )),
+                })
+                .collect()
+        }
+    })
+}
+
+/// The window of process `pid` whose title starts with `title`. Once the
+/// wait is over, a process with a single window gets that one.
+pub(super) fn pick_process_window<'a>(
+    windows: &'a [ProcessWindow],
+    pid: u32,
+    title: &str,
+    settled: bool,
+) -> Option<&'a DeferredAction> {
+    let mut owned = windows
+        .iter()
+        .filter(|window| window.pid == Some(i64::from(pid)));
+    let title = title.trim();
+    if let Some(window) = owned
+        .clone()
+        .find(|window| !title.is_empty() && window.title.starts_with(title))
+    {
+        return Some(&window.focus);
+    }
+    match (settled, owned.next(), owned.next()) {
+        (true, Some(window), None) => Some(&window.focus),
+        _ => None,
+    }
+}
+
+/// Focus the window of process `pid` showing `title`, waiting briefly for
+/// its title to follow a tab switch. Does nothing outside Hyprland, niri and
+/// sway. Blocking: run it off the UI thread.
+pub(super) fn raise_process_window(pid: u32, title: &str) -> Result<(), String> {
+    let Some(compositor) = Compositor::current() else {
+        return Ok(());
+    };
+    let deadline = Instant::now() + RAISE_WAIT;
+    loop {
+        let windows = compositor.process_windows()?;
+        let settled = Instant::now() >= deadline;
+        if let Some(focus) = pick_process_window(&windows, pid, title, settled) {
+            return focus.run();
+        }
+        if settled {
+            crate::debug_log!("browser tabs: no window of pid {pid} shows {title:?}");
+            return Ok(());
+        }
+        std::thread::sleep(RAISE_POLL);
+    }
+}
+
 /// What a window row needs, whatever the compositor.
 struct Window {
     identity: String,
@@ -792,6 +917,54 @@ mod tests {
                 if address == "0x1a" && workspace == "1"
         ));
         assert!(firefox.primary.as_ref().unwrap().confirm.is_none() && secondary.confirm.is_none());
+    }
+
+    #[test]
+    fn test_pick_process_window_matches_title_then_single_window() {
+        let clients = r#"[
+            {"address":"0x1","workspace":{"id":1,"name":"1"},"title":"Mail — Mozilla Firefox","pid":100},
+            {"address":"0x2","workspace":{"id":2,"name":"2"},"title":"Raffi docs — Mozilla Firefox","pid":100},
+            {"address":"0x3","workspace":{"id":2,"name":"2"},"title":"Raffi docs - Google Chrome","pid":200},
+            {"address":"0x4","workspace":{"id":2,"name":"2"},"title":"gone","pid":300,"mapped":false}]"#;
+        let windows = process_windows(Compositor::Hyprland, clients.as_bytes()).unwrap();
+        let address = |focus: Option<&DeferredAction>| match focus {
+            Some(DeferredAction::Hypr(HyprAction::Focus { address })) => Some(address.clone()),
+            other => panic!("unexpected focus {other:?}"),
+        };
+        assert_eq!(
+            address(pick_process_window(&windows, 100, " Raffi docs ", false)),
+            Some("0x2".into())
+        );
+        assert_eq!(
+            address(pick_process_window(&windows, 200, "Raffi docs", false)),
+            Some("0x3".into())
+        );
+        // The title has not followed the switch yet: wait, then fall back
+        // to the only window of the process.
+        assert!(pick_process_window(&windows, 200, "Other", false).is_none());
+        assert_eq!(
+            address(pick_process_window(&windows, 200, "Other", true)),
+            Some("0x3".into())
+        );
+        assert!(pick_process_window(&windows, 100, "Other", true).is_none());
+        assert!(pick_process_window(&windows, 300, "", true).is_none());
+    }
+
+    #[test]
+    fn test_process_windows_niri_and_sway() {
+        let niri_windows = process_windows(Compositor::Niri, NIRI_WINDOWS.as_bytes()).unwrap();
+        let focus = pick_process_window(&niri_windows, 1767294, "term two", false).unwrap();
+        assert!(
+            matches!(focus, DeferredAction::Command(argv) if argv == &niri("focus-window --id 3"))
+        );
+
+        let sway_windows = process_windows(Compositor::Sway, SWAY_TREE.as_bytes()).unwrap();
+        let focus = pick_process_window(&sway_windows, 1846750, "term B", false).unwrap();
+        assert!(
+            matches!(focus, DeferredAction::Command(argv) if argv == &swaymsg("[con_id=8] focus"))
+        );
+
+        assert!(process_windows(Compositor::Sway, b"nope").is_err());
     }
 
     #[test]

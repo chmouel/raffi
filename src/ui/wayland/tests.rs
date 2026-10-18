@@ -1809,6 +1809,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "gh",
             "sys",
             "win",
+            "tabs",
             "media",
             "audio",
             "kill",
@@ -1858,7 +1859,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
     assert_eq!(entries[1].icon.as_deref(), Some("gist-icon"));
     assert_eq!(entries[1].completion.as_deref(), Some("gist "));
     assert_eq!(entries[0].completion.as_deref(), Some("~/"));
-    assert_eq!(entries[14].completion, None);
+    assert_eq!(entries[15].completion, None);
     // Shortcut rows are informational: they never arm a keyword.
     for entry in entries
         .iter()
@@ -1877,6 +1878,7 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
     addons.file_browser.enabled = false;
     addons.system.enabled = false;
     addons.windows.enabled = false;
+    addons.browser_tabs.enabled = false;
     addons.media.enabled = false;
     addons.audio.enabled = false;
     addons.kill.enabled = false;
@@ -1935,6 +1937,7 @@ fn test_help_entries_skip_disabled_addons() {
     addons.file_browser.enabled = false;
     addons.system.enabled = false;
     addons.windows.enabled = false;
+    addons.browser_tabs.enabled = false;
     addons.media.enabled = false;
     addons.audio.enabled = false;
     addons.kill.enabled = false;
@@ -6371,4 +6374,89 @@ fn test_vault_recently_used_entries_come_first() {
         command_list_titles(&app),
         vec!["gitlab", "bank", "code host", "Lock vault"]
     );
+}
+
+fn browser_tabs_app(query: &str) -> LauncherApp {
+    let mut app = test_app(AddonsConfig::default());
+    app.history.max_items = 0;
+    let task = app.update(Message::SearchChanged(query.into()));
+    assert!(task.units() > 0, "the tabs load");
+    assert_eq!(app.command_list.status(), Some("Loading browser tabs..."));
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(
+        generation,
+        Ok(super::browser_tabs::fixture_items()),
+    ));
+    app
+}
+
+#[test]
+fn test_route_query_browser_tabs_trigger() {
+    let mut addons = AddonsConfig::default();
+    assert_eq!(
+        route_query("tabs github", &addons),
+        QueryMode::CommandList {
+            addon: CommandListAddon::BrowserTabs,
+            query: "github".into()
+        }
+    );
+    assert_eq!(loggable_query("tabs github", &addons), "<redacted>");
+    assert_eq!(
+        keyword_suggestions("tab", &addons)[0].subtitle,
+        "Switch to or close a browser tab"
+    );
+
+    addons.browser_tabs.trigger = Some("t".into());
+    assert!(matches!(
+        route_query("t x", &addons),
+        QueryMode::CommandList {
+            addon: CommandListAddon::BrowserTabs,
+            ..
+        }
+    ));
+    addons.browser_tabs.enabled = false;
+    assert_eq!(route_query("t x", &addons), QueryMode::Standard);
+}
+
+#[test]
+fn test_browser_tabs_enter_switches_after_close() {
+    let mut app = browser_tabs_app("tabs ");
+    assert_eq!(command_list_titles(&app), vec!["Raffi", "Mail"]);
+    let _ = app.update(Message::SearchChanged("tabs mail.example".into()));
+    assert_eq!(command_list_titles(&app), vec!["Mail"]);
+
+    let _ = app.update(Message::Submit);
+    assert!(matches!(
+        deferred_action(&app),
+        Some(DeferredAction::BrowserTab(super::browser_tabs::TabAction {
+            tab_id: 2,
+            operation: super::browser_tabs::TabOperation::Focus,
+            browser_pid: Some(9),
+            ..
+        }))
+    ));
+}
+
+#[test]
+fn test_browser_tabs_ctrl_enter_closes_and_refreshes() {
+    let mut app = browser_tabs_app("tabs ");
+    let identity = "10:1".to_string();
+    let _ = app.update(Message::ModifiersChanged(iced::keyboard::Modifiers::CTRL));
+    let task = app.update(Message::Submit);
+    assert!(task.units() > 0, "the tab closes in the background");
+    assert!(deferred_action(&app).is_none(), "Raffi stays open");
+    assert!(app.in_flight.is_pending("browser_tabs", &identity));
+
+    let task = app.update(Message::CommandListActionDone(
+        CommandListAddon::BrowserTabs,
+        app.command_list.session,
+        identity.clone(),
+        Err("the browser is no longer connected".into()),
+    ));
+    assert!(task.units() > 0, "the list refreshes");
+    assert_eq!(
+        command_list_titles(&app)[0],
+        "Raffi failed: the browser is no longer connected"
+    );
+    assert!(!app.in_flight.is_pending("browser_tabs", &identity));
 }

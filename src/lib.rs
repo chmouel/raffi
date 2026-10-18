@@ -13,6 +13,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_yaml::Value;
 
+pub mod browser_host;
 pub mod debug;
 #[cfg(feature = "wayland")]
 pub mod secret;
@@ -634,6 +635,52 @@ impl Default for WindowsAddonConfig {
     }
 }
 
+/// Configuration for the browser tabs addon, fed by the Vicinae browser
+/// extension (native UI only)
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
+pub struct BrowserTabsAddonConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Keyword that opens the tab list (default: `tabs`).
+    #[serde(default)]
+    pub trigger: Option<String>,
+    /// Where to download site icons the browsers have not stored themselves
+    /// (default: `twenty`). Downloading sends the domains of open tabs to
+    /// that service; `none` keeps favicons to the browsers' own.
+    #[serde(default)]
+    pub favicon_service: FaviconService,
+}
+
+/// Service asked for the favicons of sites the browsers have none for
+#[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FaviconService {
+    /// twenty-icons.com, the Vicinae default
+    #[default]
+    Twenty,
+    /// Google's favicon service
+    Google,
+    /// Never download; only use the icons the browsers stored
+    None,
+}
+
+impl BrowserTabsAddonConfig {
+    pub fn trigger(&self) -> &str {
+        self.trigger.as_deref().unwrap_or("tabs")
+    }
+}
+
+impl Default for BrowserTabsAddonConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            trigger: None,
+            favicon_service: FaviconService::default(),
+        }
+    }
+}
+
 /// Configuration for the media controls addon (native UI only)
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
@@ -896,6 +943,8 @@ pub struct AddonsConfig {
     pub system: SystemAddonConfig,
     #[serde(default)]
     pub windows: WindowsAddonConfig,
+    #[serde(default)]
+    pub browser_tabs: BrowserTabsAddonConfig,
     #[serde(default)]
     pub media: MediaAddonConfig,
     #[serde(default)]
@@ -1225,6 +1274,21 @@ pub struct Args {
     pub check_config: bool,
     #[options(help = "write debug log to FILE")]
     pub debug_file: Option<String>,
+    #[options(
+        help = "register Raffi as the native host of the Vicinae browser extension and exit",
+        no_short
+    )]
+    pub install_browser_host: bool,
+    #[options(
+        help = "remove the browser host manifests pointing to Raffi and exit",
+        no_short
+    )]
+    pub uninstall_browser_host: bool,
+    #[options(
+        help = "with --install-browser-host, replace manifests of other hosts such as Vicinae",
+        no_short
+    )]
+    pub force: bool,
 }
 
 fn resolve_window_dimensions(general: &GeneralConfig) -> (f32, f32) {
@@ -2531,6 +2595,10 @@ pub fn run(args: Args) -> Result<()> {
         return Ok(());
     }
 
+    if args.install_browser_host || args.uninstall_browser_host {
+        return browser_host::manifest_command(args.uninstall_browser_host, args.force);
+    }
+
     if args.refresh_cache {
         clear_icon_cache()?;
         clear_emoji_cache()?;
@@ -3005,6 +3073,9 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
+            install_browser_host: false,
+            uninstall_browser_host: false,
+            force: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.entries.len(), 2);
@@ -3060,6 +3131,9 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
+            install_browser_host: false,
+            uninstall_browser_host: false,
+            force: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -3129,6 +3203,9 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
+            install_browser_host: false,
+            uninstall_browser_host: false,
+            force: false,
         };
         let env_provider = MockEnvProvider {
             vars: {
@@ -3185,6 +3262,9 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
+            install_browser_host: false,
+            uninstall_browser_host: false,
+            force: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -3268,6 +3348,9 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
+            install_browser_host: false,
+            uninstall_browser_host: false,
+            force: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -3462,6 +3545,9 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
+            install_browser_host: false,
+            uninstall_browser_host: false,
+            force: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -3497,6 +3583,9 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
+            install_browser_host: false,
+            uninstall_browser_host: false,
+            force: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -3551,6 +3640,9 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
+            install_browser_host: false,
+            uninstall_browser_host: false,
+            force: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -3588,6 +3680,9 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
+            install_browser_host: false,
+            uninstall_browser_host: false,
+            force: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.general.font_size, Some(16.0));
@@ -3621,6 +3716,9 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
+            install_browser_host: false,
+            uninstall_browser_host: false,
+            force: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.general.theme, Some("light".to_string()));
@@ -3750,6 +3848,9 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
+            install_browser_host: false,
+            uninstall_browser_host: false,
+            force: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -3812,6 +3913,9 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
+            install_browser_host: false,
+            uninstall_browser_host: false,
+            force: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -3888,6 +3992,9 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
+            install_browser_host: false,
+            uninstall_browser_host: false,
+            force: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -3929,6 +4036,9 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
+            install_browser_host: false,
+            uninstall_browser_host: false,
+            force: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert!(parsed_config.addons.text_snippets.is_empty());
@@ -3966,6 +4076,9 @@ mod tests {
             schema: false,
             check_config: false,
             debug_file: None,
+            install_browser_host: false,
+            uninstall_browser_host: false,
+            force: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -4006,6 +4119,9 @@ mod tests {
                 schema: false,
                 check_config: false,
                 debug_file: None,
+                install_browser_host: false,
+                uninstall_browser_host: false,
+                force: false,
             };
             read_config_from_reader(Cursor::new(yaml), &args)
         };
@@ -4197,6 +4313,9 @@ shell:
             schema: false,
             check_config: false,
             debug_file: None,
+            install_browser_host: false,
+            uninstall_browser_host: false,
+            force: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -4240,6 +4359,9 @@ shell:
             schema: false,
             check_config: false,
             debug_file: None,
+            install_browser_host: false,
+            uninstall_browser_host: false,
+            force: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -4282,6 +4404,9 @@ shell:
             schema: false,
             check_config: false,
             debug_file: None,
+            install_browser_host: false,
+            uninstall_browser_host: false,
+            force: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 

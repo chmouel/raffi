@@ -17,6 +17,7 @@ const KEPT_OPEN_TIMEOUT: Duration = Duration::from_secs(5);
 pub(super) enum CommandListAddon {
     System,
     Windows,
+    BrowserTabs,
     Media,
     Audio,
     Kill,
@@ -31,6 +32,7 @@ impl CommandListAddon {
         match self {
             Self::System => "system",
             Self::Windows => "windows",
+            Self::BrowserTabs => "browser_tabs",
             Self::Media => "media",
             Self::Audio => "audio",
             Self::Kill => "kill",
@@ -44,6 +46,7 @@ impl CommandListAddon {
         match self {
             Self::System => "System",
             Self::Windows => "Window",
+            Self::BrowserTabs => "Tab",
             Self::Media => "Media",
             Self::Audio => "Audio",
             Self::Kill => "Process",
@@ -57,6 +60,7 @@ impl CommandListAddon {
         match self {
             Self::System => "Loading...",
             Self::Windows => "Loading windows...",
+            Self::BrowserTabs => "Loading browser tabs...",
             Self::Media => "Loading players...",
             Self::Audio => "Loading audio devices...",
             Self::Kill => "Loading processes...",
@@ -422,6 +426,10 @@ pub(super) fn run_kept_open(action: &DeferredAction) -> Result<(), String> {
         DeferredAction::Command(argv) => argv,
         DeferredAction::Signal(target) => return super::kill::send_signal(target),
         DeferredAction::Bluetooth(args) => return super::bluetooth::run_action(args),
+        DeferredAction::BrowserTab(action) => return super::browser_tabs::run(action),
+        DeferredAction::BrowserHostSetup { force } => {
+            return crate::browser_host::install_current(*force).map(|_| ())
+        }
         _ => return Err("this action only runs after Raffi closes".to_string()),
     };
     let (program, args) = argv.split_first().ok_or("no command to run")?;

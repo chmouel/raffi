@@ -390,6 +390,7 @@ pub(super) const CLIPBOARD_ICON: &str = "copyq";
 pub(super) const CLIPBOARD_IMAGES_ICON: &str = "image-x-generic";
 pub(super) const SYSTEM_ICON: &str = "system-shutdown";
 pub(super) const WINDOWS_ICON: &str = "preferences-system-windows";
+pub(super) const BROWSER_TABS_ICON: &str = "web-browser";
 pub(super) const MEDIA_ICON: &str = "multimedia-player";
 pub(super) const AUDIO_ICON: &str = "audio-speakers";
 pub(super) const KILL_ICON: &str = "utilities-system-monitor";
@@ -554,6 +555,15 @@ pub(super) fn route_query(query: &str, addons: &AddonsConfig) -> QueryMode {
         }
     }
 
+    if addons.browser_tabs.enabled {
+        if let Some(query) = extract_keyword_query(input, addons.browser_tabs.trigger()) {
+            return QueryMode::CommandList {
+                addon: CommandListAddon::BrowserTabs,
+                query,
+            };
+        }
+    }
+
     if addons.media.enabled {
         if let Some(query) = extract_keyword_query(input, addons.media.trigger()) {
             return QueryMode::CommandList {
@@ -710,6 +720,14 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
             keyword: addons.windows.trigger().to_string(),
             subtitle: "Switch to an open window".to_string(),
             icon: Some(WINDOWS_ICON.to_string()),
+        });
+    }
+
+    if addons.browser_tabs.enabled && matches(addons.browser_tabs.trigger()) {
+        suggestions.push(KeywordSuggestion {
+            keyword: addons.browser_tabs.trigger().to_string(),
+            subtitle: "Switch to or close a browser tab".to_string(),
+            icon: Some(BROWSER_TABS_ICON.to_string()),
         });
     }
 
@@ -1128,6 +1146,16 @@ impl LauncherApp {
             }
             Message::CommandListActionDone(addon, session, identity, result) => {
                 self.handle_command_list_action_done(addon, session, identity, result)
+            }
+            Message::FaviconsFetched(session, fetched) => {
+                if fetched
+                    && self.command_list.addon == Some(CommandListAddon::BrowserTabs)
+                    && self.command_list.session == session
+                {
+                    self.load_command_list(super::browser_tabs::load_tabs, true)
+                } else {
+                    Task::none()
+                }
             }
             Message::DevtoolsSelected(index) => self.handle_devtools_selected(index),
             Message::DevtoolsHashes(generation, rows) => {
@@ -1863,6 +1891,22 @@ impl LauncherApp {
                 }
                 self.load_command_list(move || compositor.load_windows(), false)
             }
+            CommandListAddon::BrowserTabs if !entered => Task::none(),
+            CommandListAddon::BrowserTabs => {
+                let load = self.load_command_list(super::browser_tabs::load_tabs, false);
+                let session = self.command_list.session;
+                let service = self.addons.browser_tabs.favicon_service;
+                load.chain(Task::perform(
+                    async move {
+                        let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                        std::thread::spawn(move || {
+                            let _ = sender.send(super::favicons::fetch_pending(service));
+                        });
+                        receiver.await.unwrap_or(false)
+                    },
+                    move |fetched| Message::FaviconsFetched(session, fetched),
+                ))
+            }
             CommandListAddon::Media if !entered => Task::none(),
             CommandListAddon::Media => {
                 if !(self.program_exists)("playerctl") {
@@ -2358,6 +2402,9 @@ impl LauncherApp {
                 CommandListAddon::Media => self.load_media(true),
                 CommandListAddon::Audio => self.load_audio(true),
                 CommandListAddon::Kill => self.load_command_list(super::kill::load_processes, true),
+                CommandListAddon::BrowserTabs => {
+                    self.load_command_list(super::browser_tabs::load_tabs, true)
+                }
                 CommandListAddon::Bluetooth => self.load_bluetooth(true),
                 CommandListAddon::System
                 | CommandListAddon::Windows
@@ -2382,6 +2429,9 @@ impl LauncherApp {
                 let refresh = match addon {
                     CommandListAddon::Kill => {
                         self.load_command_list(super::kill::load_processes, true)
+                    }
+                    CommandListAddon::BrowserTabs => {
+                        self.load_command_list(super::browser_tabs::load_tabs, true)
                     }
                     CommandListAddon::Bluetooth => self.load_bluetooth(true),
                     _ => Task::none(),
@@ -2440,6 +2490,9 @@ impl LauncherApp {
     /// A theme icon path for `name`, directly or through the desktop entry
     /// of the executable with that name.
     fn resolve_icon_name(&self, name: &str) -> Option<String> {
+        if Path::new(name).is_absolute() {
+            return Path::new(name).is_file().then(|| name.to_string());
+        }
         self.icon_map.get(name).cloned().or_else(|| {
             self.desktop_icon_map
                 .get(name)

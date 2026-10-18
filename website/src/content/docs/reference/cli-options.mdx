@@ -54,6 +54,32 @@ Print the JSON Schema of the configuration format to stdout and exit.
   ```
 
 
+**`--install-browser-host`** `boolean` (default: `false`)
+
+Register Raffi as the native messaging host of the Vicinae browser extension, for the [browser tabs](/features/browser-tabs/) list, and exit.
+
+  Writes a `com.vicinae.vicinae.json` manifest pointing to the running `raffi` binary for every Chromium or Firefox based browser with a configuration directory, and prints each file. A manifest Raffi did not install, such as one that starts Vicinae, is left alone unless `--force` is given.
+
+  ```bash
+  raffi --install-browser-host
+  raffi --install-browser-host --force
+  ```
+
+
+**`--uninstall-browser-host`** `boolean` (default: `false`)
+
+Remove the browser host manifests that start Raffi and exit. Manifests of other programs are kept.
+
+  ```bash
+  raffi --uninstall-browser-host
+  ```
+
+
+**`--force`** `boolean` (default: `false`)
+
+With `--install-browser-host`, replace manifests Raffi did not install, such as the ones that start Vicinae.
+
+
 ## UI Options
 
 **`-u, --ui-type`** `string` (default: `native` in standard builds; `fuzzel` in Fuzzel-only builds)

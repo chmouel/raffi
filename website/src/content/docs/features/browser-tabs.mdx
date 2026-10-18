@@ -1,0 +1,135 @@
+---
+title: Browser Tabs
+description: Search, switch to and close browser tabs from Raffi with the Vicinae browser extension
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Type `tabs ` (with the trailing space) to list the tabs open in your
+browsers. Tabs playing sound come first, then the ones you used most
+recently. Each row shows the tab title, the site and the browser. Words
+after the keyword filter by title or URL, and pasting a URL lists the tabs
+of that site first.
+
+| Key        | Action                              |
+|------------|-------------------------------------|
+| Enter      | Switch to the tab                   |
+| Ctrl+Enter | Close the tab, keeping Raffi open   |
+
+Tabs playing sound are tagged "Playing", muted tabs "Muted", and pinned
+tabs "Pinned".
+
+<Aside type="note">
+The tab list is only available in native mode. Queries typed in this mode
+are not saved in the search history.
+</Aside>
+
+## Setup
+
+Raffi gets the tabs from the browser extension made for
+[Vicinae](https://docs.vicinae.com/browser-extension), so there is nothing
+to build or load by hand.
+
+1. Install the extension in your browser:
+   - Chrome, Chromium, Brave, Edge, Vivaldi and other Chromium browsers:
+     [Chrome Web Store](https://chromewebstore.google.com/detail/vicinae-integration/kcmipingpfbohfjckomimmahknoddnke)
+   - Firefox, LibreWolf and Zen:
+     [Firefox Add-ons](https://addons.mozilla.org/firefox/addon/vicinae/)
+2. Register Raffi with the browsers:
+
+   ```sh
+   raffi --install-browser-host
+   ```
+
+   This writes a `com.vicinae.vicinae.json` native messaging manifest for
+   every browser that has a configuration directory, and prints each file.
+   Run it again if you move the `raffi` binary.
+3. Restart the browser, or turn the extension off and on again. The
+   extension's popup then shows it as connected.
+
+Each running browser starts its own `raffi` process in the background,
+which keeps the tab list and answers the launcher. It stops when the
+browser closes.
+
+To remove the manifests again:
+
+```sh
+raffi --uninstall-browser-host
+```
+
+Only manifests Raffi installed are removed.
+
+### Setting up from the launcher
+
+When no browser answers, `tabs ` lists the setup steps instead, and Enter
+runs the one under the cursor:
+
+- "Connect Raffi to your browsers" writes the manifests, as
+  `--install-browser-host` does, while Raffi stays open. It shows up when
+  tabs are not set up yet or the manifests point to a `raffi` binary that
+  has since moved. When the browsers send their tabs to Vicinae or another
+  program, the row offers to take over instead and asks for a second Enter.
+- "Get the Vicinae extension for Firefox" (or Chrome, Brave, and so on)
+  opens the extension's store page in that browser. Raffi offers one row per
+  supported browser it finds on your machine. When a profile of that browser
+  already has the extension, the row opens the browser instead.
+- "Open the browser tabs setup guide" opens this page.
+
+## Vicinae
+
+The extension talks to a single program, so Raffi and Vicinae cannot both
+receive the tabs. When a manifest already starts Vicinae, or anything else
+Raffi did not install (a symbolic link included), `--install-browser-host`
+leaves it alone and says so; add `--force` to replace it. Vicinae writes its manifest back each time it starts, so with
+Vicinae running the tabs go to Vicinae.
+
+## Site icons
+
+Each tab shows the icon of its site. Raffi first looks in the favicon
+database of the browser profile (`favicons.sqlite` for Firefox and its
+forks, `Favicons` for Chromium browsers), read only and without waiting for
+the browser to release it. Sites with no stored icon are downloaded in the
+background once the list is shown, the same way Vicinae does, and the list
+updates when they arrive. Icons are cached in `~/.cache/raffi/favicons`, and
+a site with no icon is retried after a week. Tabs that are not web pages,
+such as `about:` pages or `localhost`, keep the browser icon, as do sites
+whose only icon is an SVG.
+
+The download service sees the domains of your open tabs. It defaults to
+twenty-icons.com; set `favicon_service` to `google` to use Google's service
+instead, or to `none` to keep everything local:
+
+```yaml
+addons:
+  browser_tabs:
+    favicon_service: none
+```
+
+A site visited for the first time may only get its icon on a later opening,
+because the browser writes new icons to its database in batches.
+
+## Switching windows
+
+The extension switches the tab and asks the browser to bring its window
+forward, but on Wayland compositors usually ignore that request. On
+Hyprland, niri and sway, Raffi then focuses the browser window showing the
+tab itself, waiting up to a second for the window title to follow. In other
+sessions the tab is switched inside the browser and the window stays where
+it is.
+
+To open the list from a key binding, pass the keyword as the initial query:
+
+```sh
+raffi -u native -i "tabs "
+```
+
+## Configuration
+
+```yaml
+addons:
+  browser_tabs:
+    trigger: "t"
+```
+
+See the [addon reference](/reference/addon-configuration/#browser-tabs) for
+every field.

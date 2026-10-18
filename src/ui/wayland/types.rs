@@ -503,6 +503,9 @@ pub(crate) enum Message {
         String,
         std::result::Result<(), String>,
     ),
+    /// Site icons were downloaded for the browser tab list of this session;
+    /// `true` when any arrived.
+    FaviconsFetched(u64, bool),
     DevtoolsSelected(usize),
     /// Hash rows computed for the `dev` query with this generation.
     DevtoolsHashes(u64, Vec<super::devtools::DevRow>),

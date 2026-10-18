@@ -38,6 +38,7 @@ export default defineConfig({
             { label: 'Audio Switcher', slug: 'features/audio-switcher' },
             { label: 'Bitwarden', slug: 'features/bitwarden' },
             { label: 'Bluetooth', slug: 'features/bluetooth' },
+            { label: 'Browser Tabs', slug: 'features/browser-tabs' },
             { label: 'Calculator', slug: 'features/calculator' },
             { label: 'Clipboard History', slug: 'features/clipboard-history' },
             { label: 'Color Converter', slug: 'features/color-converter' },

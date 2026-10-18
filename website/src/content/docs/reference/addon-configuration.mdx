@@ -1040,6 +1040,37 @@ addons:
     trigger: "w"
 ```
 
+## Browser Tabs
+
+Lists the tabs of your browsers through the Vicinae browser extension, and
+switches to or closes the one you pick. See
+[Browser Tabs](/features/browser-tabs/) for setup and usage.
+
+### Configuration
+
+**`addons.browser_tabs.enabled`** `boolean` (default: `true`)
+
+**`addons.browser_tabs.trigger`** `string` (default: `tabs`)
+
+Keyword that opens the list. Type it followed by a space. Web searches with
+the same keyword take precedence.
+
+**`addons.browser_tabs.favicon_service`** `twenty | google | none` (default: `twenty`)
+
+Where to download site icons the browser has not stored itself. `twenty` uses
+twenty-icons.com and `google` uses Google's favicon service, so the domains
+of your open tabs are sent to that service. `none` keeps Raffi offline and
+uses only the icons found in the browser profiles.
+
+### Example
+
+```yaml
+addons:
+  browser_tabs:
+    trigger: "t"
+    favicon_service: none
+```
+
 ## Media Controls
 
 Plays, pauses, skips or stops the running media players through `playerctl`.
@@ -1290,6 +1321,11 @@ addons:
   windows:
     enabled: true
     trigger: "win"
+
+  browser_tabs:
+    enabled: true
+    trigger: "tabs"
+    favicon_service: twenty
 
   media:
     enabled: true

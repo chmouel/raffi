@@ -141,6 +141,18 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         });
     }
 
+    if addons.browser_tabs.enabled {
+        let trigger = addons.browser_tabs.trigger();
+        entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
+            trigger: trigger.to_string(),
+            title: "Browser tabs".to_string(),
+            usage: format!("{trigger} <title or URL>, Enter switches, Ctrl+Enter closes"),
+            icon: Some(super::app::BROWSER_TABS_ICON.to_string()),
+            completion: Some(format!("{trigger} ")),
+        });
+    }
+
     if addons.media.enabled {
         let trigger = addons.media.trigger();
         entries.push(HelpEntry {

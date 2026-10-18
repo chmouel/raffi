@@ -647,6 +647,17 @@ addons:
   #   enabled: true
   #   trigger: win
 
+  # Browser tabs (native UI only). Type "tabs " to list the tabs of your
+  # browsers, playing ones first. Enter switches to the tab, Ctrl+Enter
+  # closes it. Needs the Vicinae browser extension and a one-time
+  # `raffi --install-browser-host`. Site icons come from the browser
+  # profiles, then from favicon_service (twenty, google or none to stay
+  # offline), which receives the domains of the open tabs.
+  # browser_tabs:
+  #   enabled: true
+  #   trigger: tabs
+  #   favicon_service: twenty
+
   # Media controls (native UI only, needs playerctl). Type "media " to play,
   # pause, skip or stop any running media player. Raffi stays open and
   # refreshes after each action unless close_on_action is true.

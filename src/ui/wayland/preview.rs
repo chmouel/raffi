@@ -1785,6 +1785,20 @@ fn describe_addon_by_keyword(
         );
     }
 
+    if addons.browser_tabs.enabled && keyword == addons.browser_tabs.trigger() {
+        return (
+            "Browser Tabs".to_string(),
+            vec![
+                ("Enter".to_string(), "Switch to the tab".to_string()),
+                ("Ctrl+Enter".to_string(), "Close the tab".to_string()),
+                (
+                    "Requires".to_string(),
+                    "The Vicinae browser extension and raffi --install-browser-host".to_string(),
+                ),
+            ],
+        );
+    }
+
     if addons.media.enabled && keyword == addons.media.trigger() {
         return (
             "Media Controls".to_string(),

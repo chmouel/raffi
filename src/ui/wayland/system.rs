@@ -41,7 +41,9 @@ impl SystemEntry {
             | DeferredAction::HyprPaste(_)
             | DeferredAction::Signal(_)
             | DeferredAction::Bluetooth(_)
-            | DeferredAction::Secret(_) => String::new(),
+            | DeferredAction::Secret(_)
+            | DeferredAction::BrowserTab(_)
+            | DeferredAction::BrowserHostSetup { .. } => String::new(),
         }
     }
 }
@@ -108,9 +110,11 @@ fn program(action: &DeferredAction) -> Option<&str> {
         DeferredAction::Hypr(_) => Some("hyprctl"),
         DeferredAction::NiriQuit => Some("niri"),
         DeferredAction::SwayExit => Some("swaymsg"),
-        DeferredAction::HyprPaste(_) | DeferredAction::Signal(_) | DeferredAction::Secret(_) => {
-            None
-        }
+        DeferredAction::HyprPaste(_)
+        | DeferredAction::Signal(_)
+        | DeferredAction::Secret(_)
+        | DeferredAction::BrowserTab(_)
+        | DeferredAction::BrowserHostSetup { .. } => None,
         DeferredAction::Bluetooth(_) => Some("bluetoothctl"),
     }
 }
