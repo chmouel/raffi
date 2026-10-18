@@ -4,12 +4,17 @@ description: Search, switch to and close browser tabs from Raffi with the Vicina
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import browserTabsScreenshot from '../../../assets/screenshots/browser-tabs.png';
+import browserTabsSetupScreenshot from '../../../assets/screenshots/browser-tabs-setup.png';
 
 Type `tabs ` (with the trailing space) to list the tabs open in your
 browsers. Tabs playing sound come first, then the ones you used most
 recently. Each row shows the tab title, the site and the browser. Words
 after the keyword filter by title or URL, and pasting a URL lists the tabs
 of that site first.
+
+<Image src={browserTabsScreenshot} alt="Open browser tabs with their site icons, and the selected YouTube tab previewed with its description and thumbnail" width={800} />
 
 | Key        | Action                              |
 |------------|-------------------------------------|
@@ -74,6 +79,8 @@ runs the one under the cursor:
   supported browser it finds on your machine. When a profile of that browser
   already has the extension, the row opens the browser instead.
 - "Open the browser tabs setup guide" opens this page.
+
+<Image src={browserTabsSetupScreenshot} alt="The tabs keyword offering to connect Raffi to the browsers and to open the setup guide" width={800} />
 
 ## Vicinae
 
