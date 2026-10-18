@@ -4201,6 +4201,16 @@ impl LauncherApp {
         } else {
             self.filtered_configs = fuzzy_match_configs(&self.configs, query, log_query);
         }
+        self.main_view.launchers_strong = !query.is_empty()
+            && self.filtered_configs.iter().any(|&index| {
+                let config = &self.configs[index];
+                let title = config
+                    .description
+                    .as_deref()
+                    .or(config.binary.as_deref())
+                    .unwrap_or_default();
+                super::support::word_prefix_match(title, query)
+            });
     }
 
     pub(super) fn total_items(&self) -> usize {

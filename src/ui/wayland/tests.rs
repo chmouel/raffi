@@ -7048,7 +7048,7 @@ fn test_main_view_late_rows_keep_the_selection() {
     let run = *generation;
     let items = (0..2)
         .map(|index| ScriptFilterItem {
-            title: format!("issue {index}"),
+            title: format!("mail issue {index}"),
             subtitle: None,
             arg: None,
             icon: None,
@@ -7164,6 +7164,27 @@ fn script_filter_generation(app: &LauncherApp, source: usize) -> u64 {
         panic!("script filter source");
     };
     *generation
+}
+
+#[test]
+fn test_main_view_selection_follows_launchers_moved_down() {
+    let mut addons = AddonsConfig::default();
+    addons.script_filters.push(issues_filter());
+    let mut app = main_view_app(
+        &["launchers", "script_filters.Issues"],
+        firefox_launcher(),
+        addons,
+    );
+    let _ = app.update(Message::SearchChanged("ail".into()));
+    assert_eq!(app.selected_index, 0, "the launcher, alone so far");
+    let run = script_filter_generation(&app, 0);
+    let mut result = issue_items(2);
+    for item in &mut result.items {
+        item.title = format!("ail {}", item.title);
+    }
+    let _ = app.update(Message::MainViewScriptFilter(0, run, Some(Ok(result))));
+    assert_eq!(app.total_items(), 3);
+    assert_eq!(app.selected_index, 2, "still on the launcher");
 }
 
 #[test]
@@ -7294,6 +7315,84 @@ fn main_view_titles(app: &LauncherApp) -> Vec<String> {
             }
         })
         .collect()
+}
+
+#[test]
+fn test_main_view_lists_groups_starting_with_the_query_first() {
+    use super::main_view::Block;
+    let mut addons = AddonsConfig::default();
+    addons.text_snippets.push(TextSnippetSourceConfig {
+        name: "Notes".into(),
+        keyword: "sn".into(),
+        icon: None,
+        snippets: Some(Vec::new()),
+        file: None,
+        command: None,
+        directory: None,
+        args: Vec::new(),
+        action: None,
+        secondary_action: None,
+        placeholders: false,
+        restore_clipboard: false,
+    });
+    let launchers = vec![RaffiConfig {
+        binary: Some("brave".into()),
+        description: Some("Brave Browser".into()),
+        ..Default::default()
+    }];
+    let mut app = main_view_app(
+        &["browser_tabs", "text_snippets.Notes", "launchers"],
+        launchers,
+        addons,
+    );
+    load_main_view_tabs(&mut app);
+    let snippet = |name: &str, value: &str| TextSnippet {
+        name: name.into(),
+        value: value.into(),
+        keyword: None,
+        icon: None,
+    };
+    let _ = app.update(Message::MainViewSnippetsLoaded(
+        1,
+        Ok(vec![
+            snippet("Meeting notes", "met brave people"),
+            snippet("Babysit PR", "make a branch, review everything"),
+        ]),
+    ));
+
+    let _ = app.update(Message::SearchChanged("brave".into()));
+    assert_eq!(app.main_view.row_count(Block::BeforeLaunchers), 0);
+    assert_eq!(app.filtered_configs, vec![0]);
+    assert_eq!(app.selected_index, 0, "the launcher comes first");
+    assert_eq!(
+        main_view_titles(&app),
+        vec!["Meeting notes"],
+        "a scattered fuzzy match is dropped"
+    );
+
+    let _ = app.update(Message::SearchChanged("people".into()));
+    assert_eq!(
+        app.main_view.row_count(Block::BeforeLaunchers),
+        1,
+        "config order when nothing starts with the query"
+    );
+}
+
+#[test]
+fn test_main_view_tabs_need_every_query_word() {
+    let mut app = main_view_app(
+        &["browser_tabs", "launchers"],
+        Vec::new(),
+        AddonsConfig::default(),
+    );
+    load_main_view_tabs(&mut app);
+    let _ = app.update(Message::SearchChanged("rail".into()));
+    assert!(
+        main_view_titles(&app).is_empty(),
+        "r…a…i…l over Raffi's URL"
+    );
+    let _ = app.update(Message::SearchChanged("raffi github".into()));
+    assert_eq!(main_view_titles(&app), vec!["Raffi"]);
 }
 
 fn recent_pick(source: &str, key: &str) -> super::recent::RecentPick {

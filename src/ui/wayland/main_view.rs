@@ -18,7 +18,7 @@ use super::snippets::{
     snippet_mru_key,
 };
 use super::state::{ClipboardData, ClipboardSnapshot, LauncherApp, ScriptFilterResult};
-use super::support::{mru_bounds, mru_sort_key};
+use super::support::{contains_words, mru_bounds, mru_sort_key};
 use super::types::Message;
 use crate::{AddonsConfig, TextSnippet};
 
@@ -202,6 +202,9 @@ pub(super) struct MainViewState {
     pub recent_path: Option<PathBuf>,
     /// Compositor instance window picks must come from.
     pub window_session: Option<String>,
+    /// Whether a launcher matching the query starts with it or has a word
+    /// that does, which lists the launchers ahead of weaker groups.
+    pub launchers_strong: bool,
     /// Whether the sources' rows are the recent picks rather than matches.
     recent_applied: bool,
 }
@@ -225,6 +228,7 @@ impl MainViewState {
                     list.enter(addon);
                     list.session = MAIN_VIEW_SESSION | state.sources.len() as u64;
                     list.loading = true;
+                    list.strict = true;
                     Source::List(Box::new(list))
                 }
                 Entry::Snippets(config_index) => Source::Snippets {
@@ -402,10 +406,57 @@ impl MainViewState {
         }
     }
 
-    fn block_range(&self, block: Block) -> std::ops::Range<usize> {
+    /// Sources in display order and how many of them come before the
+    /// launchers. Config order, except that while a query is typed with
+    /// nothing focused, the groups with a row whose title starts with the
+    /// query, or has a word that does, move ahead of the others.
+    fn arrangement(&self) -> (Vec<usize>, usize) {
+        if !self.active || self.focus.is_some() || self.query.is_empty() {
+            return ((0..self.sources.len()).collect(), self.launchers_at);
+        }
+        let groups = (0..self.launchers_at)
+            .map(Some)
+            .chain(std::iter::once(None))
+            .chain((self.launchers_at..self.sources.len()).map(Some));
+        let (strong, weak): (Vec<_>, Vec<_>) = groups.partition(|group| match group {
+            Some(source) => self.is_strong(*source),
+            None => self.launchers_strong && !self.hide_launchers,
+        });
+        let groups: Vec<Option<usize>> = strong.into_iter().chain(weak).collect();
+        let split = groups.iter().position(Option::is_none).unwrap_or_default();
+        (groups.into_iter().flatten().collect(), split)
+    }
+
+    /// Whether one of the rows `source` shows has a title starting with the
+    /// query or with a word that does.
+    fn is_strong(&self, source: usize) -> bool {
+        let rows = self.source_rows(source);
+        let strong = |title: &str| super::support::word_prefix_match(title, &self.query);
+        match &self.sources[source] {
+            Source::List(list) => (0..rows)
+                .filter_map(|row| list.item(row))
+                .any(|item| strong(&item.title)),
+            Source::Snippets {
+                items, filtered, ..
+            } => filtered
+                .iter()
+                .take(rows)
+                .any(|&index| strong(&items[index].name)),
+            Source::ScriptFilter { results, .. } => results
+                .iter()
+                .flat_map(|result| result.items.iter().take(rows))
+                .any(|item| strong(&item.title)),
+        }
+    }
+
+    fn block_sources(&self, block: Block) -> Vec<usize> {
+        let (mut order, split) = self.arrangement();
         match block {
-            Block::BeforeLaunchers => 0..self.launchers_at,
-            Block::AfterLaunchers => self.launchers_at..self.sources.len(),
+            Block::BeforeLaunchers => {
+                order.truncate(split);
+                order
+            }
+            Block::AfterLaunchers => order.split_off(split),
         }
     }
 
@@ -431,14 +482,16 @@ impl MainViewState {
     }
 
     pub fn row_count(&self, block: Block) -> usize {
-        self.block_range(block)
+        self.block_sources(block)
+            .into_iter()
             .map(|source| self.source_rows(source))
             .sum()
     }
 
     /// The rows of `block` in display order, as (source, row in source).
     pub fn rows(&self, block: Block) -> impl Iterator<Item = (usize, usize)> + '_ {
-        self.block_range(block)
+        self.block_sources(block)
+            .into_iter()
             .flat_map(move |source| (0..self.source_rows(source)).map(move |row| (source, row)))
     }
 
@@ -448,7 +501,7 @@ impl MainViewState {
     }
 
     pub fn block_of(&self, source: usize) -> Block {
-        if source < self.launchers_at {
+        if self.block_sources(Block::BeforeLaunchers).contains(&source) {
             Block::BeforeLaunchers
         } else {
             Block::AfterLaunchers
@@ -457,8 +510,11 @@ impl MainViewState {
 
     /// Rows of the sources shown before `source` in its block.
     fn rows_before(&self, source: usize) -> usize {
-        let start = self.block_range(self.block_of(source)).start;
-        (start..source).map(|other| self.source_rows(other)).sum()
+        self.block_sources(self.block_of(source))
+            .into_iter()
+            .take_while(|&other| other != source)
+            .map(|other| self.source_rows(other))
+            .sum()
     }
 }
 
@@ -480,6 +536,8 @@ fn find_pick(items: &[CommandItem], pick: &RecentPick, picked: &[usize]) -> Opti
 }
 
 /// Filter a snippet source with the main view query, ranked by `usage`.
+/// Past the keyword matches, the name or value must hold every word of the
+/// query, a loose fuzzy match being noise next to the other sources.
 fn filter_main_view_snippets(main_view: &mut MainViewState, source: usize, usage: &[u64]) {
     let shows = main_view.shows(source);
     let query = &main_view.query;
@@ -488,7 +546,19 @@ fn filter_main_view_snippets(main_view: &mut MainViewState, source: usize, usage
     }) = main_view.sources.get_mut(source)
     {
         *filtered = if shows {
-            filter_snippets(items, query, usage)
+            let lowered = query.to_lowercase();
+            let mut matches = filter_snippets(items, query, usage);
+            matches.retain(|&index| {
+                let snippet = &items[index];
+                query.is_empty()
+                    || snippet
+                        .keyword
+                        .as_deref()
+                        .is_some_and(|keyword| keyword.to_lowercase().starts_with(&lowered))
+                    || contains_words(&snippet.name, query)
+                    || contains_words(&snippet.value, query)
+            });
+            matches
         } else {
             Vec::new()
         };
@@ -769,6 +839,8 @@ impl LauncherApp {
         }
         let before_total = self.total_items();
         let selected = self.selected_index;
+        let launchers = self.launchers_start();
+        let in_launchers = (launchers..launchers + self.filtered_configs.len()).contains(&selected);
         let before = self.main_view_spans();
         let within = before
             .iter()
@@ -798,6 +870,7 @@ impl LauncherApp {
                 // When the selected row went away, select what now sits there.
                 start + found.unwrap_or(row.min(count.saturating_sub(1)))
             }
+            None if in_launchers => self.launchers_start() + selected - launchers,
             None => {
                 let moved: isize = before
                     .iter()
@@ -811,6 +884,12 @@ impl LauncherApp {
         self.selected_index = self
             .selected_index
             .min(self.total_items().saturating_sub(1));
+    }
+
+    /// Index of the first launcher row in the whole list.
+    fn launchers_start(&self) -> usize {
+        self.main_view_offset(Block::AfterLaunchers)
+            .saturating_sub(self.filtered_configs.len())
     }
 
     /// First row and row count of every source in the whole list.

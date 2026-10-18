@@ -49,7 +49,8 @@ version: 1
 #   main_view:               # Mix addon results into the main list (native UI only); Ctrl+Tab shows one source at a time
 #     - launchers            # Keep launchers; once main_view is set they only show if listed
 #     - browser_tabs         # Typing "gmail" lists matching tabs, up to 5 per addon;
-#                            # with no query, your 5 latest addon picks are listed
+#                            # with no query, your 5 latest addon picks are listed;
+#                            # groups with a title starting with the query come first
 #     - windows              # Also: system, media, audio, bluetooth, pass
 #     - text_snippets."Emails"       # A snippet source, by name
 #     - script_filters."Bookmarks"   # A script filter, run when typing pauses

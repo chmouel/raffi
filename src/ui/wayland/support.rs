@@ -185,6 +185,32 @@ pub(super) fn calculator_inline_result(calc: &CalculatorResult) -> InlineResult 
     }
 }
 
+/// Whether every word of `query` appears in `text`, ignoring case, so a
+/// fuzzy match scattered over unrelated words is turned down.
+pub(super) fn contains_words(text: &str, query: &str) -> bool {
+    let text = text.to_lowercase();
+    query
+        .split_whitespace()
+        .all(|word| text.contains(&word.to_lowercase()))
+}
+
+/// Whether `title` starts with `query`, or has a word that does, ignoring
+/// case.
+pub(super) fn word_prefix_match(title: &str, query: &str) -> bool {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return false;
+    }
+    let title = title.to_lowercase();
+    let mut before = None;
+    title.char_indices().any(|(at, current)| {
+        let starts = before.is_none_or(|before: char| !before.is_alphanumeric())
+            && title[at..].starts_with(&query);
+        before = Some(current);
+        starts
+    })
+}
+
 /// `log_query` is what the debug log shows in place of `query`, so
 /// sensitive queries can be redacted.
 pub(super) fn fuzzy_match_configs(
@@ -373,6 +399,15 @@ pub(super) fn save_history(history: &[String]) {
 mod tests {
     use super::*;
     use crate::RaffiConfig;
+
+    #[test]
+    fn test_word_prefix_match() {
+        assert!(word_prefix_match("Brave Browser", "brave"));
+        assert!(word_prefix_match("Search Brave Search", "brave"));
+        assert!(!word_prefix_match("Unbraveable", "brave"));
+        assert!(word_prefix_match("cargo go go", "go go"), "overlapping");
+        assert!(word_prefix_match("x---", "--"));
+    }
 
     #[test]
     fn test_fuzzy_match_configs() {

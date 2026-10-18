@@ -206,6 +206,9 @@ pub(super) struct CommandListState {
     /// Row listed first while the query asks for it; it has no match text
     /// and the identity [`QUERY_ROW`].
     pub query_row: Option<QueryRow>,
+    /// Keep only rows holding every word of the query, for lists mixed
+    /// into the main view where a loose fuzzy match is noise.
+    pub strict: bool,
 }
 
 /// Identity of the row `CommandListState::query_row` builds.
@@ -390,6 +393,7 @@ impl CommandListState {
             &self.query,
             &self.matcher,
             &self.usage,
+            self.strict,
             &mut self.filtered,
         );
         self.extra_start = self.filtered.len();
@@ -474,6 +478,7 @@ pub(super) fn filter_items_into(
     query: &str,
     matcher: &SkimMatcherV2,
     usage: &HashMap<String, u64>,
+    strict: bool,
     out: &mut Vec<usize>,
 ) {
     out.clear();
@@ -504,6 +509,9 @@ pub(super) fn filter_items_into(
                 .is_some_and(|domain| item.domains.contains(domain))
             {
                 return Some((index, 1, 0));
+            }
+            if strict && !super::support::contains_words(&item.match_text, query) {
+                return None;
             }
             matcher
                 .fuzzy_match(&item.match_text, query)
