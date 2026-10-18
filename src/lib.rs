@@ -726,11 +726,26 @@ pub struct AudioAddonConfig {
     /// the list (default: false).
     #[serde(default)]
     pub close_on_action: bool,
+    /// Percent the Volume up and Volume down rows change the output volume
+    /// by (default: 5).
+    #[serde(default)]
+    pub volume_step: Option<u32>,
+    /// Highest output volume the volume rows set, in percent (default: 100).
+    #[serde(default)]
+    pub max_volume: Option<u32>,
 }
 
 impl AudioAddonConfig {
     pub fn trigger(&self) -> &str {
         self.trigger.as_deref().unwrap_or("audio")
+    }
+
+    pub fn volume_step(&self) -> u32 {
+        self.volume_step.unwrap_or(5).max(1)
+    }
+
+    pub fn max_volume(&self) -> u32 {
+        self.max_volume.unwrap_or(100)
     }
 }
 
@@ -740,6 +755,8 @@ impl Default for AudioAddonConfig {
             enabled: true,
             trigger: None,
             close_on_action: false,
+            volume_step: None,
+            max_volume: None,
         }
     }
 }

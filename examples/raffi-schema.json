@@ -133,6 +133,16 @@
           "type": "boolean",
           "default": true
         },
+        "max_volume": {
+          "description": "Highest output volume the volume rows set, in percent (default: 100).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "default": null,
+          "minimum": 0
+        },
         "trigger": {
           "description": "Keyword that opens the audio device list (default: `audio`).",
           "type": [
@@ -140,6 +150,16 @@
             "null"
           ],
           "default": null
+        },
+        "volume_step": {
+          "description": "Percent the Volume up and Volume down rows change the output volume\nby (default: 5).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "default": null,
+          "minimum": 0
         }
       },
       "additionalProperties": false

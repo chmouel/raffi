@@ -171,7 +171,9 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             section: HelpSection::KeywordsAndActions,
             trigger: trigger.to_string(),
             title: "Audio devices".to_string(),
-            usage: format!("{trigger} <device>, Enter sets the default, Ctrl+Enter mutes"),
+            usage: format!(
+                "{trigger} <device or volume>, Enter sets the default, Ctrl+Enter mutes"
+            ),
             icon: Some(super::app::AUDIO_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
         });

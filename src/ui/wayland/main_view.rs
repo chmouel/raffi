@@ -438,8 +438,16 @@ impl LauncherApp {
                 if !exists("pactl") {
                     return missing("pactl");
                 }
-                let keep_open = !self.addons.audio.close_on_action;
-                Box::new(move || Ok(super::audio::load_devices(keep_open)))
+                let options = super::audio::AudioOptions::of(&self.addons.audio);
+                let icon = self.resolve_icon_name(super::audio::SET_VOLUME_ICON);
+                if let Source::List(list) = &mut self.main_view.sources[source] {
+                    list.query_row = Some(std::sync::Arc::new(move |query: &str| {
+                        let mut item = super::audio::set_volume_item(query, false, options)?;
+                        item.icon = icon.clone();
+                        Some(item)
+                    }));
+                }
+                Box::new(move || Ok(super::audio::load_devices(options)))
             }
             CommandListAddon::Bluetooth => {
                 if !exists("bluetoothctl") {

@@ -11,6 +11,29 @@ const TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_OUTPUT: usize = 2 * 1024 * 1024;
 pub(super) const NO_DEVICES: &str = "No audio devices found";
 const DEFAULT_MARK: &str = "✓";
+/// Identity of the row a typed volume such as `vol 40` adds.
+pub(super) const SET_VOLUME: &str = super::command_list::QUERY_ROW;
+pub(super) const SET_VOLUME_ICON: &str = "audio-volume-high";
+
+/// What the audio rows do, from the addon configuration.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct AudioOptions {
+    pub keep_open: bool,
+    /// Percent the Volume up and Volume down rows step by.
+    pub step: u32,
+    /// Highest volume the volume rows set, in percent.
+    pub max: u32,
+}
+
+impl AudioOptions {
+    pub(super) fn of(config: &crate::AudioAddonConfig) -> Self {
+        Self {
+            keep_open: !config.close_on_action,
+            step: config.volume_step(),
+            max: config.max_volume(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Kind {
@@ -112,6 +135,22 @@ impl Device {
         percents.join(" / ")
     }
 
+    /// The channel volumes averaged, in percent.
+    fn volume_percent(&self) -> Option<u32> {
+        let percents: Vec<u32> = self
+            .volume
+            .values()
+            .filter_map(|volume| {
+                let percent = volume.value_percent.trim();
+                percent.strip_suffix('%').unwrap_or(percent).parse().ok()
+            })
+            .collect();
+        let count = u32::try_from(percents.len())
+            .ok()
+            .filter(|&count| count > 0)?;
+        Some((percents.iter().sum::<u32>() + count / 2) / count)
+    }
+
     /// Whether the form factor or active port points at headphones.
     fn is_headphones(&self) -> bool {
         let port = self.port();
@@ -173,15 +212,24 @@ pub(super) fn toggle_mute_argv(kind: Kind, name: &str) -> Vec<String> {
     ]
 }
 
+pub(super) fn set_volume_argv(name: &str, percent: u32) -> Vec<String> {
+    vec![
+        "pactl".to_string(),
+        "set-sink-volume".to_string(),
+        name.to_string(),
+        format!("{percent}%"),
+    ]
+}
+
 /// List the audio outputs and inputs. Blocking: run it off the UI thread.
-pub(super) fn load_devices(keep_open: bool) -> Vec<CommandItem> {
+pub(super) fn load_devices(options: AudioOptions) -> Vec<CommandItem> {
     load_devices_with(
         |args| {
             let mut command = Command::new("pactl");
             command.args(args);
             run_bounded(command, TIMEOUT, MAX_OUTPUT)
         },
-        keep_open,
+        options,
     )
 }
 
@@ -190,7 +238,7 @@ pub(super) fn load_devices(keep_open: bool) -> Vec<CommandItem> {
 /// single error row.
 pub(super) fn load_devices_with(
     pactl: impl Fn(&[&str]) -> Result<Vec<u8>, String> + Sync,
-    keep_open: bool,
+    options: AudioOptions,
 ) -> Vec<CommandItem> {
     let (sinks, sources, default_sink, default_source) = std::thread::scope(|scope| {
         let pactl = &pactl;
@@ -236,18 +284,19 @@ pub(super) fn load_devices_with(
         &sources,
         &default_name(default_sink),
         &default_name(default_source),
-        keep_open,
+        options,
     )
 }
 
-/// An "Outputs" header followed by the sinks, then an "Inputs" header
+/// The volume controls of the default devices under a "Volume" header,
+/// then an "Outputs" header followed by the sinks, then an "Inputs" header
 /// followed by the sources.
 pub(super) fn audio_items(
     sinks: &[Device],
     sources: &[Device],
     default_sink: &str,
     default_source: &str,
-    keep_open: bool,
+    options: AudioOptions,
 ) -> Vec<CommandItem> {
     if sinks.is_empty() && sources.is_empty() {
         return vec![CommandItem::info(
@@ -256,7 +305,12 @@ pub(super) fn audio_items(
             "audio-card",
         )];
     }
-    let mut items = Vec::new();
+    let keep_open = options.keep_open;
+    let mut items = volume_items(
+        sinks.iter().find(|sink| sink.name == default_sink),
+        sources.iter().find(|source| source.name == default_source),
+        options,
+    );
     for (kind, devices, default, header, icon) in [
         (Kind::Sink, sinks, default_sink, "Outputs", "audio-speakers"),
         (
@@ -280,6 +334,159 @@ pub(super) fn audio_items(
         );
     }
     items
+}
+
+fn control_item(
+    identity: &str,
+    title: String,
+    subtitle: String,
+    match_text: String,
+    icon: &str,
+    argv: Vec<String>,
+    keep_open: bool,
+) -> CommandItem {
+    CommandItem {
+        details: vec![
+            ("Device".to_string(), subtitle.clone()),
+            ("Enter".to_string(), argv.join(" ")),
+        ],
+        title,
+        subtitle,
+        match_text,
+        icon_names: vec![icon.to_string(), "audio-card".to_string()],
+        icon: None,
+        identity: identity.to_string(),
+        unavailable: None,
+        primary: Some(CommandAction {
+            action: DeferredAction::Command(argv),
+            confirm: None,
+            keep_open,
+            progress: None,
+        }),
+        secondary: None,
+        badge: None,
+        domains: Vec::new(),
+    }
+}
+
+/// Volume up and down and mute for the default output, mute for the
+/// default input.
+fn volume_items(
+    sink: Option<&Device>,
+    source: Option<&Device>,
+    options: AudioOptions,
+) -> Vec<CommandItem> {
+    let mut items = Vec::new();
+    if let Some(sink) = sink {
+        if let Some(current) = sink.volume_percent() {
+            let up = (current + options.step).min(options.max);
+            if up > current {
+                items.push(control_item(
+                    "volume/up",
+                    "Volume up".to_string(),
+                    format!("{current}% → {up}% · {}", sink.title()),
+                    "volume up louder increase sound".to_string(),
+                    "audio-volume-high",
+                    set_volume_argv(&sink.name, up),
+                    options.keep_open,
+                ));
+            }
+            if current > 0 {
+                let down = current.saturating_sub(options.step);
+                items.push(control_item(
+                    "volume/down",
+                    "Volume down".to_string(),
+                    format!("{current}% → {down}% · {}", sink.title()),
+                    "volume down quieter decrease sound".to_string(),
+                    "audio-volume-low",
+                    set_volume_argv(&sink.name, down),
+                    options.keep_open,
+                ));
+            }
+        }
+        let (title, icon) = if sink.mute {
+            ("Unmute output", "audio-volume-high")
+        } else {
+            ("Mute output", "audio-volume-muted")
+        };
+        items.push(control_item(
+            "volume/mute-output",
+            title.to_string(),
+            sink.title().to_string(),
+            format!("{title} volume sound speakers"),
+            icon,
+            toggle_mute_argv(Kind::Sink, &sink.name),
+            options.keep_open,
+        ));
+    }
+    if let Some(source) = source {
+        let (title, icon) = if source.mute {
+            ("Unmute microphone", "audio-input-microphone")
+        } else {
+            ("Mute microphone", "microphone-sensitivity-muted")
+        };
+        items.push(control_item(
+            "volume/mute-input",
+            title.to_string(),
+            source.title().to_string(),
+            format!("{title} mic input"),
+            icon,
+            toggle_mute_argv(Kind::Source, &source.name),
+            options.keep_open,
+        ));
+    }
+    if !items.is_empty() {
+        let mut header = CommandItem::info("volume", "Volume".to_string(), "audio-volume-high");
+        header.match_text = "Volume".to_string();
+        items.insert(0, header);
+    }
+    items
+}
+
+/// The volume a query asks for: `vol 40`, `volume 40%`, or a bare `40`
+/// when `bare` allows it.
+pub(super) fn parse_volume_query(query: &str, bare: bool) -> Option<u32> {
+    let query = query.trim().to_lowercase();
+    let number = match query
+        .strip_prefix("volume")
+        .or_else(|| query.strip_prefix("vol"))
+    {
+        Some(rest) if rest.starts_with(char::is_whitespace) => rest.trim(),
+        Some(_) => return None,
+        None if bare => query.as_str(),
+        None => return None,
+    };
+    let number = number.strip_suffix('%').unwrap_or(number).trim_end();
+    if number.is_empty() || number.len() > 3 || !number.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    number.parse().ok()
+}
+
+/// The row setting the default output to the volume `query` asks for.
+pub(super) fn set_volume_item(
+    query: &str,
+    bare: bool,
+    options: AudioOptions,
+) -> Option<CommandItem> {
+    let wanted = parse_volume_query(query, bare)?;
+    let percent = wanted.min(options.max);
+    let subtitle = if wanted > percent {
+        format!("Default output, capped at {percent}%")
+    } else {
+        "Default output".to_string()
+    };
+    let mut item = control_item(
+        SET_VOLUME,
+        format!("Set output volume to {percent}%"),
+        subtitle,
+        String::new(),
+        SET_VOLUME_ICON,
+        set_volume_argv("@DEFAULT_SINK@", percent),
+        options.keep_open,
+    );
+    item.details[0].1 = "Default output".to_string();
+    Some(item)
 }
 
 fn device_item(kind: Kind, device: &Device, is_default: bool, keep_open: bool) -> CommandItem {
@@ -434,8 +641,17 @@ pub(super) fn fixture_items(keep_open: bool) -> Vec<CommandItem> {
         &parse_devices(SOURCES.as_bytes(), Kind::Source).unwrap(),
         DEFAULT_SINK,
         DEFAULT_SOURCE,
-        keep_open,
+        test_options(keep_open),
     )
+}
+
+#[cfg(test)]
+pub(super) fn test_options(keep_open: bool) -> AudioOptions {
+    AudioOptions {
+        keep_open,
+        step: 5,
+        max: 100,
+    }
 }
 
 #[cfg(test)]
@@ -480,11 +696,16 @@ mod tests {
 
     #[test]
     fn test_audio_items_rows_defaults_and_icons() {
-        let items = load_devices_with(fake_pactl(Ok(SINKS)), true);
+        let items = load_devices_with(fake_pactl(Ok(SINKS)), test_options(true));
         let titles: Vec<&str> = items.iter().map(|item| item.title.as_str()).collect();
         assert_eq!(
             titles,
             vec![
+                "Volume",
+                "Volume up",
+                "Volume down",
+                "Unmute output",
+                "Mute microphone",
                 "Outputs",
                 "Ryzen HD Audio Controller Pro",
                 "✓ Razer Seiren V2 Pro Analog Stereo",
@@ -494,33 +715,33 @@ mod tests {
                 "✓ Razer Seiren V2 Pro Mono",
             ]
         );
-        assert!(items[0].primary.is_none() && items[4].primary.is_none());
+        assert!(items[5].primary.is_none() && items[9].primary.is_none());
         assert_eq!(
-            items[2].subtitle,
+            items[7].subtitle,
             "Default · Muted · Speakers · 95% / 80% · alsa_output.usb-Razer_Seiren-00.analog-stereo"
         );
         assert_eq!(
-            items[1].subtitle,
+            items[6].subtitle,
             "100% · alsa_output.pci-0000_c4_00.6.pro-output-0"
         );
-        assert_eq!(items[2].identity, format!("sink/{DEFAULT_SINK}"));
-        assert_eq!(items[6].identity, format!("source/{DEFAULT_SOURCE}"));
-        assert_eq!(items[1].icon_names[0], "audio-speakers");
+        assert_eq!(items[7].identity, format!("sink/{DEFAULT_SINK}"));
+        assert_eq!(items[11].identity, format!("source/{DEFAULT_SOURCE}"));
+        assert_eq!(items[6].icon_names[0], "audio-speakers");
         assert_eq!(
-            items[3].icon_names[..2],
+            items[8].icon_names[..2],
             ["audio-headphones", "audio-speakers"]
         );
-        assert_eq!(items[6].icon_names[0], "audio-input-microphone");
+        assert_eq!(items[11].icon_names[0], "audio-input-microphone");
     }
 
     #[test]
     fn test_audio_item_argv() {
-        let items = load_devices_with(fake_pactl(Ok(SINKS)), true);
+        let items = load_devices_with(fake_pactl(Ok(SINKS)), test_options(true));
         let argv = |action: Option<&CommandAction>| match action.map(|a| &a.action) {
             Some(DeferredAction::Command(argv)) => argv.clone(),
             other => panic!("unexpected action {other:?}"),
         };
-        let sink = &items[3];
+        let sink = &items[8];
         assert_eq!(
             argv(sink.primary.as_ref()),
             [
@@ -538,7 +759,7 @@ mod tests {
                 "toggle"
             ]
         );
-        let source = &items[5];
+        let source = &items[10];
         assert_eq!(
             argv(source.primary.as_ref()),
             [
@@ -557,21 +778,26 @@ mod tests {
             ]
         );
         assert!(sink.primary.as_ref().unwrap().keep_open);
-        let closing = load_devices_with(fake_pactl(Ok(SINKS)), false);
-        assert!(!closing[3].secondary.as_ref().unwrap().keep_open);
+        let closing = load_devices_with(fake_pactl(Ok(SINKS)), test_options(false));
+        assert!(!closing[8].secondary.as_ref().unwrap().keep_open);
     }
 
     #[test]
     fn test_load_devices_failures_give_an_error_row() {
         for sinks in [Err("exited with exit status: 1"), Ok("not json")] {
-            let items = load_devices_with(fake_pactl(sinks), true);
+            let items = load_devices_with(fake_pactl(sinks), test_options(true));
             assert_eq!(items.len(), 1);
             assert!(items[0].title.starts_with("Cannot list audio devices"));
             assert!(items[0].primary.is_none());
         }
-        let items = load_devices_with(fake_pactl(Ok("[]")), true);
-        assert_eq!(items[0].title, "Inputs");
-        assert_eq!(audio_items(&[], &[], "", "", true)[0].title, NO_DEVICES);
+        let items = load_devices_with(fake_pactl(Ok("[]")), test_options(true));
+        assert_eq!(items[0].title, "Volume");
+        assert_eq!(items[1].title, "Mute microphone");
+        assert_eq!(items[2].title, "Inputs");
+        assert_eq!(
+            audio_items(&[], &[], "", "", test_options(true))[0].title,
+            NO_DEVICES
+        );
     }
 
     #[test]
@@ -581,10 +807,102 @@ mod tests {
             ["-f", "json", "list", "sources"] => Ok(b"[]".to_vec()),
             _ => Err("timed out after 2s".to_string()),
         };
-        let items = load_devices_with(pactl, true);
+        let items = load_devices_with(pactl, test_options(true));
+        // No default devices, so no volume rows.
         assert_eq!(items.len(), 4);
         assert!(items
             .iter()
             .all(|item| !item.title.starts_with(DEFAULT_MARK)));
+    }
+
+    #[test]
+    fn test_volume_rows_step_and_clamp() {
+        let argv = |item: &CommandItem| match item.primary.as_ref().map(|a| &a.action) {
+            Some(DeferredAction::Command(argv)) => argv.join(" "),
+            other => panic!("unexpected action {other:?}"),
+        };
+        let items = fixture_items(true);
+        // 95% and 80% average to 88%.
+        assert_eq!(
+            items[1].subtitle,
+            "88% → 93% · Razer Seiren V2 Pro Analog Stereo"
+        );
+        assert_eq!(
+            argv(&items[1]),
+            format!("pactl set-sink-volume {DEFAULT_SINK} 93%")
+        );
+        assert_eq!(
+            argv(&items[2]),
+            format!("pactl set-sink-volume {DEFAULT_SINK} 83%")
+        );
+        assert_eq!(
+            argv(&items[3]),
+            format!("pactl set-sink-mute {DEFAULT_SINK} toggle")
+        );
+        assert_eq!(
+            argv(&items[4]),
+            format!("pactl set-source-mute {DEFAULT_SOURCE} toggle")
+        );
+
+        let sinks = parse_devices(SINKS.as_bytes(), Kind::Sink).unwrap();
+        let ryzen = &sinks[0].name;
+        let options = AudioOptions {
+            keep_open: true,
+            step: 10,
+            max: 100,
+        };
+        let titles = |items: Vec<CommandItem>| {
+            items
+                .iter()
+                .take_while(|item| item.title != "Outputs")
+                .map(|item| item.title.clone())
+                .collect::<Vec<_>>()
+        };
+        // At 100% there is no Volume up.
+        assert_eq!(
+            titles(audio_items(&sinks, &[], ryzen, "", options)),
+            ["Volume", "Volume down", "Mute output"]
+        );
+        let louder = AudioOptions {
+            max: 150,
+            ..options
+        };
+        let items = audio_items(&sinks, &[], ryzen, "", louder);
+        assert_eq!(
+            argv(&items[1]),
+            format!("pactl set-sink-volume {ryzen} 110%")
+        );
+    }
+
+    #[test]
+    fn test_set_volume_query() {
+        assert_eq!(parse_volume_query("vol 40", false), Some(40));
+        assert_eq!(parse_volume_query(" Volume 40% ", false), Some(40));
+        assert_eq!(parse_volume_query("40", false), None);
+        assert_eq!(parse_volume_query("40%", true), Some(40));
+        for junk in [
+            "vol",
+            "vol40",
+            "volume x",
+            "vol 4000",
+            "vol -1",
+            "volume 4 0",
+        ] {
+            assert_eq!(parse_volume_query(junk, true), None, "{junk}");
+        }
+
+        let options = test_options(true);
+        let item = set_volume_item("vol 150", false, options).unwrap();
+        assert_eq!(item.title, "Set output volume to 100%");
+        assert_eq!(item.subtitle, "Default output, capped at 100%");
+        assert_eq!(item.identity, SET_VOLUME);
+        assert!(item.match_text.is_empty());
+        match item.primary.map(|action| action.action) {
+            Some(DeferredAction::Command(argv)) => {
+                assert_eq!(argv, ["pactl", "set-sink-volume", "@DEFAULT_SINK@", "100%"]);
+            }
+            other => panic!("unexpected action {other:?}"),
+        }
+        assert!(set_volume_item("40", false, options).is_none());
     }
 }

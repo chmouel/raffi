@@ -156,6 +156,9 @@ pub(super) enum Selection {
     Run(DeferredAction, String, bool),
 }
 
+/// Builds a row from the query, such as the volume `vol 40` sets.
+pub(super) type QueryRow = std::sync::Arc<dyn Fn(&str) -> Option<CommandItem> + Send + Sync>;
+
 #[derive(Default)]
 pub(super) struct CommandListState {
     pub addon: Option<CommandListAddon>,
@@ -196,7 +199,13 @@ pub(super) struct CommandListState {
     pub preview_inflight: Option<String>,
     /// The page URL the preview pane wants, empty for none.
     pub preview_wanted: super::tab_preview::Wanted,
+    /// Row listed first while the query asks for it; it has no match text
+    /// and the identity [`QUERY_ROW`].
+    pub query_row: Option<QueryRow>,
 }
+
+/// Identity of the row `CommandListState::query_row` builds.
+pub(super) const QUERY_ROW: &str = "query-row";
 
 impl CommandListState {
     pub fn is_active(&self) -> bool {
@@ -219,6 +228,7 @@ impl CommandListState {
         self.previews.clear();
         self.preview_inflight = None;
         self.preview_wanted.clear();
+        self.query_row = None;
         self.generation = self.generation.wrapping_add(1);
         self.session = self.session.wrapping_add(1);
     }
@@ -365,6 +375,12 @@ impl CommandListState {
     }
 
     fn refilter(&mut self) {
+        if let Some(build) = &self.query_row {
+            self.items.retain(|item| item.identity != QUERY_ROW);
+            if let Some(row) = build(&self.query) {
+                self.items.insert(0, row);
+            }
+        }
         filter_items_into(
             &self.items,
             &self.query,

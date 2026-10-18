@@ -1102,8 +1102,8 @@ addons:
 
 ## Audio Switcher
 
-Sets the default output or input and mutes devices through `pactl`.
-See [Audio Switcher](/features/audio-switcher/) for usage.
+Changes the volume, sets the default output or input and mutes devices
+through `pactl`. See [Audio Switcher](/features/audio-switcher/) for usage.
 
 ### Configuration
 
@@ -1119,6 +1119,15 @@ with the same keyword take precedence.
 Close Raffi after an action. By default Raffi stays open and refreshes the
 list.
 
+**`addons.audio.volume_step`** `integer` (default: `5`)
+
+Percent "Volume up" and "Volume down" change the output volume by. At least 1.
+
+**`addons.audio.max_volume`** `integer` (default: `100`)
+
+Highest output volume "Volume up" and a typed volume such as `vol 40` will
+set. Raise it above 100 to allow boosting.
+
 ### Example
 
 ```yaml
@@ -1126,6 +1135,7 @@ addons:
   audio:
     trigger: "snd"
     close_on_action: true
+    volume_step: 10
 ```
 
 ## Kill Process

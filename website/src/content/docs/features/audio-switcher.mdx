@@ -1,12 +1,15 @@
 ---
 title: Audio Switcher
-description: Pick the default speaker or microphone and mute devices from Raffi
+description: Change the volume, pick the default speaker or microphone and mute devices from Raffi
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-Type `audio ` (with the trailing space) to list your sound devices. Outputs,
-such as speakers and headphones, come first under an "Outputs" header, then
+Type `audio ` (with the trailing space) to list your sound devices. A
+"Volume" group comes first with "Volume up", "Volume down", "Mute output"
+and "Mute microphone" for the default devices. The volume rows show the
+change they make, such as `60% → 65%`. Outputs,
+such as speakers and headphones, come next under an "Outputs" header, then
 inputs such as microphones under "Inputs". Each row shows the device name,
 its port, its volume and its internal name. The current default device has a
 check mark and says "Default", and a muted device says "Muted". Monitor
@@ -14,6 +17,13 @@ sources, which only echo an output, are left out.
 
 Words after the keyword filter the devices, so `audio headphones` or
 `audio razer` narrows the list, and `audio inputs` shows the microphones.
+
+Type a number to set the output volume directly: `audio 40`, `audio vol 40`
+or `audio volume 40%` adds a "Set output volume to 40%" row at the top. The
+volume never goes above `max_volume`. When the audio addon is in
+[`main_view`](/configuration/general-settings/#main-view), typing `vol 40`
+in the main list does the same. A bare number there is left to the
+calculator.
 
 <Aside type="note">
 The audio switcher is only available in native mode and needs `pactl`,
@@ -47,6 +57,8 @@ addons:
   audio:
     trigger: "snd"
     close_on_action: true
+    volume_step: 10   # Volume up and down change it by 10% (default: 5)
+    max_volume: 150   # Allow boosting past 100% (default: 100)
 ```
 
 See the [addon reference](/reference/addon-configuration/#audio-switcher)

@@ -2384,8 +2384,14 @@ impl LauncherApp {
     }
 
     fn load_audio(&mut self, refresh: bool) -> Task<Message> {
-        let keep_open = !self.addons.audio.close_on_action;
-        self.load_command_list(move || Ok(super::audio::load_devices(keep_open)), refresh)
+        let options = super::audio::AudioOptions::of(&self.addons.audio);
+        let icon = self.resolve_icon_name(super::audio::SET_VOLUME_ICON);
+        self.command_list.query_row = Some(std::sync::Arc::new(move |query: &str| {
+            let mut item = super::audio::set_volume_item(query, true, options)?;
+            item.icon = icon.clone();
+            Some(item)
+        }));
+        self.load_command_list(move || Ok(super::audio::load_devices(options)), refresh)
     }
 
     fn load_media(&mut self, refresh: bool) -> Task<Message> {

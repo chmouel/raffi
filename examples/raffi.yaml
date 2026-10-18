@@ -334,12 +334,16 @@ addons:
   #   close_on_action: false
 
   # Audio switcher (native UI only, needs pactl). Type "audio " to list
-  # outputs and inputs. Enter makes a device the default, Ctrl+Enter mutes or
-  # unmutes it. Raffi stays open and refreshes unless close_on_action is true.
+  # volume controls, outputs and inputs. Enter makes a device the default,
+  # Ctrl+Enter mutes or unmutes it. "audio 40" or "vol 40" in main_view sets
+  # the output volume. Raffi stays open and refreshes unless close_on_action
+  # is true.
   # audio:
   #   enabled: true
   #   trigger: audio
   #   close_on_action: false
+  #   volume_step: 5      # Percent changed by Volume up and down
+  #   max_volume: 100     # Highest volume Volume up and "vol N" will set
 
   # Kill process (native UI only, needs kill). Type "kill " to list your own
   # processes, biggest memory first. Enter twice sends SIGTERM, Ctrl+Enter

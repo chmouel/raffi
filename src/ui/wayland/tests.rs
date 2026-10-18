@@ -5023,6 +5023,11 @@ fn test_audio_rows_and_filtering() {
     assert_eq!(
         command_list_titles(&app),
         vec![
+            "Volume",
+            "Volume up",
+            "Volume down",
+            "Unmute output",
+            "Mute microphone",
             "Outputs",
             "Ryzen HD Audio Controller Pro",
             "✓ Razer Seiren V2 Pro Analog Stereo",
@@ -5051,19 +5056,31 @@ fn test_audio_rows_and_filtering() {
         let _ = app.update(Message::SearchChanged(query.into()));
         assert_eq!(command_list_titles(&app)[0], header);
         let count = if kind == "sink/" { 3 } else { 2 };
-        for &index in &app.command_list.filtered[1..=count] {
-            assert!(
-                app.command_list.items[index].identity.starts_with(kind),
-                "{query}"
-            );
-        }
+        let listed = app
+            .command_list
+            .filtered
+            .iter()
+            .filter(|&&index| app.command_list.items[index].identity.starts_with(kind))
+            .count();
+        assert_eq!(listed, count, "{query}");
     }
+
+    // A typed volume comes first and sets the default output.
+    let _ = app.update(Message::SearchChanged("audio 40".into()));
+    assert_eq!(command_list_titles(&app)[0], "Set output volume to 40%");
+    let task = app.update(Message::Submit);
+    assert!(task.units() > 0, "the volume is set in the background");
+    assert!(app.in_flight.is_pending("audio", super::audio::SET_VOLUME));
+    let _ = app.update(Message::SearchChanged("audio razer".into()));
+    assert!(!command_list_titles(&app)
+        .iter()
+        .any(|title| title.starts_with("Set output volume")));
 }
 
 #[test]
 fn test_audio_actions_keep_raffi_open_and_refresh_on_the_same_device() {
     let mut app = audio_app("audio ");
-    app.selected_index = 3;
+    app.selected_index = 8;
     let identity = "sink/bluez_output.00_11_22_33_44_55.1".to_string();
     assert_eq!(selected_identity(&app), identity);
 
@@ -5086,7 +5103,7 @@ fn test_audio_actions_keep_raffi_open_and_refresh_on_the_same_device() {
 
     // The refreshed list moved the device; the selection follows it.
     let mut items = super::audio::fixture_items(true);
-    let moved = items.remove(3);
+    let moved = items.remove(8);
     items.insert(1, moved);
     let generation = app.command_list.generation;
     let _ = app.update(Message::CommandListLoaded(generation, Ok(items)));
@@ -6936,6 +6953,35 @@ fn test_main_view_reloads_after_any_action_of_its_addon() {
     assert!(task.units() > 0);
     let _ = app.update(Message::MainViewLoaded(0, earlier, Ok(Vec::new())));
     assert_eq!(app.total_items(), 1, "the older load is dropped");
+}
+
+#[test]
+fn test_main_view_audio_sets_volume_only_with_a_prefix() {
+    let mut app = main_view_app(&["audio"], Vec::new(), AddonsConfig::default());
+    let super::main_view::Source::List(list) = &app.main_view.sources[0] else {
+        panic!("command list source");
+    };
+    let generation = list.generation;
+    let _ = app.update(Message::MainViewLoaded(
+        0,
+        generation,
+        Ok(super::audio::fixture_items(true)),
+    ));
+
+    let _ = app.update(Message::SearchChanged("vol 40".into()));
+    assert_eq!(
+        app.resolve_selected_preview().unwrap().title,
+        "Set output volume to 40%"
+    );
+    let _ = app.update(Message::SearchChanged("40".into()));
+    assert!(app
+        .resolve_selected_preview()
+        .is_none_or(|row| !row.title.starts_with("Set output volume")));
+
+    let _ = app.update(Message::SearchChanged("vol 40".into()));
+    let _ = app.update(Message::Submit);
+    assert_eq!(app.search_query, "audio vol 40", "handed to the audio mode");
+    assert!(app.in_flight.is_pending("audio", super::audio::SET_VOLUME));
 }
 
 #[test]
