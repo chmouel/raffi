@@ -101,18 +101,17 @@ See: [UI modes](https://chmouel.github.io/raffi/features/ui-modes/) · [Themes](
 
 ## Configuration
 
-Raffi reads its configuration from `$HOME/.config/raffi/raffi.yaml`. A basic example:
+Raffi reads launcher entries from `$HOME/.config/raffi/launchers.yaml` and settings from `$HOME/.config/raffi/raffi.yaml`. Both are optional. A basic `launchers.yaml`:
 
 ```yaml
-version: 1
-
-launchers:
-  firefox:
-    binary: firefox
-    args: [--marionette]
-    icon: firefox
-    description: Firefox browser with marionette enabled
+firefox:
+  binary: firefox
+  args: [--marionette]
+  icon: firefox
+  description: Firefox browser with marionette enabled
 ```
+
+Entries can also live under a `launchers:` key in `raffi.yaml`; when they do, `launchers.yaml` is ignored. See [`examples/raffi.yaml`](examples/raffi.yaml) and [`examples/launchers.yaml`](examples/launchers.yaml) for fuller examples.
 
 The docs cover the rest of the configuration:
 

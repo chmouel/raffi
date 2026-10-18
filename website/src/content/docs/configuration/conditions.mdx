@@ -28,31 +28,29 @@ Environment variable name. Entry is shown only if this variable is set.
 
 #### Example: Wayland-Only Entry
 
-```yaml
-launchers:
-  rbw-pass:
-    binary: rofi-rbw
-    args:
-      [
-        "--selector wofi --clipboarder wl-copy --action copy-password --typer xdotool",
-      ]
-    description: "Password Manager"
-    icon: password-manager
-    ifenvset: WAYLAND_DISPLAY
+```yaml title="launchers.yaml"
+rbw-pass:
+  binary: rofi-rbw
+  args:
+    [
+      "--selector wofi --clipboarder wl-copy --action copy-password --typer xdotool",
+    ]
+  description: "Password Manager"
+  icon: password-manager
+  ifenvset: WAYLAND_DISPLAY
 ```
 
 This entry appears only when `WAYLAND_DISPLAY` is set (i.e., in Wayland sessions).
 
 #### Example: Sway-Specific Entry
 
-```yaml
-launchers:
-  cliphistory:
-    binary: clipman
-    args: ["pick", "-t", "wofi"]
-    description: "Clipboard history"
-    icon: accessories-clipboard
-    ifenvset: SWAYSOCK
+```yaml title="launchers.yaml"
+cliphistory:
+  binary: clipman
+  args: ["pick", "-t", "wofi"]
+  description: "Clipboard history"
+  icon: accessories-clipboard
+  ifenvset: SWAYSOCK
 ```
 
 ### ifenvnotset
@@ -66,12 +64,11 @@ Environment variable name. Entry is shown only if this variable is not set.
 
 #### Example
 
-```yaml
-launchers:
-  x11-only:
-    binary: xdotool
-    description: "X11 Tool"
-    ifenvnotset: WAYLAND_DISPLAY
+```yaml title="launchers.yaml"
+x11-only:
+  binary: xdotool
+  description: "X11 Tool"
+  ifenvnotset: WAYLAND_DISPLAY
 ```
 
 ### ifenveq
@@ -87,45 +84,42 @@ Array with exactly two elements: `[VARIABLE_NAME, EXPECTED_VALUE]`.
 
 #### Example: GNOME-Only Entry
 
-```yaml
-launchers:
-  keyboard-setting:
-    binary: gnome-control-center
-    args: [keyboard]
-    description: "Keyboard setting"
-    icon: preferences-desktop-keyboard-shortcuts
-    ifenveq: [DESKTOP_SESSION, GNOME]
+```yaml title="launchers.yaml"
+keyboard-setting:
+  binary: gnome-control-center
+  args: [keyboard]
+  description: "Keyboard setting"
+  icon: preferences-desktop-keyboard-shortcuts
+  ifenveq: [DESKTOP_SESSION, GNOME]
 ```
 
 #### Example: X11-Only Entry
 
-```yaml
-launchers:
-  snap-window-around:
-    binary: wmctrl-resize-and-center
-    args: [rotate]
-    description: "Snap window around"
-    icon: wmaround
-    ifenveq: [XDG_SESSION_TYPE, x11]
+```yaml title="launchers.yaml"
+snap-window-around:
+  binary: wmctrl-resize-and-center
+  args: [rotate]
+  description: "Snap window around"
+  icon: wmaround
+  ifenveq: [XDG_SESSION_TYPE, x11]
 ```
 
 #### Example: Desktop Environment Check
 
-```yaml
-launchers:
-  gnome-shutdown:
-    binary: gnome-session-quit
-    args: [--power-off]
-    description: "Shutdown / Poweroff"
-    icon: gnome-shutdown
-    ifenveq: [DESKTOP_SESSION, GNOME]
+```yaml title="launchers.yaml"
+gnome-shutdown:
+  binary: gnome-session-quit
+  args: [--power-off]
+  description: "Shutdown / Poweroff"
+  icon: gnome-shutdown
+  ifenveq: [DESKTOP_SESSION, GNOME]
 
-  reboot:
-    binary: gnome-session-quit
-    args: [--reboot]
-    description: "Reboot"
-    icon: gnome-session-reboot
-    ifenveq: [DESKTOP_SESSION, GNOME]
+reboot:
+  binary: gnome-session-quit
+  args: [--reboot]
+  description: "Reboot"
+  icon: gnome-session-reboot
+  ifenveq: [DESKTOP_SESSION, GNOME]
 ```
 
 ### ifexist
@@ -139,46 +133,43 @@ Binary name. Entry is shown only if the binary exists in PATH.
 
 #### Example: Binary Existence
 
-```yaml
-launchers:
-  wally:
-    binary: jumpapp
-    args: ["-X", "wally"]
-    description: "Wally"
-    icon: wally
-    ifexist: wally
+```yaml title="launchers.yaml"
+wally:
+  binary: jumpapp
+  args: ["-X", "wally"]
+  description: "Wally"
+  icon: wally
+  ifexist: wally
 ```
 
 Shown only if `wally` is installed in PATH.
 
 #### Example: Multiple Entries for Same App
 
-```yaml
-launchers:
-  evolution-mail:
-    binary: jumpapp
-    args: ["-t", "Evolution", "-X", "evolution"]
-    description: "Evolution Mail"
-    icon: evolution-mail
-    ifexist: evolution
+```yaml title="launchers.yaml"
+evolution-mail:
+  binary: jumpapp
+  args: ["-t", "Evolution", "-X", "evolution"]
+  description: "Evolution Mail"
+  icon: evolution-mail
+  ifexist: evolution
 
-  signal:
-    binary: jumpapp
-    args: ["-X", "signal", "signal-desktop"]
-    description: "Signal"
-    icon: signal-desktop
-    ifexist: signal-desktop
+signal:
+  binary: jumpapp
+  args: ["-X", "signal", "signal-desktop"]
+  description: "Signal"
+  icon: signal-desktop
+  ifexist: signal-desktop
 ```
 
 #### Example: File Path Check
 
-```yaml
-launchers:
-  custom-app:
-    binary: ~/bin/myapp
-    description: "My Application"
-    icon: myapp
-    ifexist: ~/bin/myapp
+```yaml title="launchers.yaml"
+custom-app:
+  binary: ~/bin/myapp
+  description: "My Application"
+  icon: myapp
+  ifexist: ~/bin/myapp
 ```
 
 ## Combining with Other Fields
@@ -187,26 +178,24 @@ Conditions work with all other entry fields:
 
 ### Script with Condition
 
-```yaml
-launchers:
-  my-script:
-    script: |
-      echo "Running on Wayland"
-      env | grep WAYLAND
-    description: "Wayland Info"
-    icon: "info"
-    ifenvset: WAYLAND_DISPLAY
+```yaml title="launchers.yaml"
+my-script:
+  script: |
+    echo "Running on Wayland"
+    env | grep WAYLAND
+  description: "Wayland Info"
+  icon: "info"
+  ifenvset: WAYLAND_DISPLAY
 ```
 
 ### Disabled Entry with Condition
 
-```yaml
-launchers:
-  optional-tool:
-    binary: special-tool
-    description: "Special Tool"
-    ifexist: special-tool
-    disabled: true
+```yaml title="launchers.yaml"
+optional-tool:
+  binary: special-tool
+  description: "Special Tool"
+  ifexist: special-tool
+  disabled: true
 ```
 
 <Aside type="note">
@@ -219,69 +208,66 @@ From the example configuration:
 
 ### Environment-Specific System Commands
 
-```yaml
+```yaml title="launchers.yaml"
 # GNOME-specific shutdown
-launchers:
-  gnome-shutdown:
-    binary: gnome-session-quit
-    args: [--power-off]
-    description: "Shutdown / Poweroff"
-    icon: gnome-shutdown
-    ifenveq: [DESKTOP_SESSION, GNOME]
+gnome-shutdown:
+  binary: gnome-session-quit
+  args: [--power-off]
+  description: "Shutdown / Poweroff"
+  icon: gnome-shutdown
+  ifenveq: [DESKTOP_SESSION, GNOME]
 
-  # Sway-specific shutdown
-  shutdown:
-    binary: poweroff
-    description: "Shutdown / Poweroff"
-    icon: gnome-shutdown
-    ifenvset: SWAYSOCK
+# Sway-specific shutdown
+shutdown:
+  binary: poweroff
+  description: "Shutdown / Poweroff"
+  icon: gnome-shutdown
+  ifenvset: SWAYSOCK
 ```
 
 ### Session Type Detection
 
-```yaml
+```yaml title="launchers.yaml"
 # X11-only entry
-launchers:
-  red-hat-mail:
-    binary: xdo-focus-a-tab
-    args: ["chromium", "Red Hat Mail", "https://mail.google.com/a/redhat.com"]
-    description: "Red Hat GMail"
-    icon: gmail
-    ifenveq: [XDG_SESSION_TYPE, x11]
+red-hat-mail:
+  binary: xdo-focus-a-tab
+  args: ["chromium", "Red Hat Mail", "https://mail.google.com/a/redhat.com"]
+  description: "Red Hat GMail"
+  icon: gmail
+  ifenveq: [XDG_SESSION_TYPE, x11]
 
-  # Wayland-only entry
-  screenshot-clipboard:
-    binary: sway-screenshot
-    args: [selection-clipboard]
-    description: "Screenshot to clipboard"
-    icon: screenshoticon
-    ifenvset: SWAYSOCK
+# Wayland-only entry
+screenshot-clipboard:
+  binary: sway-screenshot
+  args: [selection-clipboard]
+  description: "Screenshot to clipboard"
+  icon: screenshoticon
+  ifenvset: SWAYSOCK
 ```
 
 ### Optional Tools
 
-```yaml
-launchers:
-  emoji-picker:
-    binary: splatmoji
-    args: [copy]
-    description: "Emoji Picker"
-    icon: emoji
-    ifexist: splatmoji
+```yaml title="launchers.yaml"
+emoji-picker:
+  binary: splatmoji
+  args: [copy]
+  description: "Emoji Picker"
+  icon: emoji
+  ifexist: splatmoji
 
-  bpytop:
-    binary: kitty-ctrl
-    args: ["jump", "bpytop"]
-    description: "BpyTOP"
-    icon: bashtop
-    ifexist: bpytop
+bpytop:
+  binary: kitty-ctrl
+  args: ["jump", "bpytop"]
+  description: "BpyTOP"
+  icon: bashtop
+  ifexist: bpytop
 
-  start-kind:
-    binary: kitty-ctrl
-    args: ["jump", "-t", "Kind", "startkind"]
-    description: "Start Kind"
-    icon: kind-started
-    ifexist: kind
+start-kind:
+  binary: kitty-ctrl
+  args: ["jump", "-t", "Kind", "startkind"]
+  description: "Start Kind"
+  icon: kind-started
+  ifexist: kind
 ```
 
 ## Validation Logic
@@ -302,25 +288,23 @@ Even without conditions, Raffi automatically hides entries if:
 - `binary` doesn't exist in PATH (for non-script entries)
 - Script interpreter doesn't exist in PATH (for script entries)
 
-```yaml
+```yaml title="launchers.yaml"
 # Automatically hidden if firefox is not installed
-launchers:
-  firefox:
-    binary: firefox
-    description: "Firefox"
-    icon: firefox
+firefox:
+  binary: firefox
+  description: "Firefox"
+  icon: firefox
 ```
 
 ## Multiple Conditions
 
 Multiple conditions can be specified on a single entry. When present, they are AND-ed together — all conditions must pass for the entry to be shown.
 
-```yaml
+```yaml title="launchers.yaml"
 # Entry shown only on GNOME Wayland sessions
-launchers:
-  gnome-wayland-tool:
-    binary: my-tool
-    description: "Tool (GNOME on Wayland)"
-    ifenveq: [DESKTOP_SESSION, GNOME]
-    ifenvset: WAYLAND_DISPLAY
+gnome-wayland-tool:
+  binary: my-tool
+  description: "Tool (GNOME on Wayland)"
+  ifenveq: [DESKTOP_SESSION, GNOME]
+  ifenvset: WAYLAND_DISPLAY
 ```

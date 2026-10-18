@@ -1,15 +1,15 @@
 ---
 title: YAML Configuration Schema
-description: Complete reference for raffi.yaml configuration structure
+description: Complete reference for raffi.yaml and launchers.yaml
 ---
 
-Raffi uses a YAML configuration file to define launcher entries and settings. The default location is `~/.config/raffi/raffi.yaml`.
+Raffi reads settings from `~/.config/raffi/raffi.yaml` and launcher entries from `~/.config/raffi/launchers.yaml`.
 
 ## Top-Level Structure
 
-The configuration file consists of three main sections:
+`raffi.yaml` holds the settings:
 
-```yaml
+```yaml title="raffi.yaml"
 version: 1
 
 general:
@@ -17,14 +17,18 @@ general:
 
 addons:
   # Addon configurations (currency, calculator, etc.)
-
-# Entry definitions (each key becomes an entry)
-launchers:
-  entry_name:
-    binary: command
-    description: "Display name"
-    # ... other entry fields
 ```
+
+`launchers.yaml` holds the entries, one top-level key per entry:
+
+```yaml title="launchers.yaml"
+entry_name:
+  binary: command
+  description: "Display name"
+  # ... other entry fields
+```
+
+`raffi.yaml` may also contain the entries under a `launchers:` key. In that case `launchers.yaml` is ignored, so pick one place for them. `launchers.yaml` is used when `raffi.yaml` is missing or has no `launchers:` section.
 
 ## General Section
 
@@ -234,7 +238,7 @@ Custom color overrides for the native UI theme.
 
 ## Entry Fields
 
-Each key under `launchers` defines a launcher entry.
+Each top-level key in `launchers.yaml` (or each key under `launchers` in `raffi.yaml`) defines a launcher entry.
 
 **`binary`** `string` (optional)
 
@@ -242,11 +246,10 @@ The executable command to run.
 
   If the binary is not found in `$PATH`, the entry is automatically hidden.
 
-  ```yaml
-  launchers:
-    firefox:
-      binary: firefox
-      description: "Firefox Browser"
+  ```yaml title="launchers.yaml"
+  firefox:
+    binary: firefox
+    description: "Firefox Browser"
 
 ```
 
@@ -257,11 +260,10 @@ Display name shown in the launcher.
 
   If omitted, the entry key or binary name is used.
 
-  ```yaml
-  launchers:
-    firefox:
-      binary: firefox
-      description: "Firefox Browser"
+  ```yaml title="launchers.yaml"
+  firefox:
+    binary: firefox
+    description: "Firefox Browser"
 
 ```
 
@@ -272,12 +274,11 @@ Command-line arguments to pass to the binary.
 
   Supports tilde and environment variable expansion.
 
-  ```yaml
-  launchers:
-    firefox:
-      binary: firefox
-      args: ["--marionette", "--private-window"]
-      description: "Firefox Private"
+  ```yaml title="launchers.yaml"
+  firefox:
+    binary: firefox
+    args: ["--marionette", "--private-window"]
+    description: "Firefox Private"
 
 ```
 
@@ -286,12 +287,11 @@ Command-line arguments to pass to the binary.
 
 Icon name resolved from system icon directories (`$XDG_DATA_DIRS/icons`, `$XDG_DATA_DIRS/pixmaps`). Prefers larger icons (48×48+) as Raffi renders at 48×48. Supports PNG and SVG formats.
 
-  ```yaml
-  launchers:
-    firefox:
-      binary: firefox
-      icon: firefox
-      description: "Firefox"
+  ```yaml title="launchers.yaml"
+  firefox:
+    binary: firefox
+    icon: firefox
+    description: "Firefox"
 
 ```
 
@@ -304,20 +304,19 @@ Inline script content to execute.
 
   Script expansion (`~/` and `${VAR}`) is **not** performed on the script content itself.
 
-  ```yaml
-  launchers:
-    hello_script:
-      script: |
-        echo "Hello, world!"
-        date
-      description: "Hello Script"
+  ```yaml title="launchers.yaml"
+  hello_script:
+    script: |
+      echo "Hello, world!"
+      date
+    description: "Hello Script"
 
-    python_script:
-      binary: python3
-      script: |
-        import datetime
-        print(f"Current time: {datetime.datetime.now()}")
-      description: "Python Time"
+  python_script:
+    binary: python3
+    script: |
+      import datetime
+      print(f"Current time: {datetime.datetime.now()}")
+    description: "Python Time"
 
 ```
 
@@ -326,12 +325,11 @@ Inline script content to execute.
 
 Hide this entry from the launcher.
 
-  ```yaml
-  launchers:
-    experimental_feature:
-      binary: experimental
-      description: "Experimental Feature"
-      disabled: true
+  ```yaml title="launchers.yaml"
+  experimental_feature:
+    binary: experimental
+    description: "Experimental Feature"
+    disabled: true
 
 ```
 
@@ -340,13 +338,12 @@ Hide this entry from the launcher.
 
 Show the right-hand preview pane for this entry in the native UI, regardless of `general.show_preview`.
 
-  ```yaml
-  launchers:
-    deploy:
-      script: |
-        kubectl apply -f deploy.yaml
-      description: "Deploy"
-      show_preview: true
+  ```yaml title="launchers.yaml"
+  deploy:
+    script: |
+      kubectl apply -f deploy.yaml
+    description: "Deploy"
+    show_preview: true
 
 ```
 
@@ -361,12 +358,11 @@ Show entry only if an environment variable equals a specific value.
 
   Must be an array with exactly two elements: `[VARIABLE_NAME, expected_value]`
 
-  ```yaml
-  launchers:
-    gnome_settings:
-      binary: gnome-control-center
-      description: "Settings"
-      ifenveq: [DESKTOP_SESSION, GNOME]
+  ```yaml title="launchers.yaml"
+  gnome_settings:
+    binary: gnome-control-center
+    description: "Settings"
+    ifenveq: [DESKTOP_SESSION, GNOME]
 
 ```
 
@@ -375,12 +371,11 @@ Show entry only if an environment variable equals a specific value.
 
 Show entry only if the specified environment variable is set (to any value).
 
-  ```yaml
-  launchers:
-    wayland_tool:
-      binary: some-wayland-tool
-      description: "Wayland Tool"
-      ifenvset: WAYLAND_DISPLAY
+  ```yaml title="launchers.yaml"
+  wayland_tool:
+    binary: some-wayland-tool
+    description: "Wayland Tool"
+    ifenvset: WAYLAND_DISPLAY
 
 ```
 
@@ -389,12 +384,11 @@ Show entry only if the specified environment variable is set (to any value).
 
 Show entry only if the specified environment variable is **not** set.
 
-  ```yaml
-  launchers:
-    x11_only:
-      binary: some-x11-tool
-      description: "X11 Tool"
-      ifenvnotset: WAYLAND_DISPLAY
+  ```yaml title="launchers.yaml"
+  x11_only:
+    binary: some-x11-tool
+    description: "X11 Tool"
+    ifenvnotset: WAYLAND_DISPLAY
 
 ```
 
@@ -403,12 +397,11 @@ Show entry only if the specified environment variable is **not** set.
 
 Show entry only if the specified binary exists in `$PATH`.
 
-  ```yaml
-  launchers:
-    spotify:
-      binary: spotify
-      description: "Spotify"
-      ifexist: spotify
+  ```yaml title="launchers.yaml"
+  spotify:
+    binary: spotify
+    description: "Spotify"
+    ifexist: spotify
 
 ```
 
@@ -432,12 +425,16 @@ addons:
 
 ## Validation
 
-Raffi generates a JSON Schema for this format and keeps a copy named `raffi-schema.json` next to your config file. The copy is rewritten whenever it no longer matches the running version of Raffi.
+Raffi generates JSON Schemas for both files and keeps copies named `raffi-schema.json` and `launchers-schema.json` next to your config file. The copies are rewritten whenever they no longer match the running version of Raffi.
 
-Point your editor at it by adding this line at the top of `raffi.yaml` (supported by any editor using [yaml-language-server](https://github.com/redhat-developer/yaml-language-server)):
+Point your editor at them by adding this line at the top of each file (supported by any editor using [yaml-language-server](https://github.com/redhat-developer/yaml-language-server)):
 
-```yaml
+```yaml title="raffi.yaml"
 # yaml-language-server: $schema=raffi-schema.json
+```
+
+```yaml title="launchers.yaml"
+# yaml-language-server: $schema=launchers-schema.json
 ```
 
 Unknown keys (a typo such as `binnary:`) and wrong value types are then flagged while you edit.
@@ -445,10 +442,10 @@ Unknown keys (a typo such as `binnary:`) and wrong value types are then flagged 
 Raffi also validates the config every time it loads it. Problems are printed to stderr as warnings and Raffi keeps running, ignoring unknown keys as before:
 
 ```
-raffi: config warning: /home/user/.config/raffi/raffi.yaml:12: /launchers/firefox: Additional properties are not allowed ('binnary' was unexpected)
+raffi: config warning: /home/user/.config/raffi/launchers.yaml:12: /firefox: Additional properties are not allowed ('binnary' was unexpected)
 ```
 
-To check a config explicitly, for example in a script or after editing, run `raffi --check-config`. It prints all problems and exits with a non-zero status if any were found.
+To check a config explicitly, for example in a script or after editing, run `raffi --check-config`. It checks `raffi.yaml` and `launchers.yaml`, prints all problems and exits with a non-zero status if any were found.
 
 The startup warnings and `--check-config` need the `config-validation` Cargo feature, which is enabled by default. Minimal `--no-default-features` builds skip them, though the schema file is still written for your editor.
 
@@ -459,18 +456,17 @@ Most configuration fields (except `script`) support path and variable expansion:
 - `~/` expands to `$HOME`
 - `${VAR}` expands to the value of environment variable `VAR` (empty string if unset)
 
-```yaml
-launchers:
-  myapp:
-    binary: ${HOME}/bin/myapp
-    args: ["${XDG_DATA_HOME}/files", "~/Documents"]
-    icon: ~/icons/myapp.png
-    ifexist: ~/bin/myapp
+```yaml title="launchers.yaml"
+myapp:
+  binary: ${HOME}/bin/myapp
+  args: ["${XDG_DATA_HOME}/files", "~/Documents"]
+  icon: ~/icons/myapp.png
+  ifexist: ~/bin/myapp
 ```
 
 ## Complete Example
 
-```yaml
+```yaml title="raffi.yaml"
 version: 1
 
 general:
@@ -500,35 +496,36 @@ addons:
       keyword: "g"
       url: "https://google.com/search?q={query}"
       icon: "google"
+```
 
-launchers:
-  firefox:
-    binary: firefox
-    args: ["--marionette"]
-    icon: firefox
-    description: "Firefox Browser"
+```yaml title="launchers.yaml"
+firefox:
+  binary: firefox
+  args: ["--marionette"]
+  icon: firefox
+  description: "Firefox Browser"
 
-  thunder:
-    binary: thunar
-    args: ["~/Downloads/"]
-    description: "File Manager"
+thunder:
+  binary: thunar
+  args: ["~/Downloads/"]
+  description: "File Manager"
 
-  hello_script:
-    script: |
-      echo "Hello, world!"
-      date
-    description: "Hello Script"
-    icon: "script"
+hello_script:
+  script: |
+    echo "Hello, world!"
+    date
+  description: "Hello Script"
+  icon: "script"
 
-  gnome_settings:
-    binary: gnome-control-center
-    description: "System Settings"
-    icon: preferences-system
-    ifenveq: [DESKTOP_SESSION, GNOME]
+gnome_settings:
+  binary: gnome-control-center
+  description: "System Settings"
+  icon: preferences-system
+  ifenveq: [DESKTOP_SESSION, GNOME]
 
-  suspend:
-    binary: systemctl
-    args: [suspend]
-    description: "Suspend/Sleep"
-    icon: system-suspend
+suspend:
+  binary: systemctl
+  args: [suspend]
+  description: "Suspend/Sleep"
+  icon: system-suspend
 ```

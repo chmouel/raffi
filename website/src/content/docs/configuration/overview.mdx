@@ -5,44 +5,45 @@ description: Learn how to configure Raffi's launcher entries and settings
 
 import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
 
-## Configuration File Location
+## Configuration Files
 
-Raffi's configuration is stored in:
+Raffi reads two files from `$HOME/.config/raffi/`:
 
 ```
-$HOME/.config/raffi/raffi.yaml
+$HOME/.config/raffi/raffi.yaml       # general settings and addons
+$HOME/.config/raffi/launchers.yaml   # launcher entries
 ```
 
-You can override this location using the `-c` or `--configfile` flag:
+Keeping launchers in `launchers.yaml` is the recommended layout: the file you edit most stays short and free of settings, and `raffi.yaml` only holds what you rarely touch. Both files are optional. Raffi reads `launchers.yaml` when `raffi.yaml` is missing or has no `launchers:` section of its own; if `raffi.yaml` does define launchers, those win and `launchers.yaml` is ignored with a warning.
+
+You can override the location of `raffi.yaml` with the `-c` or `--configfile` flag. Raffi then looks for `launchers.yaml` in the same directory:
 
 ```bash
-raffi --configfile /path/to/custom/config.yaml
+raffi --configfile /path/to/custom/raffi.yaml
 ```
 
-Raffi writes a `raffi-schema.json` file next to your config so editors can validate it as you type, and warns on stderr about unknown or invalid keys when it starts. Run `raffi --check-config` to validate the file on demand. See [Validation](/reference/yaml-schema#validation) for details.
+Raffi writes `raffi-schema.json` and `launchers-schema.json` next to your config so editors can validate both files as you type, and warns on stderr about unknown or invalid keys when it starts. Run `raffi --check-config` to validate them on demand. See [Validation](/reference/yaml-schema#validation) for details.
 
 ## Basic Structure
 
-The configuration file is a YAML file with three main sections:
+`launchers.yaml` is a mapping of entry names to [entries](/configuration/entries). `raffi.yaml` has two main sections:
 
 1. **General settings** - UI preferences, theme, fonts, window dimensions
-2. **Entries** - Application launcher entries
-3. **Addons** - Optional features like script filters, web searches, text snippets
+2. **Addons** - Optional features like script filters, web searches, text snippets
 
 ### Minimal Example
 
-```yaml
-launchers:
-  firefox:
-    binary: firefox
-    args: [--marionette]
-    icon: firefox
-    description: Firefox browser with marionette enabled
+```yaml title="launchers.yaml"
+firefox:
+  binary: firefox
+  args: [--marionette]
+  icon: firefox
+  description: Firefox browser with marionette enabled
 ```
 
 ### Complete Structure
 
-```yaml
+```yaml title="raffi.yaml"
 version: 1
 
 # General settings (optional)
@@ -52,19 +53,6 @@ general:
   font_size: 20
   window_width: 800
   window_height: 600
-
-# Launcher entries
-launchers:
-  firefox:
-    binary: firefox
-    description: "Firefox"
-    icon: firefox
-    args: ["--marionette"]
-
-  terminal:
-    binary: kitty
-    description: "Terminal"
-    icon: terminal
 
 # Addons (optional)
 addons:
@@ -78,6 +66,32 @@ addons:
     - name: "Google"
       keyword: "g"
       url: "https://google.com/search?q={query}"
+```
+
+```yaml title="launchers.yaml"
+firefox:
+  binary: firefox
+  description: "Firefox"
+  icon: firefox
+  args: ["--marionette"]
+
+terminal:
+  binary: kitty
+  description: "Terminal"
+  icon: terminal
+```
+
+### Launchers Inside raffi.yaml
+
+A single file still works. Put the entries under a `launchers:` key in `raffi.yaml`, indented one level. The snippets in these docs are written for `launchers.yaml`; to use one in `raffi.yaml`, nest it under `launchers:`:
+
+```yaml title="raffi.yaml"
+version: 1
+
+launchers:
+  firefox:
+    binary: firefox
+    icon: firefox
 ```
 
 ## Configuration Sections
@@ -165,13 +179,12 @@ Most configuration fields support path expansion:
 - `${VAR}` expands to environment variable values
 - Unset variables expand to empty strings
 
-```yaml
-launchers:
-  myapp:
-    binary: ${HOME}/bin/myapp
-    args: ["${XDG_DATA_HOME}/files", "~/Documents"]
-    icon: ~/icons/myapp.png
-    ifexist: ~/bin/myapp
+```yaml title="launchers.yaml"
+myapp:
+  binary: ${HOME}/bin/myapp
+  args: ["${XDG_DATA_HOME}/files", "~/Documents"]
+  icon: ~/icons/myapp.png
+  ifexist: ~/bin/myapp
 ```
 
 <Aside type="note">

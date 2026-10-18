@@ -19,33 +19,31 @@ This guide will help you configure and launch your first application with Raffi.
 <Steps>
 1. **Create the config directory**
 
-   Raffi looks for its configuration at `~/.config/raffi/raffi.yaml`. Create the directory:
+   Raffi reads its configuration from `~/.config/raffi/`. Create the directory:
 
    ```bash
    mkdir -p ~/.config/raffi
    ```
 
-2. **Create a basic configuration file**
+2. **Add your launchers**
 
-   Create `~/.config/raffi/raffi.yaml` with a simple entry:
+   Create `~/.config/raffi/launchers.yaml` with a few entries. Each key is an entry name:
 
-   ```yaml
-   version: 1
-   launchers:
-     firefox:
-       binary: firefox
-       icon: firefox
-       description: Firefox Web Browser
+   ```yaml title="launchers.yaml"
+   firefox:
+     binary: firefox
+     icon: firefox
+     description: Firefox Web Browser
 
-     terminal:
-       binary: kitty
-       icon: kitty
-       description: Kitty Terminal
+   terminal:
+     binary: kitty
+     icon: kitty
+     description: Kitty Terminal
 
-     file_manager:
-       binary: nautilus
-       icon: folder
-       description: File Manager
+   file_manager:
+     binary: nautilus
+     icon: folder
+     description: File Manager
    ```
 
 3. **Test your configuration**
@@ -170,41 +168,38 @@ Raffi can execute inline scripts with any interpreter:
 
 <Tabs>
 <TabItem label="Bash Script">
-```yaml
-launchers:
-  hello_script:
-    script: |
-      echo "Hello from Bash!"
-      notify-send "Raffi" "Script executed successfully"
-    description: "Hello Script"
-    icon: "script"
+```yaml title="launchers.yaml"
+hello_script:
+  script: |
+    echo "Hello from Bash!"
+    notify-send "Raffi" "Script executed successfully"
+  description: "Hello Script"
+  icon: "script"
 ```
 </TabItem>
 <TabItem label="Python Script">
-```yaml
-launchers:
-  check_disk:
-    binary: python3
-    script: |
-      import shutil
-      usage = shutil.disk_usage("/")
-      percent = (usage.used / usage.total) * 100
-      print(f"Disk usage: {percent:.1f}%")
-    description: "Check Disk Usage"
-    icon: "drive-harddisk"
+```yaml title="launchers.yaml"
+check_disk:
+  binary: python3
+  script: |
+    import shutil
+    usage = shutil.disk_usage("/")
+    percent = (usage.used / usage.total) * 100
+    print(f"Disk usage: {percent:.1f}%")
+  description: "Check Disk Usage"
+  icon: "drive-harddisk"
 ```
 </TabItem>
 <TabItem label="Node.js Script">
-```yaml
-launchers:
-  node_example:
-    binary: node
-    script: |
-      const os = require('os');
-      console.log(`Hostname: ${os.hostname()}`);
-      console.log(`Platform: ${os.platform()}`);
-    description: "System Info (Node)"
-    icon: "nodejs"
+```yaml title="launchers.yaml"
+node_example:
+  binary: node
+  script: |
+    const os = require('os');
+    console.log(`Hostname: ${os.hostname()}`);
+    console.log(`Platform: ${os.platform()}`);
+  description: "System Info (Node)"
+  icon: "nodejs"
 ```
 </TabItem>
 </Tabs>
@@ -373,19 +368,18 @@ wiki rust programming
   <details>
 <summary>Launch applications with custom arguments</summary>
 
-    ```yaml
-    launchers:
-      firefox_private:
-        binary: firefox
-        args: [--private-window]
-        icon: firefox
-        description: Firefox Private Window
+    ```yaml title="launchers.yaml"
+    firefox_private:
+      binary: firefox
+      args: [--private-window]
+      icon: firefox
+      description: Firefox Private Window
 
-      code_workspace:
-        binary: code
-        args: [~/projects/myapp]
-        icon: vscode
-        description: Open MyApp in VS Code
+    code_workspace:
+      binary: code
+      args: [~/projects/myapp]
+      icon: vscode
+      description: Open MyApp in VS Code
 
 ```
   </details>
@@ -393,25 +387,24 @@ wiki rust programming
   <details>
 <summary>Conditional entries (show only when available)</summary>
 
-    ```yaml
-    launchers:
-      gnome_tweaks:
-        binary: gnome-tweaks
-        description: GNOME Tweaks
-        icon: gnome-tweak-tool
-        ifenveq: [DESKTOP_SESSION, GNOME]
+    ```yaml title="launchers.yaml"
+    gnome_tweaks:
+      binary: gnome-tweaks
+      description: GNOME Tweaks
+      icon: gnome-tweak-tool
+      ifenveq: [DESKTOP_SESSION, GNOME]
 
-      wayland_only_app:
-        binary: my-wayland-app
-        description: Wayland App
-        icon: wayland
-        ifenvset: WAYLAND_DISPLAY
+    wayland_only_app:
+      binary: my-wayland-app
+      description: Wayland App
+      icon: wayland
+      ifenvset: WAYLAND_DISPLAY
 
-      docker_compose:
-        binary: docker-compose
-        description: Docker Compose
-        icon: docker
-        ifexist: docker-compose
+    docker_compose:
+      binary: docker-compose
+      description: Docker Compose
+      icon: docker
+      ifexist: docker-compose
 
 ```
   </details>
@@ -419,14 +412,13 @@ wiki rust programming
   <details>
 <summary>Path expansion and environment variables</summary>
 
-    ```yaml
-    launchers:
-      custom_script:
-        binary: ${HOME}/bin/my-script
-        args: ["${XDG_DATA_HOME}/files", "~/Documents"]
-        icon: ~/icons/custom.png
-        description: My Custom Script
-        ifexist: ~/bin/my-script
+    ```yaml title="launchers.yaml"
+    custom_script:
+      binary: ${HOME}/bin/my-script
+      args: ["${XDG_DATA_HOME}/files", "~/Documents"]
+      icon: ~/icons/custom.png
+      description: My Custom Script
+      ifexist: ~/bin/my-script
 
 ```
   </details>
@@ -434,25 +426,24 @@ wiki rust programming
   <details>
 <summary>System actions</summary>
 
-    ```yaml
-    launchers:
-      lock_screen:
-        binary: swaylock
-        args: [-f, -c, "000000"]
-        icon: system-lock-screen
-        description: Lock Screen
+    ```yaml title="launchers.yaml"
+    lock_screen:
+      binary: swaylock
+      args: [-f, -c, "000000"]
+      icon: system-lock-screen
+      description: Lock Screen
 
-      suspend:
-        binary: systemctl
-        args: [suspend]
-        icon: system-suspend
-        description: Suspend to RAM
+    suspend:
+      binary: systemctl
+      args: [suspend]
+      icon: system-suspend
+      description: Suspend to RAM
 
-      poweroff:
-        binary: systemctl
-        args: [poweroff]
-        icon: system-shutdown
-        description: Power Off
+    poweroff:
+      binary: systemctl
+      args: [poweroff]
+      icon: system-shutdown
+      description: Power Off
 
 ```
   </details>

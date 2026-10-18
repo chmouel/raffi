@@ -1122,7 +1122,7 @@ pub struct ParsedConfig {
 }
 
 /// Represents the top-level configuration structure (v1 format).
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct Config {
     #[serde(default)]
     #[allow(dead_code)]
@@ -1716,21 +1716,30 @@ fn format_config_problem(source: &str, problem: &ConfigProblem) -> String {
 fn report_config_warnings(raw: &Value, text: &str, v0: bool, source: &str) {
     let mut problems = validate_config_value(raw);
     locate_config_problems(&mut problems, text, v0);
-    for problem in &problems {
+    print_config_warnings(&problems, source);
+}
+
+fn print_config_warnings(problems: &[ConfigProblem], source: &str) {
+    for problem in problems {
         let problem = format_config_problem(source, problem);
         debug_log!("config warning: {problem}");
         eprintln!("raffi: config warning: {problem}");
     }
 }
 
-/// Check a config file without running raffi or rewriting the file.
-/// Returns the list of problems found; empty means the config is valid.
-pub fn check_config(filename: &str) -> Result<Vec<ConfigProblem>> {
+fn ensure_config_validation() -> Result<()> {
     if !cfg!(feature = "config-validation") {
         anyhow::bail!(
             "config validation is not available in this build; rebuild with the `config-validation` feature"
         );
     }
+    Ok(())
+}
+
+/// Check a config file without running raffi or rewriting the file.
+/// Returns the list of problems found; empty means the config is valid.
+pub fn check_config(filename: &str) -> Result<Vec<ConfigProblem>> {
+    ensure_config_validation()?;
     let contents =
         fs::read_to_string(filename).context(format!("cannot open config file {filename}"))?;
     let mut raw: Value = serde_yaml::from_str(&contents).context("cannot parse config as YAML")?;
@@ -1768,9 +1777,80 @@ pub fn read_config(filename: &str, args: &Args) -> Result<ParsedConfig> {
         report_config_warnings(&raw, &contents, false, filename);
     }
 
-    let config: Config = serde_yaml::from_value(raw).context("cannot parse config")?;
+    let mut config: Config = serde_yaml::from_value(raw).context("cannot parse config")?;
+    let launchers_path = launchers_file_for(filename);
+    if launchers_path.exists() {
+        if config.launchers.is_empty() {
+            config.launchers = read_launchers_file(&launchers_path)?;
+        } else {
+            eprintln!(
+                "raffi: ignoring {} because {filename} already defines launchers",
+                launchers_path.display()
+            );
+        }
+    }
 
     process_config(config, args)
+}
+
+/// Path of the standalone launchers file that sits next to `configfile`.
+fn launchers_file_for(configfile: &str) -> PathBuf {
+    Path::new(configfile)
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join("launchers.yaml")
+}
+
+/// Parse a launchers file, a mapping of launcher names to entries, and wrap
+/// it as a v1 config so it can be checked against the main schema.
+fn parse_launchers_file(path: &Path) -> Result<(String, Value)> {
+    let contents = fs::read_to_string(path)
+        .context(format!("cannot open launchers file {}", path.display()))?;
+    let launchers: Value =
+        serde_yaml::from_str(&contents).context("cannot parse launchers file as YAML")?;
+    let launchers = if launchers.is_null() {
+        Value::Mapping(serde_yaml::Mapping::new())
+    } else {
+        launchers
+    };
+    let mut wrapped = serde_yaml::Mapping::new();
+    wrapped.insert(Value::String("version".to_string()), Value::from(1u64));
+    wrapped.insert(Value::String("launchers".to_string()), launchers);
+    Ok((contents, Value::Mapping(wrapped)))
+}
+
+/// Validate a wrapped launchers file, reporting paths relative to the file itself.
+fn launchers_file_problems(contents: &str, wrapped: &Value) -> Vec<ConfigProblem> {
+    let mut problems = validate_config_value(wrapped);
+    locate_config_problems(&mut problems, contents, true);
+    for problem in &mut problems {
+        if let Some(rest) = problem.path.strip_prefix("/launchers") {
+            problem.path = if rest.is_empty() { "/" } else { rest }.to_string();
+        }
+    }
+    problems
+}
+
+fn read_launchers_file(path: &Path) -> Result<HashMap<String, Value>> {
+    let (contents, wrapped) = parse_launchers_file(path)?;
+    let problems = launchers_file_problems(&contents, &wrapped);
+    print_config_warnings(&problems, &path.display().to_string());
+    let config: Config = serde_yaml::from_value(wrapped)
+        .context(format!("cannot parse launchers file {}", path.display()))?;
+    Ok(config.launchers)
+}
+
+/// Check a launchers file without running raffi.
+pub fn check_launchers_file(path: &Path) -> Result<Vec<ConfigProblem>> {
+    ensure_config_validation()?;
+    let (contents, wrapped) = parse_launchers_file(path)?;
+    let mut problems = launchers_file_problems(&contents, &wrapped);
+    if problems.is_empty() {
+        if let Err(e) = serde_yaml::from_value::<Config>(wrapped) {
+            problems.push(ConfigProblem::new("/", e.to_string()));
+        }
+    }
+    Ok(problems)
 }
 
 /// Read config from a reader, accepting both v0 (flat) and v1 (launchers) formats.
@@ -2381,8 +2461,10 @@ pub(crate) fn resolve_launcher_icon_path(
 }
 
 fn no_valid_config_message(configfile: &str) -> String {
+    let launchers = launchers_file_for(configfile);
     format!(
-        "No valid launchers found.\nChecked: {configfile}\nExpected a YAML config using `version: 1` and a `launchers:` section.\nYou can copy `examples/raffi.yaml` as a starting point, or install desktop applications so Raffi can auto-detect them."
+        "No valid launchers found.\nChecked: {configfile} and {}\nDefine launchers in launchers.yaml next to raffi.yaml, or in a `launchers:` section of raffi.yaml.\nYou can copy `examples/launchers.yaml` as a starting point, or install desktop applications so Raffi can auto-detect them.",
+        launchers.display()
     )
 }
 
@@ -2562,9 +2644,14 @@ fn generate_schema() -> String {
     serde_json::to_string_pretty(&schema).expect("Failed to serialize JSON Schema")
 }
 
-/// Write the JSON Schema to `schema_path` when missing or out of date.
-fn write_schema_if_changed(schema_path: &Path) {
-    let schema = generate_schema();
+/// JSON Schema for `launchers.yaml`, a mapping of launcher names to entries.
+fn generate_launchers_schema() -> String {
+    let schema = schemars::schema_for!(HashMap<String, RaffiConfig>);
+    serde_json::to_string_pretty(&schema).expect("Failed to serialize JSON Schema")
+}
+
+/// Write `schema` to `schema_path` when missing or out of date.
+fn write_schema_if_changed(schema_path: &Path, schema: &str) {
     if fs::read_to_string(schema_path).is_ok_and(|current| current == schema) {
         return;
     }
@@ -2612,25 +2699,51 @@ pub fn run(args: Args) -> Result<()> {
     let configfile = args.configfile.as_deref().unwrap_or(&default_config_path);
     debug_log!("config: using file {configfile}");
     let config_exists = Path::new(configfile).exists();
+    let launchers_path = launchers_file_for(configfile);
 
     if args.check_config {
-        let problems = check_config(configfile)?;
-        if problems.is_empty() {
-            println!("{configfile}: config OK");
-            return Ok(());
+        let mut checks = Vec::new();
+        if config_exists || !launchers_path.exists() {
+            checks.push((configfile.to_string(), check_config(configfile)?));
         }
-        for problem in &problems {
-            eprintln!("{}", format_config_problem(configfile, problem));
+        if launchers_path.exists() {
+            checks.push((
+                launchers_path.display().to_string(),
+                check_launchers_file(&launchers_path)?,
+            ));
         }
-        anyhow::bail!("{} problem(s) found in {configfile}", problems.len());
+        let mut count = 0;
+        for (source, problems) in &checks {
+            if problems.is_empty() {
+                println!("{source}: config OK");
+            }
+            for problem in problems {
+                eprintln!("{}", format_config_problem(source, problem));
+            }
+            count += problems.len();
+        }
+        if count > 0 {
+            anyhow::bail!("{count} problem(s) found");
+        }
+        return Ok(());
     }
 
-    // Keep the schema file next to the config in sync with this binary
+    // Keep the schema files next to the config in sync with this binary
     let config_dir = Path::new(configfile).parent().unwrap_or(Path::new("."));
-    write_schema_if_changed(&config_dir.join("raffi-schema.json"));
+    write_schema_if_changed(&config_dir.join("raffi-schema.json"), &generate_schema());
+    write_schema_if_changed(
+        &config_dir.join("launchers-schema.json"),
+        &generate_launchers_schema(),
+    );
 
     let mut parsed_config = if config_exists {
         read_config(configfile, &args).context("Failed to read config")?
+    } else if launchers_path.exists() {
+        let config = Config {
+            launchers: read_launchers_file(&launchers_path)?,
+            ..Config::default()
+        };
+        process_config(config, &args)?
     } else {
         ParsedConfig {
             general: GeneralConfig::default(),
@@ -4854,6 +4967,47 @@ launchers:
     }
 
     #[test]
+    #[cfg(feature = "config-validation")]
+    fn test_check_launchers_file() {
+        let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/launchers.yaml");
+        assert_eq!(check_launchers_file(&example).unwrap(), Vec::new());
+
+        let dir = temp_test_dir("check-launchers-file");
+        let path = dir.join("launchers.yaml");
+        fs::write(&path, "ff:\n  binary: firefox\n  ifexist: 1\n").unwrap();
+        let problems = check_launchers_file(&path).unwrap();
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert_eq!(problems[0].path, "/ff/ifexist");
+        assert_eq!(problems[0].line, Some(3));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_read_config_uses_launchers_file() {
+        let dir = temp_test_dir("launchers-file");
+        let config = dir.join("raffi.yaml");
+        let config = config.to_str().unwrap();
+        fs::write(dir.join("launchers.yaml"), "from-file:\n  binary: sh\n").unwrap();
+        let args = Args::parse_args_default::<&str>(&[]).unwrap();
+
+        fs::write(config, "version: 1\ngeneral:\n  theme: light\n").unwrap();
+        let parsed = read_config(config, &args).unwrap();
+        assert_eq!(parsed.general.theme.as_deref(), Some("light"));
+        assert_eq!(parsed.entries.len(), 1);
+        assert_eq!(parsed.entries[0].binary.as_deref(), Some("sh"));
+
+        fs::write(
+            config,
+            "version: 1\nlaunchers:\n  inline:\n    binary: sh\n    description: inline\n",
+        )
+        .unwrap();
+        let parsed = read_config(config, &args).unwrap();
+        assert_eq!(parsed.entries.len(), 1);
+        assert_eq!(parsed.entries[0].description.as_deref(), Some("inline"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn test_unknown_keys_still_load() {
         let config = "version: 1\nlaunchers:\n  sh:\n    binary: sh\n    binnary: typo\n";
         let args = Args::parse_args_default::<&str>(&[]).unwrap();
@@ -4883,11 +5037,11 @@ launchers:
         let dir = temp_test_dir("schema-refresh");
         let path = dir.join("raffi-schema.json");
 
-        write_schema_if_changed(&path);
+        write_schema_if_changed(&path, &generate_schema());
         assert_eq!(fs::read_to_string(&path).unwrap(), generate_schema());
 
         fs::write(&path, "{}").unwrap();
-        write_schema_if_changed(&path);
+        write_schema_if_changed(&path, &generate_schema());
         assert_eq!(fs::read_to_string(&path).unwrap(), generate_schema());
         let _ = fs::remove_dir_all(dir);
     }
