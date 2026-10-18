@@ -1242,8 +1242,10 @@ struct Config {
     general: GeneralConfig,
     #[serde(default)]
     addons: AddonsConfig,
+    /// A YAML mapping rather than a HashMap so launchers keep their file
+    /// order, which breaks ties in the usage sort.
     #[serde(default)]
-    launchers: HashMap<String, Value>,
+    launchers: serde_yaml::Mapping,
 }
 
 /// Public schema representation of the v1 config format, used for JSON Schema generation.
@@ -1951,7 +1953,7 @@ fn launchers_file_problems(contents: &str, wrapped: &Value) -> Vec<ConfigProblem
     problems
 }
 
-fn read_launchers_file(path: &Path) -> Result<HashMap<String, Value>> {
+fn read_launchers_file(path: &Path) -> Result<serde_yaml::Mapping> {
     let (contents, wrapped) = parse_launchers_file(path)?;
     let problems = launchers_file_problems(&contents, &wrapped);
     print_config_warnings(&problems, &path.display().to_string());
@@ -3514,6 +3516,27 @@ mod tests {
         for expected_config in &expected_configs {
             assert!(parsed_config.entries.contains(expected_config));
         }
+    }
+
+    #[test]
+    fn test_read_config_keeps_launcher_file_order() {
+        let names = [
+            "zulu", "alpha", "mike", "bravo", "yankee", "charlie", "xray", "delta", "whiskey",
+            "echo",
+        ];
+        let launchers: String = names
+            .iter()
+            .map(|name| format!("  {name}:\n    script: \"true\"\n    description: \"{name}\"\n"))
+            .collect();
+        let yaml_config = format!("version: 1\nlaunchers:\n{launchers}");
+        let parsed_config =
+            read_config_from_reader(Cursor::new(yaml_config), &Args::default()).unwrap();
+        let descriptions: Vec<_> = parsed_config
+            .entries
+            .iter()
+            .map(|entry| entry.description.as_deref().unwrap_or_default())
+            .collect();
+        assert_eq!(descriptions, names);
     }
 
     #[test]

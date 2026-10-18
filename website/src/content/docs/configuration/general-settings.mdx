@@ -132,6 +132,8 @@ Controls how launcher entries, [text snippets](/features/text-snippets/#snippet-
   - `recency` - Sort by last-used time (most recently used first)
   - `hybrid` - Combined score: 40% frequency + 60% recency (default)
 
+  Launchers you have never used, or that tie, keep the order they have in your config file.
+
   The MRU cache at `~/.cache/raffi/mru.cache` stores both launch counts and timestamps. Existing caches using the old format are migrated automatically on next use. Snippet use is kept separately in `~/.cache/raffi/snippets.cache`, and password entry use in `~/.cache/raffi/vault.cache`.
 
 
