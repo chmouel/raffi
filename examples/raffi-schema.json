@@ -1304,7 +1304,7 @@
           "default": true
         },
         "kitty_socket": {
-          "description": "kitty remote control address, such as `unix:/tmp/mykitty`, as given\nto kitty's `listen_on`. Read from kitty.conf when unset.",
+          "description": "kitty remote control address, such as\n`unix:${XDG_RUNTIME_DIR}/kitty`, as given to kitty's `listen_on`.\nRead from kitty.conf when unset.",
           "type": [
             "string",
             "null"

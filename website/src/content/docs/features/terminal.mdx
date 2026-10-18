@@ -56,9 +56,12 @@ The same terminal opens desktop apps marked `Terminal=true` when
 When the terminal found above is kitty or WezTerm and one is already
 running, the command opens in a new tab of it instead of a new window, and
 Raffi brings its window to the front on Hyprland, sway and niri. The row
-then reads "in a new kitty tab". When no instance is running, or the tab
-cannot be opened, a new window opens as usual. The tab starts in the
-directory Raffi was started from.
+then reads "in a new kitty tab". Raffi first asks the terminal, without
+changing anything, whether it accepts remote commands. When no instance is
+running or it does not answer that, a new window opens as usual. Once the
+tab has been asked for, a failure is reported and nothing else opens, since
+the tab may have opened anyway. The tab starts in the directory Raffi was
+started from.
 
 This only applies when the terminal is picked as kitty or WezTerm. With
 `xdg-terminal-exec` installed, set `command: [kitty]` or
@@ -69,17 +72,22 @@ kitty needs remote control turned on, with a socket, in `kitty.conf`:
 
 ```
 allow_remote_control socket-only
-listen_on unix:/tmp/mykitty
+listen_on unix:${XDG_RUNTIME_DIR}/kitty
 ```
 
 Raffi reads `listen_on` from `kitty.conf` (not from files it `include`s) and
-finds the newest kitty listening there. Set `kitty_socket` to the same value
-when kitty gets its address elsewhere, such as from `--listen-on`. When
-Raffi itself runs inside kitty, that kitty is used.
+finds the newest of your kitty processes listening there. A socket another
+user created under the same name is ignored. Only Unix sockets are used: a
+`tcp:` address opens a window. Set `kitty_socket` to the same value when
+kitty gets its address elsewhere, such as from `--listen-on`. When Raffi
+itself runs inside kitty, that kitty is used, with the same checks.
 
 WezTerm needs nothing: Raffi finds the newest running WezTerm through its
 socket under `$XDG_RUNTIME_DIR/wezterm`, and the tab opens in the window
-that last had focus.
+that last had focus. When WezTerm does not know which window that is, the
+tab goes to the first window `wezterm cli list` shows. Raffi only brings
+WezTerm to the front when it has a single window, since WezTerm titles its
+windows its own way.
 
 ## As a fallback
 

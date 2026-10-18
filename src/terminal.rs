@@ -146,32 +146,31 @@ pub fn tab_kind(prefix: &[String]) -> Option<TabKind> {
 pub fn find_tab_target(prefix: &[String], kitty_socket: Option<&str>) -> Option<TabTarget> {
     let kind = tab_kind(prefix)?;
     let env = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
-    if kind == TabKind::Kitty {
-        if let Some(socket) = env("KITTY_LISTEN_ON") {
-            let pid = env("KITTY_PID").and_then(|pid| pid.parse().ok());
-            return Some(TabTarget { kind, socket, pid });
-        }
-    }
     let sockets = std::fs::read_to_string("/proc/net/unix")
-        .map(|table| unix_socket_paths(&table))
+        .map(|table| unix_sockets(&table))
         .unwrap_or_default();
     let target = match kind {
         TabKind::Kitty => {
-            let address = match kitty_socket {
-                Some(address) => address.to_string(),
-                None => {
-                    let dir = env("KITTY_CONFIG_DIRECTORY")
-                        .or_else(|| env("XDG_CONFIG_HOME").map(|dir| format!("{dir}/kitty")))
-                        .or_else(|| env("HOME").map(|home| format!("{home}/.config/kitty")))?;
-                    let conf = std::fs::read_to_string(format!("{dir}/kitty.conf")).ok()?;
-                    kitty_listen_on(&conf)?
-                }
-            };
-            let home = env("HOME").unwrap_or_default();
-            let address = expand_kitty_address(&address, &env, &home, &std::env::temp_dir());
-            kitty_target(&address, &sockets, process_start_time)
+            if let Some(address) = env("KITTY_LISTEN_ON") {
+                let pid = env("KITTY_PID").and_then(|pid| pid.parse().ok());
+                inherited_kitty(&address, pid, &sockets, &Proc)
+            } else {
+                let address = match kitty_socket {
+                    Some(address) => address.to_string(),
+                    None => {
+                        let dir = env("KITTY_CONFIG_DIRECTORY")
+                            .or_else(|| env("XDG_CONFIG_HOME").map(|dir| format!("{dir}/kitty")))
+                            .or_else(|| env("HOME").map(|home| format!("{home}/.config/kitty")))?;
+                        let conf = std::fs::read_to_string(format!("{dir}/kitty.conf")).ok()?;
+                        kitty_listen_on(&conf)?
+                    }
+                };
+                let home = env("HOME").unwrap_or_default();
+                let address = expand_kitty_address(&address, &env, &home, &std::env::temp_dir());
+                kitty_target(&address, &sockets, &Proc)
+            }
         }
-        TabKind::WezTerm => wezterm_target(&env("XDG_RUNTIME_DIR")?, &sockets, process_start_time),
+        TabKind::WezTerm => wezterm_target(&env("XDG_RUNTIME_DIR")?, &sockets, &Proc),
     };
     crate::debug_log!("terminal: tab target {target:?}");
     target
@@ -212,31 +211,83 @@ pub fn tab_argv(
     argv
 }
 
-/// For a WezTerm [`tab_argv`], the command line listing its panes as JSON.
-pub fn wezterm_list_argv(tab: &[String]) -> Option<Vec<String>> {
-    let spawn = tab.iter().position(|arg| arg == "spawn")?;
-    let mut argv = tab[..spawn].to_vec();
-    argv.extend(["list", "--format", "json"].map(str::to_string));
+/// The part of a [`tab_argv`] before `verb` (`launch` or `spawn`),
+/// followed by `args`: another remote control command for the same
+/// instance.
+fn remote_argv(tab: &[String], verb: &str, args: &[&str]) -> Option<Vec<String>> {
+    let at = tab.iter().position(|arg| arg == verb)?;
+    let mut argv = tab[..at].to_vec();
+    argv.extend(args.iter().map(|arg| arg.to_string()));
     Some(argv)
 }
 
-/// The WezTerm `tab` command line naming the first window of `list`, the
-/// output of [`wezterm_list_argv`]. Without it, WezTerm fails when it
-/// cannot tell which window has focus.
-pub fn wezterm_spawn_in_window(tab: &[String], list: &[u8]) -> Option<Vec<String>> {
+/// For a kitty [`tab_argv`], a read-only command that only succeeds when
+/// the instance answers remote control.
+pub fn kitty_check_argv(tab: &[String]) -> Option<Vec<String>> {
+    remote_argv(tab, "launch", &["ls"])
+}
+
+/// For a WezTerm [`tab_argv`], the command line listing its panes as JSON.
+pub fn wezterm_list_argv(tab: &[String]) -> Option<Vec<String>> {
+    remote_argv(tab, "spawn", &["list", "--format", "json"])
+}
+
+/// For a WezTerm [`tab_argv`], the command line listing its clients, with
+/// the pane each has focused, as JSON.
+pub fn wezterm_clients_argv(tab: &[String]) -> Option<Vec<String>> {
+    remote_argv(tab, "spawn", &["list-clients", "--format", "json"])
+}
+
+/// The WezTerm `tab` command line naming where the tab goes, so WezTerm
+/// does not have to guess: next to the pane focused most recently in
+/// `clients` (from [`wezterm_clients_argv`]), else in the first window of
+/// `list` (from [`wezterm_list_argv`]).
+pub fn wezterm_spawn_argv(
+    tab: &[String],
+    clients: Option<&[u8]>,
+    list: &[u8],
+) -> Option<Vec<String>> {
+    #[derive(serde::Deserialize)]
+    struct Idle {
+        secs: u64,
+        nanos: u32,
+    }
+    #[derive(serde::Deserialize)]
+    struct Client {
+        focused_pane_id: Option<u64>,
+        idle_time: Option<Idle>,
+    }
     #[derive(serde::Deserialize)]
     struct Pane {
         window_id: u64,
     }
-    let window = serde_json::from_slice::<Vec<Pane>>(list)
-        .ok()?
-        .first()?
-        .window_id;
+    let focused = clients
+        .and_then(|clients| serde_json::from_slice::<Vec<Client>>(clients).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|client| {
+            let idle = client
+                .idle_time
+                .map_or((u64::MAX, 0), |idle| (idle.secs, idle.nanos));
+            Some((idle, client.focused_pane_id?))
+        })
+        .min_by_key(|(idle, _)| *idle)
+        .map(|(_, pane)| ("--pane-id", pane));
+    let place = match focused {
+        Some(place) => place,
+        None => (
+            "--window-id",
+            serde_json::from_slice::<Vec<Pane>>(list)
+                .ok()?
+                .first()?
+                .window_id,
+        ),
+    };
     let spawn = tab.iter().position(|arg| arg == "spawn")?;
     let mut argv = tab.to_vec();
     argv.splice(
         spawn + 1..spawn + 1,
-        ["--window-id".to_string(), window.to_string()],
+        [place.0.to_string(), place.1.to_string()],
     );
     Some(argv)
 }
@@ -304,50 +355,118 @@ fn expand_vars(value: &str, env: &impl Fn(&str) -> Option<String>) -> String {
     out
 }
 
-/// The paths of the Unix sockets in `/proc/net/unix`, abstract ones
-/// starting with `@`.
-fn unix_socket_paths(table: &str) -> Vec<String> {
-    let mut paths: Vec<String> = table
-        .lines()
-        .skip(1)
-        .filter_map(|line| line.split_whitespace().nth(7).map(str::to_string))
-        .collect();
-    paths.sort();
-    paths.dedup();
-    paths
+/// A Unix socket from `/proc/net/unix`: its path, abstract ones starting
+/// with `@`, and its inode.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UnixSocket {
+    path: String,
+    inode: u64,
 }
 
-/// The live kitty listening on `address`: kitty adds `-<pid>` to it, or
-/// puts the pid in place of `{kitty_pid}`. The newest instance wins; an
-/// exact match is used when no pid is found.
+fn unix_sockets(table: &str) -> Vec<UnixSocket> {
+    table
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            Some(UnixSocket {
+                path: fields.get(7)?.to_string(),
+                inode: fields.get(6)?.parse().ok()?,
+            })
+        })
+        .collect()
+}
+
+/// What tab discovery needs to know about processes and socket files.
+trait Processes {
+    /// When `pid` started, in clock ticks since boot; `None` once it is gone.
+    fn start_time(&self, pid: u32) -> Option<u64>;
+    /// Whether `pid` is one of ours and holds socket `inode` open.
+    fn holds(&self, pid: u32, inode: u64) -> bool;
+    /// Whether the socket file `path` belongs to us.
+    fn owns(&self, path: &str) -> bool;
+}
+
+struct Proc;
+
+impl Processes for Proc {
+    fn start_time(&self, pid: u32) -> Option<u64> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        // The command name may hold spaces and parentheses; the fields
+        // after its closing parenthesis start at the third one.
+        stat.rsplit_once(')')?
+            .1
+            .split_whitespace()
+            .nth(19)?
+            .parse()
+            .ok()
+    }
+
+    fn holds(&self, pid: u32, inode: u64) -> bool {
+        // Only the fds of our own processes can be listed, so this also
+        // checks that `pid` is ours.
+        let target = format!("socket:[{inode}]");
+        std::fs::read_dir(format!("/proc/{pid}/fd")).is_ok_and(|fds| {
+            fds.flatten().any(|fd| {
+                std::fs::read_link(fd.path()).is_ok_and(|link| link.as_os_str() == &*target)
+            })
+        })
+    }
+
+    fn owns(&self, path: &str) -> bool {
+        use std::os::unix::fs::{FileTypeExt, MetadataExt};
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        let uid = unsafe { libc::geteuid() };
+        std::fs::symlink_metadata(path)
+            .is_ok_and(|meta| meta.file_type().is_socket() && meta.uid() == uid)
+    }
+}
+
+/// The kitty Raffi runs inside, from its `$KITTY_LISTEN_ON` and
+/// `$KITTY_PID`, checked like a discovered one.
+fn inherited_kitty(
+    address: &str,
+    pid: Option<u32>,
+    sockets: &[UnixSocket],
+    procs: &impl Processes,
+) -> Option<TabTarget> {
+    let path = address.strip_prefix("unix:")?;
+    let trusted = match pid {
+        Some(pid) => sockets
+            .iter()
+            .any(|socket| socket.path == path && procs.holds(pid, socket.inode)),
+        None => !path.starts_with('@') && procs.owns(path),
+    };
+    trusted.then(|| TabTarget {
+        kind: TabKind::Kitty,
+        socket: address.to_string(),
+        pid,
+    })
+}
+
+/// The live kitty of ours listening on `address`: kitty adds `-<pid>` to
+/// it, or puts the pid in place of `{kitty_pid}`. The newest instance wins;
+/// an exact match on a socket file we own is used when no pid is found.
+/// Other addresses, such as TCP, cannot be checked and are not used.
 fn kitty_target(
     address: &str,
-    sockets: &[String],
-    start_time: impl Fn(u32) -> Option<u64>,
+    sockets: &[UnixSocket],
+    procs: &impl Processes,
 ) -> Option<TabTarget> {
-    let Some(path) = address.strip_prefix("unix:") else {
-        // A TCP address cannot be checked; a failed tab opens a window.
-        return Some(TabTarget {
-            kind: TabKind::Kitty,
-            socket: address.to_string(),
-            pid: None,
-        });
-    };
+    let path = address.strip_prefix("unix:")?;
     let (before, after) = path
         .split_once("{kitty_pid}")
         .map_or((format!("{path}-"), ""), |(before, after)| {
             (before.to_string(), after)
         });
-    if let Some((socket, pid)) = newest(sockets, &before, after, start_time) {
+    if let Some((socket, pid)) = newest(sockets, &before, after, procs) {
         return Some(TabTarget {
             kind: TabKind::Kitty,
             socket: format!("unix:{socket}"),
             pid: Some(pid),
         });
     }
-    sockets
-        .iter()
-        .any(|socket| socket == path)
+    (!path.starts_with('@') && sockets.iter().any(|socket| socket.path == path) && procs.owns(path))
         .then(|| TabTarget {
             kind: TabKind::Kitty,
             socket: address.to_string(),
@@ -355,14 +474,15 @@ fn kitty_target(
         })
 }
 
-/// The newest live WezTerm GUI, from its `wezterm/gui-sock-<pid>` socket.
+/// The newest live WezTerm GUI of ours, from its `wezterm/gui-sock-<pid>`
+/// socket.
 fn wezterm_target(
     runtime_dir: &str,
-    sockets: &[String],
-    start_time: impl Fn(u32) -> Option<u64>,
+    sockets: &[UnixSocket],
+    procs: &impl Processes,
 ) -> Option<TabTarget> {
     let before = format!("{runtime_dir}/wezterm/gui-sock-");
-    let (socket, pid) = newest(sockets, &before, "", start_time)?;
+    let (socket, pid) = newest(sockets, &before, "", procs)?;
     Some(TabTarget {
         kind: TabKind::WezTerm,
         socket,
@@ -370,40 +490,29 @@ fn wezterm_target(
     })
 }
 
-/// Among `sockets` named `<before><pid><after>`, the one of the most
-/// recently started process still running.
+/// Among `sockets` named `<before><pid><after>` and held by that process,
+/// the one of the most recently started process still running.
 fn newest(
-    sockets: &[String],
+    sockets: &[UnixSocket],
     before: &str,
     after: &str,
-    start_time: impl Fn(u32) -> Option<u64>,
+    procs: &impl Processes,
 ) -> Option<(String, u32)> {
     sockets
         .iter()
         .filter_map(|socket| {
-            let pid = socket.strip_prefix(before)?.strip_suffix(after)?;
+            let pid = socket.path.strip_prefix(before)?.strip_suffix(after)?;
             if pid.is_empty() || !pid.bytes().all(|byte| byte.is_ascii_digit()) {
                 return None;
             }
             let pid: u32 = pid.parse().ok()?;
-            Some((start_time(pid)?, socket.clone(), pid))
+            let started = procs.start_time(pid)?;
+            procs
+                .holds(pid, socket.inode)
+                .then(|| (started, socket.path.clone(), pid))
         })
         .max_by_key(|(started, ..)| *started)
         .map(|(_, socket, pid)| (socket, pid))
-}
-
-/// When process `pid` started, in clock ticks since boot; `None` once it
-/// is gone.
-fn process_start_time(pid: u32) -> Option<u64> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    // The command name may hold spaces and parentheses; the fields after
-    // its closing parenthesis start at the third one.
-    stat.rsplit_once(')')?
-        .1
-        .split_whitespace()
-        .nth(19)?
-        .parse()
-        .ok()
 }
 
 #[cfg(test)]
@@ -561,6 +670,22 @@ mod tests {
         assert_eq!(expand("tcp:localhost:1"), "tcp:localhost:1");
     }
 
+    /// Fake processes: `(pid, start time, socket inodes held)`, and the
+    /// socket files we own.
+    struct FakeProcs(Vec<(u32, u64, Vec<u64>)>, Vec<&'static str>);
+
+    impl Processes for FakeProcs {
+        fn start_time(&self, pid: u32) -> Option<u64> {
+            self.0.iter().find(|p| p.0 == pid).map(|p| p.1)
+        }
+        fn holds(&self, pid: u32, inode: u64) -> bool {
+            self.0.iter().any(|p| p.0 == pid && p.2.contains(&inode))
+        }
+        fn owns(&self, path: &str) -> bool {
+            self.1.contains(&path)
+        }
+    }
+
     #[test]
     fn test_kitty_target_picks_the_newest_live_socket() {
         let table = "Num       RefCount Protocol Flags    Type St Inode Path\n\
@@ -571,52 +696,85 @@ mod tests {
             0000: 00000002 00000000 00010000 0001 01 5 /tmp/mykitty-x-40\n\
             0000: 00000002 00000000 00010000 0001 01 6 @k-50.sock\n\
             0000: 00000002 00000000 00010000 0001 01 7\n";
-        let sockets = unix_socket_paths(table);
+        let sockets = unix_sockets(table);
         assert_eq!(
-            sockets.iter().filter(|s| *s == "/tmp/mykitty-10").count(),
-            1
+            sockets[0],
+            UnixSocket {
+                path: "/tmp/mykitty-10".to_string(),
+                inode: 1
+            }
         );
         // 30 is gone, 20 started after 10.
-        let started = |pid| match pid {
-            10 => Some(100),
-            20 => Some(200),
-            40 => Some(900),
-            50 => Some(1),
-            _ => None,
-        };
+        let procs = FakeProcs(
+            vec![
+                (10, 100, vec![1, 2]),
+                (20, 200, vec![3]),
+                (40, 900, vec![5]),
+                (50, 1, vec![6]),
+            ],
+            vec!["/tmp/mykitty-10"],
+        );
         let kitty = |socket: &str, pid| TabTarget {
             kind: TabKind::Kitty,
             socket: socket.to_string(),
             pid,
         };
         assert_eq!(
-            kitty_target("unix:/tmp/mykitty", &sockets, started),
+            kitty_target("unix:/tmp/mykitty", &sockets, &procs),
             Some(kitty("unix:/tmp/mykitty-20", Some(20)))
         );
         assert_eq!(
-            kitty_target("unix:@k-{kitty_pid}.sock", &sockets, started),
+            kitty_target("unix:@k-{kitty_pid}.sock", &sockets, &procs),
             Some(kitty("unix:@k-50.sock", Some(50)))
         );
+        let none = FakeProcs(vec![], vec!["/tmp/mykitty-10"]);
         assert_eq!(
-            kitty_target("unix:/tmp/mykitty-10", &sockets, |_| None),
+            kitty_target("unix:/tmp/mykitty-10", &sockets, &none),
             Some(kitty("unix:/tmp/mykitty-10", None)),
             "a full address matches as is"
         );
-        assert_eq!(kitty_target("unix:/tmp/other", &sockets, started), None);
+        assert_eq!(kitty_target("unix:/tmp/other", &sockets, &procs), None);
+        assert_eq!(kitty_target("tcp:localhost:5", &sockets, &procs), None);
+    }
+
+    #[test]
+    fn test_kitty_target_skips_sockets_of_other_users() {
+        let sockets = unix_sockets(
+            "Num RefCount Protocol Flags Type St Inode Path\n\
+            0000: 00000002 00000000 00010000 0001 01 1 /tmp/mykitty-10\n\
+            0000: 00000002 00000000 00010000 0001 01 2 /tmp/mykitty-20\n\
+            0000: 00000002 00000000 00010000 0001 01 3 @k-20\n",
+        );
+        // 20 is newer and ours, but another user made its sockets: it does
+        // not hold them.
+        let procs = FakeProcs(vec![(10, 100, vec![1]), (20, 200, vec![9])], vec![]);
         assert_eq!(
-            kitty_target("tcp:localhost:5", &sockets, started),
-            Some(kitty("tcp:localhost:5", None))
+            kitty_target("unix:/tmp/mykitty", &sockets, &procs).map(|t| t.pid),
+            Some(Some(10))
+        );
+        assert_eq!(kitty_target("unix:@k", &sockets, &procs), None);
+        assert_eq!(
+            kitty_target("unix:/tmp/mykitty-20", &sockets, &procs),
+            None,
+            "a full address needs a socket file we own"
+        );
+        assert_eq!(
+            kitty_target("unix:@k-20", &sockets, &FakeProcs(vec![], vec!["@k-20"])),
+            None,
+            "an abstract socket without a pid cannot be checked"
         );
     }
 
     #[test]
     fn test_wezterm_target() {
-        let sockets = strings(&[
-            "/run/user/1/wezterm/gui-sock-7",
-            "/run/user/1/wezterm/gui-sock-8",
-            "/run/user/1/wezterm/sock",
-        ]);
-        let target = wezterm_target("/run/user/1", &sockets, |pid| (pid == 7).then_some(5));
+        let sockets = unix_sockets(
+            "Num RefCount Protocol Flags Type St Inode Path\n\
+            0000: 00000002 00000000 00010000 0001 01 1 /run/user/1/wezterm/gui-sock-7\n\
+            0000: 00000002 00000000 00010000 0001 01 2 /run/user/1/wezterm/gui-sock-8\n\
+            0000: 00000002 00000000 00010000 0001 01 3 /run/user/1/wezterm/sock\n",
+        );
+        let procs = FakeProcs(vec![(7, 5, vec![1])], vec![]);
+        let target = wezterm_target("/run/user/1", &sockets, &procs);
         assert_eq!(
             target,
             Some(TabTarget {
@@ -625,7 +783,7 @@ mod tests {
                 pid: Some(7),
             })
         );
-        assert_eq!(wezterm_target("/run/user/2", &sockets, |_| Some(1)), None);
+        assert_eq!(wezterm_target("/run/user/2", &sockets, &procs), None);
     }
 
     #[test]
@@ -698,11 +856,70 @@ mod tests {
             wezterm_list_argv(&tab).unwrap()[2..],
             strings(&["wezterm", "cli", "list", "--format", "json"])
         );
-        let list = br#"[{"window_id": 3, "pane_id": 9}, {"window_id": 1, "pane_id": 2}]"#;
         assert_eq!(
-            wezterm_spawn_in_window(&tab, list).unwrap()[3..8],
+            wezterm_clients_argv(&tab).unwrap()[2..],
+            strings(&["wezterm", "cli", "list-clients", "--format", "json"])
+        );
+        let list = br#"[{"window_id": 3, "pane_id": 9}, {"window_id": 1, "pane_id": 2}]"#;
+        let clients = br#"[
+            {"focused_pane_id": 4, "idle_time": {"secs": 60, "nanos": 0}},
+            {"focused_pane_id": 2, "idle_time": {"secs": 5, "nanos": 0}},
+            {"focused_pane_id": null, "idle_time": {"secs": 0, "nanos": 0}}
+        ]"#;
+        assert_eq!(
+            wezterm_spawn_argv(&tab, Some(clients), list).unwrap()[3..8],
+            strings(&["cli", "spawn", "--pane-id", "2", "--"]),
+            "next to the pane focused last"
+        );
+        assert_eq!(
+            wezterm_spawn_argv(&tab, Some(b"[]"), list).unwrap()[3..8],
             strings(&["cli", "spawn", "--window-id", "3", "--"])
         );
-        assert_eq!(wezterm_spawn_in_window(&tab, b"[]"), None);
+        assert_eq!(wezterm_spawn_argv(&tab, None, b"[]"), None);
+
+        let tab = tab_argv(&kitty, &strings(&["kitty"]), "zsh", "ls", false, None);
+        assert_eq!(
+            kitty_check_argv(&tab).unwrap(),
+            strings(&["kitty", "@", "--to", "unix:/tmp/k-1", "ls"])
+        );
+    }
+
+    #[test]
+    fn test_inherited_kitty_is_checked() {
+        let sockets = unix_sockets(
+            "Num RefCount Protocol Flags Type St Inode Path\n\
+            0000: 00000002 00000000 00010000 0001 01 1 @kitty-10\n",
+        );
+        let procs = FakeProcs(vec![(10, 1, vec![1])], vec![]);
+        assert_eq!(
+            inherited_kitty("unix:@kitty-10", Some(10), &sockets, &procs).map(|t| t.pid),
+            Some(Some(10))
+        );
+        assert_eq!(
+            inherited_kitty("unix:@kitty-10", Some(11), &sockets, &procs),
+            None
+        );
+        assert_eq!(
+            inherited_kitty("unix:@kitty-10", None, &sockets, &procs),
+            None
+        );
+        assert_eq!(
+            inherited_kitty("tcp:localhost:1", Some(10), &sockets, &procs),
+            None
+        );
+    }
+
+    #[test]
+    fn test_proc_owns_our_socket_files_only() {
+        let dir = std::env::temp_dir().join(format!("raffi-owns-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let socket = dir.join("sock");
+        let _listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let file = dir.join("file");
+        std::fs::write(&file, "").unwrap();
+        assert!(Proc.owns(socket.to_str().unwrap()));
+        assert!(!Proc.owns(file.to_str().unwrap()), "not a socket");
+        assert!(!Proc.owns(dir.join("gone").to_str().unwrap()));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -283,18 +283,7 @@ impl DeferredAction {
                 tab,
                 window,
                 raise,
-            } => {
-                if let Err(error) = open_terminal_tab(*kind, tab) {
-                    crate::debug_log!("terminal: cannot open a tab, opening a window: {error}");
-                    return run_detached(window, DEFERRED_TIMEOUT);
-                }
-                if let Some((pid, title)) = raise {
-                    if let Err(error) = super::windows::raise_process_window(*pid, title) {
-                        crate::debug_log!("terminal: cannot raise the terminal window: {error}");
-                    }
-                }
-                Ok(())
-            }
+            } => open_in_terminal_tab(*kind, tab, window, raise.as_ref(), DEFERRED_TIMEOUT),
         }
     }
 
@@ -345,30 +334,66 @@ fn run_deferred_with(
     })
 }
 
-/// Run the command line opening a terminal tab. WezTerm fails when it
-/// cannot tell which of its windows has focus, so it is then asked for its
-/// windows and told to use the first one.
-fn open_terminal_tab(kind: crate::terminal::TabKind, tab: &[String]) -> Result<(), String> {
-    let run = |argv: &[String]| run_batch(&[argv.to_vec()], DEFERRED_TIMEOUT);
-    let error = match run(tab) {
-        Ok(()) => return Ok(()),
-        Err(error) => error,
+/// Open the command in a new terminal tab, or in `window` when the terminal
+/// cannot take it. Once the tab was asked for, a failure may still have
+/// opened it, so nothing else runs and the failure is reported: the command
+/// must not run twice.
+fn open_in_terminal_tab(
+    kind: crate::terminal::TabKind,
+    tab: &[String],
+    window: &[String],
+    raise: Option<&(u32, String)>,
+    timeout: Duration,
+) -> Result<(), String> {
+    let Some(tab) = check_terminal_tab(kind, tab, timeout) else {
+        crate::debug_log!(
+            "terminal: {} cannot open a tab, opening a window",
+            kind.name()
+        );
+        return run_detached(window, timeout);
     };
-    if kind != crate::terminal::TabKind::WezTerm {
-        return Err(error);
-    }
-    let Some(list) = crate::terminal::wezterm_list_argv(tab) else {
-        return Err(error);
-    };
-    let mut command = Command::new(&list[0]);
-    command.args(&list[1..]);
-    let retry = match run_bounded_status(command, DEFERRED_TIMEOUT, 1024 * 1024) {
-        Ok((status, output)) if status.success() => {
-            crate::terminal::wezterm_spawn_in_window(tab, &output)
+    run_batch(&[tab], timeout).map_err(|error| {
+        format!(
+            "cannot tell whether the {} tab opened: {error}",
+            kind.name()
+        )
+    })?;
+    if let Some((pid, title)) = raise {
+        if let Err(error) = super::windows::raise_process_window(*pid, title) {
+            crate::debug_log!("terminal: cannot raise the terminal window: {error}");
         }
-        _ => None,
+    }
+    Ok(())
+}
+
+/// Ask the terminal, read-only, whether it takes remote commands, and
+/// return the `tab` command line to run then. WezTerm is also told where
+/// the tab goes, as it fails when it cannot tell which window has focus.
+fn check_terminal_tab(
+    kind: crate::terminal::TabKind,
+    tab: &[String],
+    timeout: Duration,
+) -> Option<Vec<String>> {
+    let query = |argv: Option<Vec<String>>| {
+        let argv = argv?;
+        let (program, args) = argv.split_first()?;
+        let mut command = Command::new(program);
+        command.args(args);
+        match run_bounded_status(command, timeout, 16 * 1024 * 1024) {
+            Ok((status, output)) if status.success() => Some(output),
+            _ => None,
+        }
     };
-    retry.map_or(Err(error), |argv| run(&argv))
+    match kind {
+        crate::terminal::TabKind::Kitty => {
+            query(crate::terminal::kitty_check_argv(tab)).map(|_| tab.to_vec())
+        }
+        crate::terminal::TabKind::WezTerm => {
+            let list = query(crate::terminal::wezterm_list_argv(tab))?;
+            let clients = query(crate::terminal::wezterm_clients_argv(tab));
+            crate::terminal::wezterm_spawn_argv(tab, clients.as_deref(), &list)
+        }
+    }
 }
 
 /// Start `argv` in its own process group and fail if it exits unsuccessfully
@@ -1204,26 +1229,82 @@ mod tests {
     }
 
     #[test]
-    fn test_terminal_tab_opens_a_window_only_when_the_tab_fails() {
+    fn test_terminal_tab_falls_back_only_before_asking_for_the_tab() {
+        use crate::terminal::TabKind;
         let dir = std::env::temp_dir().join(format!("raffi-terminal-tab-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("launches");
         let marker = dir.join("window");
-        let action = |tab: &str| DeferredAction::TerminalTab {
-            kind: crate::terminal::TabKind::Kitty,
-            tab: vec![tab.to_string()],
-            window: vec![
-                "sh".to_string(),
-                "-c".to_string(),
-                "touch \"$0\"".to_string(),
-                marker.display().to_string(),
-            ],
-            raise: None,
+        let window = [
+            "sh".to_string(),
+            "-c".to_string(),
+            "touch \"$0\"".to_string(),
+            marker.display().to_string(),
+        ];
+        // A fake kitty or WezTerm: its check answers with `check`, and a
+        // launch is logged, then does `launch`.
+        let fake = |kind: TabKind, check: &str, launch: &str| {
+            let script = format!(
+                "case \"$1\" in\n\
+                 ls) {check} ;;\n\
+                 list) echo '[{{\"window_id\": 3}}]' ;;\n\
+                 list-clients) echo '[]' ;;\n\
+                 *) echo \"$@\" >> \"$0\"; {launch} ;;\n\
+                 esac"
+            );
+            let verb = match kind {
+                TabKind::Kitty => "launch",
+                TabKind::WezTerm => "spawn",
+            };
+            let tab = [
+                "sh",
+                "-c",
+                &script,
+                &log.display().to_string(),
+                verb,
+                "--",
+                "x",
+            ]
+            .map(str::to_string);
+            let _ = std::fs::remove_file(&log);
+            let _ = std::fs::remove_file(&marker);
+            let result =
+                open_in_terminal_tab(kind, &tab, &window, None, Duration::from_millis(300));
+            let launches = std::fs::read_to_string(&log).unwrap_or_default();
+            (result, launches, marker.exists())
         };
 
-        action("true").run().unwrap();
-        assert!(!marker.exists(), "the tab opened");
-        action("false").run().unwrap();
-        assert!(marker.exists(), "a window opens instead");
+        let (result, launches, window_opened) = fake(TabKind::Kitty, "exit 0", "exit 0");
+        assert_eq!(
+            (result, launches.as_str(), window_opened),
+            (Ok(()), "launch -- x\n", false)
+        );
+
+        let (result, launches, window_opened) = fake(TabKind::Kitty, "exit 1", "exit 0");
+        assert_eq!(
+            (result, launches.as_str(), window_opened),
+            (Ok(()), "", true),
+            "remote control is off: a window opens"
+        );
+
+        // Once asked for, the tab may have opened whatever happens next:
+        // a failed reply, a signal or no reply in time.
+        for kind in [TabKind::Kitty, TabKind::WezTerm] {
+            for launch in ["exit 1", "kill -9 $$", "sleep 5"] {
+                let (result, launches, window_opened) = fake(kind, "exit 0", launch);
+                let error = result.unwrap_err();
+                assert!(error.contains("cannot tell whether"), "{launch}: {error}");
+                assert_eq!(launches.lines().count(), 1, "{launch}: launched once");
+                assert!(!window_opened, "{launch}: no window");
+            }
+        }
+
+        let (result, launches, _) = fake(TabKind::WezTerm, "exit 0", "exit 0");
+        assert_eq!(result, Ok(()));
+        assert_eq!(
+            launches, "spawn --window-id 3 -- x\n",
+            "the window is chosen first"
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 

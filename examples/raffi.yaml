@@ -362,14 +362,14 @@ addons:
   # until Enter once it exits. With kitty or WezTerm already running, the
   # command opens in a new tab of it (open_in: window turns that off). kitty
   # needs allow_remote_control and listen_on in kitty.conf; kitty_socket
-  # overrides the listen_on read from there.
+  # overrides the listen_on read from there (Unix sockets only).
   # terminal:
   #   enabled: true
   #   trigger: ">"
   #   command: [alacritty, -e]
   #   hold: true
   #   open_in: tab
-  #   kitty_socket: unix:/tmp/mykitty
+  #   kitty_socket: unix:${XDG_RUNTIME_DIR}/kitty
 
   # Kill process (native UI only, needs kill). Type "kill " to list your own
   # processes, biggest memory first. Enter twice sends SIGTERM, Ctrl+Enter

@@ -807,8 +807,9 @@ pub struct TerminalAddonConfig {
     /// Where typed commands open (default: tab).
     #[serde(default)]
     pub open_in: TerminalOpenIn,
-    /// kitty remote control address, such as `unix:/tmp/mykitty`, as given
-    /// to kitty's `listen_on`. Read from kitty.conf when unset.
+    /// kitty remote control address, such as
+    /// `unix:${XDG_RUNTIME_DIR}/kitty`, as given to kitty's `listen_on`.
+    /// Read from kitty.conf when unset.
     #[serde(default)]
     pub kitty_socket: Option<String>,
 }

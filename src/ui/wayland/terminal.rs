@@ -1,6 +1,6 @@
 use super::actions::DeferredAction;
 use super::command_list::{CommandAction, CommandItem, QUERY_ROW};
-use crate::terminal::TabTarget;
+use crate::terminal::{TabKind, TabTarget};
 
 pub(super) const TERMINAL_ICON: &str = "utilities-terminal";
 
@@ -27,11 +27,18 @@ pub(super) fn run_action(
     };
     let cwd = std::env::current_dir().ok();
     let cwd = cwd.as_deref().and_then(std::path::Path::to_str);
+    // kitty titles the tab after the command, which then names its window.
+    // WezTerm's window title follows its own format, so its window is only
+    // found when it has a single one.
+    let title = match target.kind {
+        TabKind::Kitty => command,
+        TabKind::WezTerm => "",
+    };
     DeferredAction::TerminalTab {
         kind: target.kind,
         tab: crate::terminal::tab_argv(target, prefix, shell, command, hold, cwd),
         window,
-        raise: target.pid.map(|pid| (pid, command.to_string())),
+        raise: target.pid.map(|pid| (pid, title.to_string())),
     }
 }
 
