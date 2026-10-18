@@ -1303,6 +1303,18 @@
           "type": "boolean",
           "default": true
         },
+        "kitty_socket": {
+          "description": "kitty remote control address, such as `unix:/tmp/mykitty`, as given\nto kitty's `listen_on`. Read from kitty.conf when unset.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "open_in": {
+          "description": "Where typed commands open (default: tab).",
+          "$ref": "#/$defs/TerminalOpenIn"
+        },
         "trigger": {
           "description": "Keyword that runs the rest of the query in a terminal (default: `>`).",
           "type": [
@@ -1313,6 +1325,21 @@
         }
       },
       "additionalProperties": false
+    },
+    "TerminalOpenIn": {
+      "description": "Where the terminal addon opens typed commands",
+      "oneOf": [
+        {
+          "description": "A new tab of the running kitty or WezTerm, else a new window",
+          "type": "string",
+          "const": "tab"
+        },
+        {
+          "description": "Always a new window",
+          "type": "string",
+          "const": "window"
+        }
+      ]
     },
     "TextSnippet": {
       "description": "A single text snippet entry",

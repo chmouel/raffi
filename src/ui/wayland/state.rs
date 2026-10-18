@@ -561,6 +561,8 @@ pub(super) struct LauncherApp {
     pub program_exists: fn(&str) -> bool,
     /// Detects the compositor Raffi runs in; replaced in tests.
     pub compositor: fn() -> Option<super::windows::Compositor>,
+    /// Finds the running terminal to open a tab in; replaced in tests.
+    pub terminal_tab: fn(&[String], Option<&str>) -> Option<crate::terminal::TabTarget>,
     pub web_search: WebSearchState,
     pub file_browser: FileBrowserState,
     /// Wayland drag-and-drop source worker, if the UI runs on Wayland.

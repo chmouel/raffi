@@ -251,6 +251,15 @@ pub(super) enum DeferredAction {
     BrowserHostSetup {
         force: bool,
     },
+    /// Open a command in a new tab of a running terminal, then raise the
+    /// window of process `raise.0` titled `raise.1`. When the tab cannot be
+    /// opened, `window` runs instead.
+    TerminalTab {
+        kind: crate::terminal::TabKind,
+        tab: Vec<String>,
+        window: Vec<String>,
+        raise: Option<(u32, String)>,
+    },
 }
 
 impl DeferredAction {
@@ -269,6 +278,23 @@ impl DeferredAction {
             Self::BrowserHostSetup { force } => {
                 crate::browser_host::install_current(*force).map(|_| ())
             }
+            Self::TerminalTab {
+                kind,
+                tab,
+                window,
+                raise,
+            } => {
+                if let Err(error) = open_terminal_tab(*kind, tab) {
+                    crate::debug_log!("terminal: cannot open a tab, opening a window: {error}");
+                    return run_detached(window, DEFERRED_TIMEOUT);
+                }
+                if let Some((pid, title)) = raise {
+                    if let Err(error) = super::windows::raise_process_window(*pid, title) {
+                        crate::debug_log!("terminal: cannot raise the terminal window: {error}");
+                    }
+                }
+                Ok(())
+            }
         }
     }
 
@@ -283,6 +309,7 @@ impl DeferredAction {
             Self::Bluetooth(_) => "bluetoothctl",
             Self::Secret(_) => "secret",
             Self::BrowserTab(_) | Self::BrowserHostSetup { .. } => "browser tabs",
+            Self::TerminalTab { .. } => "terminal",
         }
     }
 
@@ -316,6 +343,32 @@ fn run_deferred_with(
         report(&action, &error);
         format!("{}: {error}", action.label())
     })
+}
+
+/// Run the command line opening a terminal tab. WezTerm fails when it
+/// cannot tell which of its windows has focus, so it is then asked for its
+/// windows and told to use the first one.
+fn open_terminal_tab(kind: crate::terminal::TabKind, tab: &[String]) -> Result<(), String> {
+    let run = |argv: &[String]| run_batch(&[argv.to_vec()], DEFERRED_TIMEOUT);
+    let error = match run(tab) {
+        Ok(()) => return Ok(()),
+        Err(error) => error,
+    };
+    if kind != crate::terminal::TabKind::WezTerm {
+        return Err(error);
+    }
+    let Some(list) = crate::terminal::wezterm_list_argv(tab) else {
+        return Err(error);
+    };
+    let mut command = Command::new(&list[0]);
+    command.args(&list[1..]);
+    let retry = match run_bounded_status(command, DEFERRED_TIMEOUT, 1024 * 1024) {
+        Ok((status, output)) if status.success() => {
+            crate::terminal::wezterm_spawn_in_window(tab, &output)
+        }
+        _ => None,
+    };
+    retry.map_or(Err(error), |argv| run(&argv))
 }
 
 /// Start `argv` in its own process group and fail if it exits unsuccessfully
@@ -1147,6 +1200,30 @@ mod tests {
         copy_file_to_clipboard_with(&mut command, &input_path, Duration::from_secs(5)).unwrap();
 
         assert_eq!(std::fs::read(output_path).unwrap(), image);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn test_terminal_tab_opens_a_window_only_when_the_tab_fails() {
+        let dir = std::env::temp_dir().join(format!("raffi-terminal-tab-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("window");
+        let action = |tab: &str| DeferredAction::TerminalTab {
+            kind: crate::terminal::TabKind::Kitty,
+            tab: vec![tab.to_string()],
+            window: vec![
+                "sh".to_string(),
+                "-c".to_string(),
+                "touch \"$0\"".to_string(),
+                marker.display().to_string(),
+            ],
+            raise: None,
+        };
+
+        action("true").run().unwrap();
+        assert!(!marker.exists(), "the tab opened");
+        action("false").run().unwrap();
+        assert!(marker.exists(), "a window opens instead");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

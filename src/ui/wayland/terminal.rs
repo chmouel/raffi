@@ -1,5 +1,6 @@
 use super::actions::DeferredAction;
 use super::command_list::{CommandAction, CommandItem, QUERY_ROW};
+use crate::terminal::TabTarget;
 
 pub(super) const TERMINAL_ICON: &str = "utilities-terminal";
 
@@ -11,8 +12,37 @@ pub(super) fn terminal_name(prefix: &[String]) -> &str {
         .unwrap_or_default()
 }
 
+/// What runs `command`: a new tab of `tab` when there is one, falling back
+/// to a new window.
+pub(super) fn run_action(
+    prefix: &[String],
+    shell: &str,
+    command: &str,
+    hold: bool,
+    tab: Option<&TabTarget>,
+) -> DeferredAction {
+    let window = crate::terminal::shell_argv(prefix, shell, command, hold);
+    let Some(target) = tab else {
+        return DeferredAction::Command(window);
+    };
+    let cwd = std::env::current_dir().ok();
+    let cwd = cwd.as_deref().and_then(std::path::Path::to_str);
+    DeferredAction::TerminalTab {
+        kind: target.kind,
+        tab: crate::terminal::tab_argv(target, prefix, shell, command, hold, cwd),
+        window,
+        raise: target.pid.map(|pid| (pid, command.to_string())),
+    }
+}
+
 /// The row running `query` in the terminal, or a hint while it is empty.
-pub(super) fn run_item(query: &str, prefix: &[String], shell: &str, hold: bool) -> CommandItem {
+pub(super) fn run_item(
+    query: &str,
+    prefix: &[String],
+    shell: &str,
+    hold: bool,
+    tab: Option<&TabTarget>,
+) -> CommandItem {
     let name = terminal_name(prefix);
     let command = query.trim();
     if command.is_empty() {
@@ -22,17 +52,23 @@ pub(super) fn run_item(query: &str, prefix: &[String], shell: &str, hold: bool) 
             TERMINAL_ICON,
         );
     }
-    let argv = crate::terminal::shell_argv(prefix, shell, command, hold);
+    let (subtitle, opens_in) = match tab {
+        Some(target) => {
+            let kind = target.kind.name();
+            (format!("in a new {kind} tab"), format!("New {kind} tab"))
+        }
+        None => (format!("in {name}"), "New window".to_string()),
+    };
     CommandItem {
         title: format!("Run {command}"),
-        subtitle: format!("in {name}"),
+        subtitle,
         match_text: String::new(),
         icon_names: vec![TERMINAL_ICON.to_string()],
         icon: None,
         identity: QUERY_ROW.to_string(),
         unavailable: None,
         primary: Some(CommandAction {
-            action: DeferredAction::Command(argv),
+            action: run_action(prefix, shell, command, hold, tab),
             confirm: None,
             keep_open: false,
             progress: None,
@@ -41,6 +77,7 @@ pub(super) fn run_item(query: &str, prefix: &[String], shell: &str, hold: bool) 
         details: vec![
             ("Command".to_string(), command.to_string()),
             ("Terminal".to_string(), prefix.join(" ")),
+            ("Opens in".to_string(), opens_in),
             ("Shell".to_string(), shell.to_string()),
         ],
         badge: None,
@@ -55,11 +92,11 @@ mod tests {
     #[test]
     fn test_run_item() {
         let prefix = vec!["/usr/bin/foot".to_string()];
-        let hint = run_item("  ", &prefix, "bash", true);
+        let hint = run_item("  ", &prefix, "bash", true, None);
         assert_eq!(hint.title, "Type a command to run in foot");
         assert!(hint.primary.is_none());
 
-        let item = run_item(" echo 'a b' ", &prefix, "zsh", false);
+        let item = run_item(" echo 'a b' ", &prefix, "zsh", false, None);
         assert_eq!(item.title, "Run echo 'a b'");
         assert_eq!(item.subtitle, "in foot");
         let Some(DeferredAction::Command(argv)) = item.primary.map(|action| action.action) else {

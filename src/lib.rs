@@ -804,6 +804,24 @@ pub struct TerminalAddonConfig {
     /// pressed (default: true).
     #[serde(default = "default_true")]
     pub hold: bool,
+    /// Where typed commands open (default: tab).
+    #[serde(default)]
+    pub open_in: TerminalOpenIn,
+    /// kitty remote control address, such as `unix:/tmp/mykitty`, as given
+    /// to kitty's `listen_on`. Read from kitty.conf when unset.
+    #[serde(default)]
+    pub kitty_socket: Option<String>,
+}
+
+/// Where the terminal addon opens typed commands
+#[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TerminalOpenIn {
+    /// A new tab of the running kitty or WezTerm, else a new window
+    #[default]
+    Tab,
+    /// Always a new window
+    Window,
 }
 
 impl TerminalAddonConfig {
@@ -819,6 +837,8 @@ impl Default for TerminalAddonConfig {
             trigger: None,
             command: None,
             hold: true,
+            open_in: TerminalOpenIn::default(),
+            kitty_socket: None,
         }
     }
 }

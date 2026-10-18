@@ -965,6 +965,7 @@ impl LauncherApp {
                 copier: None,
                 program_exists: crate::find_binary,
                 compositor: super::windows::Compositor::current,
+                terminal_tab: crate::terminal::find_tab_target,
                 web_search: WebSearchState::default(),
                 file_browser: FileBrowserState {
                     show_hidden: file_browser_show_hidden,
@@ -2036,9 +2037,11 @@ impl LauncherApp {
                 };
                 let shell = self.view.default_script_shell.clone();
                 let hold = self.addons.terminal.hold;
+                let tab = self.terminal_tab_target(&prefix);
                 let icon = self.resolve_icon_name(super::terminal::TERMINAL_ICON);
                 self.command_list.query_row = Some(std::sync::Arc::new(move |query: &str| {
-                    let mut item = super::terminal::run_item(query, &prefix, &shell, hold);
+                    let mut item =
+                        super::terminal::run_item(query, &prefix, &shell, hold, tab.as_ref());
                     item.icon = icon.clone();
                     Some(item)
                 }));
@@ -2425,6 +2428,16 @@ impl LauncherApp {
             move || Ok(super::bluetooth::load_devices(keep_open)),
             refresh,
         )
+    }
+
+    /// The running terminal to open typed commands in a tab of, unless
+    /// `open_in: window` asks for windows.
+    fn terminal_tab_target(&self, prefix: &[String]) -> Option<crate::terminal::TabTarget> {
+        let terminal = &self.addons.terminal;
+        if terminal.open_in != crate::TerminalOpenIn::Tab {
+            return None;
+        }
+        (self.terminal_tab)(prefix, terminal.kitty_socket.as_deref())
     }
 
     fn load_audio(&mut self, refresh: bool) -> Task<Message> {
@@ -4102,14 +4115,16 @@ impl LauncherApp {
                     return iced::exit();
                 }
                 FallbackAction::Terminal { prefix, hold } => {
-                    let argv = crate::terminal::shell_argv(
+                    let tab = self.terminal_tab_target(prefix);
+                    let action = super::terminal::run_action(
                         prefix,
                         &self.view.default_script_shell,
                         &query,
                         *hold,
+                        tab.as_ref(),
                     );
                     if let Ok(mut slot) = self.deferred_action.lock() {
-                        *slot = Some(DeferredAction::Command(argv));
+                        *slot = Some(action);
                     }
                     self.save_query_to_history();
                     return iced::exit();

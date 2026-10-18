@@ -1,14 +1,15 @@
 ---
 title: Run in Terminal
-description: Run a shell command in a terminal window from Raffi
+description: Run a shell command in a terminal window or tab from Raffi
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
 Type `>` followed by a space and a command, such as `> htop` or
 `> journalctl -f`, then press Enter. Raffi closes and runs the command in a
-terminal window. While the command is empty, the row says which terminal
-will be used.
+terminal window, or in a new tab of a running kitty or WezTerm (see
+[below](#tabs-in-kitty-and-wezterm)). While the command is empty, the row
+says which terminal will be used.
 
 The command runs through `general.default_script_shell` (bash by default)
 with `-c`, so pipes, `&&` and quotes work as in a shell. Use a POSIX-style
@@ -50,6 +51,36 @@ addons:
 The same terminal opens desktop apps marked `Terminal=true` when
 [installed apps](/features/installed-apps/) are listed.
 
+## Tabs in kitty and WezTerm
+
+When the terminal found above is kitty or WezTerm and one is already
+running, the command opens in a new tab of it instead of a new window, and
+Raffi brings its window to the front on Hyprland, sway and niri. The row
+then reads "in a new kitty tab". When no instance is running, or the tab
+cannot be opened, a new window opens as usual. The tab starts in the
+directory Raffi was started from.
+
+This only applies when the terminal is picked as kitty or WezTerm. With
+`xdg-terminal-exec` installed, set `command: [kitty]` or
+`command: [wezterm, start, --]` to get tabs. Set `open_in: window` to always
+open a window.
+
+kitty needs remote control turned on, with a socket, in `kitty.conf`:
+
+```
+allow_remote_control socket-only
+listen_on unix:/tmp/mykitty
+```
+
+Raffi reads `listen_on` from `kitty.conf` (not from files it `include`s) and
+finds the newest kitty listening there. Set `kitty_socket` to the same value
+when kitty gets its address elsewhere, such as from `--listen-on`. When
+Raffi itself runs inside kitty, that kitty is used.
+
+WezTerm needs nothing: Raffi finds the newest running WezTerm through its
+socket under `$XDG_RUNTIME_DIR/wezterm`, and the tab opens in the window
+that last had focus.
+
 ## As a fallback
 
 Add `addons.terminal` to `fallbacks` to get a "Run '…' in kitty" row at the
@@ -68,6 +99,8 @@ addons:
   terminal:
     trigger: "!"
     hold: false
+    open_in: tab                  # tab or window
+    kitty_socket: unix:/tmp/mykitty
 ```
 
 See the [addon reference](/reference/addon-configuration/#run-in-terminal)

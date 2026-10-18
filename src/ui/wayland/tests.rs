@@ -50,6 +50,7 @@ fn test_app_with_fallbacks(addons: AddonsConfig, fallback_paths: Vec<String>) ->
     app.vault.usage.clear();
     app.vault.usage_path = None;
     app.program_exists = |_| true;
+    app.terminal_tab = |_, _| None;
     app
 }
 
@@ -5247,6 +5248,68 @@ fn test_terminal_fallback_runs_the_query() {
         deferred_argv(&app).map(|argv| argv.last().cloned()),
         Some(Some("make test".to_string()))
     );
+}
+
+fn terminal_row(app: &LauncherApp) -> &super::command_list::CommandItem {
+    &app.command_list.items[app.command_list.filtered[0]]
+}
+
+fn kitty_tab(_: &[String], socket: Option<&str>) -> Option<crate::terminal::TabTarget> {
+    Some(crate::terminal::TabTarget {
+        kind: crate::terminal::TabKind::Kitty,
+        socket: socket.unwrap_or("unix:/tmp/k-7").to_string(),
+        pid: Some(7),
+    })
+}
+
+fn kitty_addons() -> AddonsConfig {
+    let mut addons = terminal_addons();
+    addons.terminal.command = Some(vec!["kitty".into()]);
+    addons
+}
+
+#[test]
+fn test_terminal_opens_a_tab_in_the_running_kitty() {
+    let mut app = test_app(kitty_addons());
+    app.terminal_tab = kitty_tab;
+    let _ = app.update(Message::SearchChanged("> htop".into()));
+    assert_eq!(terminal_row(&app).subtitle, "in a new kitty tab");
+    assert!(terminal_row(&app)
+        .details
+        .contains(&("Opens in".to_string(), "New kitty tab".to_string())));
+    let _ = app.update(Message::Submit);
+    let Some(DeferredAction::TerminalTab {
+        tab, window, raise, ..
+    }) = app.deferred_action.lock().unwrap().clone()
+    else {
+        panic!("terminal tab action");
+    };
+    assert_eq!(tab[..4], ["kitty", "@", "--to", "unix:/tmp/k-7"]);
+    assert_eq!(tab.last().map(String::as_str), Some("htop"));
+    assert_eq!(window[0], "kitty", "a window when the tab fails");
+    assert_eq!(raise, Some((7, "htop".to_string())));
+
+    let mut app = test_app_with_fallbacks(kitty_addons(), vec!["addons.terminal".into()]);
+    app.history.max_items = 0;
+    app.terminal_tab = kitty_tab;
+    let _ = app.update(Message::SearchChanged("make test".into()));
+    let _ = app.update(Message::FallbackSelected(0));
+    assert!(matches!(
+        app.deferred_action.lock().unwrap().as_ref(),
+        Some(DeferredAction::TerminalTab { .. })
+    ));
+}
+
+#[test]
+fn test_terminal_open_in_window_ignores_a_running_kitty() {
+    let mut addons = kitty_addons();
+    addons.terminal.open_in = crate::TerminalOpenIn::Window;
+    let mut app = test_app(addons);
+    app.terminal_tab = kitty_tab;
+    let _ = app.update(Message::SearchChanged("> htop".into()));
+    assert_eq!(terminal_row(&app).subtitle, "in kitty");
+    let _ = app.update(Message::Submit);
+    assert_eq!(deferred_argv(&app).unwrap()[0], "kitty");
 }
 
 fn launcher_names(app: &LauncherApp) -> Vec<String> {

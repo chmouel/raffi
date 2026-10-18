@@ -1165,7 +1165,8 @@ addons:
 
 ## Run in Terminal
 
-Runs a typed command in a terminal window.
+Runs a typed command in a terminal window, or in a new tab of a running
+kitty or WezTerm.
 See [Run in Terminal](/features/terminal/) for usage.
 
 ### Configuration
@@ -1190,6 +1191,20 @@ xterm that is installed. The same terminal opens desktop apps marked
 Keep the window open after the command exits, showing its exit status, until
 Enter is pressed.
 
+**`addons.terminal.open_in`** `tab | window` (default: `tab`)
+
+`tab` opens the command in a new tab of the running kitty or WezTerm, when
+that is the terminal used, and falls back to a new window when none is
+running. `window` always opens a new window. Desktop apps marked
+`Terminal=true` always open a window.
+See [Tabs in kitty and WezTerm](/features/terminal/#tabs-in-kitty-and-wezterm).
+
+**`addons.terminal.kitty_socket`** `string` (default: `listen_on` from `kitty.conf`)
+
+kitty remote control address, written as for kitty's `listen_on`, such as
+`unix:/tmp/mykitty`. kitty adds its process id to the address, unless it
+contains `{kitty_pid}`, and Raffi picks the newest kitty listening there.
+
 ### Example
 
 ```yaml
@@ -1198,6 +1213,7 @@ addons:
     trigger: "!"
     command: [foot]
     hold: false
+    open_in: window
 ```
 
 ## Kill Process
