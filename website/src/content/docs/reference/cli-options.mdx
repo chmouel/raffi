@@ -133,6 +133,17 @@ Pre-fill the search field with an initial query.
   raffi -u native -i firefox
   ```
 
+**`-1, --select-1`** `boolean` (default: `false`)
+
+With a non-empty `--initial-query`, automatically activate the only selectable
+result after its results finish loading. The option applies only to the
+initial query; typing or refining the query later does not trigger automatic
+activation. Native UI only.
+
+  ```bash
+  raffi -1 -i firefox
+  raffi --select-1 --initial-query firefox
+  ```
 
 **`-t, --theme`** `string` (default: `dark`)
 

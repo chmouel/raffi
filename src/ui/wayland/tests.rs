@@ -4613,6 +4613,142 @@ fn test_windows_load_then_filter_and_focus() {
 }
 
 #[test]
+fn test_select_1_waits_for_async_results_and_activates_the_only_selectable_row() {
+    let mut app = windows_app();
+    app.select_1_query = Some("win ".into());
+    let _ = app.update(Message::SearchChanged("win ".into()));
+    assert_eq!(app.command_list.status(), Some("Loading windows..."));
+    assert_eq!(app.select_1_query.as_deref(), Some("win "));
+    assert!(deferred_action(&app).is_none());
+
+    let generation = app.command_list.generation;
+    let mut items: Vec<_> = window_fixture()
+        .into_iter()
+        .filter(|item| item.title == "Mozilla Firefox")
+        .collect();
+    items.push(super::command_list::CommandItem::info(
+        "notice",
+        "Not selectable".into(),
+        "dialog-information",
+    ));
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(items)));
+
+    assert_eq!(app.total_items(), 2);
+    assert!(matches!(
+        deferred_action(&app),
+        Some(DeferredAction::Hypr(HyprAction::Focus { address })) if address == "0xa1"
+    ));
+    assert!(app.select_1_query.is_none());
+
+    *app.deferred_action.lock().unwrap() = None;
+    let _ = app.update(Message::WindowResized(iced::Size::new(800.0, 600.0)));
+    assert!(deferred_action(&app).is_none());
+}
+
+#[test]
+fn test_select_1_does_not_activate_after_the_initial_query_changes() {
+    let mut app = windows_app();
+    app.select_1_query = Some("win fire".into());
+    let _ = app.update(Message::SearchChanged("win fire".into()));
+    let generation = app.command_list.generation;
+
+    let _ = app.update(Message::SearchChanged("win notes".into()));
+    assert!(app.select_1_query.is_none());
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(window_fixture())));
+
+    assert!(deferred_action(&app).is_none());
+}
+
+#[test]
+fn test_select_1_requires_a_non_empty_initial_query_and_is_opt_in() {
+    let mut app = windows_app();
+    app.select_1_query = Some(String::new());
+    let _ = app.update(Message::SearchChanged(String::new()));
+    assert!(app.select_1_query.is_none());
+
+    let _ = app.update(Message::SearchChanged("win fire".into()));
+    let generation = app.command_list.generation;
+    let items: Vec<_> = window_fixture()
+        .into_iter()
+        .filter(|item| item.title == "Mozilla Firefox")
+        .collect();
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(items)));
+
+    assert!(deferred_action(&app).is_none());
+}
+
+#[test]
+fn test_select_1_does_not_activate_zero_or_multiple_selectable_rows() {
+    let mut app = windows_app();
+    app.select_1_query = Some("win ".into());
+    let _ = app.update(Message::SearchChanged("win ".into()));
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(window_fixture())));
+    assert!(deferred_action(&app).is_none());
+    assert!(app.select_1_query.is_none());
+
+    let mut app = windows_app();
+    app.select_1_query = Some("win no-such-window".into());
+    let _ = app.update(Message::SearchChanged("win no-such-window".into()));
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(window_fixture())));
+    assert!(deferred_action(&app).is_none());
+    assert!(app.select_1_query.is_none());
+}
+
+#[test]
+fn test_select_1_waits_for_bitwarden_notes_search() {
+    let mut app = test_app(AddonsConfig::default());
+    app.search_query = "bw recovery".into();
+    app.query_class = super::app::classify_query(&app.search_query, &app.addons);
+    app.select_1_query = Some(app.search_query.clone());
+    app.select_1_ready = true;
+    app.command_list.enter(CommandListAddon::Bitwarden);
+    app.command_list.set_query("recovery".into());
+    app.vault.search_query = Some("recovery".into());
+
+    let _ = app.update(Message::WindowResized(iced::Size::new(800.0, 600.0)));
+
+    assert_eq!(app.select_1_query.as_deref(), Some("bw recovery"));
+}
+
+#[test]
+fn test_select_1_indexes_results_after_currency_help() {
+    let mut app = test_app(AddonsConfig::default());
+    app.search_query = "x".into();
+    app.query_class = classify_query(&app.search_query, &app.addons);
+    app.currency.help = true;
+    app.inline_result = Some(InlineResult {
+        provider: InlineProvider::Units,
+        rows: vec![InlineRow {
+            title: "one result".into(),
+            subtitle: None,
+            copy_value: "1".into(),
+            alt_copy_value: None,
+            swatch: None,
+            preview: None,
+        }],
+    });
+    app.select_1_query = Some(app.search_query.clone());
+    app.select_1_ready = true;
+    app.copier = Some(vec!["true".into()]);
+
+    let _ = app.update(Message::WindowResized(iced::Size::new(800.0, 600.0)));
+
+    assert!(app.in_flight.is_pending("inline-copy", ""));
+}
+
+#[test]
+fn test_currency_help_row_is_not_activatable() {
+    let mut app = test_app(AddonsConfig::default());
+    app.currency.help = true;
+
+    let task = app.update(Message::Submit);
+
+    assert_eq!(task.units(), 0);
+}
+
+#[test]
 fn test_windows_ctrl_enter_brings_window_here() {
     let mut app = windows_app();
     let _ = app.update(Message::SearchChanged("win notes".into()));

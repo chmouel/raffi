@@ -126,6 +126,7 @@ fn run_wayland_ui(
     let main_view = settings.main_view.clone();
     let clipboard_history = settings.clipboard_history;
     let show_preview = settings.show_preview;
+    let select_1 = settings.select_1;
     let preview_style = theme::PreviewStyle::resolve(
         &theme_colors,
         &settings.preview,
@@ -168,6 +169,9 @@ fn run_wayland_ui(
                 sort_mode.clone(),
                 fallbacks.clone(),
             );
+            if select_1 && !app.search_query.is_empty() {
+                app.select_1_query = Some(app.search_query.clone());
+            }
             app.text_snippets.clipboard_history = clipboard_history;
             configure_preview_visibility(&mut app.view, show_preview);
             app.view.preview_style = preview_style.clone();

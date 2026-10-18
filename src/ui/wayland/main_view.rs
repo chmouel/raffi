@@ -125,6 +125,7 @@ pub(super) enum Source {
     List(Box<CommandListState>),
     Snippets {
         config_index: usize,
+        loading: bool,
         items: Vec<TextSnippet>,
         filtered: Vec<usize>,
         /// Values with their placeholders filled in, indexed like `items`.
@@ -204,6 +205,7 @@ impl MainViewState {
                 }
                 Entry::Snippets(config_index) => Source::Snippets {
                     config_index,
+                    loading: false,
                     items: Vec::new(),
                     filtered: Vec::new(),
                     previews: Vec::new(),
@@ -256,6 +258,17 @@ impl MainViewState {
                 None => !self.query.is_empty(),
                 Some(focus) => focus == Focus::Source(source),
             }
+    }
+
+    pub fn has_loading(&self) -> bool {
+        self.sources.iter().enumerate().any(|(source, entry)| {
+            self.shows(source)
+                && match entry {
+                    Source::List(list) => list.loading || list.refreshing,
+                    Source::Snippets { loading, .. } => *loading,
+                    Source::ScriptFilter { running, .. } => *running,
+                }
+        })
     }
 
     fn block_range(&self, block: Block) -> std::ops::Range<usize> {
@@ -368,9 +381,20 @@ impl LauncherApp {
                 None => Task::none(),
             },
             Source::Snippets { config_index, .. } => {
-                let Some(config) = self.addons.text_snippets.get(*config_index).cloned() else {
+                let config_index = *config_index;
+                let Some(config) = self.addons.text_snippets.get(config_index).cloned() else {
+                    if let Some(Source::Snippets { loading, .. }) =
+                        self.main_view.sources.get_mut(source)
+                    {
+                        *loading = false;
+                    }
                     return Task::none();
                 };
+                if let Some(Source::Snippets { loading, .. }) =
+                    self.main_view.sources.get_mut(source)
+                {
+                    *loading = true;
+                }
                 Task::perform(
                     off_thread(move || load_snippet_source(&config)),
                     move |result| {
@@ -393,14 +417,25 @@ impl LauncherApp {
         addon: CommandListAddon,
         fetch_favicons: bool,
     ) -> Task<Message> {
-        let Source::List(list) = &mut self.main_view.sources[source] else {
-            return Task::none();
+        let generation = {
+            let Source::List(list) = &mut self.main_view.sources[source] else {
+                return Task::none();
+            };
+            list.generation = list.generation.wrapping_add(1);
+            if list.items.is_empty() {
+                list.loading = true;
+            } else {
+                list.refreshing = true;
+            }
+            list.generation
         };
-        list.generation = list.generation.wrapping_add(1);
-        let generation = list.generation;
         let exists = self.program_exists;
-        let missing = |tool: &str| {
+        let missing = |this: &mut Self, tool: &str| {
             crate::debug_log!("main_view: {} hidden, {tool} not found", addon.name());
+            if let Some(Source::List(list)) = this.main_view.sources.get_mut(source) {
+                list.loading = false;
+                list.refreshing = false;
+            }
             Task::none()
         };
         let load: ListLoad = match addon {
@@ -419,24 +454,24 @@ impl LauncherApp {
             }
             CommandListAddon::Windows => {
                 let Some(compositor) = (self.compositor)() else {
-                    return missing("a supported compositor");
+                    return missing(self, "a supported compositor");
                 };
                 if !exists(compositor.program()) {
-                    return missing(compositor.program());
+                    return missing(self, compositor.program());
                 }
                 Box::new(move || compositor.load_windows())
             }
             CommandListAddon::BrowserTabs => Box::new(super::browser_tabs::load_tabs),
             CommandListAddon::Media => {
                 if !exists("playerctl") {
-                    return missing("playerctl");
+                    return missing(self, "playerctl");
                 }
                 let keep_open = !self.addons.media.close_on_action;
                 Box::new(move || super::media::load_players(keep_open))
             }
             CommandListAddon::Audio => {
                 if !exists("pactl") {
-                    return missing("pactl");
+                    return missing(self, "pactl");
                 }
                 let options = super::audio::AudioOptions::of(&self.addons.audio);
                 let query_row = self.audio_query_row(false);
@@ -447,17 +482,17 @@ impl LauncherApp {
             }
             CommandListAddon::Bluetooth => {
                 if !exists("bluetoothctl") {
-                    return missing("bluetoothctl");
+                    return missing(self, "bluetoothctl");
                 }
                 let keep_open = !self.addons.bluetooth.close_on_action;
                 Box::new(move || Ok(super::bluetooth::load_devices(keep_open)))
             }
             CommandListAddon::Pass => {
                 if !exists("pass") {
-                    return missing("pass");
+                    return missing(self, "pass");
                 }
                 if !exists("gpg") && !exists("gpg2") {
-                    return missing("gpg");
+                    return missing(self, "gpg");
                 }
                 let usage = self.vault_usage();
                 if let Source::List(list) = &mut self.main_view.sources[source] {
@@ -467,7 +502,11 @@ impl LauncherApp {
                 Box::new(move || super::pass::load_entries(&ctx))
             }
             CommandListAddon::Kill | CommandListAddon::Bitwarden | CommandListAddon::Terminal => {
-                return Task::none()
+                if let Some(Source::List(list)) = self.main_view.sources.get_mut(source) {
+                    list.loading = false;
+                    list.refreshing = false;
+                }
+                return Task::none();
             }
         };
         let load = Task::perform(off_thread(load), move |result| {
@@ -508,6 +547,10 @@ impl LauncherApp {
             Ok(items) => items,
             Err(error) => {
                 crate::debug_log!("main_view: {} hidden: {error}", addon.name());
+                if let Some(Source::List(list)) = self.main_view.sources.get_mut(source) {
+                    list.loading = false;
+                    list.refreshing = false;
+                }
                 return Task::none();
             }
         };
@@ -609,6 +652,9 @@ impl LauncherApp {
         source: usize,
         result: Result<Vec<TextSnippet>, String>,
     ) -> Task<Message> {
+        if let Some(Source::Snippets { loading, .. }) = self.main_view.sources.get_mut(source) {
+            *loading = false;
+        }
         match result {
             Ok(snippets) => {
                 if let Some(Source::Snippets { items, .. }) = self.main_view.sources.get_mut(source)

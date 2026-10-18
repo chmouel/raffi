@@ -435,6 +435,7 @@ impl EmojiState {
 pub(super) struct DevtoolsState {
     pub active: bool,
     pub rows: Vec<super::devtools::DevRow>,
+    pub loading: bool,
     /// Bumped by every `dev` query and when leaving the mode; a hash worker
     /// started for an older value skips its work or has its result dropped.
     pub hash_generation: Arc<std::sync::atomic::AtomicU64>,
@@ -447,6 +448,7 @@ impl DevtoolsState {
     pub fn clear(&mut self) {
         self.active = false;
         self.rows.clear();
+        self.loading = false;
         self.hash_generation
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
@@ -531,6 +533,8 @@ pub(super) struct LauncherApp {
     pub configs: Vec<crate::RaffiConfig>,
     pub filtered_configs: Vec<usize>,
     pub search_query: String,
+    pub select_1_query: Option<String>,
+    pub select_1_ready: bool,
     pub selected_index: usize,
     pub selected_item: SharedSelection,
     pub icon_map: HashMap<String, String>,

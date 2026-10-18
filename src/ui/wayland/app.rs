@@ -27,7 +27,7 @@ use super::emoji::{
     load_emoji_data_from_disk, resolve_emoji_file_names,
 };
 use super::help::{add_main_view_shortcut, filter_help_entries, help_entries};
-use super::main_view::{Block, Focus, MAIN_VIEW_SESSION};
+use super::main_view::{Block, Focus, Source, MAIN_VIEW_SESSION};
 use super::pass::PassContext;
 use super::preview::image_mime_type;
 use super::script_filters::{
@@ -942,6 +942,8 @@ impl LauncherApp {
                 filtered_configs: (0..configs.len()).collect(),
                 configs,
                 search_query: initial_query.clone(),
+                select_1_query: None,
+                select_1_ready: false,
                 selected_index: 0,
                 selected_item,
                 icon_map,
@@ -1015,10 +1017,210 @@ impl LauncherApp {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.update_inner(message);
         self.sync_vault();
+        let select_1 = self.maybe_auto_select_1();
         let preview = self.ensure_clipboard_preview();
         let file_preview = self.ensure_file_browser_preview();
         let tab_preview = self.ensure_tab_preview();
-        Task::batch([task, preview, file_preview, tab_preview])
+        Task::batch([task, select_1, preview, file_preview, tab_preview])
+    }
+
+    fn maybe_auto_select_1(&mut self) -> Task<Message> {
+        if !self.select_1_ready {
+            return Task::none();
+        }
+        let Some(query) = self
+            .select_1_query
+            .as_deref()
+            .filter(|query| !query.is_empty())
+        else {
+            self.select_1_query = None;
+            self.select_1_ready = false;
+            return Task::none();
+        };
+        if self.search_query != query {
+            self.select_1_query = None;
+            self.select_1_ready = false;
+            return Task::none();
+        }
+        if self.select_1_results_loading() {
+            return Task::none();
+        }
+        let index = self.sole_selectable_result_index();
+        self.select_1_query = None;
+        self.select_1_ready = false;
+        if let Some(index) = index {
+            self.activate_index(index)
+        } else {
+            Task::none()
+        }
+    }
+
+    fn select_1_results_loading(&self) -> bool {
+        match &self.query_class.mode {
+            QueryMode::ScriptFilter { .. } => self.script_filter.loading,
+            QueryMode::TextSnippet { .. } => self.text_snippets.loading,
+            QueryMode::Emoji { .. } => self.emoji.data_loading,
+            QueryMode::Clipboard { .. } => self.clipboard.loading,
+            QueryMode::CommandList { addon, .. } => {
+                self.command_list.loading
+                    || self.command_list.refreshing
+                    || (VaultAddon::of(*addon).is_some()
+                        && (self.vault.busy()
+                            || self.vault.prompt.is_some()
+                            || self.vault.search_query.is_some()))
+            }
+            QueryMode::Devtools { .. } => self.devtools.loading,
+            QueryMode::Standard => {
+                self.currency.loading || self.currency.multi_loading || self.main_view.has_loading()
+            }
+            QueryMode::FileBrowser { .. } | QueryMode::WebSearch { .. } => false,
+        }
+    }
+
+    fn sole_selectable_result_index(&self) -> Option<usize> {
+        if self.view.help_active {
+            return None;
+        }
+        let (selectable_count, candidate) = {
+            let mut candidate = None;
+            let mut selectable_count = 0;
+            let mut index = 0;
+            let mut consider = |selectable: bool| {
+                if selectable {
+                    selectable_count += 1;
+                    if selectable_count == 1 {
+                        candidate = Some(index);
+                    }
+                }
+                index += 1;
+            };
+
+            for _ in &self.keyword_suggestions {
+                consider(true);
+            }
+            if self.script_filter.loading {
+                consider(false);
+            } else if let Some(result) = &self.script_filter.results {
+                for _ in &result.items {
+                    consider(true);
+                }
+            }
+            if self.text_snippets.loading {
+                consider(false);
+            } else if self.text_snippets.active {
+                for _ in &self.text_snippets.filtered {
+                    consider(true);
+                }
+            }
+            if self.emoji.active {
+                for _ in &self.emoji.filtered {
+                    consider(true);
+                }
+            }
+            for row in 0..self.clipboard.row_count() {
+                consider(self.clipboard.items.get(row).is_some());
+            }
+            for row in 0..self.command_list.row_count() {
+                consider(
+                    self.selectable_command_item(
+                        self.command_list.addon,
+                        self.command_list.item(row),
+                    ),
+                );
+            }
+            if self.devtools.active {
+                for row in &self.devtools.rows {
+                    consider(row.copyable);
+                }
+            }
+            if self.file_browser.active {
+                for _ in &self.file_browser.entries {
+                    consider(true);
+                }
+            }
+            if self.web_search.active.is_some() {
+                consider(true);
+            }
+            if self.currency.help {
+                consider(false);
+            }
+            if self.currency.loading {
+                consider(false);
+            } else if self.currency.result.is_some() {
+                consider(true);
+            }
+            if self.currency.multi_loading {
+                consider(false);
+            } else if let Some(result) = &self.currency.multi_result {
+                for _ in &result.conversions {
+                    consider(true);
+                }
+            }
+            if let Some(inline) = &self.inline_result {
+                for row in &inline.rows {
+                    consider(!row.copy_value.is_empty());
+                }
+            }
+            for (source, row) in self.main_view.rows(Block::BeforeLaunchers) {
+                let selectable = match &self.main_view.sources[source] {
+                    Source::List(list) => self.selectable_command_item(list.addon, list.item(row)),
+                    Source::Snippets { filtered, .. } => filtered.get(row).is_some(),
+                    Source::ScriptFilter { results, .. } => results
+                        .as_ref()
+                        .is_some_and(|result| result.items.get(row).is_some()),
+                };
+                consider(selectable);
+            }
+            for _ in &self.filtered_configs {
+                consider(true);
+            }
+            for (source, row) in self.main_view.rows(Block::AfterLaunchers) {
+                let selectable = match &self.main_view.sources[source] {
+                    Source::List(list) => self.selectable_command_item(list.addon, list.item(row)),
+                    Source::Snippets { filtered, .. } => filtered.get(row).is_some(),
+                    Source::ScriptFilter { results, .. } => results
+                        .as_ref()
+                        .is_some_and(|result| result.items.get(row).is_some()),
+                };
+                consider(selectable);
+            }
+            for _ in 0..self.fallback_count() {
+                consider(true);
+            }
+
+            (selectable_count, candidate)
+        };
+        if selectable_count == 1 {
+            candidate
+        } else {
+            None
+        }
+    }
+
+    fn selectable_command_item(
+        &self,
+        addon: Option<CommandListAddon>,
+        item: Option<&super::command_list::CommandItem>,
+    ) -> bool {
+        let (Some(addon), Some(item)) = (addon, item) else {
+            return false;
+        };
+        if let Some(vault) = VaultAddon::of(addon) {
+            let identity = item.identity.as_str();
+            return match vault {
+                VaultAddon::Pass => {
+                    identity == super::pass::LOCK_IDENTITY
+                        || identity == super::pass::SYNC_IDENTITY
+                        || super::pass::entry_name(identity).is_some()
+                }
+                VaultAddon::Bitwarden => {
+                    identity == super::bitwarden::LOCK_IDENTITY
+                        || identity == super::bitwarden::SYNC_IDENTITY
+                        || super::bitwarden::item_id(identity).is_some()
+                }
+            };
+        }
+        item.unavailable.is_none() && item.action(self.view.current_modifiers).is_some()
     }
 
     /// Look up the page preview of the selected browser tab, one at a time.
@@ -1326,6 +1528,15 @@ impl LauncherApp {
         } else {
             (query, None)
         };
+
+        if self.select_1_query.is_some() {
+            if self.select_1_query.as_deref() == Some(query.as_str()) && !self.view.help_active {
+                self.select_1_ready = true;
+            } else {
+                self.select_1_query = None;
+                self.select_1_ready = false;
+            }
+        }
 
         self.history.search_in_progress = false;
 
@@ -2782,6 +2993,13 @@ impl LauncherApp {
             current_index += 1;
         }
 
+        if self.currency.help {
+            if index == current_index {
+                return Task::none();
+            }
+            current_index += 1;
+        }
+
         if self.currency.loading {
             if index == current_index {
                 return Task::none();
@@ -3820,6 +4038,7 @@ impl LauncherApp {
     fn handle_devtools_query(&mut self, payload: String) -> Task<Message> {
         self.devtools.active = true;
         self.devtools.rows = transform_rows(&payload);
+        self.devtools.loading = false;
         if payload.is_empty() {
             return Task::none();
         }
@@ -3837,6 +4056,7 @@ impl LauncherApp {
         if jobs.is_empty() {
             return Task::none();
         }
+        self.devtools.loading = true;
         let generation = self.devtools.current_generation();
         let current = self.devtools.hash_generation.clone();
         Task::perform(
@@ -3879,6 +4099,7 @@ impl LauncherApp {
         if !self.devtools.active || generation != self.devtools.current_generation() {
             return Task::none();
         }
+        self.devtools.loading = false;
         for row in rows {
             if let Some(slot) = self
                 .devtools
