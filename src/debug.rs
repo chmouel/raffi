@@ -5,12 +5,12 @@ use std::sync::{Mutex, OnceLock};
 static DEBUG_FILE: OnceLock<Mutex<File>> = OnceLock::new();
 
 pub fn init(path: &str) {
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .expect("cannot open debug file");
-    let _ = DEBUG_FILE.set(Mutex::new(file));
+    match OpenOptions::new().create(true).append(true).open(path) {
+        Ok(file) => {
+            let _ = DEBUG_FILE.set(Mutex::new(file));
+        }
+        Err(error) => eprintln!("raffi: cannot open debug file {path}: {error}"),
+    }
 }
 
 pub fn is_enabled() -> bool {

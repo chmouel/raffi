@@ -161,11 +161,7 @@ pub fn get_vault_mru_cache_path() -> Result<PathBuf> {
 
 /// Get the command history cache file path
 pub fn get_history_cache_path() -> Result<PathBuf> {
-    let cache_dir = std::env::var("XDG_CACHE_HOME")
-        .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()));
-    let mut path = PathBuf::from(cache_dir);
-    path.push("raffi");
-    std::fs::create_dir_all(&path)?;
-    path.push("history.cache");
+    let mut path = get_mru_cache_path()?;
+    path.set_file_name("history.cache");
     Ok(path)
 }

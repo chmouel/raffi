@@ -2522,7 +2522,7 @@ pub fn run(args: Args) -> Result<()> {
     }
 
     if args.version {
-        println!("raffi version 0.1.0");
+        println!("raffi version {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
 

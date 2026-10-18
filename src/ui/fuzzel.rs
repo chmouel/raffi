@@ -28,35 +28,28 @@ impl UI for FuzzelUI {
 /// Create the input for fuzzel based on the Raffi configurations.
 fn make_fuzzel_input(rafficonfigs: &[RaffiConfig], no_icons: bool) -> Result<String> {
     if no_icons {
-        return Ok(make_fuzzel_input_with_maps(
-            rafficonfigs,
-            None,
-            None,
-            no_icons,
-        ));
+        return Ok(render_fuzzel_input(rafficonfigs, None));
     }
 
     // Load icon maps once for the entire menu build.
     let icon_map = read_icon_map().unwrap_or_default();
     let desktop_icon_map = read_desktop_icon_map();
 
-    Ok(make_fuzzel_input_with_maps(
+    Ok(render_fuzzel_input(
         rafficonfigs,
-        Some(&icon_map),
-        Some(&desktop_icon_map),
-        no_icons,
+        Some((&icon_map, &desktop_icon_map)),
     ))
 }
 
-fn make_fuzzel_input_with_maps(
-    rafficonfigs: &[RaffiConfig],
-    icon_map: Option<&std::collections::HashMap<String, String>>,
-    desktop_icon_map: Option<&std::collections::HashMap<String, String>>,
-    no_icons: bool,
-) -> String {
+type IconMaps<'a> = Option<(
+    &'a std::collections::HashMap<String, String>,
+    &'a std::collections::HashMap<String, String>,
+)>;
+
+fn render_fuzzel_input(rafficonfigs: &[RaffiConfig], icon_maps: IconMaps) -> String {
     let mut ret = String::new();
 
-    if no_icons {
+    let Some((icon_map, desktop_icon_map)) = icon_maps else {
         for mc in rafficonfigs {
             let description = mc
                 .description
@@ -65,11 +58,7 @@ fn make_fuzzel_input_with_maps(
             ret.push_str(&format!("{description}\n"));
         }
         return ret;
-    }
-
-    let icon_map = icon_map.expect("icon map is required when icons are enabled");
-    let desktop_icon_map =
-        desktop_icon_map.expect("desktop icon map is required when icons are enabled");
+    };
 
     for mc in rafficonfigs {
         let description = mc
@@ -86,8 +75,11 @@ fn make_fuzzel_input_with_maps(
 /// Run the fuzzel command with the provided input and return its output.
 fn run_fuzzel_with_input(input: &str) -> Result<String> {
     let cache_file = super::get_mru_cache_path().context("Failed to get MRU cache path")?;
+    let cache_file = cache_file
+        .to_str()
+        .context("MRU cache path is not valid UTF-8")?;
     let mut child = Command::new("fuzzel")
-        .args(["-d", "--counter", "--cache", cache_file.to_str().unwrap()])
+        .args(["-d", "--counter", "--cache", cache_file])
         .stdout(Stdio::piped())
         .stdin(Stdio::piped())
         .stderr(Stdio::null())
@@ -108,7 +100,7 @@ fn run_fuzzel_with_input(input: &str) -> Result<String> {
 mod tests {
     use std::collections::HashMap;
 
-    use super::make_fuzzel_input_with_maps;
+    use super::render_fuzzel_input;
     use crate::RaffiConfig;
 
     #[test]
@@ -122,8 +114,7 @@ mod tests {
         let icon_map = HashMap::from([("firefox".to_string(), "/icons/firefox.svg".to_string())]);
         let desktop_icon_map = HashMap::from([("firefox".to_string(), "firefox".to_string())]);
 
-        let input =
-            make_fuzzel_input_with_maps(&configs, Some(&icon_map), Some(&desktop_icon_map), false);
+        let input = render_fuzzel_input(&configs, Some((&icon_map, &desktop_icon_map)));
 
         assert_eq!(input, "Firefox\0icon\x1f/icons/firefox.svg\n");
     }
@@ -136,7 +127,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let input = make_fuzzel_input_with_maps(&configs, None, None, true);
+        let input = render_fuzzel_input(&configs, None);
 
         assert_eq!(input, "Firefox\n");
     }

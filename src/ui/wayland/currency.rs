@@ -36,8 +36,10 @@ static PATTERN_SIMPLE_CURRENCY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)^\s*(\d+(?:\.\d+)?)\s*([A-Z]{3})?$").unwrap());
 
 pub(super) fn is_currency_help_query(query: &str, trigger: &str) -> bool {
-    let trimmed = query.trim();
-    trimmed == trigger || trimmed == format!("{} ", trigger)
+    query
+        .trim()
+        .strip_prefix(trigger)
+        .is_some_and(|rest| rest.is_empty() || rest == " ")
 }
 
 fn word_to_currency(word: &str) -> Option<&'static str> {
