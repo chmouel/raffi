@@ -168,7 +168,7 @@ No trigger character is needed; simply type a valid expression.
 
 Converts lengths, weights, volumes, temperatures, data sizes, durations,
 speeds and areas as you type, such as `10 km to mi`. See
-[Unit Conversion](/features/unit-conversion/) for the supported units.
+[Unit Conversion](../../features/unit-conversion/) for the supported units.
 
 ### Configuration
 
@@ -186,7 +186,7 @@ addons:
 
 Shows a color typed as `#ff8800`, `rgb(255 136 0)` or `hsl(32 100% 50%)` in
 hex, rgb and hsl, with the nearest CSS color name. See
-[Color Converter](/features/color-converter/) for the accepted formats.
+[Color Converter](../../features/color-converter/) for the accepted formats.
 
 ### Configuration
 
@@ -204,7 +204,7 @@ addons:
 
 Shows the time in another place (`time tokyo`, `time in new york`) or converts
 a time between places (`15:00 paris to nyc`). Needs the system `tzdata`
-package. See [World Clock](/features/world-clock/) for place names and rules.
+package. See [World Clock](../../features/world-clock/) for place names and rules.
 
 ### Configuration
 
@@ -316,7 +316,7 @@ Command that Ctrl+B uses to open the browsed directory. The directory is appende
 
 **`addons.file_browser.preview_command`** `string` (default: the bundled previewer when `python3` is installed)
 
-Command that previews the selected entry in the preview pane. When unset, raffi runs the previewer it bundles from `scripts/file-preview`; `none` turns rich previews off. The path is appended as the last argument and exported as `$RAFFI_VALUE`; the command prints ANSI text or a [preview object](/features/script-filters/#preview-object) as JSON, and prints nothing or exits non-zero to keep the built-in preview. See [Rich Previews](/features/file-browser/#rich-previews).
+Command that previews the selected entry in the preview pane. When unset, raffi runs the previewer it bundles from `scripts/file-preview`; `none` turns rich previews off. The path is appended as the last argument and exported as `$RAFFI_VALUE`; the command prints ANSI text or a [preview object](../../features/script-filters/#preview-object) as JSON, and prints nothing or exits non-zero to keep the built-in preview. See [Rich Previews](../../features/file-browser/#rich-previews).
 
   ```yaml
   addons:
@@ -492,7 +492,7 @@ Minimum number of characters required after the keyword before the script execut
 
 **`dynamic_preview`** `boolean` (default: `true`)
 
-Re-run the script with `RAFFI_PREVIEW=1` for the selected item and show the preview object it prints in the preview pane. Scripts that do not support it are detected and skipped after one run. See [Dynamic Previews](/features/script-filters/#dynamic-previews).
+Re-run the script with `RAFFI_PREVIEW=1` for the selected item and show the preview object it prints in the preview pane. Scripts that do not support it are detected and skipped after one run. See [Dynamic Previews](../../features/script-filters/#dynamic-previews).
 
   ```yaml
   addons:
@@ -525,7 +525,7 @@ The script must output JSON matching this structure:
 - `subtitle` (optional): Secondary text shown below the title
 - `arg` (optional): Value used in actions (falls back to `title` if omitted)
 - `icon.path` (optional): Absolute path to a PNG or SVG icon
-- `preview` (optional): Preview text or file path, or a preview object (see [Dynamic Previews](/features/script-filters/#dynamic-previews))
+- `preview` (optional): Preview text or file path, or a preview object (see [Dynamic Previews](../../features/script-filters/#dynamic-previews))
 - `variables` (optional): String map exported as environment variables to the preview call and to the actions
 
 The `title` and `subtitle` fields support ANSI color codes for colored text rendering.
@@ -707,7 +707,7 @@ Inline list of snippets.
 
 - `name` (string, required): Display name
 - `value` (string, required): Snippet content, which may contain
-  [dynamic placeholders](/features/text-snippets/#dynamic-placeholders)
+  [dynamic placeholders](../../features/text-snippets/#dynamic-placeholders)
   such as `{clipboard}` or `{date +1d}`
 - `keyword` (string, optional): Abbreviation ranked first when typed exactly
 - `icon` (string, optional): Emoji (for example `🏠`), icon name, or image path
@@ -812,7 +812,7 @@ Action to perform on Enter. Inside Hyprland, an unset `action` becomes
   clipboard unless `restore_clipboard` is enabled; does not reposition
   `{cursor}`. Marks the snippet sensitive so CopyQ and other clipboard managers
   that honor the hint skip storing it. See
-  [Hyprland paste](/features/text-snippets/#default-actions).
+  [Hyprland paste](../../features/text-snippets/#default-actions).
 
   Any other string is executed as a shell command via `sh -c`, with `{value}` replaced by the snippet value. The value is also exported as `$RAFFI_VALUE`; prefer `"$RAFFI_VALUE"` when the snippet may contain quotes or shell syntax, since `{value}` is substituted as raw text.
 
@@ -854,7 +854,7 @@ actions.
 
 **`placeholders`** `boolean` (default: `true`)
 
-Expand [dynamic placeholders](/features/text-snippets/#dynamic-placeholders) in snippet values. Set to `false` to use values exactly as written.
+Expand [dynamic placeholders](../../features/text-snippets/#dynamic-placeholders) in snippet values. Set to `false` to use values exactly as written.
 
   ```yaml
   addons:
@@ -936,7 +936,7 @@ addons:
 ## Clipboard History
 
 Browses the clipboard history stored by CopyQ. See
-[Clipboard History](/features/clipboard-history/) for setup and usage.
+[Clipboard History](../../features/clipboard-history/) for setup and usage.
 
 ### Configuration
 
@@ -986,7 +986,7 @@ addons:
 ## System Commands
 
 Lists lock, suspend, hibernate, log out, reboot and shut down. See
-[System Commands](/features/system-commands/) for usage.
+[System Commands](../../features/system-commands/) for usage.
 
 ### Configuration
 
@@ -1021,7 +1021,7 @@ addons:
 ## Window Switcher
 
 Lists the open windows on Hyprland, niri or sway and focuses the one you
-pick. See [Window Switcher](/features/window-switcher/) for usage.
+pick. See [Window Switcher](../../features/window-switcher/) for usage.
 
 ### Configuration
 
@@ -1044,7 +1044,7 @@ addons:
 
 Lists the tabs of your browsers through the Vicinae browser extension, and
 switches to or closes the one you pick. See
-[Browser Tabs](/features/browser-tabs/) for setup and usage.
+[Browser Tabs](../../features/browser-tabs/) for setup and usage.
 
 ### Configuration
 
@@ -1075,7 +1075,7 @@ addons:
 ## Media Controls
 
 Plays, pauses, skips or stops the running media players through `playerctl`.
-See [Media Controls](/features/media-controls/) for usage.
+See [Media Controls](../../features/media-controls/) for usage.
 
 ### Configuration
 
@@ -1103,7 +1103,7 @@ addons:
 ## Audio Switcher
 
 Changes the volume, sets the default output or input and mutes devices
-through `pactl`. See [Audio Switcher](/features/audio-switcher/) for usage.
+through `pactl`. See [Audio Switcher](../../features/audio-switcher/) for usage.
 
 ### Configuration
 
@@ -1141,7 +1141,7 @@ addons:
 ## Installed Apps
 
 Lists the applications installed on the system next to your launchers.
-See [Installed Apps](/features/installed-apps/) for usage.
+See [Installed Apps](../../features/installed-apps/) for usage.
 
 ### Configuration
 
@@ -1167,7 +1167,7 @@ addons:
 
 Runs a typed command in a terminal window, or in a new tab of a running
 kitty or WezTerm.
-See [Run in Terminal](/features/terminal/) for usage.
+See [Run in Terminal](../../features/terminal/) for usage.
 
 ### Configuration
 
@@ -1197,7 +1197,7 @@ Enter is pressed.
 that is the terminal used, and falls back to a new window when none is
 running. `window` always opens a new window. Desktop apps marked
 `Terminal=true` always open a window.
-See [Tabs in kitty and WezTerm](/features/terminal/#tabs-in-kitty-and-wezterm).
+See [Tabs in kitty and WezTerm](../../features/terminal/#tabs-in-kitty-and-wezterm).
 
 **`addons.terminal.kitty_socket`** `string` (default: `listen_on` from `kitty.conf`)
 
@@ -1221,7 +1221,7 @@ addons:
 ## Kill Process
 
 Stops your own processes with `kill`.
-See [Kill Process](/features/kill-process/) for usage.
+See [Kill Process](../../features/kill-process/) for usage.
 
 ### Configuration
 
@@ -1243,7 +1243,7 @@ addons:
 ## Bluetooth
 
 Turns Bluetooth on and off and connects paired devices with `bluetoothctl`.
-See [Bluetooth](/features/bluetooth/) for usage.
+See [Bluetooth](../../features/bluetooth/) for usage.
 
 ### Configuration
 
@@ -1271,7 +1271,7 @@ addons:
 ## Password Store
 
 Copies or types passwords from [pass](https://www.passwordstore.org/).
-See [Password Store](/features/password-store/) for usage.
+See [Password Store](../../features/password-store/) for usage.
 
 ### Configuration
 
@@ -1323,7 +1323,7 @@ addons:
 Copies or types passwords from a Bitwarden vault with
 [rbw](https://github.com/doy/rbw). The vault lock timeout is set in rbw
 (`rbw config set lock_timeout`), not here.
-See [Bitwarden](/features/bitwarden/) for usage.
+See [Bitwarden](../../features/bitwarden/) for usage.
 
 ### Configuration
 
@@ -1356,7 +1356,7 @@ addons:
 
 Lists base64, URL, hash, epoch, JSON and case transforms of the text typed
 after `dev `, and generates UUIDs (`uuid`) and passwords (`pw`, `pw 32`) inline.
-See [Developer Tools](/features/developer-tools/) for usage.
+See [Developer Tools](../../features/developer-tools/) for usage.
 
 ### Configuration
 

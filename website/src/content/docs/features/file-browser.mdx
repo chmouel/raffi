@@ -125,14 +125,14 @@ Any executable works. Raffi runs the command with `sh -c`, adds the selected pat
 | `RAFFI_VALUE` | Absolute path of the selected file or directory |
 | `RAFFI_PREVIEW_WIDTH`, `RAFFI_PREVIEW_HEIGHT` | Preview pane size in pixels |
 | `RAFFI_PREVIEW_COLUMNS`, `RAFFI_PREVIEW_LINES` | Preview pane size in text cells, for tools such as `bat --terminal-width` |
-| `RAFFI_THEME`, `RAFFI_THEME_MODE`, `RAFFI_THEME_FG`, ... | The current theme, see [Terminal Colours](/features/themes/#terminal-colours) |
+| `RAFFI_THEME`, `RAFFI_THEME_MODE`, `RAFFI_THEME_FG`, ... | The current theme, see [Terminal Colours](../themes/#terminal-colours) |
 
 The path is never pasted into the shell line, so file names containing quotes, spaces or `$(...)` are safe.
 
 The command can print one of two things:
 
 - Text, with ANSI colours and bold, dim, italic or underline styles. The 16 basic colours are drawn with the theme's palette, so output from `bat --theme=ansi`, `eza` or `jq -C` matches the theme. It replaces the built-in preview body. Output is cut after 1000 lines.
-- A JSON preview object, in the same format as a [Script Filter preview](/features/script-filters/#preview-object). Use it to show an image with metadata rows, or several sections. Any `metadata` rows go above raffi's own Path, Size and Modified rows.
+- A JSON preview object, in the same format as a [Script Filter preview](../script-filters/#preview-object). Use it to show an image with metadata rows, or several sections. Any `metadata` rows go above raffi's own Path, Size and Modified rows.
 
 ```json
 {

@@ -125,9 +125,11 @@ Maximum number of search query history entries.
   Set to `0` to disable history. Navigate history with Alt+P (previous) and Alt+N (next) in native mode.
 
 
+<a id="sort_mode"></a>
+
 **`sort_mode`** `string` (default: `hybrid`)
 
-Controls how launcher entries, [text snippets](/features/text-snippets/#snippet-keywords-and-search), [password store](/features/password-store/) entries and [Bitwarden](/features/bitwarden/) logins are ordered by past use. With no search query they are listed in this order; while typing, it breaks ties between equally good matches. Valid options:
+Controls how launcher entries, [text snippets](../../features/text-snippets/#snippet-keywords-and-search), [password store](../../features/password-store/) entries and [Bitwarden](../../features/bitwarden/) logins are ordered by past use. With no search query they are listed in this order; while typing, it breaks ties between equally good matches. Valid options:
   - `frequency` - Sort by launch count (most frequently used first)
   - `recency` - Sort by last-used time (most recently used first)
   - `hybrid` - Combined score: 40% frequency + 60% recency (default)
@@ -139,7 +141,7 @@ Controls how launcher entries, [text snippets](/features/text-snippets/#snippet-
 
 **`clipboard_history`** `string` (default: `auto`)
 
-Clipboard manager used by `{clipboard:N}` in [text snippets](/features/text-snippets/#clipboard-history). Valid options:
+Clipboard manager used by `{clipboard:N}` in [text snippets](../../features/text-snippets/#clipboard-history). Valid options:
   - `auto` - Use the running one, preferring cliphist, then CopyQ, then clipman (default)
   - `cliphist` - Always use cliphist
   - `copyq` - Always use CopyQ
@@ -150,7 +152,7 @@ Clipboard manager used by `{clipboard:N}` in [text snippets](/features/text-snip
 
 **`terminal_classes`** `list of strings` (default: `[]`)
 
-Extra window classes that the [`hypr_paste`](/features/text-snippets/#default-actions) snippet action treats as terminals. Terminals get Ctrl+Shift+V instead of Ctrl+V. The list is added to the built-in one, which covers Alacritty, foot, kitty, Ghostty, WezTerm, GNOME Terminal, GNOME Console, Ptyxis, Konsole, Tilix, Terminator, Xfce Terminal, Rio and st. Classes are matched case-insensitively. Run `hyprctl activewindow` in your terminal to find its class.
+Extra window classes that the [`hypr_paste`](../../features/text-snippets/#default-actions) snippet action treats as terminals. Terminals get Ctrl+Shift+V instead of Ctrl+V. The list is added to the built-in one, which covers Alacritty, foot, kitty, Ghostty, WezTerm, GNOME Terminal, GNOME Console, Ptyxis, Konsole, Tilix, Terminator, Xfce Terminal, Rio and st. Classes are matched case-insensitively. Run `hyprctl activewindow` in your terminal to find its class.
 
 ```yaml
 general:
@@ -165,7 +167,7 @@ general:
 
 Addon entries that appear at the bottom of the launcher list when you type a non-empty query. This is useful for search-type addons (web searches, script filters) so they are always accessible without remembering their keywords.
 
-Each entry is a dot-separated path: `addons.<type>."<name>"` where `<type>` is `web_searches` or `script_filters`, and `<name>` matches the addon's `name` field. `addons.terminal` takes no name and adds a row that runs the query in a terminal, see [Run in Terminal](/features/terminal/).
+Each entry is a dot-separated path: `addons.<type>."<name>"` where `<type>` is `web_searches` or `script_filters`, and `<name>` matches the addon's `name` field. `addons.terminal` takes no name and adds a row that runs the query in a terminal, see [Run in Terminal](../../features/terminal/).
 
 Behavior:
   - Only shown when the search query is **non-empty**

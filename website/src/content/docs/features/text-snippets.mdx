@@ -365,7 +365,7 @@ for the CopyQ server, and prefers them in that order when several run. A custom
 `-db-path` for cliphist or `--histpath` for clipman on that command line is
 used too, including paths containing spaces. Quote those paths when launching
 the watcher through a shell. To pick one yourself or turn history off, set
-[`clipboard_history`](/configuration/general-settings/) in
+[`clipboard_history`](../../configuration/general-settings/) in
 `general:`.
 
 With CopyQ, Raffi reads the tab CopyQ saves the clipboard to (its
@@ -401,7 +401,7 @@ snippet value (before placeholders are filled in). The keyword is shown next to
 the snippet name.
 
 Raffi also remembers which snippets you pick, scored with the same
-[`sort_mode`](/configuration/general-settings/) as launchers (`hybrid` by
+[`sort_mode`](../../configuration/general-settings/) as launchers (`hybrid` by
 default). With nothing typed after the source keyword, the snippets you use
 most come first; while typing, usage only decides between equally good
 matches. A query starting with `!` is a keyword lookup, so usage is ignored
@@ -409,7 +409,7 @@ there and ties keep the source order. Usage is stored in
 `~/.cache/raffi/snippets.cache`, per source keyword and snippet name.
 
 To search a source without its keyword, add it to
-[`general.main_view`](/configuration/general-settings/#main-view) as
+[`general.main_view`](../../configuration/general-settings/#main-view) as
 `text_snippets."<name>"`. Its best matches then show in the main list. A
 command source runs once when Raffi starts there, rather than for each
 search.
@@ -456,7 +456,7 @@ Hyprland is older than 0.55, Enter keeps the `copy` default. Set `action: "copy"
 `action` or `secondary_action` on a text snippet source. The receiving app
 must accept Ctrl+V, or Ctrl+Shift+V for terminals. Raffi recognises common
 terminals by their window class; add others with
-[`general.terminal_classes`](/configuration/general-settings/).
+[`general.terminal_classes`](../../configuration/general-settings/).
 
 Snippet copies are marked sensitive so clipboard managers that honor this
 hint, including CopyQ with its default settings, keep them out of history.

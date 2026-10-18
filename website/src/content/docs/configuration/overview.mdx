@@ -22,11 +22,11 @@ You can override the location of `raffi.yaml` with the `-c` or `--configfile` fl
 raffi --configfile /path/to/custom/raffi.yaml
 ```
 
-Raffi writes `raffi-schema.json` and `launchers-schema.json` next to your config so editors can validate both files as you type, and warns on stderr about unknown or invalid keys when it starts. Run `raffi --check-config` to validate them on demand. See [Validation](/reference/yaml-schema#validation) for details.
+Raffi writes `raffi-schema.json` and `launchers-schema.json` next to your config so editors can validate both files as you type, and warns on stderr about unknown or invalid keys when it starts. Run `raffi --check-config` to validate them on demand. See [Validation](../../reference/yaml-schema/#validation) for details.
 
 ## Basic Structure
 
-`launchers.yaml` is a mapping of entry names to [entries](/configuration/entries). `raffi.yaml` has two main sections:
+`launchers.yaml` is a mapping of entry names to [entries](../entries/). `raffi.yaml` has two main sections:
 
 1. **General settings** - UI preferences, theme, fonts, window dimensions
 2. **Addons** - Optional features like script filters, web searches, text snippets
@@ -98,32 +98,32 @@ launchers:
 
 <div class="nav-cards">
   <CardGrid>
-    <a href="/configuration/general-settings/">
+    <a href="../general-settings/">
       <Card title="General Settings" icon="setting">
         UI type, theme, fonts, and window settings
       </Card>
     </a>
-    <a href="/configuration/entries/">
+    <a href="../entries/">
       <Card title="Entries" icon="rocket">
         Define launcher entries with binaries, scripts, and arguments
       </Card>
     </a>
-    <a href="/configuration/icons/">
+    <a href="../icons/">
       <Card title="Icons" icon="star">
         Icon caching, discovery, and path configuration
       </Card>
     </a>
-    <a href="/configuration/scripts/">
+    <a href="../scripts/">
       <Card title="Scripts" icon="pencil">
         Inline scripts with bash, python, or custom interpreters
       </Card>
     </a>
-    <a href="/configuration/conditions/">
+    <a href="../conditions/">
       <Card title="Conditions" icon="magnifier">
         Conditional visibility based on environment or binary existence
       </Card>
     </a>
-    <a href="/reference/addon-configuration/">
+    <a href="../../reference/addon-configuration/">
       <Card title="Addons" icon="puzzle">
         Optional features like script filters, web searches, and text snippets
       </Card>
