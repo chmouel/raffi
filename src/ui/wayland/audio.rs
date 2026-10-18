@@ -379,7 +379,7 @@ fn volume_items(
     let mut items = Vec::new();
     if let Some(sink) = sink {
         if let Some(current) = sink.volume_percent() {
-            let up = (current + options.step).min(options.max);
+            let up = current.saturating_add(options.step).min(options.max);
             if up > current {
                 items.push(control_item(
                     "volume/up",
@@ -871,6 +871,15 @@ mod tests {
         assert_eq!(
             argv(&items[1]),
             format!("pactl set-sink-volume {ryzen} 110%")
+        );
+        let huge_step = AudioOptions {
+            step: u32::MAX,
+            ..louder
+        };
+        let items = audio_items(&sinks, &[], ryzen, "", huge_step);
+        assert_eq!(
+            argv(&items[1]),
+            format!("pactl set-sink-volume {ryzen} 150%")
         );
     }
 
