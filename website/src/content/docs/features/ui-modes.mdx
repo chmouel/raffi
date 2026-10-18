@@ -1,6 +1,6 @@
 ---
 title: UI Modes
-description: Choose between Fuzzel integration and native interface
+description: Native UI by default; legacy Fuzzel integration
 ---
 
 import { Aside, Tabs, TabItem, Card, CardGrid } from '@astrojs/starlight/components';
@@ -11,22 +11,22 @@ import keywordShortcutScreenshot from '../../../assets/screenshots/keyword-help-
 import fuzzelScreenshot from '../../../assets/screenshots/fuzzel-mode.png';
 import emojiScreenshot from '../../../assets/screenshots/emoji-picker.png';
 
-Raffi supports two distinct user interface modes, each designed for different use cases and preferences.
+Raffi's built-in native interface is the default and recommended UI. The external Fuzzel backend is deprecated but remains available as a legacy option for existing setups and Fuzzel-only builds.
 
 ## Overview
 
-Raffi can operate in two modes:
+Raffi defaults to its native interface, with the legacy Fuzzel backend available when needed:
 
 <div class="nav-cards">
   <CardGrid>
-    <a href="#fuzzel-mode">
-      <Card title="Fuzzel Mode" icon="rocket">
-        External launcher integration with Wayland environments
+    <a href="#native-mode">
+      <Card title="Native Mode (Default)" icon="laptop">
+        Built-in graphical interface with advanced features
       </Card>
     </a>
-    <a href="#native-mode">
-      <Card title="Native Mode" icon="laptop">
-        Built-in graphical interface with advanced features
+    <a href="#fuzzel-mode">
+      <Card title="Fuzzel Mode (Legacy)" icon="rocket">
+        Deprecated external launcher integration
       </Card>
     </a>
   </CardGrid>
@@ -34,7 +34,7 @@ Raffi can operate in two modes:
 
 ## Fuzzel Mode
 
-Fuzzel mode uses the external [Fuzzel](https://codeberg.org/dnkl/fuzzel) launcher and integrates naturally with Wayland environments.
+Fuzzel mode uses the external [Fuzzel](https://codeberg.org/dnkl/fuzzel) launcher. It is deprecated, but remains available for existing setups and Fuzzel-only builds.
 
 ### Features
 
@@ -99,7 +99,7 @@ This removes the iced GUI dependency while maintaining full Fuzzel functionality
 
 ## Native Mode
 
-Native mode uses an internal iced-based graphical interface with fuzzy search, keyboard navigation, and theme support.
+Native mode uses Raffi's built-in iced-based graphical interface with fuzzy search, keyboard navigation, and theme support. It is the default and recommended interface in standard builds.
 
 ### Features
 
@@ -263,8 +263,8 @@ general:
 
 ## Comparison
 
-| Feature | Fuzzel Mode | Native Mode |
-|---------|-------------|-------------|
+| Feature | Legacy Fuzzel Mode | Native Mode (Default) |
+|---------|--------------------|----------------------|
 | **Size** | 1.1 MB (no-default-features) | 15 MB |
 | **Dependencies** | Requires Fuzzel | Self-contained |
 | **Calculator** | ❌ | ✅ |
@@ -281,8 +281,8 @@ general:
 If no UI type is specified, Raffi selects:
 
 1. **Native mode** in builds with the `wayland` feature (the standard build)
-2. **Fuzzel mode** in Fuzzel-only builds, if `fuzzel` is available in `PATH`
+2. **Legacy Fuzzel mode** in Fuzzel-only builds, if `fuzzel` is available in `PATH`
 
 <Aside type="note">
-Having Fuzzel installed does not change the default in a standard build. To use it, select `-u fuzzel` or set `general.ui_type: fuzzel`.
+Fuzzel mode is deprecated and having Fuzzel installed does not change the default in a standard build. To use the legacy backend, select `-u fuzzel` or set `general.ui_type: fuzzel`.
 </Aside>

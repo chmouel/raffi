@@ -8,8 +8,8 @@ version: 1
 
 # General settings (all fields optional, CLI flags override these)
 # general:
-#   ui_type: native          # Backend (native is the standard-build default;
-#                            # use fuzzel to choose the external Fuzzel UI)
+#   ui_type: native          # Native is the default; fuzzel selects the
+#                            # deprecated legacy external Fuzzel UI
 #   default_script_shell: bash  # Shell for script entries
 #   no_icons: false          # Hide icons
 #   max_history: 10          # Max search query history entries (0 to disable, navigate with Alt-P/N)

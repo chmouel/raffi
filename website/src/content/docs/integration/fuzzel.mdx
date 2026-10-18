@@ -1,12 +1,13 @@
 ---
-title: Fuzzel Configuration
-description: Customize Fuzzel's appearance for Raffi
+title: Legacy Fuzzel Integration
+description: Configure the deprecated Fuzzel interface for Raffi
 ---
 
-Raffi can use Fuzzel as an external interface. Standard builds use the native
-interface by default; choose Fuzzel with `-u fuzzel` or
-`general.ui_type: fuzzel`. You can customize Fuzzel's appearance and behavior
-through its configuration file.
+Raffi's built-in native interface is the default and recommended UI. The
+external Fuzzel interface is deprecated but remains available as a legacy
+option for existing setups. Select it with `-u fuzzel` or
+`general.ui_type: fuzzel`, then customize its appearance and behavior through
+Fuzzel's configuration file.
 
 ## Configuration File
 
@@ -157,6 +158,6 @@ sudo apt install fuzzel
 sudo dnf install fuzzel
 ```
 
-## Alternative: Native UI
+## Recommended: Native UI
 
-If you prefer not to use Fuzzel, Raffi includes a built-in native interface. See the [UI modes guide](/features/ui-modes) for details on using `--ui-type native`.
+Raffi includes a built-in native interface by default. See the [UI modes guide](/features/ui-modes) for details.

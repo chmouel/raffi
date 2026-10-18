@@ -58,11 +58,12 @@ Print the JSON Schema of the configuration format to stdout and exit.
 
 **`-u, --ui-type`** `string` (default: `native` in standard builds; `fuzzel` in Fuzzel-only builds)
 
-Select the user interface backend.
+Select the user interface backend. Native is the default and recommended option
+in standard builds; Fuzzel is a deprecated legacy backend.
 
   Valid values:
 
-- `fuzzel` - Uses the external Fuzzel launcher (requires Fuzzel to be installed)
+- `fuzzel` - Uses the deprecated external Fuzzel launcher (requires Fuzzel to be installed)
 - `native` - Uses the built-in iced-based graphical interface (requires build with `wayland` feature)
 
   ```bash

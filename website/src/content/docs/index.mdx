@@ -13,17 +13,17 @@ Raffi is a flexible application launcher designed for Wayland environments that 
 
 ## What is Raffi?
 
-Raffi is an application launcher that sits on top of Fuzzel or operates using its own built-in native interface. It provides a powerful way to launch applications, run scripts, and execute commands with support for:
+Raffi is an application launcher with its own built-in native interface by default. The deprecated external Fuzzel interface remains available as a legacy option. Raffi provides a powerful way to launch applications, run scripts, and execute commands with support for:
 
 - **YAML-based configuration** - Define all your commands and workflows in a simple, readable format
 - **Icon support** - Visual application identification with cached icon paths
 - **Script execution** - Run inline scripts with configurable interpreters (Bash, Python, etc.)
 - **Conditional visibility** - Show/hide entries based on environment variables or binary availability
-- **Multiple UI modes** - Use external Fuzzel or the built-in native interface
+- **Native UI by default** - Use the built-in interface, with the legacy Fuzzel backend available for existing setups
 
 ## Key Features
 
-- **Dual Interface Modes** — Choose between Fuzzel integration for a minimal Wayland-native experience or the built-in iced-based GUI with fuzzy search and theming.
+- **Native Interface by Default** — Use the built-in iced-based GUI with fuzzy search and theming; the deprecated Fuzzel integration remains available for existing setups.
 - **YAML Configuration** — Define applications, scripts, and commands in `~/.config/raffi/raffi.yaml` with support for arguments, icons, and conditional display.
 - **Native Interface Addons** — Built-in calculator, currency converter, file browser, web searches, text snippets, and script filters for extended functionality.
 - **Script Support** — Execute inline scripts with any interpreter (Bash, Python, Node.js) directly from the launcher with environment variable expansion.
@@ -139,13 +139,13 @@ Store and quickly insert reusable text snippets from inline config, YAML files, 
 ## Why Raffi?
 
 - **Lightweight** - 1.1 MB binary when built without native UI, ~15 MB with GUI support
-- **Flexible** - Works with Fuzzel or standalone with built-in interface
+- **Flexible** - Runs with the built-in interface by default, with legacy Fuzzel support available
 - **Extensible** - Script filters and addons for custom workflows
 - **Wayland-first** - Designed specifically for modern Wayland compositors
 - **Simple configuration** - Human-readable YAML with path expansion and environment variables
 
 <Aside type="note">
-  If you only need Fuzzel integration, build without default features to get a significantly smaller binary: `cargo build --release --no-default-features`
+  For a legacy Fuzzel-only build, disable default features to get a significantly smaller binary: `cargo build --release --no-default-features`
 </Aside>
 
 ## Next Steps

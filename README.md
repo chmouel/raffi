@@ -2,7 +2,7 @@
 
 # Raffi Application Launcher
 
-Raffi is an application launcher for Wayland. You define commands and scripts in a YAML file, with icons, arguments, conditions for when an entry shows up, and the interpreter each script runs with. Raffi shows them in its own native window, or in Fuzzel if you prefer.
+Raffi is an application launcher for Wayland. You define commands and scripts in a YAML file, with icons, arguments, conditions for when an entry shows up, and the interpreter each script runs with. Raffi is based on Rust and is fast, lightweight and secure and works without a server or a DB. It has a native interface with fuzzy search, keyboard navigation, themes and a preview pane. It also has a legacy Fuzzel interface for simplier workflow.
 
 ## Documentation
 
@@ -21,7 +21,7 @@ The full documentation is at <https://chmouel.github.io/raffi/>. Good places to 
 
 ## Installation
 
-Prebuilt binaries and packages are on the [GitHub releases page](https://github.com/chmouel/raffi/releases). They use the native interface by default. To use Fuzzel instead, install it and pass `-u fuzzel` or set `ui_type: fuzzel`.
+Prebuilt binaries and packages are on the [GitHub releases page](https://github.com/chmouel/raffi/releases). They use the native interface by default. The deprecated Fuzzel interface remains selectable: install Fuzzel and pass `-u fuzzel` or set `ui_type: fuzzel`.
 
 On Arch Linux, install it from the AUR with a helper such as:
 
@@ -87,11 +87,11 @@ $super = SUPER
 bind = $super, R, exec, (val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val")
 ```
 
-See also: [Sway integration](https://chmouel.github.io/raffi/integration/sway/) · [Hyprland integration](https://chmouel.github.io/raffi/integration/hyprland/) · [Fuzzel integration](https://chmouel.github.io/raffi/integration/fuzzel/)
+See also: [Sway integration](https://chmouel.github.io/raffi/integration/sway/) · [Hyprland integration](https://chmouel.github.io/raffi/integration/hyprland/) · [Legacy Fuzzel integration](https://chmouel.github.io/raffi/integration/fuzzel/)
 
 ## User Interfaces
 
-Raffi has two interfaces. The native one is the default: a built-in window with fuzzy search, keyboard navigation and themes. The other hands the list to the external Fuzzel launcher.
+Raffi's built-in native interface is the default and recommended UI, with fuzzy search, keyboard navigation and themes. The external Fuzzel interface is deprecated but remains available as a legacy option for existing setups.
 
 The native interface also comes with addons. Some answer as you type: a calculator, currency and unit conversion, a color converter, a world clock and developer tools (encoders, hashes, UUID and password generators). Others let you search and pick: a file browser, an emoji and Nerd Fonts picker, text snippets, clipboard history (through CopyQ), web searches and script filters. The rest control your desktop: system commands (lock, suspend, hibernate, log out, reboot, shut down), a window switcher for Hyprland, niri and sway, media controls, an audio device switcher, Bluetooth, and a way to stop your own processes. Two more copy or type passwords from [pass](https://www.passwordstore.org/) and Bitwarden (through [rbw](https://github.com/doy/rbw)), unlocking the vault when needed.
 

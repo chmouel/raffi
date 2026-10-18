@@ -66,11 +66,48 @@ This guide will help you configure and launch your first application with Raffi.
 
 ## Step 2: Choose Your Interface
 
-Raffi supports two interface modes:
+The built-in native interface is the default and recommended UI. The external
+Fuzzel backend is deprecated and remains available as a legacy option for
+existing setups and Fuzzel-only builds.
 
 <Tabs>
-  <TabItem label="Fuzzel Mode">
-    Fuzzel mode uses the external Fuzzel launcher for a minimal, Wayland-native experience.
+  <TabItem label="Native Mode (Default)">
+    Native mode uses Raffi's built-in iced-based GUI with additional features like calculator, file browser, and more.
+
+    ### Launch Native Interface
+
+    ```bash
+    raffi
+    ```
+
+    ### Choose a Theme
+
+    ```bash
+    # Dark theme (default, Dracula-inspired)
+    raffi -u native -t dark
+
+    # Light theme (Rose Pine Dawn)
+    raffi -u native -t light
+    ```
+
+    ### Make the Choice Explicit
+
+    The standard build already uses native mode by default. To pin that choice in your config:
+
+    ```yaml
+    general:
+      ui_type: native
+      theme: dark
+      font_size: 20
+      window_width: 800
+      window_height: 600
+
+```
+  </TabItem>
+
+  <TabItem label="Legacy Fuzzel (Deprecated)">
+    Fuzzel mode uses the external Fuzzel launcher. This deprecated backend
+    remains available for existing setups.
 
     ### Install Fuzzel
 
@@ -124,40 +161,6 @@ Raffi supports two interface modes:
     selection=44475add
     border=bd93f9ff
     ```
-  </TabItem>
-
-  <TabItem label="Native Mode (Default)">
-    Native mode uses Raffi's built-in iced-based GUI with additional features like calculator, file browser, and more.
-
-    ### Launch Native Interface
-
-    ```bash
-    raffi
-    ```
-
-    ### Choose a Theme
-
-    ```bash
-    # Dark theme (default, Dracula-inspired)
-    raffi -u native -t dark
-
-    # Light theme (Rose Pine Dawn)
-    raffi -u native -t light
-    ```
-
-    ### Make the Choice Explicit
-
-    The standard build already uses native mode by default. To pin that choice in your config:
-
-    ```yaml
-    general:
-      ui_type: native
-      theme: dark
-      font_size: 20
-      window_width: 800
-      window_height: 600
-
-```
   </TabItem>
 </Tabs>
 
