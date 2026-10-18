@@ -2429,13 +2429,19 @@ impl LauncherApp {
 
     fn load_audio(&mut self, refresh: bool) -> Task<Message> {
         let options = super::audio::AudioOptions::of(&self.addons.audio);
+        self.command_list.query_row = Some(self.audio_query_row(true));
+        self.load_command_list(move || Ok(super::audio::load_devices(options)), refresh)
+    }
+
+    /// The "Set output volume" row builder; `bare` accepts a lone number.
+    pub(super) fn audio_query_row(&self, bare: bool) -> super::command_list::QueryRow {
+        let options = super::audio::AudioOptions::of(&self.addons.audio);
         let icon = self.resolve_icon_name(super::audio::SET_VOLUME_ICON);
-        self.command_list.query_row = Some(std::sync::Arc::new(move |query: &str| {
-            let mut item = super::audio::set_volume_item(query, true, options)?;
+        std::sync::Arc::new(move |query: &str| {
+            let mut item = super::audio::set_volume_item(query, bare, options)?;
             item.icon = icon.clone();
             Some(item)
-        }));
-        self.load_command_list(move || Ok(super::audio::load_devices(options)), refresh)
+        })
     }
 
     fn load_media(&mut self, refresh: bool) -> Task<Message> {

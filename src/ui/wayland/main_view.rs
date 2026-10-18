@@ -439,13 +439,9 @@ impl LauncherApp {
                     return missing("pactl");
                 }
                 let options = super::audio::AudioOptions::of(&self.addons.audio);
-                let icon = self.resolve_icon_name(super::audio::SET_VOLUME_ICON);
+                let query_row = self.audio_query_row(false);
                 if let Source::List(list) = &mut self.main_view.sources[source] {
-                    list.query_row = Some(std::sync::Arc::new(move |query: &str| {
-                        let mut item = super::audio::set_volume_item(query, false, options)?;
-                        item.icon = icon.clone();
-                        Some(item)
-                    }));
+                    list.query_row = Some(query_row);
                 }
                 Box::new(move || Ok(super::audio::load_devices(options)))
             }
@@ -1022,6 +1018,10 @@ impl LauncherApp {
                 .to_string();
                 self.main_view.stale.insert(source);
                 self.command_list.enter(addon);
+                if addon == CommandListAddon::Audio {
+                    // Replaces the main view's volume row in the copied items.
+                    self.command_list.query_row = Some(self.audio_query_row(true));
+                }
                 self.command_list.usage = usage;
                 self.command_list.previews = previews;
                 self.command_list.set_items(items);

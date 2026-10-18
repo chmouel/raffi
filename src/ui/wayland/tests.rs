@@ -7056,6 +7056,27 @@ fn test_main_view_audio_sets_volume_only_with_a_prefix() {
     let _ = app.update(Message::Submit);
     assert_eq!(app.search_query, "audio vol 40", "handed to the audio mode");
     assert!(app.in_flight.is_pending("audio", super::audio::SET_VOLUME));
+
+    // The volume row keeps following the query after the handoff, even
+    // when the action failed and the list did not reload.
+    let _ = app.update(Message::CommandListActionDone(
+        CommandListAddon::Audio,
+        app.command_list.session,
+        super::audio::SET_VOLUME.into(),
+        Err("pactl failed".into()),
+    ));
+    let volume_row = |app: &LauncherApp| {
+        let position = app.command_list.position(super::audio::SET_VOLUME)?;
+        let index = app.command_list.filtered[position];
+        Some(app.command_list.items[index].title.clone())
+    };
+    let _ = app.update(Message::SearchChanged("audio 50".into()));
+    assert_eq!(
+        volume_row(&app).as_deref(),
+        Some("Set output volume to 50%")
+    );
+    let _ = app.update(Message::SearchChanged("audio razer".into()));
+    assert_eq!(volume_row(&app), None);
 }
 
 #[test]
