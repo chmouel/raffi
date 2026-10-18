@@ -26,20 +26,23 @@ jobs:
         uses: actions/checkout@v7
       - name: Fetch all tags
         run: git fetch --force --tags
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          target: ${{ matrix.job.target }}
+          targets: ${{ matrix.job.target }}
       - uses: Swatinem/rust-cache@v2
       - name: Build on ${{ matrix.job.target }}
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release --target=${{ matrix.job.target }}
+        run: cargo build --release --target=${{ matrix.job.target }}
 
       - uses: actions/upload-artifact@v7
         with:
           name: raffi-${{ matrix.job.target }}
+          path: target/${{ matrix.job.target }}/release/raffi
+      - name: Build Fuzzel-only on ${{ matrix.job.target }}
+        run: cargo build --release --no-default-features --target=${{ matrix.job.target }}
+      - name: Upload Fuzzel-only artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: raffi-fuzzel-only-${{ matrix.job.target }}
           path: target/${{ matrix.job.target }}/release/raffi
   goreleaser:
     name: Goreleaser over Rust
@@ -56,6 +59,18 @@ jobs:
         with:
           name: raffi-x86_64-unknown-linux-gnu
           path: target/linux_amd64/raffi
+      - uses: actions/download-artifact@v8
+        with:
+          name: raffi-fuzzel-only-x86_64-unknown-linux-gnu
+          path: target/fuzzel-only
+
+      - name: Package Fuzzel-only archive
+        run: |
+          mkdir -p target/release-assets/fuzzel-only
+          install -m755 target/fuzzel-only/raffi target/release-assets/fuzzel-only/raffi
+          install -m644 LICENSE target/release-assets/fuzzel-only/LICENSE
+          install -m644 README.md target/release-assets/fuzzel-only/README.md
+          tar -C target/release-assets/fuzzel-only -czf target/release-assets/raffi-fuzzel-only.tar.gz raffi LICENSE README.md
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7

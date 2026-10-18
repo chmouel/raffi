@@ -21,7 +21,7 @@ The full documentation is at <https://chmouel.github.io/raffi/>. Good places to 
 
 ## Installation
 
-Prebuilt binaries and packages are on the [GitHub releases page](https://github.com/chmouel/raffi/releases). They use the native interface by default. The deprecated Fuzzel interface remains selectable: install Fuzzel and pass `-u fuzzel` or set `ui_type: fuzzel`.
+Prebuilt binaries and packages are on the [GitHub releases page](https://github.com/chmouel/raffi/releases). The standard release assets use the native interface. Linux x86_64 releases also include a smaller Fuzzel-only archive; it requires Fuzzel, and config validation is disabled (`--check-config` reports that it is unavailable, and startup warnings about unknown keys are not shown). The deprecated Fuzzel interface remains selectable in the standard build: install Fuzzel and pass `-u fuzzel` or set `ui_type: fuzzel`.
 
 On Arch Linux, install it from the AUR with a helper such as:
 
@@ -62,7 +62,7 @@ If you only use Fuzzel, you can build without the native UI:
 cargo build --release --no-default-features
 ```
 
-The binary drops from about 15 MB to about 1.1 MB. This build also leaves out config validation (`--check-config` and the startup warnings about unknown keys); `--features config-validation` adds it back for a few MB.
+The binary drops from about 15 MB to about 2.1 MB. This build also disables config validation: `--check-config` reports that the feature is unavailable, and startup warnings about unknown keys are not shown. Add `--features config-validation` to keep validation, which adds a few MB.
 
 ## Usage
 

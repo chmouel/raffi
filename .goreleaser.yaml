@@ -25,6 +25,9 @@ archives:
       - README.md
 checksum:
   name_template: "checksums.txt"
+  extra_files:
+    - glob: target/release-assets/raffi-fuzzel-only.tar.gz
+      name_template: "raffi-fuzzel-only_{{ .Version }}_Linux_x86_64.tar.gz"
 
 nfpms:
   - file_name_template: >-
@@ -54,6 +57,9 @@ universal_binaries:
 
 release:
   prerelease: "false"
+  extra_files:
+    - glob: target/release-assets/raffi-fuzzel-only.tar.gz
+      name_template: "raffi-fuzzel-only_{{ .Version }}_Linux_x86_64.tar.gz"
 
 aurs:
   - name: raffi-bin

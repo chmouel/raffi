@@ -81,6 +81,8 @@ Raffi can be installed through multiple package managers or built from source. C
 
 Prebuilt binaries for various platforms are available from the [GitHub releases page](https://github.com/chmouel/raffi/releases).
 
+Linux x86_64 releases also include a `raffi-fuzzel-only_<version>_Linux_x86_64.tar.gz` archive without the native UI. This smallest build requires Fuzzel and disables config validation: `--check-config` reports that the feature is unavailable, and startup warnings about unknown keys are not shown. The standard release assets use the native UI.
+
 <Steps>
 1. **Download the archive**
 
@@ -133,9 +135,9 @@ cd raffi
 cargo build --release --no-default-features
 ```
 
-This removes the `iced` GUI dependency, reducing the binary size from ~15 MB to ~1.1 MB.
+This removes the `iced` GUI dependency, reducing the binary size from ~15 MB to ~2.1 MB.
 
-The minimal build also leaves out config validation (`--check-config` and the startup warnings about unknown keys). To keep it, build with `cargo build --release --no-default-features --features config-validation`, which adds a few MB.
+The minimal build also disables config validation: `--check-config` reports that the feature is unavailable, and startup warnings about unknown keys are not shown. To keep config validation, build with `cargo build --release --no-default-features --features config-validation`, which adds a few MB.
 
 <Tabs>
 <TabItem label="Full build (with native UI)">
@@ -146,7 +148,7 @@ cargo build --release
 </TabItem>
 <TabItem label="Minimal build (legacy Fuzzel only)">
 ```bash
-# ~1.1 MB binary, Fuzzel integration only
+# ~2.1 MB binary, Fuzzel integration only
 cargo build --release --no-default-features
 ```
 </TabItem>
