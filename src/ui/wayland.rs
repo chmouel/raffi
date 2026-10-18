@@ -32,6 +32,7 @@ mod state;
 mod support;
 mod system;
 mod tab_preview;
+mod terminal;
 mod theme;
 mod types;
 mod units;

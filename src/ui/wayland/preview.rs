@@ -1697,6 +1697,28 @@ impl LauncherApp {
                     ],
                 }
             }
+            FallbackAction::Terminal { prefix, hold } => PreviewData {
+                title: fallback.label(query),
+                subtitle: Some("Fallback Terminal".to_string()),
+                badge: Some("Fallback".to_string()),
+                icon,
+                bodies: vec![PreviewBody::Text {
+                    heading: Some("Terminal".to_string()),
+                    content: prefix.join(" "),
+                    truncated: false,
+                }],
+                metadata: vec![
+                    ("Query".to_string(), query.to_string()),
+                    (
+                        "Enter".to_string(),
+                        if *hold {
+                            "Run in a terminal kept open".to_string()
+                        } else {
+                            "Run in a terminal".to_string()
+                        },
+                    ),
+                ],
+            },
         }
     }
 

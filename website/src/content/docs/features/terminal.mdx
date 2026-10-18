@@ -1,0 +1,71 @@
+---
+title: Run in Terminal
+description: Run a shell command in a terminal window from Raffi
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Type `>` followed by a space and a command, such as `> htop` or
+`> journalctl -f`, then press Enter. Raffi closes and runs the command in a
+terminal window. While the command is empty, the row says which terminal
+will be used.
+
+The command runs through `general.default_script_shell` (bash by default)
+with `-c`, so pipes, `&&` and quotes work as in a shell. Use a POSIX-style
+shell such as bash, zsh or sh here. Once the command exits, the window stays
+open showing its exit status until you press Enter. Set `hold: false` to
+close it right away.
+
+Commands typed here are saved in the search history, so Alt+P brings back
+the previous one.
+
+<Aside type="note">
+Run in terminal is only available in native mode. It is on by default.
+</Aside>
+
+## Which terminal
+
+Raffi uses the first of these that works:
+
+1. `addons.terminal.command`, when set
+2. `xdg-terminal-exec`, when installed
+3. `$TERMINAL`, when set to an installed program
+4. the first of kitty, foot, alacritty, wezterm, ghostty, konsole,
+   gnome-terminal, xfce4-terminal and xterm that is installed
+
+When none is found, the row says "No terminal found, set
+addons.terminal.command".
+
+`command` is the start of the command line, and the shell command is added
+after it. Include the flag your terminal needs before the program to run:
+
+```yaml
+addons:
+  terminal:
+    command: [alacritty, -e]
+    # command: [wezterm, start, --]
+    # command: [foot]
+```
+
+## As a fallback
+
+Add `addons.terminal` to `fallbacks` to get a "Run '…' in kitty" row at the
+bottom of every search, so any query can be run without typing `>` first:
+
+```yaml
+general:
+  fallbacks:
+    - addons.terminal
+```
+
+## Configuration
+
+```yaml
+addons:
+  terminal:
+    trigger: "!"
+    hold: false
+```
+
+See the [addon reference](/reference/addon-configuration/#run-in-terminal)
+for every field.

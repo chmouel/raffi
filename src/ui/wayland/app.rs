@@ -195,6 +195,10 @@ impl QueryClass {
     pub(super) fn saved_in_history(&self) -> bool {
         match &self.mode {
             QueryMode::CommandList { addon, .. } if VaultAddon::of(*addon).is_some() => true,
+            QueryMode::CommandList {
+                addon: CommandListAddon::Terminal,
+                ..
+            } => true,
             _ => !self.sensitive,
         }
     }
@@ -660,6 +664,15 @@ pub(super) fn route_query(query: &str, addons: &AddonsConfig) -> QueryMode {
         }
     }
 
+    if addons.terminal.enabled {
+        if let Some(query) = extract_keyword_query(input, addons.terminal.trigger()) {
+            return QueryMode::CommandList {
+                addon: CommandListAddon::Terminal,
+                query,
+            };
+        }
+    }
+
     QueryMode::Standard
 }
 
@@ -820,6 +833,14 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
             keyword: addons.devtools.trigger().to_string(),
             subtitle: "Encode, decode, hash or reformat text".to_string(),
             icon: Some(DEVTOOLS_ICON.to_string()),
+        });
+    }
+
+    if addons.terminal.enabled && matches(addons.terminal.trigger()) {
+        suggestions.push(KeywordSuggestion {
+            keyword: addons.terminal.trigger().to_string(),
+            subtitle: "Run a command in a terminal".to_string(),
+            icon: Some(super::terminal::TERMINAL_ICON.to_string()),
         });
     }
 
@@ -2001,6 +2022,29 @@ impl LauncherApp {
                 }
                 self.load_bluetooth(false)
             }
+            CommandListAddon::Terminal if !entered => Task::none(),
+            CommandListAddon::Terminal => {
+                let env_terminal = std::env::var("TERMINAL").ok();
+                let Some(prefix) = crate::terminal::resolve(
+                    self.addons.terminal.command.as_deref(),
+                    env_terminal.as_deref(),
+                    &self.program_exists,
+                ) else {
+                    self.command_list
+                        .set_notice("No terminal found, set addons.terminal.command".to_string());
+                    return Task::none();
+                };
+                let shell = self.view.default_script_shell.clone();
+                let hold = self.addons.terminal.hold;
+                let icon = self.resolve_icon_name(super::terminal::TERMINAL_ICON);
+                self.command_list.query_row = Some(std::sync::Arc::new(move |query: &str| {
+                    let mut item = super::terminal::run_item(query, &prefix, &shell, hold);
+                    item.icon = icon.clone();
+                    Some(item)
+                }));
+                self.set_command_list_items(Vec::new());
+                Task::none()
+            }
             CommandListAddon::Bitwarden if !entered => self.search_vault_notes(),
             CommandListAddon::Pass if !entered => Task::none(),
             CommandListAddon::Pass | CommandListAddon::Bitwarden => {
@@ -2476,7 +2520,8 @@ impl LauncherApp {
                 CommandListAddon::System
                 | CommandListAddon::Windows
                 | CommandListAddon::Pass
-                | CommandListAddon::Bitwarden => Task::none(),
+                | CommandListAddon::Bitwarden
+                | CommandListAddon::Terminal => Task::none(),
             },
             Err(error) => {
                 crate::debug_log!("{}: action failed: {error}", addon.name());
@@ -3745,6 +3790,7 @@ impl LauncherApp {
                 if let Ok(mut slot) = self.deferred_action.lock() {
                     *slot = Some(action);
                 }
+                self.save_query_to_history();
                 iced::exit()
             }
         }
@@ -3938,6 +3984,26 @@ impl LauncherApp {
     fn resolve_fallbacks(paths: &[String], addons: &AddonsConfig) -> Vec<ResolvedFallback> {
         let mut resolved = Vec::new();
         for path in paths {
+            if path == "addons.terminal" {
+                let terminal = &addons.terminal;
+                match crate::terminal::resolve_default(terminal.command.as_deref()) {
+                    Some(prefix) => resolved.push(ResolvedFallback {
+                        name: super::terminal::terminal_name(&prefix).to_string(),
+                        icon: Some(super::terminal::TERMINAL_ICON.to_string()),
+                        action: FallbackAction::Terminal {
+                            prefix,
+                            hold: terminal.hold,
+                        },
+                    }),
+                    None => {
+                        crate::debug_log!("fallback: no terminal found");
+                        eprintln!(
+                            "Warning: fallback addons.terminal skipped, no terminal found; set addons.terminal.command"
+                        );
+                    }
+                }
+                continue;
+            }
             let parts: Vec<&str> = path.splitn(3, '.').collect();
             if parts.len() != 3 || parts[0] != "addons" {
                 crate::debug_log!("fallback: invalid path '{path}', expected addons.<type>.<name>");
@@ -3981,7 +4047,7 @@ impl LauncherApp {
                 }
                 _ => {
                     crate::debug_log!(
-                        "fallback: unsupported addon type '{addon_type}', expected web_searches or script_filters"
+                        "fallback: unsupported addon type '{addon_type}', expected web_searches, script_filters or terminal"
                     );
                     eprintln!("Warning: unsupported fallback addon type '{addon_type}'");
                 }
@@ -4025,6 +4091,19 @@ impl LauncherApp {
                                 }
                             }
                         }
+                    }
+                    self.save_query_to_history();
+                    return iced::exit();
+                }
+                FallbackAction::Terminal { prefix, hold } => {
+                    let argv = crate::terminal::shell_argv(
+                        prefix,
+                        &self.view.default_script_shell,
+                        &query,
+                        *hold,
+                    );
+                    if let Ok(mut slot) = self.deferred_action.lock() {
+                        *slot = Some(DeferredAction::Command(argv));
                     }
                     self.save_query_to_history();
                     return iced::exit();

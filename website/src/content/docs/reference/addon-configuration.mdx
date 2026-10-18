@@ -1138,6 +1138,43 @@ addons:
     volume_step: 10
 ```
 
+## Run in Terminal
+
+Runs a typed command in a terminal window.
+See [Run in Terminal](/features/terminal/) for usage.
+
+### Configuration
+
+**`addons.terminal.enabled`** `boolean` (default: `true`)
+
+**`addons.terminal.trigger`** `string` (default: `>`)
+
+Keyword that starts a command. Type it followed by a space, then the command.
+
+**`addons.terminal.command`** `list of strings` (default: found automatically)
+
+Terminal command line the shell command is appended to, such as
+`[alacritty, -e]` or `[wezterm, start, --]`. When unset, Raffi uses
+`xdg-terminal-exec`, then `$TERMINAL`, then the first of kitty, foot,
+alacritty, wezterm, ghostty, konsole, gnome-terminal, xfce4-terminal and
+xterm that is installed. The same terminal opens desktop apps marked
+`Terminal=true`.
+
+**`addons.terminal.hold`** `boolean` (default: `true`)
+
+Keep the window open after the command exits, showing its exit status, until
+Enter is pressed.
+
+### Example
+
+```yaml
+addons:
+  terminal:
+    trigger: "!"
+    command: [foot]
+    hold: false
+```
+
 ## Kill Process
 
 Stops your own processes with `kill`.

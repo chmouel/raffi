@@ -470,7 +470,9 @@ impl LauncherApp {
                 let ctx = super::pass::PassContext::new(&self.addons.pass);
                 Box::new(move || super::pass::load_entries(&ctx))
             }
-            CommandListAddon::Kill | CommandListAddon::Bitwarden => return Task::none(),
+            CommandListAddon::Kill | CommandListAddon::Bitwarden | CommandListAddon::Terminal => {
+                return Task::none()
+            }
         };
         let load = Task::perform(off_thread(load), move |result| {
             Message::MainViewLoaded(
@@ -1013,7 +1015,9 @@ impl LauncherApp {
                     CommandListAddon::Audio => self.addons.audio.trigger(),
                     CommandListAddon::Bluetooth => self.addons.bluetooth.trigger(),
                     CommandListAddon::Pass => self.addons.pass.trigger(),
-                    CommandListAddon::Kill | CommandListAddon::Bitwarden => return Task::none(),
+                    CommandListAddon::Kill
+                    | CommandListAddon::Bitwarden
+                    | CommandListAddon::Terminal => return Task::none(),
                 }
                 .to_string();
                 self.main_view.stale.insert(source);

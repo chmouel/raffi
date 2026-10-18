@@ -239,6 +239,18 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         });
     }
 
+    if addons.terminal.enabled {
+        let trigger = addons.terminal.trigger();
+        entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
+            trigger: trigger.to_string(),
+            title: "Run in terminal".to_string(),
+            usage: format!("{trigger} <command>, Enter runs it in a terminal"),
+            icon: Some(super::terminal::TERMINAL_ICON.to_string()),
+            completion: Some(format!("{trigger} ")),
+        });
+    }
+
     if addons.calculator.enabled {
         entries.push(HelpEntry {
             section: HelpSection::KeywordsAndActions,

@@ -24,6 +24,7 @@ pub(super) enum CommandListAddon {
     Bluetooth,
     Pass,
     Bitwarden,
+    Terminal,
 }
 
 impl CommandListAddon {
@@ -39,6 +40,7 @@ impl CommandListAddon {
             Self::Bluetooth => "bluetooth",
             Self::Pass => "pass",
             Self::Bitwarden => "bitwarden",
+            Self::Terminal => "terminal",
         }
     }
 
@@ -53,6 +55,7 @@ impl CommandListAddon {
             Self::Bluetooth => "Bluetooth",
             Self::Pass => "Password",
             Self::Bitwarden => "Bitwarden",
+            Self::Terminal => "Terminal",
         }
     }
 
@@ -67,6 +70,7 @@ impl CommandListAddon {
             Self::Bluetooth => "Loading Bluetooth devices...",
             Self::Pass => "Loading password store...",
             Self::Bitwarden => "Loading Bitwarden vault...",
+            Self::Terminal => "Loading...",
         }
     }
 }

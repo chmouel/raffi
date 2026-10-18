@@ -471,6 +471,11 @@ pub(super) enum FallbackAction {
         #[allow(dead_code)]
         secondary_action: Option<String>,
     },
+    /// Run the query in the terminal `prefix` starts.
+    Terminal {
+        prefix: Vec<String>,
+        hold: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -478,6 +483,16 @@ pub(super) struct ResolvedFallback {
     pub name: String,
     pub icon: Option<String>,
     pub action: FallbackAction,
+}
+
+impl ResolvedFallback {
+    /// The row title for `query`.
+    pub fn label(&self, query: &str) -> String {
+        match self.action {
+            FallbackAction::Terminal { .. } => format!("Run '{query}' in {}", self.name),
+            _ => format!("Search {} for '{query}'", self.name),
+        }
+    }
 }
 
 /// A keyword row offered while the user is still typing a keyword, before the

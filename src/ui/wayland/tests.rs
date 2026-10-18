@@ -1817,6 +1817,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "pass",
             "bw",
             "dev",
+            ">",
             "math",
             "$",
             "units",
@@ -1859,7 +1860,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
     assert_eq!(entries[1].icon.as_deref(), Some("gist-icon"));
     assert_eq!(entries[1].completion.as_deref(), Some("gist "));
     assert_eq!(entries[0].completion.as_deref(), Some("~/"));
-    assert_eq!(entries[15].completion, None);
+    assert_eq!(entries[16].completion, None);
     // Shortcut rows are informational: they never arm a keyword.
     for entry in entries
         .iter()
@@ -1889,6 +1890,7 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
     addons.color.enabled = false;
     addons.world_clock.enabled = false;
     addons.devtools.enabled = false;
+    addons.terminal.enabled = false;
     let entries = help_entries(&addons);
 
     // With every addon disabled only the general shortcut rows remain.
@@ -1948,6 +1950,7 @@ fn test_help_entries_skip_disabled_addons() {
     addons.color.enabled = false;
     addons.world_clock.enabled = false;
     addons.devtools.enabled = false;
+    addons.terminal.enabled = false;
 
     // Disabled addons drop their keyword rows and addon-specific shortcuts.
     let entries = help_entries(&addons);
@@ -5173,6 +5176,77 @@ fn test_audio_missing_pactl() {
     assert_eq!(app.command_list.status(), Some("pactl not found"));
     let _ = app.update(Message::Submit);
     assert!(deferred_action(&app).is_none());
+}
+
+fn terminal_addons() -> AddonsConfig {
+    let mut addons = AddonsConfig::default();
+    addons.terminal.command = Some(vec!["foot".into()]);
+    addons.terminal.hold = false;
+    addons
+}
+
+#[test]
+fn test_terminal_runs_the_query_and_keeps_it_in_history() {
+    let mut app = test_app(terminal_addons());
+    app.history.max_items = 0;
+    assert_eq!(
+        keyword_suggestions(">", &app.addons)[0].subtitle,
+        "Run a command in a terminal"
+    );
+
+    let _ = app.update(Message::SearchChanged("> ".into()));
+    assert_eq!(
+        command_list_titles(&app),
+        vec!["Type a command to run in foot"]
+    );
+    let _ = app.update(Message::Submit);
+    assert!(deferred_action(&app).is_none(), "the hint does nothing");
+
+    let _ = app.update(Message::SearchChanged("> htop -d 5".into()));
+    assert_eq!(command_list_titles(&app), vec!["Run htop -d 5"]);
+    assert!(app.query_class.saved_in_history());
+    let task = app.update(Message::Submit);
+    assert!(task.units() > 0, "Raffi closes");
+    assert_eq!(
+        deferred_argv(&app),
+        Some(
+            ["foot", "bash", "-c", "eval \"$1\"", "raffi", "htop -d 5"]
+                .map(String::from)
+                .to_vec()
+        )
+    );
+}
+
+#[test]
+fn test_terminal_without_a_terminal_says_how_to_set_one() {
+    let mut app = test_app(AddonsConfig::default());
+    app.program_exists = |_| false;
+    let _ = app.update(Message::SearchChanged("> htop".into()));
+    assert_eq!(
+        app.command_list.status(),
+        Some("No terminal found, set addons.terminal.command")
+    );
+    let _ = app.update(Message::Submit);
+    assert!(deferred_action(&app).is_none());
+}
+
+#[test]
+fn test_terminal_fallback_runs_the_query() {
+    let mut app = test_app_with_fallbacks(terminal_addons(), vec!["addons.terminal".into()]);
+    app.history.max_items = 0;
+    assert_eq!(app.fallbacks.len(), 1);
+    assert_eq!(
+        app.fallbacks[0].label("make test"),
+        "Run 'make test' in foot"
+    );
+
+    let _ = app.update(Message::SearchChanged("make test".into()));
+    assert_eq!(app.fallback_count(), 1);
+    let _ = app.update(Message::FallbackSelected(0));
+    assert_eq!(
+        deferred_argv(&app).map(|argv| argv.last().cloned()),
+        Some(Some("make test".to_string()))
+    );
 }
 
 fn launcher_names(app: &LauncherApp) -> Vec<String> {

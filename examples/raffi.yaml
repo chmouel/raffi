@@ -45,6 +45,7 @@ version: 1
 #     - addons.web_searches."Google"           # Opens Google search with the current query
 #     - addons.web_searches."DuckDuckGo"       # Opens DuckDuckGo search with the current query
 #     - addons.script_filters."Search Google"  # Switches to the script filter mode
+#     - addons.terminal                        # Runs the query in a terminal
 #   main_view:               # Mix addon results into the main list (native UI only); Ctrl+Tab shows one source at a time
 #     - launchers            # Keep launchers; once main_view is set they only show if listed
 #     - browser_tabs         # Typing "gmail" lists matching tabs, up to 5 per addon
@@ -344,6 +345,18 @@ addons:
   #   close_on_action: false
   #   volume_step: 5      # Percent changed by Volume up and down
   #   max_volume: 100     # Highest volume Volume up and "vol N" will set
+
+  # Run in terminal (native UI only). Type "> htop" to run htop in a
+  # terminal. The terminal is found automatically (xdg-terminal-exec,
+  # $TERMINAL, then kitty, foot, alacritty, wezterm, ghostty, konsole,
+  # gnome-terminal, xfce4-terminal, xterm) unless command is set. The command
+  # runs with general.default_script_shell; hold keeps the window open
+  # until Enter once it exits.
+  # terminal:
+  #   enabled: true
+  #   trigger: ">"
+  #   command: [alacritty, -e]
+  #   hold: true
 
   # Kill process (native UI only, needs kill). Type "kill " to list your own
   # processes, biggest memory first. Enter twice sends SIGTERM, Ctrl+Enter

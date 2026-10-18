@@ -48,6 +48,7 @@ export default defineConfig({
             { label: 'Kill Process', slug: 'features/kill-process' },
             { label: 'Media Controls', slug: 'features/media-controls' },
             { label: 'Password Store', slug: 'features/password-store' },
+            { label: 'Run in Terminal', slug: 'features/terminal' },
             { label: 'Script Filters', slug: 'features/script-filters' },
             { label: 'System Commands', slug: 'features/system-commands' },
             { label: 'Text Snippets', slug: 'features/text-snippets' },

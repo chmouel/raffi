@@ -17,6 +17,7 @@ pub mod browser_host;
 pub mod debug;
 #[cfg(feature = "wayland")]
 pub mod secret;
+pub mod terminal;
 pub mod ui;
 
 /// Represents the configuration for each Raffi entry.
@@ -761,6 +762,43 @@ impl Default for AudioAddonConfig {
     }
 }
 
+/// Configuration for the run in terminal addon (native UI only)
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
+pub struct TerminalAddonConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Keyword that runs the rest of the query in a terminal (default: `>`).
+    #[serde(default)]
+    pub trigger: Option<String>,
+    /// Terminal command line the command to run is appended to, such as
+    /// `[alacritty, -e]`. Found automatically when unset: xdg-terminal-exec,
+    /// then `$TERMINAL`, then the first known terminal installed.
+    #[serde(default)]
+    pub command: Option<Vec<String>>,
+    /// Keep the terminal open once the command exits, until Enter is
+    /// pressed (default: true).
+    #[serde(default = "default_true")]
+    pub hold: bool,
+}
+
+impl TerminalAddonConfig {
+    pub fn trigger(&self) -> &str {
+        self.trigger.as_deref().unwrap_or(">")
+    }
+}
+
+impl Default for TerminalAddonConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            trigger: None,
+            command: None,
+            hold: true,
+        }
+    }
+}
+
 /// Configuration for the kill process addon (native UI only)
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
@@ -967,6 +1005,8 @@ pub struct AddonsConfig {
     pub media: MediaAddonConfig,
     #[serde(default)]
     pub audio: AudioAddonConfig,
+    #[serde(default)]
+    pub terminal: TerminalAddonConfig,
     #[serde(default)]
     pub kill: KillAddonConfig,
     #[serde(default)]
@@ -1351,6 +1391,12 @@ pub struct DefaultBinaryChecker;
 impl BinaryChecker for DefaultBinaryChecker {
     fn exists(&self, binary: &str) -> bool {
         find_binary(binary)
+    }
+}
+
+impl BinaryChecker for fn(&str) -> bool {
+    fn exists(&self, binary: &str) -> bool {
+        self(binary)
     }
 }
 

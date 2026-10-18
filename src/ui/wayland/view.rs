@@ -2013,11 +2013,7 @@ impl LauncherApp {
                     }
                 }
 
-                let label = format!(
-                    "Search {} for '{}'",
-                    fallback.name,
-                    self.search_query.trim()
-                );
+                let label = fallback.label(self.search_query.trim());
                 let fb_text_color = if is_selected {
                     t.text_main
                 } else {
