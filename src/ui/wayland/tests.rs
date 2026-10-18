@@ -7278,6 +7278,255 @@ fn test_main_view_audio_sets_volume_only_with_a_prefix() {
     assert_eq!(volume_row(&app), None);
 }
 
+/// Titles of the main view rows in display order.
+fn main_view_titles(app: &LauncherApp) -> Vec<String> {
+    use super::main_view::{Block, Source};
+    [Block::BeforeLaunchers, Block::AfterLaunchers]
+        .into_iter()
+        .flat_map(|block| app.main_view.rows(block))
+        .map(|(source, row)| match &app.main_view.sources[source] {
+            Source::List(list) => list.item(row).unwrap().title.clone(),
+            Source::Snippets {
+                items, filtered, ..
+            } => items[filtered[row]].name.clone(),
+            Source::ScriptFilter { results, .. } => {
+                results.as_ref().unwrap().items[row].title.clone()
+            }
+        })
+        .collect()
+}
+
+fn recent_pick(source: &str, key: &str) -> super::recent::RecentPick {
+    super::recent::RecentPick::new(source.into(), key.into())
+}
+
+#[test]
+fn test_main_view_empty_query_lists_recent_picks() {
+    let mut addons = AddonsConfig::default();
+    addons.text_snippets.push(snippet_source(
+        "Notes",
+        "sn",
+        vec![
+            snippet("alpha", "a"),
+            snippet("beta", "b"),
+            snippet("gamma", "c"),
+        ],
+    ));
+    addons.script_filters.push(ScriptFilterConfig {
+        name: "Search".into(),
+        command: "search".into(),
+        keyword: "gh".into(),
+        icon: None,
+        args: Vec::new(),
+        action: None,
+        secondary_action: None,
+        env: std::collections::HashMap::new(),
+        min_query_length: None,
+        dynamic_preview: None,
+    });
+    let mut app = main_view_app(
+        &[
+            "browser_tabs",
+            "launchers",
+            "text_snippets.Notes",
+            "script_filters.Search",
+        ],
+        firefox_launcher(),
+        addons,
+    );
+    let mut moved_tab = recent_pick("browser_tabs", "10:99");
+    moved_tab.url = Some("https://github.com/chmouel/raffi".into());
+    let mut repo = recent_pick("script_filters.Search", "raffi");
+    repo.item = Some(super::recent::StoredItem {
+        title: "chmouel/raffi".into(),
+        subtitle: None,
+        arg: Some("raffi".into()),
+        icon: None,
+        variables: std::collections::HashMap::new(),
+    });
+    app.main_view.recent = vec![
+        recent_pick("browser_tabs", "10:2"),
+        recent_pick("text_snippets.Notes", "beta"),
+        moved_tab,
+        repo,
+        recent_pick("text_snippets.Notes", "deleted"),
+        recent_pick("text_snippets.Notes", "alpha"),
+        recent_pick("text_snippets.Notes", "gamma"),
+    ];
+    let _ = app.update(Message::MainViewSnippetsLoaded(
+        1,
+        Ok(vec![
+            snippet("alpha", "a"),
+            snippet("beta", "b"),
+            snippet("gamma", "c"),
+        ]),
+    ));
+    let _ = app.update(Message::SearchChanged(String::new()));
+    assert_eq!(
+        main_view_titles(&app),
+        ["beta", "alpha", "chmouel/raffi"],
+        "loading tabs keep their places"
+    );
+
+    load_main_view_tabs(&mut app);
+    assert_eq!(
+        main_view_titles(&app),
+        ["Mail", "Raffi", "beta", "alpha", "chmouel/raffi"],
+        "newest first per source, a gone snippet skipped, a tab found by its page"
+    );
+    assert_eq!(app.filtered_configs, vec![0], "launchers stay");
+    let super::main_view::Source::ScriptFilter { searched, .. } = &app.main_view.sources[2] else {
+        panic!("script filter source");
+    };
+    assert!(searched.is_empty(), "the script filter did not run");
+
+    let _ = app.update(Message::SearchChanged("mail".into()));
+    assert_eq!(main_view_titles(&app), ["Mail"], "typing lists matches");
+
+    let _ = app.update(Message::SearchChanged(String::new()));
+    let _ = app.update(Message::MainViewCycle(false));
+    assert_eq!(
+        main_view_titles(&app),
+        ["Raffi", "Mail"],
+        "a focused source lists all of its rows in its own order"
+    );
+}
+
+#[test]
+fn test_main_view_recent_windows_only_match_in_the_same_session() {
+    let mut app = main_view_app(
+        &["windows", "launchers"],
+        Vec::new(),
+        AddonsConfig::default(),
+    );
+    app.main_view.window_session = Some("/run/niri.2.sock".into());
+    let mut old = recent_pick("windows", "1");
+    old.session = Some("/run/niri.1.sock".into());
+    let mut current = recent_pick("windows", "2");
+    current.session = Some("/run/niri.2.sock".into());
+    app.main_view.recent = vec![old, current];
+    let window = |id: &str, title: &str| super::command_list::CommandItem {
+        match_text: title.into(),
+        primary: Some(super::command_list::CommandAction {
+            action: DeferredAction::Command(vec!["true".into()]),
+            confirm: None,
+            keep_open: false,
+            progress: None,
+        }),
+        ..super::command_list::CommandItem::info(id, title.into(), "window")
+    };
+    let super::main_view::Source::List(list) = &app.main_view.sources[0] else {
+        panic!("command list source");
+    };
+    let generation = list.generation;
+    let _ = app.update(Message::MainViewLoaded(
+        0,
+        generation,
+        Ok(vec![window("1", "Firefox"), window("2", "Terminal")]),
+    ));
+    let _ = app.update(Message::SearchChanged(String::new()));
+    assert_eq!(
+        main_view_titles(&app),
+        ["Terminal"],
+        "window 1 of an earlier session is another window now"
+    );
+}
+
+#[test]
+fn test_main_view_selection_stays_when_recent_rows_move_to_another_source() {
+    for result in [Err("no compositor".to_string()), Ok(Vec::new())] {
+        let mut app = main_view_app(
+            &["browser_tabs", "launchers", "windows"],
+            firefox_launcher(),
+            AddonsConfig::default(),
+        );
+        app.main_view.window_session = Some("/run/niri.sock".into());
+        let mut recent: Vec<_> = (0..super::main_view::MAX_ROWS)
+            .map(|id| super::recent::RecentPick {
+                session: Some("/run/niri.sock".into()),
+                ..recent_pick("windows", &id.to_string())
+            })
+            .collect();
+        recent.push(recent_pick("browser_tabs", "10:1"));
+        app.main_view.recent = recent;
+        let super::main_view::Source::List(windows) = &mut app.main_view.sources[1] else {
+            panic!("command list source");
+        };
+        windows.loading = true;
+        let generation = windows.generation;
+        load_main_view_tabs(&mut app);
+        let _ = app.update(Message::SearchChanged(String::new()));
+        assert!(
+            main_view_titles(&app).is_empty(),
+            "loading windows hold the slots"
+        );
+        assert_eq!(app.selected_index, 0, "the launcher");
+
+        let _ = app.update(Message::MainViewLoaded(1, generation, result));
+        assert_eq!(
+            main_view_titles(&app),
+            ["Raffi"],
+            "the tab takes a free slot"
+        );
+        assert_eq!(app.selected_index, 1, "the launcher stays selected");
+    }
+}
+
+#[test]
+fn test_main_view_recording_keeps_picks_of_other_instances() {
+    let mut app = main_view_app(
+        &["browser_tabs", "pass"],
+        Vec::new(),
+        AddonsConfig::default(),
+    );
+    let dir = std::env::temp_dir().join(format!("raffi-recent-app-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("recent.cache");
+    super::recent::save(Some(&path), &[recent_pick("browser_tabs", "10:1")]);
+    app.main_view.recent_path = Some(path.clone());
+
+    app.record_recent(recent_pick("pass", "entry:mail"));
+    let keys: Vec<_> = super::recent::load(Some(&path))
+        .into_iter()
+        .map(|pick| pick.key)
+        .collect();
+    assert_eq!(keys, ["entry:mail", "10:1"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_main_view_enter_on_a_recent_tab_switches_and_records_it() {
+    let mut app = main_view_app(
+        &["browser_tabs", "launchers"],
+        firefox_launcher(),
+        AddonsConfig::default(),
+    );
+    app.main_view.recent = vec![
+        recent_pick("browser_tabs", "10:1"),
+        recent_pick("browser_tabs", "10:2"),
+    ];
+    load_main_view_tabs(&mut app);
+    let _ = app.update(Message::SearchChanged(String::new()));
+    assert_eq!(main_view_titles(&app), ["Raffi", "Mail"]);
+
+    let _ = app.update(Message::MoveDown);
+    let _ = app.update(Message::Submit);
+    assert!(matches!(
+        deferred_action(&app),
+        Some(DeferredAction::BrowserTab(super::browser_tabs::TabAction {
+            tab_id: 2,
+            ..
+        }))
+    ));
+    let newest = &app.main_view.recent[0];
+    assert_eq!(newest.key, "10:2");
+    assert_eq!(
+        newest.url.as_deref(),
+        Some("https://mail.example.com/inbox")
+    );
+    assert_eq!(app.main_view.recent.len(), 2);
+}
+
 #[test]
 fn test_main_view_ctrl_tab_focuses_each_source_then_all() {
     let mut addons = AddonsConfig::default();

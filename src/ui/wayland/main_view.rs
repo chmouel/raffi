@@ -2,6 +2,7 @@
 //! `gmail` lists matching browser tabs without the `tabs` trigger.
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -11,6 +12,7 @@ use iced::widget::operation::move_cursor_to_end;
 use iced::Task;
 
 use super::command_list::{CommandItem, CommandListAddon, CommandListState};
+use super::recent::RecentPick;
 use super::snippets::{
     compute_previews, fetch_clipboard, filter_snippets, load_snippet_source, missing_clipboard,
     snippet_mru_key,
@@ -106,6 +108,17 @@ pub(super) fn resolve(entries: &[String], addons: &AddonsConfig) -> Vec<Entry> {
     resolved
 }
 
+/// The `main_view` name a command list addon's picks are kept under, for
+/// the addons whose picks come back on an empty query.
+pub(super) fn recent_list_name(addon: CommandListAddon) -> Option<&'static str> {
+    match addon {
+        CommandListAddon::Windows => Some("windows"),
+        CommandListAddon::BrowserTabs => Some("browser_tabs"),
+        CommandListAddon::Pass => Some("pass"),
+        _ => None,
+    }
+}
+
 /// Whether a loaded row may show in the main view: rows that only inform or
 /// set things up, which match whatever the query, stay in the addon's own
 /// list.
@@ -180,6 +193,17 @@ pub(super) struct MainViewState {
     /// Command list sources acted on in their addon's mode, reloaded when
     /// they show again.
     pub stale: HashSet<usize>,
+    /// Name each source's picks are kept under, None for sources whose
+    /// picks are not kept.
+    pub names: Vec<Option<String>>,
+    /// Rows picked from the sources, newest first, listed again when the
+    /// query is empty.
+    pub recent: Vec<RecentPick>,
+    pub recent_path: Option<PathBuf>,
+    /// Compositor instance window picks must come from.
+    pub window_session: Option<String>,
+    /// Whether the sources' rows are the recent picks rather than matches.
+    recent_applied: bool,
 }
 
 impl MainViewState {
@@ -251,11 +275,12 @@ impl MainViewState {
     }
 
     /// Whether `source` lists rows now: on its own whatever the query,
-    /// or mixed with the others once there is one.
+    /// mixed with the others once there is one, or its recent picks when
+    /// there is none.
     pub fn shows(&self, source: usize) -> bool {
         self.active
             && match self.focus {
-                None => !self.query.is_empty(),
+                None => !self.query.is_empty() || self.has_picks(source),
                 Some(focus) => focus == Focus::Source(source),
             }
     }
@@ -269,6 +294,112 @@ impl MainViewState {
                     Source::ScriptFilter { running, .. } => *running,
                 }
         })
+    }
+
+    /// A list source whose load failed or never starts, so its recent
+    /// picks stop waiting for rows.
+    pub fn loaded_nothing(&mut self, source: usize) {
+        if let Some(Source::List(list)) = self.sources.get_mut(source) {
+            list.loading = false;
+            list.refreshing = false;
+        }
+        self.apply_recent();
+    }
+
+    fn has_picks(&self, source: usize) -> bool {
+        self.names
+            .get(source)
+            .and_then(Option::as_deref)
+            .is_some_and(|name| self.recent.iter().any(|pick| pick.source == name))
+    }
+
+    fn recent_mode(&self) -> bool {
+        self.active && self.focus.is_none() && self.query.is_empty()
+    }
+
+    /// With an empty query and no focus, list the newest picks that can
+    /// still be found as the rows of their sources, at most `MAX_ROWS` in
+    /// all; otherwise give the sources back their matches. Call after the
+    /// sources were filtered.
+    pub fn apply_recent(&mut self) {
+        if !self.recent_mode() {
+            if std::mem::take(&mut self.recent_applied) {
+                for source in &mut self.sources {
+                    match source {
+                        Source::List(list) => {
+                            let query = list.query.clone();
+                            list.set_query(query);
+                        }
+                        Source::ScriptFilter { results, .. } => *results = None,
+                        // Filtered again by every refresh.
+                        Source::Snippets { .. } => {}
+                    }
+                }
+            }
+            return;
+        }
+        self.recent_applied = true;
+        let mut rows = vec![Vec::new(); self.sources.len()];
+        let mut stored = vec![Vec::new(); self.sources.len()];
+        let mut taken = 0;
+        for pick in &self.recent {
+            if taken == MAX_ROWS {
+                break;
+            }
+            let Some(source) = self
+                .names
+                .iter()
+                .position(|name| name.as_deref() == Some(pick.source.as_str()))
+            else {
+                continue;
+            };
+            let picked: &[usize] = &rows[source];
+            let found = match &self.sources[source] {
+                Source::List(list)
+                    if list.addon == Some(CommandListAddon::Windows)
+                        && pick.session != self.window_session =>
+                {
+                    continue;
+                }
+                // Keeps its place while the rows load, so they do not push
+                // out rows already shown.
+                Source::List(list) if list.loading => {
+                    taken += 1;
+                    continue;
+                }
+                Source::List(list) => find_pick(&list.items, pick, picked),
+                Source::Snippets { items, .. } => items
+                    .iter()
+                    .position(|snippet| snippet.name == pick.key)
+                    .filter(|index| !picked.contains(index)),
+                Source::ScriptFilter { .. } => {
+                    if let Some(item) = &pick.item {
+                        stored[source].push(item.to_item());
+                        taken += 1;
+                    }
+                    continue;
+                }
+            };
+            if let Some(index) = found {
+                rows[source].push(index);
+                taken += 1;
+            }
+        }
+        for (source, (rows, stored)) in rows.into_iter().zip(stored).enumerate() {
+            if !self.has_picks(source) {
+                continue;
+            }
+            match &mut self.sources[source] {
+                Source::List(list) => list.filtered = rows,
+                Source::Snippets { filtered, .. } => *filtered = rows,
+                Source::ScriptFilter { results, .. } => {
+                    *results = (!stored.is_empty()).then_some(ScriptFilterResult {
+                        items: stored,
+                        default_icon: None,
+                    });
+                }
+            }
+        }
     }
 
     fn block_range(&self, block: Block) -> std::ops::Range<usize> {
@@ -331,6 +462,23 @@ impl MainViewState {
     }
 }
 
+/// The item `pick` was made on and not yet listed: the same identity, or
+/// for a tab the same page, its id changing when the browser restarts.
+fn find_pick(items: &[CommandItem], pick: &RecentPick, picked: &[usize]) -> Option<usize> {
+    let free = |index: &usize| !picked.contains(index);
+    items
+        .iter()
+        .position(|item| item.identity == pick.key)
+        .filter(free)
+        .or_else(|| {
+            let url = pick.url.as_deref()?;
+            items.iter().enumerate().position(|(index, item)| {
+                free(&index)
+                    && super::browser_tabs::tab_target(item).is_some_and(|tab| tab.url == url)
+            })
+        })
+}
+
 /// Filter a snippet source with the main view query, ranked by `usage`.
 fn filter_main_view_snippets(main_view: &mut MainViewState, source: usize, usage: &[u64]) {
     let shows = main_view.shows(source);
@@ -364,14 +512,61 @@ impl LauncherApp {
         let Some(entries) = entries else {
             return Task::none();
         };
-        self.main_view = MainViewState::new(&resolve(entries, &self.addons));
+        let entries = resolve(entries, &self.addons);
+        self.main_view = MainViewState::new(&entries);
+        self.main_view.names = entries
+            .iter()
+            .filter_map(|entry| match *entry {
+                Entry::Launchers => None,
+                Entry::List(addon) => Some(recent_list_name(addon).map(str::to_string)),
+                Entry::Snippets(index) => Some(
+                    self.addons
+                        .text_snippets
+                        .get(index)
+                        .map(|config| format!("text_snippets.{}", config.name)),
+                ),
+                Entry::ScriptFilter(index) => Some(
+                    self.addons
+                        .script_filters
+                        .get(index)
+                        .map(|config| format!("script_filters.{}", config.name)),
+                ),
+            })
+            .collect();
+        self.main_view.recent_path = crate::ui::get_recent_cache_path().ok();
+        self.main_view.window_session =
+            super::windows::Compositor::instance(|name| std::env::var(name).ok());
+        self.main_view.recent = super::recent::load(self.main_view.recent_path.as_deref());
         if self.main_view.hide_launchers {
             self.filtered_configs.clear();
         }
+        self.main_view.apply_recent();
         let loads: Vec<_> = (0..self.main_view.sources.len())
             .map(|source| self.load_main_view_source(source, true))
             .collect();
         Task::batch(loads)
+    }
+
+    /// Keep `pick` as the newest recent pick, when its source is listed in
+    /// `main_view`.
+    pub(super) fn record_recent(&mut self, pick: RecentPick) {
+        let listed = self
+            .main_view
+            .names
+            .iter()
+            .any(|name| name.as_deref() == Some(pick.source.as_str()));
+        if !listed {
+            return;
+        }
+        if let Some(path) = &self.main_view.recent_path {
+            // Picks another Raffi made since this one started are kept.
+            self.main_view.recent = super::recent::load(Some(path));
+        }
+        super::recent::record(&mut self.main_view.recent, pick);
+        super::recent::save(
+            self.main_view.recent_path.as_deref(),
+            &self.main_view.recent,
+        );
     }
 
     fn load_main_view_source(&mut self, source: usize, fetch_favicons: bool) -> Task<Message> {
@@ -432,10 +627,7 @@ impl LauncherApp {
         let exists = self.program_exists;
         let missing = |this: &mut Self, tool: &str| {
             crate::debug_log!("main_view: {} hidden, {tool} not found", addon.name());
-            if let Some(Source::List(list)) = this.main_view.sources.get_mut(source) {
-                list.loading = false;
-                list.refreshing = false;
-            }
+            this.update_main_view(|main_view| main_view.loaded_nothing(source));
             Task::none()
         };
         let load: ListLoad = match addon {
@@ -502,10 +694,7 @@ impl LauncherApp {
                 Box::new(move || super::pass::load_entries(&ctx))
             }
             CommandListAddon::Kill | CommandListAddon::Bitwarden | CommandListAddon::Terminal => {
-                if let Some(Source::List(list)) = self.main_view.sources.get_mut(source) {
-                    list.loading = false;
-                    list.refreshing = false;
-                }
+                self.update_main_view(|main_view| main_view.loaded_nothing(source));
                 return Task::none();
             }
         };
@@ -547,10 +736,7 @@ impl LauncherApp {
             Ok(items) => items,
             Err(error) => {
                 crate::debug_log!("main_view: {} hidden: {error}", addon.name());
-                if let Some(Source::List(list)) = self.main_view.sources.get_mut(source) {
-                    list.loading = false;
-                    list.refreshing = false;
-                }
+                self.update_main_view(|main_view| main_view.loaded_nothing(source));
                 return Task::none();
             }
         };
@@ -562,55 +748,80 @@ impl LauncherApp {
                 .find_map(|name| self.resolve_icon_name(name));
         }
         let query = self.main_view.query.clone();
-        self.update_main_view_source(source, |main_view| {
+        self.update_main_view(|main_view| {
             if let Some(Source::List(list)) = main_view.sources.get_mut(source) {
                 list.set_items(items);
                 list.set_query(query);
             }
+            main_view.apply_recent();
         });
         Task::none()
     }
 
-    /// Change `source` with `update`, keeping the selection on the row it
-    /// was on, so rows landing above it never change what Enter runs.
-    fn update_main_view_source(&mut self, source: usize, update: impl FnOnce(&mut MainViewState)) {
+    /// Change the main view with `update`, keeping the selection on the row
+    /// it was on, so rows landing above it never change what Enter runs.
+    /// Recent picks share their rows across sources, so one source loading
+    /// can move the rows of the others.
+    fn update_main_view(&mut self, update: impl FnOnce(&mut MainViewState)) {
         if self.view.help_active {
             update(&mut self.main_view);
             return;
         }
         let before_total = self.total_items();
-        let start = self.main_view_offset(self.main_view.block_of(source))
-            + self.main_view.rows_before(source);
-        let old = self.main_view.source_rows(source);
         let selected = self.selected_index;
-        let identity = match &self.main_view.sources[source] {
-            Source::List(list) if (start..start + old).contains(&selected) => list
-                .item(selected - start)
-                .map(|item| item.identity.clone()),
-            _ => None,
-        };
+        let before = self.main_view_spans();
+        let within = before
+            .iter()
+            .position(|&(start, count)| (start..start + count).contains(&selected))
+            .map(|source| {
+                let row = selected - before[source].0;
+                let identity = match &self.main_view.sources[source] {
+                    Source::List(list) => list.item(row).map(|item| item.identity.clone()),
+                    _ => None,
+                };
+                (source, row, identity)
+            });
         update(&mut self.main_view);
-        let new = self.main_view.source_rows(source);
-        if selected >= before_total || selected < start {
+        if selected >= before_total {
             return;
         }
-        self.selected_index = if selected >= start + old {
-            selected - old + new
-        } else if let Some(row) = identity
-            .and_then(|identity| match &self.main_view.sources[source] {
-                Source::List(list) => list.position(&identity),
-                _ => None,
-            })
-            .filter(|&row| row < new)
-        {
-            start + row
-        } else {
-            // The selected row went away: select what now sits there.
-            selected.min(start + new.saturating_sub(1))
+        let after = self.main_view_spans();
+        self.selected_index = match within {
+            Some((source, row, identity)) => {
+                let (start, count) = after[source];
+                let found = identity
+                    .and_then(|identity| match &self.main_view.sources[source] {
+                        Source::List(list) => list.position(&identity),
+                        _ => None,
+                    })
+                    .filter(|&row| row < count);
+                // When the selected row went away, select what now sits there.
+                start + found.unwrap_or(row.min(count.saturating_sub(1)))
+            }
+            None => {
+                let moved: isize = before
+                    .iter()
+                    .zip(&after)
+                    .filter(|((start, count), _)| start + count <= selected)
+                    .map(|((_, old), (_, new))| *new as isize - *old as isize)
+                    .sum();
+                selected.saturating_add_signed(moved)
+            }
         };
         self.selected_index = self
             .selected_index
             .min(self.total_items().saturating_sub(1));
+    }
+
+    /// First row and row count of every source in the whole list.
+    fn main_view_spans(&self) -> Vec<(usize, usize)> {
+        (0..self.main_view.sources.len())
+            .map(|source| {
+                let start = self.main_view_offset(self.main_view.block_of(source))
+                    + self.main_view.rows_before(source);
+                (start, self.main_view.source_rows(source))
+            })
+            .collect()
     }
 
     /// Reload the main view sources of `addon` after one of its actions
@@ -662,8 +873,9 @@ impl LauncherApp {
                     *items = snippets;
                 }
                 let usage = self.main_view_snippet_usage(source);
-                self.update_main_view_source(source, |main_view| {
+                self.update_main_view(|main_view| {
                     filter_main_view_snippets(main_view, source, &usage);
+                    main_view.apply_recent();
                 });
                 self.compute_main_view_snippet_previews(source);
                 return self.fetch_main_view_clipboard(source);
@@ -797,6 +1009,7 @@ impl LauncherApp {
                 }
             }
         }
+        self.main_view.apply_recent();
         Task::batch(tasks)
     }
 
@@ -842,7 +1055,11 @@ impl LauncherApp {
         let Some(config) = self.addons.script_filters.get(*config_index) else {
             return Task::none();
         };
-        if searched.is_empty() || searched.len() < config.min_query_length.unwrap_or(0) {
+        if searched.is_empty() {
+            // Cleared when the query emptied; now it may hold recent picks.
+            return Task::none();
+        }
+        if searched.len() < config.min_query_length.unwrap_or(0) {
             *results = None;
             return Task::none();
         }
@@ -904,7 +1121,7 @@ impl LauncherApp {
             }
             None => return Task::none(),
         };
-        self.update_main_view_source(source, |main_view| {
+        self.update_main_view(|main_view| {
             if let Some(Source::ScriptFilter { results, .. }) = main_view.sources.get_mut(source) {
                 *results = result;
             }

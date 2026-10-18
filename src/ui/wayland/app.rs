@@ -30,6 +30,7 @@ use super::help::{add_main_view_shortcut, filter_help_entries, help_entries};
 use super::main_view::{Block, Focus, Source, MAIN_VIEW_SESSION};
 use super::pass::PassContext;
 use super::preview::image_mime_type;
+use super::recent::{RecentPick, StoredItem};
 use super::script_filters::{
     execute_script_filter, execute_script_filter_preview, parse_script_filter_output,
     schedule_script_filter_preview, PreviewRequest,
@@ -2507,8 +2508,11 @@ impl LauncherApp {
                 crate::debug_log!("vault: running {} after close", op.log_name());
                 self.save_query_to_history();
                 if let Some(identity) = op.identity() {
-                    record_mru_use(&mut self.vault.usage, identity);
+                    record_mru_use(&mut self.vault.usage, identity.clone());
                     save_mru_map(self.vault.usage_path.as_deref(), &self.vault.usage);
+                    if op.addon == VaultAddon::Pass {
+                        self.record_recent(RecentPick::new("pass".to_string(), identity));
+                    }
                 }
                 if let Ok(mut slot) = self.deferred_action.lock() {
                     *slot = Some(super::actions::DeferredAction::Secret(job));
@@ -3427,8 +3431,21 @@ impl LauncherApp {
     }
 
     pub(super) fn handle_script_filter_selected(&mut self, index: usize) -> Task<Message> {
+        let mut pick = None;
         if let Some(result) = &self.script_filter.results {
             if let Some(item) = result.items.get(index) {
+                if let Some(config) = self
+                    .script_filter
+                    .config_index
+                    .and_then(|index| self.addons.script_filters.get(index))
+                {
+                    let mut recent = RecentPick::new(
+                        format!("script_filters.{}", config.name),
+                        item.arg.clone().unwrap_or_else(|| item.title.clone()),
+                    );
+                    recent.item = Some(StoredItem::of(item, result.default_icon.as_deref()));
+                    pick = Some(recent);
+                }
                 let value = item.arg.as_deref().unwrap_or(&item.title);
                 let action = if self.view.current_modifiers.control() {
                     self.script_filter
@@ -3440,6 +3457,9 @@ impl LauncherApp {
                 };
                 execute_action_with_env(action.unwrap_or("copy"), value, &item.variables);
             }
+        }
+        if let Some(pick) = pick {
+            self.record_recent(pick);
         }
         self.save_query_to_history();
         iced::exit()
@@ -3509,6 +3529,14 @@ impl LauncherApp {
                 let state = &mut self.text_snippets;
                 record_mru_use(&mut state.mru_map, key);
                 save_mru_map(state.mru_path.as_deref(), &state.mru_map);
+            }
+            if let Some(config) = self
+                .text_snippets
+                .source_index
+                .and_then(|index| self.addons.text_snippets.get(index))
+            {
+                let source = format!("text_snippets.{}", config.name);
+                self.record_recent(RecentPick::new(source, snippet.name.clone()));
             }
             let action = if self.view.current_modifiers.control() {
                 self.text_snippets
@@ -4004,6 +4032,7 @@ impl LauncherApp {
                 if !self.in_flight.begin(addon.name(), &identity) {
                     return Task::none();
                 }
+                self.record_command_list_pick(addon, &identity);
                 if keep_open {
                     crate::debug_log!("{}: running {identity}", addon.name());
                     let session = self.command_list.session;
@@ -4031,6 +4060,33 @@ impl LauncherApp {
                 iced::exit()
             }
         }
+    }
+
+    /// Keep a tab or window run with its main action as a recent pick;
+    /// Ctrl+Enter actions such as closing a tab do not count.
+    fn record_command_list_pick(&mut self, addon: CommandListAddon, identity: &str) {
+        let Some(name) = super::main_view::recent_list_name(addon) else {
+            return;
+        };
+        let Some(item) = self
+            .command_list
+            .items
+            .iter()
+            .find(|item| item.identity == identity)
+        else {
+            return;
+        };
+        if !super::main_view::is_mixable(addon, item)
+            || (self.view.current_modifiers.control() && item.secondary.is_some())
+        {
+            return;
+        }
+        let mut pick = RecentPick::new(name.to_string(), identity.to_string());
+        pick.url = super::browser_tabs::tab_target(item).map(|tab| tab.url.clone());
+        if addon == CommandListAddon::Windows {
+            pick.session = self.main_view.window_session.clone();
+        }
+        self.record_recent(pick);
     }
 
     /// Builds the transform rows at once; hashes follow after a short

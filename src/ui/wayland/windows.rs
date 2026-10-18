@@ -23,6 +23,14 @@ pub(super) enum Compositor {
 
 impl Compositor {
     /// Detect the compositor from the environment. `var` reads a variable.
+    /// The running compositor instance, which window ids are only unique
+    /// within: niri and sway number windows from 1 every session.
+    pub fn instance(var: impl Fn(&str) -> Option<String>) -> Option<String> {
+        ["HYPRLAND_INSTANCE_SIGNATURE", "NIRI_SOCKET", "SWAYSOCK"]
+            .into_iter()
+            .find_map(|name| var(name).filter(|value| !value.is_empty()))
+    }
+
     pub fn detect(var: impl Fn(&str) -> Option<String>) -> Option<Self> {
         let set = |name| var(name).is_some_and(|value| !value.is_empty());
         if set("HYPRLAND_INSTANCE_SIGNATURE") {
