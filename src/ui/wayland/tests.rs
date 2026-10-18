@@ -6504,3 +6504,436 @@ fn test_browser_tabs_ctrl_enter_closes_and_refreshes() {
     );
     assert!(!app.in_flight.is_pending("browser_tabs", &identity));
 }
+
+fn main_view_app(entries: &[&str], configs: Vec<RaffiConfig>, addons: AddonsConfig) -> LauncherApp {
+    let (mut app, _) = LauncherApp::new(
+        configs,
+        addons,
+        true,
+        Arc::new(Mutex::new(None)),
+        None,
+        ThemeColors::from_mode_with_overrides(&crate::ThemeMode::Dark, None),
+        10,
+        FontSizes::default_sizes(),
+        SortMode::Hybrid,
+        Vec::new(),
+    );
+    app.text_snippets.mru_map.clear();
+    app.text_snippets.mru_path = None;
+    app.history.max_items = 0;
+    app.program_exists = |_| true;
+    let entries: Vec<String> = entries.iter().map(|entry| entry.to_string()).collect();
+    let _ = app.configure_main_view(Some(&entries));
+    app
+}
+
+/// Deliver the browser tabs fixture to main view source 0.
+fn load_main_view_tabs(app: &mut LauncherApp) {
+    let super::main_view::Source::List(list) = &app.main_view.sources[0] else {
+        panic!("command list source");
+    };
+    let generation = list.generation;
+    let _ = app.update(Message::MainViewLoaded(
+        0,
+        generation,
+        Ok(super::browser_tabs::fixture_items()),
+    ));
+}
+
+fn firefox_launcher() -> Vec<RaffiConfig> {
+    vec![RaffiConfig {
+        binary: Some("firefox".into()),
+        description: Some("Firefox mail".into()),
+        ..Default::default()
+    }]
+}
+
+#[test]
+fn test_main_view_without_launchers_lists_only_addon_rows() {
+    let mut app = main_view_app(
+        &["browser_tabs"],
+        firefox_launcher(),
+        AddonsConfig::default(),
+    );
+    load_main_view_tabs(&mut app);
+    assert!(app.filtered_configs.is_empty(), "launchers are not listed");
+    assert_eq!(app.total_items(), 0, "addon rows wait for a query");
+
+    let _ = app.update(Message::SearchChanged("mail".into()));
+    assert!(app.filtered_configs.is_empty());
+    assert_eq!(app.total_items(), 1);
+    assert_eq!(app.resolve_selected_preview().unwrap().title, "Mail");
+
+    let _ = app.update(Message::Submit);
+    assert_eq!(app.search_query, "tabs mail", "handed to the tabs mode");
+    assert!(
+        app.main_view.stale.contains(&0),
+        "reloaded when shown again"
+    );
+    assert!(matches!(
+        deferred_action(&app),
+        Some(DeferredAction::BrowserTab(super::browser_tabs::TabAction {
+            tab_id: 2,
+            ..
+        }))
+    ));
+}
+
+#[test]
+fn test_main_view_groups_sources_in_config_order_and_caps_them() {
+    let mut addons = AddonsConfig::default();
+    addons.text_snippets.push(TextSnippetSourceConfig {
+        name: "Notes".into(),
+        keyword: "sn".into(),
+        icon: None,
+        snippets: Some(Vec::new()),
+        file: None,
+        command: None,
+        directory: None,
+        args: Vec::new(),
+        action: None,
+        secondary_action: None,
+        placeholders: false,
+        restore_clipboard: false,
+    });
+    let mut app = main_view_app(
+        &[
+            "browser_tabs",
+            "launchers",
+            "text_snippets.Notes",
+            "kill",
+            "nope",
+        ],
+        firefox_launcher(),
+        addons,
+    );
+    assert_eq!(
+        app.main_view.sources.len(),
+        2,
+        "unsupported entries are skipped"
+    );
+    assert_eq!(app.filtered_configs, vec![0], "launchers are listed");
+    load_main_view_tabs(&mut app);
+    let snippets = (0..8)
+        .map(|index| TextSnippet {
+            name: format!("mail {index}"),
+            value: format!("value {index}"),
+            keyword: None,
+            icon: None,
+        })
+        .collect();
+    let _ = app.update(Message::MainViewSnippetsLoaded(1, Ok(snippets)));
+
+    let _ = app.update(Message::SearchChanged("mail".into()));
+    use super::main_view::Block;
+    assert_eq!(
+        app.main_view.row_count(Block::BeforeLaunchers),
+        1,
+        "the tab"
+    );
+    assert_eq!(app.filtered_configs, vec![0]);
+    assert_eq!(
+        app.main_view.row_count(Block::AfterLaunchers),
+        super::main_view::MAX_ROWS
+    );
+    assert_eq!(app.total_items(), 1 + 1 + super::main_view::MAX_ROWS);
+
+    let _ = app.update(Message::MoveDown);
+    assert!(app.resolve_selected_preview().is_none(), "the launcher row");
+    let _ = app.update(Message::MoveDown);
+    assert_eq!(app.resolve_selected_preview().unwrap().title, "mail 0");
+
+    let _ = app.update(Message::SearchChanged("tabs mail".into()));
+    assert_eq!(app.main_view.row_count(Block::BeforeLaunchers), 0);
+    assert_eq!(app.main_view.row_count(Block::AfterLaunchers), 0);
+}
+
+#[test]
+fn test_main_view_system_row_still_needs_a_second_enter() {
+    let mut app = main_view_app(&["system"], Vec::new(), AddonsConfig::default());
+    let _ = app.update(Message::SearchChanged("reboot".into()));
+    assert_eq!(app.total_items(), 1);
+
+    let task = app.update(Message::Submit);
+    assert!(task.units() > 0);
+    assert_eq!(app.command_list.addon, Some(CommandListAddon::System));
+    assert!(app.command_list.armed.is_some());
+    assert!(app.deferred_action.lock().unwrap().is_none());
+
+    let _ = app.update(Message::Submit);
+    assert_eq!(
+        deferred_argv(&app),
+        Some(vec!["systemctl".into(), "reboot".into()])
+    );
+}
+
+#[test]
+fn test_main_view_script_filter_waits_for_min_length_and_drops_stale_runs() {
+    let mut addons = AddonsConfig::default();
+    addons.script_filters.push(ScriptFilterConfig {
+        name: "Issues".into(),
+        command: "issues".into(),
+        keyword: "is".into(),
+        icon: None,
+        args: Vec::new(),
+        action: None,
+        secondary_action: None,
+        env: std::collections::HashMap::new(),
+        min_query_length: Some(3),
+        dynamic_preview: None,
+    });
+    let mut app = main_view_app(&["script_filters.Issues"], Vec::new(), addons);
+    let result = |title: &str| ScriptFilterResult {
+        default_icon: None,
+        items: vec![ScriptFilterItem {
+            title: title.into(),
+            subtitle: None,
+            arg: None,
+            icon: None,
+            preview: None,
+            quicklookurl: None,
+            variables: Default::default(),
+            text: None,
+        }],
+    };
+
+    let task = app.update(Message::SearchChanged("ab".into()));
+    assert_eq!(task.units(), 0, "too short to run");
+    let task = app.update(Message::SearchChanged("abc".into()));
+    assert!(task.units() > 0, "long enough to run");
+    let task = app.update(Message::SearchChanged("abcd".into()));
+    assert_eq!(task.units(), 0, "waits for the run that is out");
+    let super::main_view::Source::ScriptFilter { generation, .. } = &app.main_view.sources[0]
+    else {
+        panic!("script filter source");
+    };
+    let latest = *generation;
+
+    let task = app.update(Message::MainViewScriptFilter(
+        0,
+        latest - 1,
+        Some(Ok(result("stale"))),
+    ));
+    assert_eq!(app.total_items(), 0, "a superseded run is dropped");
+    assert!(task.units() > 0, "the latest query runs next");
+    let _ = app.update(Message::MainViewScriptFilter(
+        0,
+        latest,
+        Some(Ok(result("fresh"))),
+    ));
+    assert_eq!(app.total_items(), 1);
+    assert_eq!(app.resolve_selected_preview().unwrap().title, "fresh");
+}
+
+fn issues_filter() -> ScriptFilterConfig {
+    ScriptFilterConfig {
+        name: "Issues".into(),
+        command: "issues".into(),
+        keyword: "is".into(),
+        icon: None,
+        args: Vec::new(),
+        action: None,
+        secondary_action: None,
+        env: std::collections::HashMap::new(),
+        min_query_length: None,
+        dynamic_preview: None,
+    }
+}
+
+#[test]
+fn test_main_view_late_rows_keep_the_selection() {
+    let mut addons = AddonsConfig::default();
+    addons.script_filters.push(issues_filter());
+    let mut app = main_view_app(
+        &["script_filters.Issues", "launchers"],
+        firefox_launcher(),
+        addons,
+    );
+    let _ = app.update(Message::SearchChanged("mail".into()));
+    assert_eq!(app.selected_index, 0, "the launcher, alone so far");
+    let super::main_view::Source::ScriptFilter { generation, .. } = &app.main_view.sources[0]
+    else {
+        panic!("script filter source");
+    };
+    let run = *generation;
+    let items = (0..2)
+        .map(|index| ScriptFilterItem {
+            title: format!("issue {index}"),
+            subtitle: None,
+            arg: None,
+            icon: None,
+            preview: None,
+            quicklookurl: None,
+            variables: Default::default(),
+            text: None,
+        })
+        .collect();
+    let _ = app.update(Message::MainViewScriptFilter(
+        0,
+        run,
+        Some(Ok(ScriptFilterResult {
+            default_icon: None,
+            items,
+        })),
+    ));
+    assert_eq!(app.total_items(), 3);
+    assert_eq!(app.selected_index, 2, "still on the launcher");
+}
+
+#[test]
+fn test_main_view_launcher_previews_skip_rows_above_them() {
+    let mut launchers = firefox_launcher();
+    launchers.push(RaffiConfig {
+        binary: Some("thunderbird".into()),
+        description: Some("Thunderbird mail".into()),
+        ..Default::default()
+    });
+    for launcher in &mut launchers {
+        launcher.show_preview = Some(true);
+    }
+    let mut app = main_view_app(
+        &["browser_tabs", "launchers"],
+        launchers,
+        AddonsConfig::default(),
+    );
+    load_main_view_tabs(&mut app);
+    let _ = app.update(Message::SearchChanged("mail".into()));
+    assert_eq!(app.total_items(), 3);
+    let titles: Vec<String> = (0..3)
+        .map(|index| {
+            app.selected_index = index;
+            app.resolve_selected_preview().unwrap().title
+        })
+        .collect();
+    assert_eq!(titles[0], "Mail");
+    assert_ne!(titles[1], titles[2], "each launcher shows its own preview");
+}
+
+#[test]
+fn test_main_view_snippets_fill_in_placeholders() {
+    let mut addons = AddonsConfig::default();
+    addons.text_snippets.push(TextSnippetSourceConfig {
+        name: "Notes".into(),
+        keyword: "sn".into(),
+        icon: None,
+        snippets: Some(Vec::new()),
+        file: None,
+        command: None,
+        directory: None,
+        args: Vec::new(),
+        action: None,
+        secondary_action: None,
+        placeholders: true,
+        restore_clipboard: false,
+    });
+    let mut app = main_view_app(&["text_snippets.Notes"], Vec::new(), addons);
+    let snippet = |name: &str, value: &str| TextSnippet {
+        name: name.into(),
+        value: value.into(),
+        keyword: None,
+        icon: None,
+    };
+    let _ = app.update(Message::MainViewSnippetsLoaded(
+        0,
+        Ok(vec![
+            snippet("Name", "Ada"),
+            snippet("Signed", "{snippet:Name}!"),
+        ]),
+    ));
+    let _ = app.update(Message::SearchChanged("signed".into()));
+    assert_eq!(app.total_items(), 1);
+    let preview = app.resolve_selected_preview().unwrap();
+    assert!(
+        format!("{:?}", preview.bodies).contains("Ada!"),
+        "{:?}",
+        preview.bodies
+    );
+}
+
+fn issue_items(count: usize) -> ScriptFilterResult {
+    ScriptFilterResult {
+        default_icon: None,
+        items: (0..count)
+            .map(|index| ScriptFilterItem {
+                title: format!("issue {index}"),
+                subtitle: None,
+                arg: None,
+                icon: None,
+                preview: None,
+                quicklookurl: None,
+                variables: Default::default(),
+                text: None,
+            })
+            .collect(),
+    }
+}
+
+fn script_filter_generation(app: &LauncherApp, source: usize) -> u64 {
+    let super::main_view::Source::ScriptFilter { generation, .. } = &app.main_view.sources[source]
+    else {
+        panic!("script filter source");
+    };
+    *generation
+}
+
+#[test]
+fn test_main_view_selection_stays_in_range_when_its_rows_go() {
+    let mut addons = AddonsConfig::default();
+    addons.script_filters.push(issues_filter());
+    let mut app = main_view_app(
+        &["launchers", "script_filters.Issues"],
+        firefox_launcher(),
+        addons,
+    );
+    let _ = app.update(Message::SearchChanged("mail".into()));
+    let run = script_filter_generation(&app, 0);
+    let _ = app.update(Message::MainViewScriptFilter(
+        0,
+        run,
+        Some(Ok(issue_items(1))),
+    ));
+    let _ = app.update(Message::SearchChanged("mai".into()));
+    let _ = app.update(Message::MoveDown);
+    assert_eq!(app.selected_index, 1, "the earlier issue, still listed");
+
+    let run = script_filter_generation(&app, 0);
+    let _ = app.update(Message::MainViewScriptFilter(
+        0,
+        run,
+        Some(Ok(issue_items(0))),
+    ));
+    assert_eq!(app.total_items(), 1);
+    assert_eq!(app.selected_index, 0, "back on the launcher");
+}
+
+#[test]
+fn test_main_view_reloads_after_any_action_of_its_addon() {
+    let mut app = main_view_app(&["browser_tabs"], Vec::new(), AddonsConfig::default());
+    load_main_view_tabs(&mut app);
+    let action_done = |app: &mut LauncherApp| {
+        app.update(Message::CommandListActionDone(
+            CommandListAddon::BrowserTabs,
+            0,
+            "tab".into(),
+            Ok(()),
+        ))
+    };
+
+    // Closed from the tabs mode, which the main view does not show.
+    let _ = app.update(Message::SearchChanged("tabs mail".into()));
+    let _ = action_done(&mut app);
+    assert!(app.main_view.stale.contains(&0));
+    let task = app.update(Message::SearchChanged("mail".into()));
+    assert!(app.main_view.stale.is_empty());
+    assert!(task.units() > 0, "reloaded as it shows again");
+
+    // Done after the user came back: reload at once, dropping older loads.
+    let super::main_view::Source::List(list) = &app.main_view.sources[0] else {
+        panic!("command list source");
+    };
+    let earlier = list.generation;
+    let task = action_done(&mut app);
+    assert!(task.units() > 0);
+    let _ = app.update(Message::MainViewLoaded(0, earlier, Ok(Vec::new())));
+    assert_eq!(app.total_items(), 1, "the older load is dropped");
+}

@@ -45,6 +45,12 @@ version: 1
 #     - addons.web_searches."Google"           # Opens Google search with the current query
 #     - addons.web_searches."DuckDuckGo"       # Opens DuckDuckGo search with the current query
 #     - addons.script_filters."Search Google"  # Switches to the script filter mode
+#   main_view:               # Mix addon results into the main list (native UI only)
+#     - launchers            # Keep launchers; once main_view is set they only show if listed
+#     - browser_tabs         # Typing "gmail" lists matching tabs, up to 5 per addon
+#     - windows              # Also: system, media, audio, bluetooth, pass
+#     - text_snippets."Emails"       # A snippet source, by name
+#     - script_filters."Bookmarks"   # A script filter, run when typing pauses
 #   theme_colors:            # Override individual colours (hex: #RGB, #RRGGBB, or #RRGGBBAA)
 #     bg_base: "#1e1e2e"
 #     bg_input: "#313244"

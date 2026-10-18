@@ -408,6 +408,12 @@ matches. A query starting with `!` is a keyword lookup, so usage is ignored
 there and ties keep the source order. Usage is stored in
 `~/.cache/raffi/snippets.cache`, per source keyword and snippet name.
 
+To search a source without its keyword, add it to
+[`general.main_view`](/configuration/general-settings/#main-view) as
+`text_snippets."<name>"`. Its best matches then show in the main list. A
+command source runs once when Raffi starts there, rather than for each
+search.
+
 ## Actions
 
 Configure how snippets are used when selected:

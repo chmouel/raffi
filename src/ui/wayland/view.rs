@@ -8,10 +8,12 @@ use iced::{Element, Length};
 
 use super::ansi::ansi_to_spans;
 use super::browser::mimetype_icon_name;
+use super::main_view::{Block, Source as MainViewSource};
 use super::preview::{PreviewBody, PreviewData, PreviewIcon};
 use super::snippets::{truncate_preview, SnippetIcon};
-use super::state::{LauncherApp, Message};
+use super::state::{LauncherApp, Message, ScriptFilterResult};
 use super::theme::ThemeColors;
+use super::types::ScriptFilterItem;
 
 type HintSpan<'a> = iced::widget::text::Span<'a, (), iced::Font>;
 
@@ -193,6 +195,22 @@ fn scrollable_style(
         style.gap = None;
         style
     }
+}
+
+/// A small rounded label at the end of a row.
+fn badge_pill<'a>(label: String, t: ThemeColors, size: f32) -> Element<'a, Message> {
+    let accent = t.accent;
+    container(text(label).size(size).color(accent))
+        .padding([3.0, 10.0])
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(iced::Color { a: 0.14, ..accent })),
+            border: iced::Border {
+                radius: 6.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .into()
 }
 
 /// Build an icon widget for `path`, or `None` when the file is missing.
@@ -427,6 +445,151 @@ impl LauncherApp {
     }
 
     /// Render one row per available keyword or trigger, shown with `Ctrl+/`.
+    /// Icon file of a script filter row, else the filter's default icon.
+    fn script_filter_icon(
+        &self,
+        item: &ScriptFilterItem,
+        result: &ScriptFilterResult,
+    ) -> Option<String> {
+        item.icon
+            .as_ref()
+            .and_then(|icon| icon.path.clone())
+            .map(|path| crate::expand_config_value(&path))
+            .filter(|path| Path::new(path).exists())
+            .or_else(|| {
+                result
+                    .default_icon
+                    .as_ref()
+                    .and_then(|name| self.icon_map.get(name).cloned())
+            })
+    }
+
+    /// Row `row` of main view source `source`, shown at `display_idx`, with
+    /// a badge naming where it comes from.
+    fn main_view_row(
+        &self,
+        source: usize,
+        row: usize,
+        display_idx: usize,
+    ) -> Option<Element<'_, Message>> {
+        let t = self.view.theme;
+        let fs = self.view.font_sizes;
+        let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
+        let mut text_col = Column::new();
+        let mut badges = Vec::new();
+        match &self.main_view.sources[source] {
+            MainViewSource::List(list) => {
+                let item = list.item(row)?;
+                if let Some(icon) = item
+                    .icon
+                    .as_deref()
+                    .and_then(|path| icon_element(Path::new(path), 40.0))
+                {
+                    item_row = item_row.push(icon);
+                }
+                text_col = text_col
+                    .push(text(item.title.clone()).size(fs.item).color(t.text_main))
+                    .push(
+                        text(item.subtitle.clone())
+                            .size(fs.subtitle)
+                            .color(t.text_muted),
+                    );
+                badges.extend(item.badge.clone());
+                badges.extend(list.addon.map(|addon| addon.badge().to_string()));
+            }
+            MainViewSource::Snippets {
+                config_index,
+                items,
+                filtered,
+                previews,
+                ..
+            } => {
+                let item = *filtered.get(row)?;
+                let snippet = items.get(item)?;
+                let config = self.addons.text_snippets.get(*config_index)?;
+                let icon = snippet
+                    .icon
+                    .iter()
+                    .chain(config.icon.iter())
+                    .find_map(|icon| self.resolve_icon_or_glyph(icon));
+                match icon {
+                    Some(SnippetIcon::File(path)) => {
+                        if let Some(icon) = icon_element(Path::new(&path), 40.0) {
+                            item_row = item_row.push(icon);
+                        }
+                    }
+                    Some(SnippetIcon::Glyph(glyph)) => {
+                        item_row = item_row
+                            .push(text(glyph).size(fs.item + 4.0).width(Length::Fixed(40.0)));
+                    }
+                    None => {}
+                }
+                text_col = text_col
+                    .push(text(&snippet.name).size(fs.item).color(t.text_main))
+                    .push(
+                        text(truncate_preview(
+                            previews
+                                .get(item)
+                                .and_then(Option::as_deref)
+                                .unwrap_or(&snippet.value),
+                        ))
+                        .size(fs.subtitle)
+                        .color(t.text_muted),
+                    );
+                badges.push(config.name.clone());
+            }
+            MainViewSource::ScriptFilter {
+                config_index,
+                results,
+                ..
+            } => {
+                let result = results.as_ref()?;
+                let item = result.items.get(row)?;
+                if let Some(icon) = self
+                    .script_filter_icon(item, result)
+                    .and_then(|path| icon_element(Path::new(&path), 40.0))
+                {
+                    item_row = item_row.push(icon);
+                }
+                text_col = text_col.push(rich_text(ansi_to_spans(
+                    &item.title,
+                    fs.item,
+                    t.text_main,
+                    iced::Font::default(),
+                    &self.view.preview_style.ansi,
+                )));
+                if let Some(subtitle) = &item.subtitle {
+                    text_col = text_col.push(rich_text(ansi_to_spans(
+                        subtitle,
+                        fs.subtitle,
+                        t.text_muted,
+                        iced::Font::default(),
+                        &self.view.preview_style.ansi,
+                    )));
+                }
+                badges.extend(
+                    self.addons
+                        .script_filters
+                        .get(*config_index)
+                        .map(|config| config.name.clone()),
+                );
+            }
+        }
+        item_row = item_row.push(text_col.width(Length::Fill));
+        for badge in badges {
+            item_row = item_row.push(badge_pill(badge, t, fs.subtitle));
+        }
+        let is_selected = display_idx == self.selected_index;
+        Some(
+            button(item_row)
+                .on_press(Message::ItemClicked(display_idx))
+                .padding(fs.item_padding)
+                .width(Length::Fill)
+                .style(item_button_style(t, is_selected, t.text_main))
+                .into(),
+        )
+    }
+
     fn help_items_column(&self) -> Column<'_, Message> {
         let t = self.view.theme;
         let fs = self.view.font_sizes;
@@ -1056,24 +1219,7 @@ impl LauncherApp {
                 let is_selected = self.selected_index == special_item_idx;
                 let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
 
-                let icon_path = item
-                    .icon
-                    .as_ref()
-                    .and_then(|icon| icon.path.clone())
-                    .and_then(|path| {
-                        let expanded = crate::expand_config_value(&path);
-                        if Path::new(&expanded).exists() {
-                            Some(expanded)
-                        } else {
-                            None
-                        }
-                    })
-                    .or_else(|| {
-                        sf_result
-                            .default_icon
-                            .as_ref()
-                            .and_then(|name| self.icon_map.get(name).cloned())
-                    });
+                let icon_path = self.script_filter_icon(item, sf_result);
 
                 if let Some(icon_path_str) = icon_path {
                     let icon_path = PathBuf::from(&icon_path_str);
@@ -1344,22 +1490,7 @@ impl LauncherApp {
                     .is_extra_row(row)
                     .then(|| super::bitwarden::NOTES_BADGE.to_string());
                 for badge in notes.iter().chain(&item.badge) {
-                    let accent = t.accent;
-                    item_row = item_row.push(
-                        container(text(badge.clone()).size(fs.subtitle).color(accent))
-                            .padding([3.0, 10.0])
-                            .style(move |_theme| container::Style {
-                                background: Some(iced::Background::Color(iced::Color {
-                                    a: 0.14,
-                                    ..accent
-                                })),
-                                border: iced::Border {
-                                    radius: 6.0.into(),
-                                    ..Default::default()
-                                },
-                                ..Default::default()
-                            }),
-                    );
+                    item_row = item_row.push(badge_pill(badge.clone(), t, fs.subtitle));
                 }
                 items_column = items_column.push(
                     button(item_row)
@@ -1750,6 +1881,15 @@ impl LauncherApp {
             );
         }
 
+        let main_view_before = self.main_view.row_count(Block::BeforeLaunchers);
+        let main_view_after = self.main_view.row_count(Block::AfterLaunchers);
+        for (source, row) in self.main_view.rows(Block::BeforeLaunchers) {
+            if let Some(row) = self.main_view_row(source, row, special_item_idx) {
+                items_column = items_column.push(row);
+            }
+            special_item_idx += 1;
+        }
+
         let has_fallbacks = self.fallback_count() > 0;
         let has_keyword_suggestions = !self.keyword_suggestions.is_empty();
 
@@ -1766,6 +1906,7 @@ impl LauncherApp {
             && !has_web_search
             && !has_fallbacks
             && !has_keyword_suggestions
+            && main_view_before + main_view_after == 0
         {
             let no_results = container(
                 text("No matching results found.")
@@ -1826,8 +1967,15 @@ impl LauncherApp {
             }
         }
 
+        let after_start_idx = special_item_idx + self.filtered_configs.len();
+        for (offset, (source, row)) in self.main_view.rows(Block::AfterLaunchers).enumerate() {
+            if let Some(row) = self.main_view_row(source, row, after_start_idx + offset) {
+                items_column = items_column.push(row);
+            }
+        }
+
         if has_fallbacks {
-            let fallback_start_idx = special_item_idx + self.filtered_configs.len();
+            let fallback_start_idx = after_start_idx + main_view_after;
             for (fb_idx, fallback) in self.fallbacks.iter().enumerate() {
                 let display_idx = fallback_start_idx + fb_idx;
                 let is_selected = display_idx == self.selected_index;

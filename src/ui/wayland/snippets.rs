@@ -78,43 +78,93 @@ pub(super) fn execute_text_snippet_command(
     generation: u64,
 ) -> Task<Message> {
     Task::perform(
-        async move {
-            crate::debug_log!("snippets: executing command={command:?} args={args:?}");
-            let output = Command::new(&command)
-                .args(&args)
-                .stdin(Stdio::null())
-                .stderr(Stdio::null())
-                .output();
-
-            match output {
-                Ok(output) if output.status.success() => {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    match serde_json::from_str::<SnippetCommandResponse>(&stdout) {
-                        Ok(response) => {
-                            crate::debug_log!(
-                                "snippets: got {} items from {command:?}",
-                                response.items.len()
-                            );
-                            Ok(response
-                                .items
-                                .into_iter()
-                                .map(|item| TextSnippet {
-                                    name: item.title,
-                                    value: item.arg.unwrap_or_default(),
-                                    keyword: item.keyword,
-                                    icon: item.icon.and_then(|icon| icon.path),
-                                })
-                                .collect())
-                        }
-                        Err(error) => Err(format!("Invalid JSON: {}", error)),
-                    }
-                }
-                Ok(output) => Err(format!("Command exited with status {}", output.status)),
-                Err(error) => Err(format!("Failed to execute: {}", error)),
-            }
-        },
+        async move { run_text_snippet_command(&command, &args) },
         move |result| Message::TextSnippetCommandResult(generation, result),
     )
+}
+
+/// Run a snippet `command` and parse its items. Blocking.
+pub(super) fn run_text_snippet_command(
+    command: &str,
+    args: &[String],
+) -> Result<Vec<TextSnippet>, String> {
+    crate::debug_log!("snippets: executing command={command:?} args={args:?}");
+    let output = Command::new(command)
+        .args(args)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            match serde_json::from_str::<SnippetCommandResponse>(&stdout) {
+                Ok(response) => {
+                    crate::debug_log!(
+                        "snippets: got {} items from {command:?}",
+                        response.items.len()
+                    );
+                    Ok(response
+                        .items
+                        .into_iter()
+                        .map(|item| TextSnippet {
+                            name: item.title,
+                            value: item.arg.unwrap_or_default(),
+                            keyword: item.keyword,
+                            icon: item.icon.and_then(|icon| icon.path),
+                        })
+                        .collect())
+                }
+                Err(error) => Err(format!("Invalid JSON: {}", error)),
+            }
+        }
+        Ok(output) => Err(format!("Command exited with status {}", output.status)),
+        Err(error) => Err(format!("Failed to execute: {}", error)),
+    }
+}
+
+/// Snippets of a YAML `file` source. Blocking.
+pub(super) fn read_snippet_file(path: &str) -> Result<Vec<TextSnippet>, String> {
+    let contents =
+        std::fs::read_to_string(path).map_err(|error| format!("cannot read {path}: {error}"))?;
+    serde_yaml::from_str::<Vec<TextSnippet>>(&contents)
+        .map_err(|error| format!("invalid YAML in {path}: {error}"))
+}
+
+/// Snippets of the `.snippet` files in a `directory` source, by name.
+/// Blocking.
+pub(super) fn read_snippet_dir(path: &str) -> Result<Vec<TextSnippet>, String> {
+    let entries = std::fs::read_dir(path)
+        .map_err(|error| format!("cannot read directory {path}: {error}"))?;
+    let mut snippets: Vec<TextSnippet> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("snippet"))
+        .filter_map(|path| {
+            std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|contents| parse_snippet_file(&contents))
+        })
+        .collect();
+    snippets.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(snippets)
+}
+
+/// Every snippet of `config`, whatever kind of source it is. Blocking.
+pub(super) fn load_snippet_source(
+    config: &crate::TextSnippetSourceConfig,
+) -> Result<Vec<TextSnippet>, String> {
+    if let Some(snippets) = &config.snippets {
+        Ok(snippets.clone())
+    } else if let Some(file) = &config.file {
+        read_snippet_file(file)
+    } else if let Some(directory) = &config.directory {
+        read_snippet_dir(directory)
+    } else if let Some(command) = &config.command {
+        run_text_snippet_command(command, &config.args)
+    } else {
+        Ok(Vec::new())
+    }
 }
 
 /// Parse a `.snippet` file: a name line, optional `keyword:` and `icon:` header

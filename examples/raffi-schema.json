@@ -632,6 +632,17 @@
           "format": "float",
           "default": null
         },
+        "main_view": {
+          "description": "Sources mixed into the main view, in display order, when typing without\nan addon trigger (native UI only). Entries: `launchers`, `browser_tabs`,\n`windows`, `system`, `media`, `audio`, `bluetooth`, `pass`,\n`text_snippets.<name>` and `script_filters.<name>`. When set, launchers\nonly show if `launchers` is listed.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "type": "string"
+          }
+        },
         "max_history": {
           "type": [
             "integer",

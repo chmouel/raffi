@@ -41,58 +41,63 @@ pub(super) fn execute_script_filter(
     default_icon: Option<String>,
 ) -> Task<Message> {
     Task::perform(
-        async move {
-            crate::debug_log!(
-                "script_filter: executing command={command:?} args={args:?} query={query:?}"
-            );
-            let output = Command::new(&command)
-                .args(&args)
-                .envs(&env)
-                .arg(&query)
-                .stdin(Stdio::null())
-                .stderr(Stdio::null())
-                .output();
-
-            match output {
-                Ok(output) if output.status.success() => {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    match parse_script_filter_output(&stdout, default_icon) {
-                        Ok(result) => {
-                            crate::debug_log!(
-                                "script_filter: got {} items from {command:?}",
-                                result.items.len()
-                            );
-                            Ok(result)
-                        }
-                        Err(error) => {
-                            eprintln!("Script filter: invalid JSON from {}: {}", command, error);
-                            crate::debug_log!(
-                                "script_filter: invalid JSON from {command:?}: {error}"
-                            );
-                            Err(error)
-                        }
-                    }
-                }
-                Ok(output) => {
-                    eprintln!(
-                        "Script filter: {} exited with status {}",
-                        command, output.status
-                    );
-                    crate::debug_log!(
-                        "script_filter: {command:?} exited with status {}",
-                        output.status
-                    );
-                    Err(format!("Script exited with status {}", output.status))
-                }
-                Err(error) => {
-                    eprintln!("Script filter: failed to execute {}: {}", command, error);
-                    crate::debug_log!("script_filter: failed to execute {command:?}: {error}");
-                    Err(format!("Failed to execute: {}", error))
-                }
-            }
-        },
+        async move { run_script_filter(&command, &args, &env, &query, default_icon) },
         move |result| Message::ScriptFilterResult(generation, result),
     )
+}
+
+/// Run a script filter for `query` and parse its items. Blocking.
+pub(super) fn run_script_filter(
+    command: &str,
+    args: &[String],
+    env: &HashMap<String, String>,
+    query: &str,
+    default_icon: Option<String>,
+) -> Result<ScriptFilterResult, String> {
+    crate::debug_log!("script_filter: executing command={command:?} args={args:?} query={query:?}");
+    let output = Command::new(command)
+        .args(args)
+        .envs(env)
+        .arg(query)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            match parse_script_filter_output(&stdout, default_icon) {
+                Ok(result) => {
+                    crate::debug_log!(
+                        "script_filter: got {} items from {command:?}",
+                        result.items.len()
+                    );
+                    Ok(result)
+                }
+                Err(error) => {
+                    eprintln!("Script filter: invalid JSON from {}: {}", command, error);
+                    crate::debug_log!("script_filter: invalid JSON from {command:?}: {error}");
+                    Err(error)
+                }
+            }
+        }
+        Ok(output) => {
+            eprintln!(
+                "Script filter: {} exited with status {}",
+                command, output.status
+            );
+            crate::debug_log!(
+                "script_filter: {command:?} exited with status {}",
+                output.status
+            );
+            Err(format!("Script exited with status {}", output.status))
+        }
+        Err(error) => {
+            eprintln!("Script filter: failed to execute {}: {}", command, error);
+            crate::debug_log!("script_filter: failed to execute {command:?}: {error}");
+            Err(format!("Failed to execute: {}", error))
+        }
+    }
 }
 
 /// Parse the output of a `RAFFI_PREVIEW=1` run. `Ok(None)` means the script

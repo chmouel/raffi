@@ -20,6 +20,7 @@ mod file_preview;
 mod help;
 mod hyprland;
 mod kill;
+mod main_view;
 mod media;
 mod pass;
 mod placeholders;
@@ -44,7 +45,7 @@ mod world_clock;
 mod tests;
 
 use anyhow::Result;
-use iced::window;
+use iced::{window, Task};
 use std::sync::{Arc, Mutex};
 
 use super::{UISettings, UI};
@@ -121,6 +122,7 @@ fn run_wayland_ui(
     let window_height = settings.window_height;
     let sort_mode = settings.sort_mode.clone();
     let fallbacks = settings.fallbacks.clone();
+    let main_view = settings.main_view.clone();
     let clipboard_history = settings.clipboard_history;
     let show_preview = settings.show_preview;
     let preview_style = theme::PreviewStyle::resolve(
@@ -176,7 +178,8 @@ fn run_wayland_ui(
             );
             app.hyprland = hyprland.clone();
             app.deferred_action = deferred_action_for_new.clone();
-            (app, task)
+            let preload = app.configure_main_view(main_view.as_deref());
+            (app, Task::batch([task, preload]))
         },
         LauncherApp::update,
         LauncherApp::view,

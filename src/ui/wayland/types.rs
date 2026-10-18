@@ -509,6 +509,22 @@ pub(crate) enum Message {
     /// The preview of the page at the URL for the browser tab list of this
     /// session; None when the row was left before it was looked up.
     TabPreviewLoaded(u64, String, Option<Vec<super::preview::PreviewBody>>),
+    /// Rows of the main view command list source at this index, from its
+    /// load of this generation.
+    MainViewLoaded(
+        usize,
+        u64,
+        std::result::Result<Vec<super::command_list::CommandItem>, String>,
+    ),
+    /// Snippets of the main view snippet source at this index.
+    MainViewSnippetsLoaded(usize, std::result::Result<Vec<TextSnippet>, String>),
+    /// A main view script filter run of this source and generation; None
+    /// when a later query superseded it before it started.
+    MainViewScriptFilter(
+        usize,
+        u64,
+        Option<std::result::Result<ScriptFilterResult, String>>,
+    ),
     DevtoolsSelected(usize),
     /// Hash rows computed for the `dev` query with this generation.
     DevtoolsHashes(u64, Vec<super::devtools::DevRow>),

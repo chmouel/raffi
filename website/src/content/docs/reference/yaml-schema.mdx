@@ -203,6 +203,22 @@ Addon entries shown at the bottom of the launcher list when typing a non-empty q
 ```
 
 
+**`general.main_view`** `list of strings` (default: unset)
+
+Sources mixed into the main list when typing without an addon trigger, grouped in this order. Native UI only. When set, launchers only appear if `launchers` is listed. See [Main view](/configuration/general-settings/#main-view).
+
+  Entries: `launchers`, `browser_tabs`, `windows`, `system`, `media`, `audio`, `bluetooth`, `pass`, `text_snippets.<name>`, `script_filters.<name>`.
+
+  ```yaml
+  general:
+    main_view:
+      - launchers
+      - browser_tabs
+      - text_snippets."Emails"
+
+```
+
+
 **`general.theme_colors`** `object`
 
 Custom color overrides for the native UI theme.

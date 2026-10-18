@@ -1096,6 +1096,13 @@ pub struct GeneralConfig {
     pub sort_mode: SortMode,
     #[serde(default)]
     pub fallbacks: Vec<String>,
+    /// Sources mixed into the main view, in display order, when typing without
+    /// an addon trigger (native UI only). Entries: `launchers`, `browser_tabs`,
+    /// `windows`, `system`, `media`, `audio`, `bluetooth`, `pass`,
+    /// `text_snippets.<name>` and `script_filters.<name>`. When set, launchers
+    /// only show if `launchers` is listed.
+    #[serde(default)]
+    pub main_view: Option<Vec<String>>,
     /// Clipboard manager for `{clipboard:N}` snippet placeholders
     #[serde(default)]
     pub clipboard_history: ClipboardHistory,
@@ -2805,11 +2812,17 @@ pub fn run(args: Args) -> Result<()> {
             .parse::<UIType>()
             .map_err(|e| anyhow::anyhow!(e))?
     } else {
-        default_ui_type(fuzzel_available, !general.fallbacks.is_empty())?
+        default_ui_type(
+            fuzzel_available,
+            !general.fallbacks.is_empty() || general.main_view.is_some(),
+        )?
     };
 
     if ui_type == UIType::Fuzzel && !general.fallbacks.is_empty() {
         eprintln!("Warning: fallbacks are configured but ui_type is fuzzel — fallbacks require the native UI. Set ui_type: native to use fallbacks.");
+    }
+    if ui_type == UIType::Fuzzel && general.main_view.is_some() {
+        eprintln!("Warning: main_view is configured but ui_type is fuzzel — main_view requires the native UI. Set ui_type: native to use main_view.");
     }
 
     debug_log!("config: ui_type={ui_type:?}");
@@ -2845,6 +2858,7 @@ pub fn run(args: Args) -> Result<()> {
         window_height,
         sort_mode: general.sort_mode.clone(),
         fallbacks: general.fallbacks.clone(),
+        main_view: general.main_view.clone(),
         clipboard_history: general.clipboard_history,
         terminal_classes: general.terminal_classes.clone(),
         show_preview: general.show_preview,

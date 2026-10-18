@@ -185,6 +185,40 @@ Fallbacks work best with search-type addons. The referenced addon must be define
 
 <Image src={fallbacksScreenshot} alt="Configured fallback search entries and selected URL preview" width={800} />
 
+## Main view
+
+**`main_view`** `list of strings` (default: unset)
+
+Mixes addon results into the main list, so typing `gmail` shows the matching browser tabs without typing the `tabs` trigger first. Native UI only.
+
+Accepted entries:
+
+  - `launchers`: your launcher entries
+  - `browser_tabs`, `windows`, `system`, `media`, `audio`, `bluetooth`, `pass`
+  - `text_snippets.<name>` and `script_filters.<name>`, where `<name>` is the source's `name` field. The `addons.<type>."<name>"` form used by `fallbacks` works too.
+
+When `main_view` is unset, the main list shows launchers only, as before. When it is set, only the listed sources appear, so keep `launchers` in the list if you still want your launchers.
+
+Results are grouped by source in the order you list them, and each addon row carries a small badge naming where it comes from. With an empty query only launchers are shown; addon rows appear once you type. Each addon adds at most 5 rows, ranked the same way as in its own mode.
+
+Pressing Enter on an addon row switches to that addon's mode with your query (the input becomes `tabs gmail`, for instance) and runs the row there. Confirmations, lists that stay open after an action, and usage ranking behave exactly as in the addon's own mode.
+
+Addon data loads in the background when Raffi starts. Sources that cannot run here (no supported compositor, a missing tool, no connected browser) are skipped quietly. Unknown or disabled entries print a warning at startup.
+
+Script filters run each time you pause typing, so set their `min_query_length` to avoid running them for one or two characters. A filter runs once at a time here, and a run that takes longer than 10 seconds is stopped. Keep in mind that a listed filter receives everything you type in the main list, so avoid listing one that sends its query to a remote service you would not search with otherwise. Dynamic previews are only shown in the filter's own mode.
+
+```yaml
+general:
+  main_view:
+    - launchers
+    - browser_tabs
+    - windows
+    - text_snippets."Emails"
+    - script_filters."GitHub Issues"
+```
+
+Typing a trigger (`tabs gmail`) still opens the addon's full list, and fallbacks still show below the main list.
+
 ## Font and Typography
 
 **`font_size`** `number` (default: `20`)

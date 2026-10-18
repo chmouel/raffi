@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
 
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -28,6 +27,7 @@ use super::emoji::{
     load_emoji_data_from_disk, resolve_emoji_file_names,
 };
 use super::help::{filter_help_entries, help_entries};
+use super::main_view::{Block, MAIN_VIEW_SESSION};
 use super::pass::PassContext;
 use super::preview::image_mime_type;
 use super::script_filters::{
@@ -37,7 +37,7 @@ use super::script_filters::{
 use super::secret_io::{SecretError, SystemRunner};
 use super::snippets::{
     compute_previews, execute_text_snippet_command, expand_final, fetch_clipboard, filter_snippets,
-    missing_clipboard, parse_snippet_file, snippet_mru_key,
+    missing_clipboard, read_snippet_dir, read_snippet_file, snippet_mru_key,
 };
 use super::state::{
     CachedRate, ClipboardData, ClipboardState, CurrencyConversion, CurrencyConversionRequest,
@@ -284,6 +284,41 @@ const PREVIEW_SCROLL_STEP: f32 = 120.0;
 /// Wait before running a Script Filter dynamic preview, so moving quickly
 /// through results does not start one process per row.
 const SCRIPT_FILTER_PREVIEW_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(80);
+
+/// Look up the page preview of `tab` for `list`, unless one is running or
+/// already known.
+pub(super) fn request_tab_preview(
+    list: &mut super::command_list::CommandListState,
+    tab: &super::browser_tabs::TabAction,
+    service: crate::FaviconService,
+) -> Task<Message> {
+    list.preview_wanted.set(&tab.url);
+    if list.preview_inflight.is_some() || list.previews.contains_key(&tab.url) {
+        return Task::none();
+    }
+    let url = tab.url.clone();
+    let browser = crate::browser_host::Browser {
+        id: tab.browser_id.clone(),
+        name: String::new(),
+        pid: tab.browser_pid,
+    };
+    let session = list.session;
+    let wanted = list.preview_wanted.clone();
+    list.preview_inflight = Some(url.clone());
+    Task::perform(
+        {
+            let url = url.clone();
+            async move {
+                let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                std::thread::spawn(move || {
+                    let _ = sender.send(super::tab_preview::load(&url, &browser, service, &wanted));
+                });
+                receiver.await.ok().flatten()
+            }
+        },
+        move |bodies| Message::TabPreviewLoaded(session, url.clone(), bodies),
+    )
+}
 
 /// Match `keyword` followed by a space and return the remaining query.
 ///
@@ -937,6 +972,7 @@ impl LauncherApp {
                 devtools: DevtoolsState::default(),
                 clipboard: ClipboardState::default(),
                 fallbacks,
+                main_view: Default::default(),
                 keyword_suggestions: Vec::new(),
                 help_entries: Vec::new(),
                 help_filtered: Vec::new(),
@@ -973,40 +1009,12 @@ impl LauncherApp {
                 .and_then(super::browser_tabs::tab_target)
         })
         .flatten();
-        let Some(tab) = tab else {
-            self.command_list.preview_wanted.clear();
-            return Task::none();
-        };
-        self.command_list.preview_wanted.set(&tab.url);
-        if self.command_list.preview_inflight.is_some()
-            || self.command_list.previews.contains_key(&tab.url)
-        {
-            return Task::none();
-        }
-        let url = tab.url.clone();
-        let browser = crate::browser_host::Browser {
-            id: tab.browser_id.clone(),
-            name: String::new(),
-            pid: tab.browser_pid,
-        };
         let service = self.addons.browser_tabs.favicon_service;
-        let session = self.command_list.session;
-        let wanted = self.command_list.preview_wanted.clone();
-        self.command_list.preview_inflight = Some(url.clone());
-        Task::perform(
-            {
-                let url = url.clone();
-                async move {
-                    let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                    std::thread::spawn(move || {
-                        let _ =
-                            sender.send(super::tab_preview::load(&url, &browser, service, &wanted));
-                    });
-                    receiver.await.ok().flatten()
-                }
-            },
-            move |bodies| Message::TabPreviewLoaded(session, url.clone(), bodies),
-        )
+        let Some(tab) = tab.cloned() else {
+            self.command_list.preview_wanted.clear();
+            return self.ensure_main_view_tab_preview(service);
+        };
+        request_tab_preview(&mut self.command_list, &tab, service)
     }
 
     fn update_inner(&mut self, message: Message) -> Task<Message> {
@@ -1102,6 +1110,9 @@ impl LauncherApp {
                 self.handle_text_snippet_command_result(generation, result)
             }
             Message::TextSnippetSelected(index) => self.handle_text_snippet_selected(index),
+            Message::TextSnippetClipboard(session, result) if session & MAIN_VIEW_SESSION != 0 => {
+                self.handle_main_view_clipboard(session, result)
+            }
             Message::TextSnippetClipboard(session, result) => {
                 self.handle_text_snippet_clipboard(session, result)
             }
@@ -1195,6 +1206,18 @@ impl LauncherApp {
             Message::CommandListActionDone(addon, session, identity, result) => {
                 self.handle_command_list_action_done(addon, session, identity, result)
             }
+            Message::MainViewLoaded(source, generation, result) => {
+                self.handle_main_view_loaded(source, generation, result)
+            }
+            Message::MainViewSnippetsLoaded(source, result) => {
+                self.handle_main_view_snippets_loaded(source, result)
+            }
+            Message::MainViewScriptFilter(source, generation, result) => {
+                self.handle_main_view_script_filter(source, generation, result)
+            }
+            Message::TabPreviewLoaded(session, url, bodies) if session & MAIN_VIEW_SESSION != 0 => {
+                self.handle_main_view_tab_preview(session, url, bodies)
+            }
             Message::TabPreviewLoaded(session, url, bodies) => {
                 if session == self.command_list.session {
                     if self.command_list.preview_inflight.as_ref() == Some(&url) {
@@ -1205,6 +1228,9 @@ impl LauncherApp {
                     }
                 }
                 Task::none()
+            }
+            Message::FaviconsFetched(session, fetched) if session & MAIN_VIEW_SESSION != 0 => {
+                self.handle_main_view_favicons(session, fetched)
             }
             Message::FaviconsFetched(session, fetched) => {
                 if fetched
@@ -1243,7 +1269,7 @@ impl LauncherApp {
         }
     }
 
-    fn handle_search_changed(&mut self, query: String) -> Task<Message> {
+    pub(super) fn handle_search_changed(&mut self, query: String) -> Task<Message> {
         if self.view.current_modifiers.alt() && !self.history.search_in_progress {
             return Task::none();
         }
@@ -1340,6 +1366,12 @@ impl LauncherApp {
         } else {
             Vec::new()
         };
+        let main_view_query = if matches!(qmode, QueryMode::Standard) {
+            query.trim()
+        } else {
+            ""
+        };
+        tasks.push(self.refresh_main_view(main_view_query));
         match qmode {
             QueryMode::FileBrowser { expanded, filter } => {
                 self.handle_file_browser_query(&expanded, &filter);
@@ -1740,69 +1772,30 @@ impl LauncherApp {
             return;
         }
 
-        if let Some(file_path) = config.file {
-            if let Some(cached) = self.text_snippets.file_cache.get(&file_path).cloned() {
+        type Reader = fn(&str) -> std::result::Result<Vec<crate::TextSnippet>, String>;
+        let path_source = config
+            .file
+            .as_ref()
+            .map(|path| (path, read_snippet_file as Reader))
+            .or_else(|| {
+                config
+                    .directory
+                    .as_ref()
+                    .map(|path| (path, read_snippet_dir as Reader))
+            });
+        if let Some((path, read)) = path_source {
+            if let Some(cached) = self.text_snippets.file_cache.get(path).cloned() {
                 self.text_snippets.items = cached;
             } else {
-                match fs::read_to_string(&file_path) {
-                    Ok(contents) => {
-                        match serde_yaml::from_str::<Vec<crate::TextSnippet>>(&contents) {
-                            Ok(snippets) => {
-                                self.text_snippets
-                                    .file_cache
-                                    .insert(file_path.clone(), snippets.clone());
-                                self.text_snippets.items = snippets;
-                            }
-                            Err(error) => {
-                                eprintln!(
-                                    "Text snippets: invalid YAML in {}: {}",
-                                    file_path, error
-                                );
-                                self.text_snippets.items = Vec::new();
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        eprintln!("Text snippets: cannot read {}: {}", file_path, error);
-                        self.text_snippets.items = Vec::new();
-                    }
-                }
-            }
-            self.finish_text_snippet_load(&query, tasks);
-            return;
-        }
-
-        if let Some(dir_path) = config.directory {
-            if let Some(cached) = self.text_snippets.file_cache.get(&dir_path).cloned() {
-                self.text_snippets.items = cached;
-            } else {
-                match fs::read_dir(&dir_path) {
-                    Ok(entries) => {
-                        let mut snippets = Vec::new();
-                        for entry in entries.flatten() {
-                            let path = entry.path();
-                            if path.extension().and_then(|ext| ext.to_str()) != Some("snippet") {
-                                continue;
-                            }
-
-                            if let Some(snippet) = fs::read_to_string(&path)
-                                .ok()
-                                .and_then(|contents| parse_snippet_file(&contents))
-                            {
-                                snippets.push(snippet);
-                            }
-                        }
-                        snippets.sort_by(|a, b| a.name.cmp(&b.name));
+                match read(path) {
+                    Ok(snippets) => {
                         self.text_snippets
                             .file_cache
-                            .insert(dir_path.clone(), snippets.clone());
+                            .insert(path.clone(), snippets.clone());
                         self.text_snippets.items = snippets;
                     }
                     Err(error) => {
-                        eprintln!(
-                            "Text snippets: cannot read directory {}: {}",
-                            dir_path, error
-                        );
+                        eprintln!("Text snippets: {error}");
                         self.text_snippets.items = Vec::new();
                     }
                 }
@@ -1826,7 +1819,7 @@ impl LauncherApp {
     }
 
     /// Filter freshly loaded snippets and refresh their previews.
-    fn finish_text_snippet_load(&mut self, query: &str, tasks: &mut Vec<Task<Message>>) {
+    pub(super) fn finish_text_snippet_load(&mut self, query: &str, tasks: &mut Vec<Task<Message>>) {
         let usage = self.text_snippet_usage();
         self.text_snippets.filtered = filter_snippets(&self.text_snippets.items, query, &usage);
         self.text_snippets.loading = false;
@@ -2031,7 +2024,7 @@ impl LauncherApp {
     }
 
     /// How much each password manager row was used, by identity.
-    fn vault_usage(&self) -> HashMap<String, u64> {
+    pub(super) fn vault_usage(&self) -> HashMap<String, u64> {
         let map = &self.vault.usage;
         let (max_count, min_ts, max_ts) = mru_bounds(map);
         map.keys()
@@ -2305,7 +2298,7 @@ impl LauncherApp {
     }
 
     /// Rows shown above the command list, counted like `activate_index`.
-    fn command_list_offset(&self) -> usize {
+    pub(super) fn command_list_offset(&self) -> usize {
         let snippets = if self.text_snippets.loading {
             1
         } else if self.text_snippets.active {
@@ -2453,10 +2446,11 @@ impl LauncherApp {
         result: Result<(), String>,
     ) -> Task<Message> {
         self.in_flight.finish(addon.name(), &identity);
+        let main_view = self.invalidate_main_view(addon);
         if self.command_list.addon != Some(addon) || self.command_list.session != session {
-            return Task::none();
+            return main_view;
         }
-        match result {
+        let task = match result {
             Ok(()) => match addon {
                 CommandListAddon::Media => self.load_media(true),
                 CommandListAddon::Audio => self.load_audio(true),
@@ -2502,7 +2496,8 @@ impl LauncherApp {
                 ));
                 refresh
             }
-        }
+        };
+        Task::batch([main_view, task])
     }
 
     /// Show `item` above the list. The highlight stays on the same entry, so
@@ -2548,7 +2543,7 @@ impl LauncherApp {
 
     /// A theme icon path for `name`, directly or through the desktop entry
     /// of the executable with that name.
-    fn resolve_icon_name(&self, name: &str) -> Option<String> {
+    pub(super) fn resolve_icon_name(&self, name: &str) -> Option<String> {
         if Path::new(name).is_absolute() {
             return Path::new(name).is_file().then(|| name.to_string());
         }
@@ -2742,6 +2737,12 @@ impl LauncherApp {
             current_index += item_count;
         }
 
+        let before = self.main_view.row_count(Block::BeforeLaunchers);
+        if index >= current_index && index < current_index + before {
+            return self.activate_main_view(Block::BeforeLaunchers, index - current_index);
+        }
+        current_index += before;
+
         let config_index = index.saturating_sub(current_index);
         if config_index < self.filtered_configs.len() {
             let real_config_index = self.filtered_configs[config_index];
@@ -2759,6 +2760,12 @@ impl LauncherApp {
             return iced::exit();
         }
         current_index += self.filtered_configs.len();
+
+        let after = self.main_view.row_count(Block::AfterLaunchers);
+        if index >= current_index && index < current_index + after {
+            return self.activate_main_view(Block::AfterLaunchers, index - current_index);
+        }
+        current_index += after;
 
         let fallback_index = index.saturating_sub(current_index);
         if fallback_index < self.fallback_count() {
@@ -3123,7 +3130,7 @@ impl LauncherApp {
         }
     }
 
-    fn handle_script_filter_selected(&mut self, index: usize) -> Task<Message> {
+    pub(super) fn handle_script_filter_selected(&mut self, index: usize) -> Task<Message> {
         if let Some(result) = &self.script_filter.results {
             if let Some(item) = result.items.get(index) {
                 let value = item.arg.as_deref().unwrap_or(&item.title);
@@ -3191,7 +3198,7 @@ impl LauncherApp {
             .unwrap_or_else(Task::none)
     }
 
-    fn handle_text_snippet_selected(&mut self, index: usize) -> Task<Message> {
+    pub(super) fn handle_text_snippet_selected(&mut self, index: usize) -> Task<Message> {
         if self.text_snippets.pending.is_some() {
             return Task::none();
         }
@@ -3674,7 +3681,7 @@ impl LauncherApp {
     /// Runs the item's action after Raffi closes. Actions needing
     /// confirmation run on a second Enter on the same target with the same
     /// modifiers.
-    fn handle_command_list_selected(&mut self, row: usize) -> Task<Message> {
+    pub(super) fn handle_command_list_selected(&mut self, row: usize) -> Task<Message> {
         let Some(addon) = self.command_list.addon else {
             return Task::none();
         };
@@ -3806,7 +3813,7 @@ impl LauncherApp {
         self.start_checked_copy(value)
     }
 
-    fn script_filter_offset(&self) -> usize {
+    pub(super) fn script_filter_offset(&self) -> usize {
         if self.script_filter.loading {
             1
         } else {
@@ -3819,7 +3826,9 @@ impl LauncherApp {
     }
 
     pub(super) fn filter_items(&mut self, query: &str, log_query: &str) {
-        if query.is_empty() {
+        if self.main_view.hide_launchers {
+            self.filtered_configs.clear();
+        } else if query.is_empty() {
             self.filtered_configs = (0..self.configs.len()).collect();
         } else {
             self.filtered_configs = fuzzy_match_configs(&self.configs, query, log_query);
@@ -3869,6 +3878,8 @@ impl LauncherApp {
         if let Some(inline) = &self.inline_result {
             offset += inline.rows.len();
         }
+        offset += self.main_view.row_count(Block::BeforeLaunchers);
+        offset += self.main_view.row_count(Block::AfterLaunchers);
         self.filtered_configs.len() + offset + self.fallback_count()
     }
 

@@ -7,10 +7,11 @@ use chrono::{DateTime, Local};
 
 use super::browser::read_directory;
 use super::clipboard::{ClipItem, ItemKind};
-use super::command_list::CommandItem;
+use super::command_list::{CommandItem, CommandListState};
 use super::devtools::DevRow;
 use super::file_preview::FilePreviewOutput;
 use super::help::HelpEntry;
+use super::main_view::{Block as MainViewBlock, Source as MainViewSource};
 use super::snippets::SnippetIcon;
 use super::state::{
     CurrencyConversion, CurrencyResult, EmojiEntry, FallbackAction, FileBrowserEntry,
@@ -578,6 +579,9 @@ impl LauncherApp {
                     item_index,
                     &sf_result.items[item_index],
                     sf_result,
+                    self.script_filter.action.as_deref(),
+                    self.script_filter.secondary_action.as_deref(),
+                    true,
                 ));
             }
             current_index += count;
@@ -646,7 +650,7 @@ impl LauncherApp {
                 return self
                     .command_list
                     .item(index - current_index)
-                    .map(|item| self.build_command_list_preview(item));
+                    .map(|item| self.build_command_list_preview(&self.command_list, item));
             }
             current_index += count;
         }
@@ -734,6 +738,11 @@ impl LauncherApp {
             current_index += count;
         }
 
+        if let Some((source, row)) = self.selected_main_view() {
+            return self.build_main_view_preview(source, row);
+        }
+        current_index += self.main_view.row_count(MainViewBlock::BeforeLaunchers);
+
         // 9. Standard Launcher configs (disabled by default unless explicitly enabled
         // via `general.show_preview: true`, launcher `show_preview: true`, or toggled with Ctrl+P)
         let config_offset = index.saturating_sub(current_index);
@@ -751,6 +760,7 @@ impl LauncherApp {
             }
         }
         current_index += self.filtered_configs.len();
+        current_index += self.main_view.row_count(MainViewBlock::AfterLaunchers);
 
         // 10. Fallbacks
         let fallback_offset = index.saturating_sub(current_index);
@@ -773,17 +783,35 @@ impl LauncherApp {
     }
 
     fn build_text_snippet_preview(&self, snippet_idx: usize, snippet: &TextSnippet) -> PreviewData {
-        let icon = self.snippet_icon(snippet).map(|si| match si {
-            SnippetIcon::File(path) => PreviewIcon::File(path),
-            SnippetIcon::Glyph(glyph) => PreviewIcon::Glyph(glyph),
-        });
-
-        let expanded_value = self
+        let expanded = self
             .text_snippets
             .previews
             .get(snippet_idx)
-            .and_then(Option::as_deref)
-            .unwrap_or(&snippet.value);
+            .and_then(Option::as_deref);
+        self.snippet_preview(
+            snippet,
+            self.snippet_icon(snippet),
+            expanded,
+            self.text_snippets.action.as_deref(),
+            self.text_snippets.secondary_action.as_deref(),
+        )
+    }
+
+    /// Preview of `snippet`, showing `expanded`, its placeholders filled in,
+    /// when known.
+    fn snippet_preview(
+        &self,
+        snippet: &TextSnippet,
+        icon: Option<SnippetIcon>,
+        expanded: Option<&str>,
+        action: Option<&str>,
+        secondary_action: Option<&str>,
+    ) -> PreviewData {
+        let icon = icon.map(|si| match si {
+            SnippetIcon::File(path) => PreviewIcon::File(path),
+            SnippetIcon::Glyph(glyph) => PreviewIcon::Glyph(glyph),
+        });
+        let expanded_value = expanded.unwrap_or(&snippet.value);
 
         let mut bodies = vec![PreviewBody::Text {
             heading: Some("Snippet Content".to_string()),
@@ -791,7 +819,8 @@ impl LauncherApp {
             truncated: false,
         }];
 
-        if self.text_snippets.placeholders && expanded_value != snippet.value {
+        // Expansions are only computed when placeholders are enabled.
+        if expanded_value != snippet.value {
             bodies.push(PreviewBody::Text {
                 heading: Some("Raw Template".to_string()),
                 content: snippet.value.clone(),
@@ -818,12 +847,8 @@ impl LauncherApp {
             ));
         }
 
-        let primary_action = self.text_snippets.action.as_deref().unwrap_or("copy");
-        let secondary_action = self
-            .text_snippets
-            .secondary_action
-            .as_deref()
-            .unwrap_or("insert");
+        let primary_action = action.unwrap_or("copy");
+        let secondary_action = secondary_action.unwrap_or("insert");
         metadata.push(("Enter".to_string(), describe_action(primary_action)));
         metadata.push(("Ctrl+Enter".to_string(), describe_action(secondary_action)));
 
@@ -926,6 +951,9 @@ impl LauncherApp {
         index: usize,
         item: &ScriptFilterItem,
         sf_result: &ScriptFilterResult,
+        action: Option<&str>,
+        secondary_action: Option<&str>,
+        dynamic: bool,
     ) -> PreviewData {
         let icon_path = if self.no_icons {
             None
@@ -995,9 +1023,9 @@ impl LauncherApp {
             metadata.push(("Copy Text".to_string(), copy_text.clone()));
         }
 
-        let primary = self.script_filter.action.as_deref().unwrap_or("copy");
+        let primary = action.unwrap_or("copy");
         metadata.push(("Enter".to_string(), describe_action(primary)));
-        if let Some(secondary) = self.script_filter.secondary_action.as_deref() {
+        if let Some(secondary) = secondary_action {
             metadata.push(("Ctrl+Enter".to_string(), describe_action(secondary)));
         }
 
@@ -1015,7 +1043,9 @@ impl LauncherApp {
         };
 
         // A dynamic preview replaces the item's own rich preview.
-        let dynamic = self.script_filter.previews.get(&index);
+        let dynamic = dynamic
+            .then(|| self.script_filter.previews.get(&index))
+            .flatten();
         if let Some(rich) = dynamic
             .and_then(|dynamic| dynamic.preview.as_ref())
             .or_else(|| item.preview.as_ref().and_then(ScriptFilterPreview::as_rich))
@@ -1217,20 +1247,68 @@ impl LauncherApp {
         }
     }
 
-    fn build_command_list_preview(&self, item: &CommandItem) -> PreviewData {
+    fn build_command_list_preview(
+        &self,
+        list: &CommandListState,
+        item: &CommandItem,
+    ) -> PreviewData {
         PreviewData {
             title: item.title.clone(),
             subtitle: None,
-            badge: self
-                .command_list
-                .addon
-                .map(|addon| addon.badge().to_string()),
+            badge: list.addon.map(|addon| addon.badge().to_string()),
             icon: item.icon.clone().map(PreviewIcon::File),
             bodies: super::browser_tabs::tab_target(item)
-                .and_then(|tab| self.command_list.previews.get(&tab.url))
+                .and_then(|tab| list.previews.get(&tab.url))
                 .cloned()
                 .unwrap_or_default(),
             metadata: item.details.clone(),
+        }
+    }
+
+    fn build_main_view_preview(&self, source: usize, row: usize) -> Option<PreviewData> {
+        match self.main_view.sources.get(source)? {
+            MainViewSource::List(list) => list
+                .item(row)
+                .map(|item| self.build_command_list_preview(list, item)),
+            MainViewSource::Snippets {
+                config_index,
+                items,
+                filtered,
+                previews,
+                ..
+            } => {
+                let item = *filtered.get(row)?;
+                let snippet = items.get(item)?;
+                let config = self.addons.text_snippets.get(*config_index)?;
+                let icon = snippet
+                    .icon
+                    .iter()
+                    .chain(config.icon.iter())
+                    .find_map(|icon| self.resolve_icon_or_glyph(icon));
+                Some(self.snippet_preview(
+                    snippet,
+                    icon,
+                    previews.get(item).and_then(Option::as_deref),
+                    config.action.as_deref(),
+                    config.secondary_action.as_deref(),
+                ))
+            }
+            MainViewSource::ScriptFilter {
+                config_index,
+                results,
+                ..
+            } => {
+                let result = results.as_ref()?;
+                let config = self.addons.script_filters.get(*config_index)?;
+                Some(self.build_script_filter_preview(
+                    row,
+                    result.items.get(row)?,
+                    result,
+                    config.action.as_deref(),
+                    config.secondary_action.as_deref(),
+                    false,
+                ))
+            }
         }
     }
 

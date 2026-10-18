@@ -558,6 +558,8 @@ pub(super) struct LauncherApp {
     pub devtools: DevtoolsState,
     pub clipboard: ClipboardState,
     pub fallbacks: Vec<ResolvedFallback>,
+    /// Addon rows mixed into the standard results (`general.main_view`).
+    pub main_view: super::main_view::MainViewState,
     pub keyword_suggestions: Vec<KeywordSuggestion>,
     pub help_entries: Vec<HelpEntry>,
     pub help_filtered: Vec<usize>,
