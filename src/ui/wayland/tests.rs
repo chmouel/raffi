@@ -4901,6 +4901,190 @@ fn test_select_1_requires_a_non_empty_initial_query_and_is_opt_in() {
     assert!(deferred_action(&app).is_none());
 }
 
+fn alias(description: &str, alias: &str) -> RaffiConfig {
+    RaffiConfig {
+        description: Some(description.into()),
+        alias: Some(alias.into()),
+        ..Default::default()
+    }
+}
+
+fn alias_app(configs: Vec<RaffiConfig>, addons: AddonsConfig) -> LauncherApp {
+    let (mut app, _) = LauncherApp::new(
+        configs,
+        addons,
+        true,
+        Arc::new(Mutex::new(None)),
+        None,
+        ThemeColors::from_mode_with_overrides(&crate::ThemeMode::Dark, None),
+        10,
+        FontSizes::default_sizes(),
+        SortMode::Hybrid,
+        Vec::new(),
+    );
+    app.text_snippets.mru_map.clear();
+    app.text_snippets.mru_path = None;
+    app.program_exists = |_| true;
+    app.history.max_items = 0;
+    app
+}
+
+fn launcher_keyword(keyword: &str, alias: &str) -> crate::LauncherKeyword {
+    crate::LauncherKeyword {
+        keyword: keyword.into(),
+        alias: alias.into(),
+        description: format!("{keyword} launcher"),
+        icon: None,
+    }
+}
+
+/// An `mp` pull request script filter and a `linoux` keyword for one repo.
+fn pull_request_addons() -> AddonsConfig {
+    let mut addons = AddonsConfig::default();
+    addons.script_filters.push(ScriptFilterConfig {
+        name: "My Pull Requests".into(),
+        command: "pr".into(),
+        keyword: "mp".into(),
+        icon: None,
+        args: Vec::new(),
+        action: None,
+        secondary_action: None,
+        env: std::collections::HashMap::new(),
+        min_query_length: None,
+        dynamic_preview: None,
+    });
+    addons
+        .launcher_keywords
+        .push(launcher_keyword("linoux", "mp linus/linux"));
+    addons
+}
+
+fn script_filter_query(query: &str, addons: &AddonsConfig) -> Option<String> {
+    match classify_query(query, addons).mode {
+        QueryMode::ScriptFilter { query, .. } => Some(query),
+        _ => None,
+    }
+}
+
+#[test]
+fn test_launcher_keyword_routes_as_its_alias() {
+    let addons = pull_request_addons();
+    for (typed, routed) in [
+        ("linoux torvalds", Some("linus/linux torvalds")),
+        (" linoux ", Some("linus/linux")),
+        ("linoux", None),
+        ("linouxx torvalds", None),
+        ("Linoux torvalds", None),
+    ] {
+        assert_eq!(
+            script_filter_query(typed, &addons).as_deref(),
+            routed,
+            "{typed:?}"
+        );
+    }
+}
+
+#[test]
+fn test_launcher_keyword_expands_once_and_wins_over_addon_keywords() {
+    let mut addons = pull_request_addons();
+    addons.launcher_keywords = vec![
+        launcher_keyword("mp", "mp chmouel/raffi"),
+        launcher_keyword("again", "linoux"),
+    ];
+    assert_eq!(
+        script_filter_query("mp fix", &addons).as_deref(),
+        Some("chmouel/raffi fix")
+    );
+    assert_eq!(classify_query("again x", &addons).mode, QueryMode::Standard);
+}
+
+#[test]
+fn test_launcher_keyword_to_clipboard_stays_out_of_logs() {
+    let mut addons = AddonsConfig::default();
+    addons.clipboard.enabled = true;
+    let trigger = addons.clipboard.trigger().to_string();
+    addons
+        .launcher_keywords
+        .push(launcher_keyword("cc", &format!("{trigger} ")));
+    assert!(classify_query("cc secret", &addons).sensitive);
+    assert_eq!(
+        loggable_query("cc secret", &addons),
+        format!("{trigger} <redacted>")
+    );
+}
+
+#[test]
+fn test_launcher_keyword_keeps_the_typed_text_and_filters_loaded_snippets() {
+    let mut source = snippet_source("Snippets", "sn", Vec::new());
+    source.snippets = None;
+    source.command = Some("snippets-command".into());
+    let mut addons = AddonsConfig::default();
+    addons.emoji.enabled = false;
+    addons.text_snippets.push(source);
+    addons.launcher_keywords.push(launcher_keyword("q", "sn"));
+    let mut app = test_app(addons);
+    open_snippets(&mut app, "q quo");
+    assert!(app.text_snippets.loading);
+
+    let generation = app.text_snippets.generation;
+    let _ = app.update(Message::TextSnippetCommandResult(
+        generation,
+        Ok(vec![snippet("Quote", "> x"), snippet("Hello", "hi")]),
+    ));
+    assert_eq!(app.search_query, "q quo");
+    assert_eq!(app.text_snippets.filtered, vec![0]);
+}
+
+#[test]
+fn test_launcher_keywords_are_suggested() {
+    let mut addons = pull_request_addons();
+    addons.launcher_keywords[0].icon = Some("github".into());
+    let suggestions = keyword_suggestions("linoux", &addons);
+    assert_eq!(suggestions[0].keyword, "linoux");
+    assert_eq!(suggestions[0].subtitle, "linoux launcher");
+    assert_eq!(suggestions[0].icon.as_deref(), Some("github"));
+}
+
+#[test]
+fn test_picking_an_alias_launcher_only_types_its_keyword_or_alias() {
+    let mut linoux = alias("Linus Pull Requests", "mp linus/linux");
+    linoux.keyword = Some("linoux".into());
+    let mut app = alias_app(
+        vec![linoux, alias("Volume up", "audio volume up")],
+        pull_request_addons(),
+    );
+
+    let _ = app.update(Message::SearchChanged("Linus Pull".into()));
+    app.view.current_modifiers = iced::keyboard::Modifiers::ALT;
+    app.selected_index = 0;
+    let _ = app.update(Message::Submit);
+    assert_eq!(app.search_query, "linoux ");
+    assert_eq!(app.view.current_modifiers, iced::keyboard::Modifiers::ALT);
+    assert!(matches!(
+        &app.query_class.mode,
+        QueryMode::ScriptFilter { query, .. } if query == "linus/linux"
+    ));
+    assert!(app.selected_item.lock().unwrap().is_none());
+
+    app.view.current_modifiers = iced::keyboard::Modifiers::default();
+    let _ = app.update(Message::SearchChanged("Volume up".into()));
+    app.selected_index = 0;
+    let _ = app.update(Message::Submit);
+    assert_eq!(app.search_query, "audio volume up");
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(
+        generation,
+        Ok(super::audio::fixture_items(true)),
+    ));
+    assert!(app
+        .command_list
+        .items
+        .iter()
+        .all(|item| !app.in_flight.is_pending("audio", &item.identity)));
+    assert!(deferred_action(&app).is_none());
+    assert!(app.selected_item.lock().unwrap().is_none());
+}
+
 #[test]
 fn test_select_1_does_not_activate_zero_or_multiple_selectable_rows() {
     let mut app = windows_app();

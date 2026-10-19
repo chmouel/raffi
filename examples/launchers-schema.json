@@ -10,6 +10,13 @@
       "description": "Represents the configuration for each Raffi entry.",
       "type": "object",
       "properties": {
+        "alias": {
+          "description": "Route this launcher to an internal command: picking it types this text\nfor you, such as `mp linus/linux` (an addon keyword\nfollowed by its query). Cannot be combined with `binary`, `script` or\n`args` (native UI only).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "args": {
           "type": [
             "array",
@@ -65,6 +72,13 @@
           ]
         },
         "ifexist": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "keyword": {
+          "description": "Keyword that stands for `alias` while typing: with keyword `linoux`,\ntyping `linoux torvalds` searches `mp linus/linux torvalds`\nwhile the input keeps showing `linoux torvalds`. Requires `alias`; no\nwhitespace.",
           "type": [
             "string",
             "null"

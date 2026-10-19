@@ -150,9 +150,9 @@ class ParseQueryTests(unittest.TestCase):
             "involved docs": ("involved", "docs"),
             "raffi docs": ("myprs", "raffi docs"),
             "owner/repo fix login": ("owner/repo", "fix login"),
-            "pac fix": ("tektoncd/pipelines-as-code", "fix"),
+            "linoux fix": ("linus/linux", "fix"),
         }
-        with patch.dict(os.environ, {"ALIAS_pac": "tektoncd/pipelines-as-code"}):
+        with patch.dict(os.environ, {"ALIAS_linoux": "linus/linux"}):
             for query, expected in cases.items():
                 with self.subTest(query=query):
                     self.assertEqual(pr.parse_query(query), expected)

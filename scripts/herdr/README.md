@@ -144,10 +144,10 @@ raffi [working] · focused · 3 tabs · 3 panes
   Implement Raffi Builtin Feature [working] · copilot
   Workspace Agent Script Filters [working] · pi
   ~/git/perso/raffi · shell
-pac [working] · 1 tab · 2 panes
+linux [working] · 1 tab · 2 panes
   Investigate failures [working] · copilot, shell
-    copilot [working] - pac
-    shell - pac
+    copilot [working] - linux
+    shell - linux
 ```
 
 Single-pane tabs, including plain shells, appear once as the tab/session
@@ -178,7 +178,7 @@ the environment.
 ```text
 Working · 2 agents
   Implement tree icons · raffi · copilot
-  Investigate failures · pac · pi
+  Investigate failures · linux · pi
 Waiting · 1 agent
   Review changes · raffi · claude
 Idle · 1 agent

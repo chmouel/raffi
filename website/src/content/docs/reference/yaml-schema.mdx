@@ -364,6 +364,24 @@ Show the right-hand preview pane for this entry in the native UI, regardless of 
 ```
 
 
+**`alias`** `string` (native UI only)
+
+Text typed into the search box when the entry is picked, such as an addon keyword followed by its query. Nothing runs until you choose a result. Cannot be combined with `binary`, `script` or `args`. See [Entries](../../configuration/entries/) for details.
+
+
+**`keyword`** `string` (requires `alias`)
+
+Word that stands for the alias while typing: `linoux torvalds` searches like `mp linus/linux torvalds` while the box keeps showing what you typed. Case-sensitive, needs a trailing space, no spaces inside.
+
+  ```yaml title="launchers.yaml"
+  linoux:
+    description: "Linus Pull Requests"
+    alias: "mp linus/linux"
+    keyword: linoux
+
+```
+
+
 ### Conditional Display
 
 Entries can be conditionally shown based on environment variables or file existence. Multiple conditions can be specified per entry — when present, they are AND-ed together (all must pass).

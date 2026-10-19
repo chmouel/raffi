@@ -123,6 +123,15 @@ add-org-note:
   description: "Add org note"
   icon: writenote
 
+# An alias types its text into the search box when picked. With a keyword,
+# typing "linoux torvalds" searches like "mp linus/linux torvalds"
+# ("mp" being a script filter keyword) while the box shows what you typed.
+linoux:
+  description: "Linus Pull Requests"
+  icon: github
+  alias: "mp linus/linux"
+  keyword: linoux
+
 calculate:
   args:
     [

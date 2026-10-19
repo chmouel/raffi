@@ -223,6 +223,8 @@ impl QueryClass {
 }
 
 pub(super) fn classify_query(query: &str, addons: &AddonsConfig) -> QueryClass {
+    let query = expand_launcher_keyword(query, addons);
+    let query = query.as_ref();
     let mode = route_query(query, addons);
     let inline_provider = match mode {
         QueryMode::FileBrowser { .. }
@@ -350,6 +352,26 @@ fn extract_raw_keyword_payload(input: &str, keyword: &str) -> Option<String> {
 /// triggers can tell `sn` apart from `sn `.
 fn keyword_input(query: &str) -> &str {
     query.trim_start()
+}
+
+/// `query` with a leading launcher keyword replaced by its alias, so
+/// `linoux torvalds` routes like `mp linus/linux torvalds`. The
+/// alias is not expanded again, so keywords never chain or loop.
+pub(super) fn expand_launcher_keyword<'a>(
+    query: &'a str,
+    addons: &AddonsConfig,
+) -> std::borrow::Cow<'a, str> {
+    let input = keyword_input(query);
+    addons
+        .launcher_keywords
+        .iter()
+        .find_map(|launcher| {
+            let rest = input
+                .strip_prefix(launcher.keyword.as_str())?
+                .strip_prefix(' ')?;
+            Some(format!("{} {rest}", launcher.alias.trim_end()).into())
+        })
+        .unwrap_or(query.into())
 }
 
 fn expand_file_browser_query(trimmed: &str) -> String {
@@ -709,6 +731,16 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
     };
 
     let mut suggestions = Vec::new();
+
+    for launcher in &addons.launcher_keywords {
+        if matches(&launcher.keyword) {
+            suggestions.push(KeywordSuggestion {
+                keyword: launcher.keyword.clone(),
+                subtitle: launcher.description.clone(),
+                icon: launcher.icon.clone(),
+            });
+        }
+    }
 
     for config in &addons.script_filters {
         if matches(&config.keyword) {
@@ -1578,6 +1610,9 @@ impl LauncherApp {
         let class = classify_query(&query, &self.addons);
         let log_query = class.loggable_query(&query, &self.addons);
         self.search_query = query.clone();
+        // The input keeps what was typed; everything below sees the expansion.
+        let typed = query;
+        let query = expand_launcher_keyword(&typed, &self.addons).into_owned();
         self.main_view.active = matches!(class.mode, QueryMode::Standard);
         // Ctrl+Tab on one source lists only its rows.
         let focused = self.main_view.focused().is_some();
@@ -1606,7 +1641,7 @@ impl LauncherApp {
         self.selected_index = 0;
 
         if let Some(index) = self.history.index {
-            if self.history.items.get(index).map(|h| h.as_str()) != Some(query.as_str()) {
+            if self.history.items.get(index).map(|h| h.as_str()) != Some(typed.as_str()) {
                 self.history.index = None;
             }
         }
@@ -3087,6 +3122,15 @@ impl LauncherApp {
                 .description
                 .clone()
                 .unwrap_or_else(|| config.binary.clone().unwrap_or_default());
+            if let Some(alias) = &config.alias {
+                let text = match &config.keyword {
+                    Some(keyword) => format!("{keyword} "),
+                    None => alias.clone(),
+                };
+                record_mru_use(&mut self.mru_map, description);
+                save_mru_map(get_mru_cache_path().ok().as_deref(), &self.mru_map);
+                return self.type_alias(text);
+            }
             if let Ok(mut selected) = self.selected_item.lock() {
                 *selected = Some(description.clone());
             }
@@ -3519,13 +3563,10 @@ impl LauncherApp {
         match result {
             Ok(snippets) => {
                 self.text_snippets.items = snippets;
-                let input = keyword_input(&self.search_query);
-                let query = self
-                    .addons
-                    .text_snippets
-                    .iter()
-                    .find_map(|config| extract_keyword_query(input, &config.keyword))
-                    .unwrap_or_default();
+                let query = match &self.query_class.mode {
+                    QueryMode::TextSnippet { query, .. } => query.clone(),
+                    _ => String::new(),
+                };
                 let mut tasks = Vec::new();
                 self.finish_text_snippet_load(&query, &mut tasks);
                 return Task::batch(tasks);
@@ -4027,9 +4068,10 @@ impl LauncherApp {
         if !data.is_empty() {
             self.emoji.data = data;
             if self.emoji.active {
-                let emoji_trigger = self.addons.emoji.trigger.as_deref().unwrap_or("emoji");
-                let input = keyword_input(&self.search_query);
-                let emoji_query = extract_keyword_query(input, emoji_trigger).unwrap_or_default();
+                let emoji_query = match &self.query_class.mode {
+                    QueryMode::Emoji { query } => query.clone(),
+                    _ => String::new(),
+                };
                 filter_emoji_into(
                     &self.emoji.data,
                     &emoji_query,
@@ -4556,6 +4598,17 @@ impl LauncherApp {
         let input_id = self.view.search_input_id.clone();
         self.update(Message::SearchChanged(new_query))
             .chain(move_cursor_to_end(input_id))
+    }
+
+    /// Type a picked alias launcher's keyword or alias into the input; it
+    /// never runs anything by itself.
+    fn type_alias(&mut self, text: String) -> Task<Message> {
+        crate::debug_log!("alias: typing {:?}", loggable_query(&text, &self.addons));
+        // Alt would make the search change a no-op.
+        let modifiers = std::mem::take(&mut self.view.current_modifiers);
+        let task = self.update(Message::SearchChanged(text));
+        self.view.current_modifiers = modifiers;
+        task.chain(move_cursor_to_end(self.view.search_input_id.clone()))
     }
 
     pub(super) fn save_query_to_history(&mut self) {

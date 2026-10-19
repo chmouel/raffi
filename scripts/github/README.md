@@ -40,10 +40,10 @@ To give a repository its own keyword, pin it with `--repo`. Everything typed
 after the keyword then filters that repository's pull requests:
 
 ```yaml
-    - name: "PAC Pull Requests"
-      keyword: "pac"
+    - name: "Linus Pull Requests"
+      keyword: "linoux"
       command: "~/.config/raffi/scripts/github/pr.py"
-      args: ["--repo", "tektoncd/pipelines-as-code"]
+      args: ["--repo", "linus/linux"]
       icon: "github"
       action: "xdg-open {value}"
       secondary_action: "copy"
@@ -95,10 +95,10 @@ as the first word of the query or as the `--repo` value:
 
 ```yaml
       env:
-        ALIAS_pac: "tektoncd/pipelines-as-code"
+        ALIAS_linoux: "linus/linux"
 ```
 
-`pr pac` then lists the pull requests of `tektoncd/pipelines-as-code`.
+`pr linoux` then lists the pull requests of `linus/linux`.
 
 ## Settings
 

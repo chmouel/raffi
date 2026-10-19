@@ -36,6 +36,49 @@ pub struct RaffiConfig {
     pub script: Option<String>,
     /// Show the right-hand preview pane when this launcher entry is selected (default: false).
     pub show_preview: Option<bool>,
+    /// Route this launcher to an internal command: picking it types this text
+    /// for you, such as `mp linus/linux` (an addon keyword
+    /// followed by its query). Cannot be combined with `binary`, `script` or
+    /// `args` (native UI only).
+    pub alias: Option<String>,
+    /// Keyword that stands for `alias` while typing: with keyword `linoux`,
+    /// typing `linoux torvalds` searches `mp linus/linux torvalds`
+    /// while the input keeps showing `linoux torvalds`. Requires `alias`; no
+    /// whitespace.
+    pub keyword: Option<String>,
+}
+
+/// A launcher `keyword` and the `alias` text it expands to.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LauncherKeyword {
+    pub keyword: String,
+    pub alias: String,
+    pub description: String,
+    pub icon: Option<String>,
+}
+
+/// Keywords of the launchers in `entries`; the first launcher wins a keyword
+/// used twice.
+fn launcher_keywords(entries: &[RaffiConfig]) -> Vec<LauncherKeyword> {
+    let mut keywords: Vec<LauncherKeyword> = Vec::new();
+    for entry in entries {
+        let (Some(keyword), Some(alias)) = (&entry.keyword, &entry.alias) else {
+            continue;
+        };
+        if keywords.iter().any(|known| &known.keyword == keyword) {
+            eprintln!(
+                "raffi: config warning: launcher keyword '{keyword}' is used more than once, keeping the first"
+            );
+            continue;
+        }
+        keywords.push(LauncherKeyword {
+            keyword: keyword.clone(),
+            alias: alias.clone(),
+            description: entry.description.clone().unwrap_or_default(),
+            icon: entry.icon.clone(),
+        });
+    }
+    keywords
 }
 
 /// Configuration for the currency addon
@@ -1123,6 +1166,10 @@ pub struct AddonsConfig {
     /// A keyword typed in full is always suggested.
     #[serde(default)]
     pub keyword_min_chars: Option<usize>,
+    /// Built from the launcher entries, not read from this section.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub launcher_keywords: Vec<LauncherKeyword>,
 }
 
 impl AddonsConfig {
@@ -2106,6 +2153,7 @@ fn process_config(config: Config, args: &Args) -> Result<ParsedConfig> {
         ts.command = ts.command.as_ref().map(|s| expand_config_value(s));
         ts.directory = ts.directory.as_ref().map(|s| expand_config_value(s));
     }
+    addons.launcher_keywords = launcher_keywords(&rafficonfigs);
 
     Ok(ParsedConfig {
         general: config.general,
@@ -2121,7 +2169,38 @@ fn is_valid_config(
     env_provider: &impl EnvProvider,
     binary_checker: &impl BinaryChecker,
 ) -> bool {
-    if let Some(_script) = &mc.script {
+    if let Some(alias) = &mc.alias {
+        let name = mc.description.as_deref().unwrap_or(alias);
+        if alias.trim().is_empty() {
+            eprintln!("raffi: config warning: launcher '{name}' has an empty alias, skipped");
+            return false;
+        }
+        if mc.binary.is_some() || mc.script.is_some() || mc.args.is_some() {
+            eprintln!(
+                "raffi: config warning: launcher '{name}' combines alias with binary, script or args, skipped"
+            );
+            return false;
+        }
+        if let Some(keyword) = &mc.keyword {
+            if keyword.is_empty() || keyword.chars().any(char::is_whitespace) {
+                eprintln!(
+                    "raffi: config warning: launcher '{name}' has a keyword that is empty or contains spaces, skipped"
+                );
+                return false;
+            }
+        }
+        if mc.description.is_none() {
+            mc.description = Some(alias.clone());
+        }
+    } else if mc.keyword.is_some() {
+        let name = mc
+            .description
+            .as_deref()
+            .or(mc.binary.as_deref())
+            .unwrap_or("?");
+        eprintln!("raffi: config warning: launcher '{name}' has a keyword but no alias, skipped");
+        return false;
+    } else if let Some(_script) = &mc.script {
         if !binary_checker.exists(
             mc.binary
                 .as_deref()
@@ -2154,6 +2233,15 @@ fn is_valid_config(
             .ifexist
             .as_ref()
             .is_none_or(|exist| binary_checker.exists(exist))
+}
+
+/// The launcher the UI picked, by description or binary. Alias launchers are
+/// routed inside the UI and are never executed, so they are skipped.
+fn find_chosen_entry<'a>(entries: &'a [RaffiConfig], chosen: &str) -> Option<&'a RaffiConfig> {
+    entries.iter().find(|mc| {
+        mc.alias.is_none()
+            && (mc.description.as_deref() == Some(chosen) || mc.binary.as_deref() == Some(chosen))
+    })
 }
 
 /// Check if a binary exists in the PATH.
@@ -3185,6 +3273,8 @@ pub fn run(args: Args) -> Result<()> {
     if ui_type == UIType::Fuzzel && general.main_view.is_some() {
         eprintln!("Warning: main_view is configured but ui_type is fuzzel — main_view requires the native UI. Set ui_type: native to use main_view.");
     }
+    let fuzzel_drops_aliases =
+        ui_type == UIType::Fuzzel && parsed_config.entries.iter().any(|e| e.alias.is_some());
 
     debug_log!("config: ui_type={ui_type:?}");
 
@@ -3239,6 +3329,10 @@ pub fn run(args: Args) -> Result<()> {
     );
 
     // Get the appropriate UI implementation
+    if fuzzel_drops_aliases {
+        eprintln!("Warning: launchers with alias require the native UI and are hidden with ui_type fuzzel.");
+        parsed_config.entries.retain(|entry| entry.alias.is_none());
+    }
     let ui = ui::get_ui(ui_type);
     let chosen = ui
         .show(&parsed_config.entries, &parsed_config.addons, &ui_settings)
@@ -3249,13 +3343,7 @@ pub fn run(args: Args) -> Result<()> {
     if chosen_name.is_empty() {
         std::process::exit(0);
     }
-    let mc = parsed_config
-        .entries
-        .iter()
-        .find(|mc| {
-            mc.description.as_deref() == Some(chosen_name)
-                || mc.binary.as_deref() == Some(chosen_name)
-        })
+    let mc = find_chosen_entry(&parsed_config.entries, chosen_name)
         .context("No matching configuration found")?;
 
     let interpreter = if mc.script.is_some() {
@@ -3706,6 +3794,8 @@ mod tests {
             ifexist: Some("another-binary".to_string()),
             disabled: None,
             show_preview: None,
+            alias: None,
+            keyword: None,
         };
         let args = Args {
             help: false,
@@ -3745,6 +3835,85 @@ mod tests {
             &env_provider,
             &binary_checker
         ));
+    }
+
+    #[test]
+    fn test_alias_launchers() {
+        let yaml_config = r#"
+        version: 1
+        launchers:
+          volup:
+            description: Volume up
+            alias: "audio volume up"
+          untitled:
+            alias: "audio "
+          empty:
+            description: Empty
+            alias: "  "
+          both:
+            description: Both
+            binary: sh
+            alias: "audio volume up"
+          with_args:
+            description: With args
+            alias: "audio volume up"
+            args: ["-x"]
+          shell:
+            binary: sh
+            description: Volume up
+          linoux:
+            description: Linus Pull Requests
+            alias: "mp linus/linux"
+            keyword: linoux
+            icon: github
+          linoux_again:
+            description: Linus again
+            alias: "mp other/repo"
+            keyword: linoux
+          spaced:
+            description: Spaced
+            alias: "mp x"
+            keyword: "p c"
+          no_alias:
+            binary: sh
+            description: No alias
+            keyword: na
+        "#;
+        let parsed = read_config_from_reader(Cursor::new(yaml_config), &Args::default()).unwrap();
+        let entries: Vec<(Option<&str>, Option<&str>, Option<&str>)> = parsed
+            .entries
+            .iter()
+            .map(|e| {
+                (
+                    e.description.as_deref(),
+                    e.binary.as_deref(),
+                    e.alias.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            entries,
+            vec![
+                (Some("Volume up"), None, Some("audio volume up")),
+                (Some("audio "), None, Some("audio ")),
+                (Some("Volume up"), Some("sh"), None),
+                (Some("Linus Pull Requests"), None, Some("mp linus/linux")),
+                (Some("Linus again"), None, Some("mp other/repo")),
+            ]
+        );
+        // A keyword used twice keeps the first launcher.
+        assert_eq!(
+            parsed.addons.launcher_keywords,
+            vec![LauncherKeyword {
+                keyword: "linoux".into(),
+                alias: "mp linus/linux".into(),
+                description: "Linus Pull Requests".into(),
+                icon: Some("github".into()),
+            }]
+        );
+        // A launcher sharing an alias's description still resolves to itself.
+        let chosen = find_chosen_entry(&parsed.entries, "Volume up").unwrap();
+        assert_eq!(chosen.binary.as_deref(), Some("sh"));
     }
 
     #[test]

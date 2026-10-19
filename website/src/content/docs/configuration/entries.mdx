@@ -36,7 +36,7 @@ Executable name looked up in PATH. Examples: `firefox`, `kitty`.
 
 Label shown in the launcher.
 
-  If `binary` is not specified, `description` is used as the binary name.
+  If `binary` is not specified, `description` is used as the binary name, except for `alias` entries.
 
 
 **`args`** `array`
@@ -68,6 +68,28 @@ When `true`, hides the entry from the launcher.
 **`show_preview`** `boolean` (default: `false`)
 
 When `true`, the native UI shows the right-hand preview pane for this entry (full command or script, conditions, launch stats) even when `general.show_preview` is off. Set to `false` to never preview it.
+
+
+**`alias`** `string` (native UI only)
+
+Turns the entry into a shortcut for an internal command. Picking it types the alias into the search box, as if you had entered it yourself, and you carry on from there; nothing runs until you choose a result. Any trigger works: script filters, addons such as `audio`, web searches, snippets, and so on.
+
+  `alias` cannot be combined with `binary`, `script` or `args`; such entries are skipped with a warning. Without a `description`, the alias text is shown. The Fuzzel UI hides alias entries.
+
+
+**`keyword`** `string` (requires `alias`)
+
+A short word that stands for the alias while you type. With the entry below, typing `linoux torvalds` searches exactly like `mp linus/linux torvalds` (here `mp` is a script filter keyword), while the search box keeps showing `linoux torvalds`. Picking the entry from the list types `linoux `.
+
+  Like addon keywords, it is case-sensitive and needs a space after it: `linoux` alone is a normal search and shows the keyword as a suggestion. A launcher keyword is checked before addon keywords, so it can reuse one. The alias is expanded once and never again, so keywords cannot chain. Keywords cannot contain spaces; if two launchers use the same keyword, the first one keeps it.
+
+  ```yaml title="launchers.yaml"
+  linoux:
+    description: "Linus Pull Requests"
+    icon: github
+    alias: "mp linus/linux"
+    keyword: linoux
+  ```
 
 
 ## Examples
