@@ -55,7 +55,7 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock"], o
 wayland-client = { version = "0.31", optional = true }
 calloop = { version = "0.14", optional = true }
 calloop-wayland-source = { version = "0.4", optional = true }
-base64 = { version = "0.22", optional = true }
+base64 = { version = "0.23", optional = true }
 jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"], optional = true }
 evalexpr = { version = "13.1.0", optional = true }
 libc = "0.2"
