@@ -4,6 +4,10 @@ description: Convert lengths, weights, temperatures, data sizes and more as you 
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import unitsScreenshot from '../../../assets/screenshots/unit-conversion.png';
+
+<Image src={unitsScreenshot} alt="Converting 100 kilometres per hour to 62.1371 miles per hour, with the precise value in the preview" width={800} />
 
 Type an amount, a unit, `to` or `in`, and a target unit. A result row shows up
 above your launchers, with no keyword needed:

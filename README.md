@@ -137,7 +137,33 @@ pre-commit install
 
 ## Screenshots
 
-These screenshots come from an empty Hyprland workspace, with a made-up Raffi configuration and sample data.
+### Search and Recent Picks
+
+<p><img width="800" alt="Main view with launchers and a recently picked demo snippet" src="website/src/assets/screenshots/main-recent.png" /></p>
+<p><img width="800" alt="One search listing a launcher and matching demo windows" src="website/src/assets/screenshots/main-search.png" /></p>
+<p><img width="800" alt="Main view narrowed to Launchers with Ctrl+Tab" src="website/src/assets/screenshots/main-source.png" /></p>
+<p><img width="800" alt="A demo installed app and its private-window desktop action" src="website/src/assets/screenshots/installed-apps.png" /></p>
+
+### Desktop and Utilities
+
+<p><img width="800" alt="Window switcher with demo application and workspace details" src="website/src/assets/screenshots/window-switcher.png" /></p>
+<p><img width="800" alt="Typed command ready to run in a terminal" src="website/src/assets/screenshots/terminal.png" /></p>
+<p><img width="800" alt="Audio outputs with demo headphones selected" src="website/src/assets/screenshots/audio-switcher.png" /></p>
+<p><img width="800" alt="Typed output volume of 40 percent" src="website/src/assets/screenshots/audio-volume.png" /></p>
+<p><img width="800" alt="Media playback controls and demo track details" src="website/src/assets/screenshots/media-controls.png" /></p>
+<p><img width="800" alt="Demo Bluetooth devices with connection and battery details" src="website/src/assets/screenshots/bluetooth.png" /></p>
+<p><img width="800" alt="Session and power commands" src="website/src/assets/screenshots/system-commands.png" /></p>
+<p><img width="550" alt="Disposable demo worker's process details and signal actions" src="website/src/assets/screenshots/kill-process.png" /></p>
+<p><img width="800" alt="Unit conversion from kilometres per hour to miles per hour" src="website/src/assets/screenshots/unit-conversion.png" /></p>
+<p><img width="800" alt="Color conversion with swatches and CSS formats" src="website/src/assets/screenshots/color-converter.png" /></p>
+<p><img width="800" alt="Developer encoding and hashing tools" src="website/src/assets/screenshots/developer-tools.png" /></p>
+<p><img width="800" alt="Time conversion between London and Tokyo" src="website/src/assets/screenshots/world-clock.png" /></p>
+
+### Clipboard and Passwords
+
+<p><img width="800" alt="Demo clipboard history with multiline text preview" src="website/src/assets/screenshots/clipboard-history.png" /></p>
+<p><img width="800" alt="Fictional password-store entries without decrypted secrets" src="website/src/assets/screenshots/password-store.png" /></p>
+<p><img width="800" alt="Demo Bitwarden logins with public entry details" src="website/src/assets/screenshots/bitwarden.png" /></p>
 
 ### Interface Modes
 
@@ -150,6 +176,9 @@ These screenshots come from an empty Hyprland workspace, with a made-up Raffi co
 <p><img width="800" alt="File browser image preview" src="website/src/assets/screenshots/file-browser-image-preview.png" /></p>
 <p><img width="800" alt="File browser image preview scrolled to file details" src="website/src/assets/screenshots/file-browser-image-scrolled.png" /></p>
 <p><img width="800" alt="File browser showing hidden files" src="website/src/assets/screenshots/file-browser-hidden.png" /></p>
+<p><img width="800" alt="Bundled file previewer highlighting demo Python source" src="website/src/assets/screenshots/file-browser-rich-preview.png" /></p>
+<p><img width="800" alt="File browser rendering a demo PDF page" src="website/src/assets/screenshots/file-browser-pdf.png" /></p>
+<p><img width="800" alt="File-only listing sorted by modification time" src="website/src/assets/screenshots/file-browser-filter.png" /></p>
 <p><img width="800" alt="Text snippets with expanded content preview" src="website/src/assets/screenshots/text-snippets.png" /></p>
 <p><img width="800" alt="Text snippet with expanded dynamic placeholders and raw template" src="website/src/assets/screenshots/text-snippets-placeholders.png" /></p>
 <p><img width="800" alt="Emoji picker with Unicode and glyph preview" src="website/src/assets/screenshots/emoji-picker.png" /></p>
@@ -166,6 +195,8 @@ These screenshots come from an empty Hyprland workspace, with a made-up Raffi co
 <p><img width="800" alt="Inline launcher script shown in the preview pane" src="website/src/assets/screenshots/launcher-script-preview.png" /></p>
 <p><img width="800" alt="Timezone script filter with ANSI-formatted preview" src="website/src/assets/screenshots/script-filter-tz.png" /></p>
 <p><img width="800" alt="Pull request script filter with CI status and details" src="website/src/assets/screenshots/script-filter-pr.png" /></p>
+<p><img width="800" alt="Herdr demo workspace, session and pane tree" src="website/src/assets/screenshots/herdr-tree.png" /></p>
+<p><img width="800" alt="Herdr demo agents grouped by status with terminal preview" src="website/src/assets/screenshots/herdr-status.png" /></p>
 
 ### Themes
 

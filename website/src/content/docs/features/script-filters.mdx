@@ -7,6 +7,8 @@ import { Aside, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import scriptFilterTzScreenshot from '../../../assets/screenshots/script-filter-tz.png';
 import scriptFilterPrScreenshot from '../../../assets/screenshots/script-filter-pr.png';
+import herdrTreeScreenshot from '../../../assets/screenshots/herdr-tree.png';
+import herdrStatusScreenshot from '../../../assets/screenshots/herdr-status.png';
 
 Script filters allow external commands to provide dynamic results in the launcher using a subset of the Alfred Script Filter JSON format.
 
@@ -146,6 +148,11 @@ tab / pane tree:
 
 Filtering stays the script's job: it receives the query as its last
 argument and can return only the matching nodes plus their ancestors.
+
+<Image src={herdrTreeScreenshot} alt="Herdr demo workspace tree with connected session and pane rows and the selected split session's details" width={800} />
+
+<Image src={herdrStatusScreenshot} alt="Herdr demo agents grouped under Working, Waiting and Idle, with terminal output for the selected agent" width={800} />
+
 Return parents before their children, with each subtree kept together.
 The nearest preceding row with a smaller `indent` is the parent; skipped
 levels do not create extra rows. A row without a parent keeps its offset

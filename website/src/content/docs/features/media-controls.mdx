@@ -4,6 +4,10 @@ description: Play, pause and skip tracks in any media player from Raffi
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import mediaScreenshot from '../../../assets/screenshots/media-controls.png';
+
+<Image src={mediaScreenshot} alt="Media controls for a demo player, with track details and Pause, Next, Previous and Stop rows" width={800} />
 
 Type `media ` (with the trailing space) to control the media players that
 are running, such as Spotify, mpv or a browser playing a video. Each player

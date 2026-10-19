@@ -7,6 +7,9 @@ import { Aside } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import mainScreenshot from '../../../assets/screenshots/main.png';
 import fallbacksScreenshot from '../../../assets/screenshots/fallbacks.png';
+import mainSearchScreenshot from '../../../assets/screenshots/main-search.png';
+import mainRecentScreenshot from '../../../assets/screenshots/main-recent.png';
+import mainSourceScreenshot from '../../../assets/screenshots/main-source.png';
 
 ## Overview
 
@@ -201,6 +204,12 @@ Fallbacks work best with search-type addons. The referenced addon must be define
 <Image src={fallbacksScreenshot} alt="Configured fallback search entries and selected URL preview" width={800} />
 
 ## Main view
+
+<Image src={mainSearchScreenshot} alt="One search listing a configured launcher and matching demo windows, identified by their source badges" width={800} />
+
+<Image src={mainRecentScreenshot} alt="An empty query showing configured launchers and a recently picked demo checklist snippet" width={800} />
+
+<Image src={mainSourceScreenshot} alt="The same search narrowed to Launchers with Ctrl+Tab, as shown in the footer" width={800} />
 
 **`main_view`** `list of strings` (default: unset)
 

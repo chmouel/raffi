@@ -4,6 +4,10 @@ description: Lock, suspend, hibernate, log out, reboot or shut down from Raffi
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import systemScreenshot from '../../../assets/screenshots/system-commands.png';
+
+<Image src={systemScreenshot} alt="System commands including Lock, Suspend, Hibernate, Log out and Reboot, with the Lock command preview" width={800} />
 
 Type `sys ` (with the trailing space) to list session and power commands.
 Words after the keyword filter the list, so `sys reb` leaves only Reboot.

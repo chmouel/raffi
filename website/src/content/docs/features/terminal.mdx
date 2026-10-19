@@ -4,6 +4,10 @@ description: Run a shell command in a terminal window or tab from Raffi
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import terminalScreenshot from '../../../assets/screenshots/terminal.png';
+
+<Image src={terminalScreenshot} alt="Typing a cargo test command after the greater-than keyword offers to run it in kitty, with shell and target details" width={800} />
 
 Type `>` followed by a space and a command, such as `> htop` or
 `> journalctl -f`, then press Enter. Raffi closes and runs the command in a

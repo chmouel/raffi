@@ -4,6 +4,8 @@ description: Stop your own processes from Raffi with SIGTERM or SIGKILL
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import processScreenshot from '../../../assets/screenshots/kill-process.png';
 
 :::caution
 The safety check is best effort. Right before sending a signal, Raffi reads
@@ -21,6 +23,8 @@ kernel threads and processes that have already exited.
 
 Words after the keyword filter the list by name, pid or command line, so
 `kill firefox` or `kill 4242` narrows it down.
+
+<Image src={processScreenshot} alt="The preview of a disposable demo worker, showing its PID, memory, command and two-press SIGTERM and SIGKILL actions" width={550} />
 
 <Aside type="note">
 The process list is only available in native mode and on Linux, since it reads

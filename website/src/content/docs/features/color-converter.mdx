@@ -4,6 +4,10 @@ description: Convert colors between hex, rgb, hsl and CSS color names as you typ
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import colorScreenshot from '../../../assets/screenshots/color-converter.png';
+
+<Image src={colorScreenshot} alt="The color #89b4fa shown as hex, RGB, HSL and its nearest CSS color name, with matching swatches" width={800} />
 
 Type a color and Raffi shows it in four formats above your launchers, each row
 with a small swatch of the color. No keyword is needed:

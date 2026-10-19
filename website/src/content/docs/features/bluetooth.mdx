@@ -4,6 +4,10 @@ description: Turn Bluetooth on and off and connect paired devices from Raffi
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import bluetoothScreenshot from '../../../assets/screenshots/bluetooth.png';
+
+<Image src={bluetoothScreenshot} alt="Bluetooth list with demo headphones and a keyboard connected, earbuds disconnected, and battery details" width={800} />
 
 Type `bt ` (with the trailing space) to see Bluetooth. The first row always
 turns Bluetooth on or off. When Bluetooth is on, your paired devices follow,

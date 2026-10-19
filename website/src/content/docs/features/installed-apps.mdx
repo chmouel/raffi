@@ -4,6 +4,10 @@ description: List the applications installed on your system next to your launche
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import appsScreenshot from '../../../assets/screenshots/installed-apps.png';
+
+<Image src={appsScreenshot} alt="A demo browser desktop entry and its Private window action listed in Raffi" width={800} />
 
 Raffi can list the applications installed on your system, read from their
 `.desktop` files, next to the launchers you configured. Turn it on with:

@@ -4,6 +4,10 @@ description: See the time in another city or convert a time between time zones a
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import clockScreenshot from '../../../assets/screenshots/world-clock.png';
+
+<Image src={clockScreenshot} alt="Converting 3pm in London to 23:00 in Tokyo, with timezone and copy actions in the preview" width={800} />
 
 Ask for the time somewhere else and Raffi shows it above your launchers. No
 keyword setup is needed:

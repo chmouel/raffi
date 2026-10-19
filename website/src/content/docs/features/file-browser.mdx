@@ -10,6 +10,9 @@ import codePreviewScreenshot from '../../../assets/screenshots/file-browser-code
 import imagePreviewScreenshot from '../../../assets/screenshots/file-browser-image-preview.png';
 import imageDetailsScreenshot from '../../../assets/screenshots/file-browser-image-scrolled.png';
 import hiddenFilesScreenshot from '../../../assets/screenshots/file-browser-hidden.png';
+import richPreviewScreenshot from '../../../assets/screenshots/file-browser-rich-preview.png';
+import pdfPreviewScreenshot from '../../../assets/screenshots/file-browser-pdf.png';
+import filterScreenshot from '../../../assets/screenshots/file-browser-filter.png';
 
 The native interface includes a built-in file browser for quick filesystem navigation using keyboard shortcuts.
 
@@ -83,6 +86,12 @@ Image clipboard copying requires `wl-copy` or `xclip`.
 The built-in preview shows plain text, common image formats and directory listings. When `python3` is installed, raffi also runs the previewer it bundles from [`scripts/file-preview`](https://github.com/chmouel/raffi/tree/main/scripts/file-preview), which adds PDF pages, video frames, ebook and album covers, archive listings, syntax-highlighted source, Markdown, JSON and CSV tables. Nothing needs to be installed or configured.
 
 The previewer only needs Python 3. It uses tools such as `bat`, `pdftoppm`, `ffmpegthumbnailer` or `ebook-meta` when they are installed and falls back to plainer output without them; see its README for the full list. Without `python3` on your `PATH`, raffi keeps its plain preview.
+
+<Image src={richPreviewScreenshot} alt="Bundled file previewer showing syntax-highlighted Python from a demo document" width={800} />
+
+<Image src={pdfPreviewScreenshot} alt="A demo PDF's first page rendered in the file browser preview pane" width={800} />
+
+<Image src={filterScreenshot} alt="File browser restricted to files and sorted by modification time, with the current modes in the footer" width={800} />
 
 When you select an entry, raffi shows its plain preview at once and swaps in the previewer's output when it arrives. Results are kept for the session and reused until the file changes.
 

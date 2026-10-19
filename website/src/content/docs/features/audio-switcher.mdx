@@ -4,6 +4,13 @@ description: Change the volume, pick the default speaker or microphone and mute 
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import audioScreenshot from '../../../assets/screenshots/audio-switcher.png';
+import volumeScreenshot from '../../../assets/screenshots/audio-volume.png';
+
+<Image src={audioScreenshot} alt="Audio outputs with demo headphones selected and their volume and default-device details" width={800} />
+
+<Image src={volumeScreenshot} alt="Typing audio 40 offers to set the default output volume to 40 percent" width={800} />
 
 Type `audio ` (with the trailing space) to list your sound devices. A
 "Volume" group comes first with "Volume up", "Volume down", "Mute output"

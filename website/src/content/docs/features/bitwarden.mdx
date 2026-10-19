@@ -4,6 +4,10 @@ description: Copy or type passwords from your Bitwarden vault with rbw
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import bitwardenScreenshot from '../../../assets/screenshots/bitwarden.png';
+
+<Image src={bitwardenScreenshot} alt="Bitwarden login list with demo entries and the selected login's username, folder and URL" width={800} />
 
 Type `bw ` (with the trailing space) to list the logins in your Bitwarden
 vault. Each row shows the item name, with the username and folder

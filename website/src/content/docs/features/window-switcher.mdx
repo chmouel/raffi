@@ -4,6 +4,10 @@ description: Jump to any open window on Hyprland, niri or sway from Raffi
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import windowsScreenshot from '../../../assets/screenshots/window-switcher.png';
+
+<Image src={windowsScreenshot} alt="Window switcher with demo browser, editor, terminal and file-manager windows grouped by their workspaces" width={800} />
 
 Type `win ` (with the trailing space) to list the open windows, the most
 recently used first. Each row shows the window title, its application (the

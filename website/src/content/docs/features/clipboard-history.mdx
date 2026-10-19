@@ -4,10 +4,14 @@ description: Browse, preview and paste your CopyQ clipboard history from Raffi
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import clipboardScreenshot from '../../../assets/screenshots/clipboard-history.png';
 
 Raffi can browse the clipboard history kept by [CopyQ](https://hluk.github.io/CopyQ/).
 CopyQ records and stores the history. Raffi gives you a keyboard-driven list
 with search, previews, and copy or paste of any past item.
+
+<Image src={clipboardScreenshot} alt="Clipboard history with a demo release checklist selected and its multiline text in the preview pane" width={800} />
 
 <Aside type="note">
 The clipboard browser is only available in native mode and is off by default.
