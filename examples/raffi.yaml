@@ -142,13 +142,29 @@ addons:
     #   action: "xdg-open {value}"
     #   secondary_action: "copy"
 
-    # Herdr agent sessions. Install scripts/herdr/herdr_filter.py first.
-    # The preview pane shows the agent's live terminal output.
-    # - name: "Herdr Agents"
+    # Herdr session browser. Install herdr_filter.py and its sibling icons/
+    # directory from scripts/herdr/ (including the icon license notices).
+    # Single-pane tabs appear once; multi-pane tabs show their pane children.
+    # The query filters the tree and keeps ancestors of matches. Items
+    # export HERDR_KIND and HERDR_FOCUS, so the action focuses whatever you
+    # picked. Add args: ["--agents"] for a flat list of agents only.
+    # The preview pane shows live terminal output, pane lists, or tab lists.
+    # HERDR_VIEW: status groups agents by Working/Waiting/Idle/Done/Unknown,
+    # with counts and non-actionable headings; shells stay in the workspace view.
+    # - name: "Herdr"
     #   keyword: "herdr"
     #   command: "~/.config/raffi/scripts/herdr/herdr_filter.py"
     #   icon: "utilities-terminal"
-    #   action: 'herdr agent focus "$RAFFI_VALUE"'
+    #   env:
+    #     HERDR_ICON_SET: color  # Default; mono-dark or mono-light for monochrome icons
+    #     HERDR_VIEW: workspace  # Default; status for an agent status tree (or args: ["--status"])
+    #   action: >-
+    #     case "$HERDR_KIND" in
+    #       workspace) herdr workspace focus "$HERDR_FOCUS" ;;
+    #       tab) herdr tab focus "$HERDR_FOCUS" ;;
+    #       agent) herdr agent focus "$HERDR_FOCUS" ;;
+    #       *) herdr tab focus "$HERDR_FOCUS" ;;
+    #     esac
     # For compositor-specific window focus commands, see scripts/herdr/README.md.
 
     # GitHub pull requests with CI status. Install scripts/github/pr.py first.

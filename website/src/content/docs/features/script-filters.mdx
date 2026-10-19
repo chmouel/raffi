@@ -125,6 +125,42 @@ Secondary text shown below the title
 Value copied to clipboard (falls back to title if omitted)
 
 
+**`indent`** `integer`
+
+Raffi extension for tree-style results (Alfred ignores it): indentation
+level of the item, `0` by default. Each level shifts the row further right
+in the result list and adds subtle connector guides in the native UI, so a
+script can return a hierarchy — for example the Herdr filter's workspace /
+tab / pane tree:
+
+```json
+{
+  "items": [
+    { "title": "raffi [working]", "subtitle": "1 tab · 2 panes", "arg": "w1", "indent": 0 },
+    { "title": "Feature [working]", "subtitle": "copilot, shell", "arg": "w1:t1", "indent": 1 },
+    { "title": "copilot [working] - raffi", "arg": "w1:p1", "indent": 2 },
+    { "title": "shell - raffi", "arg": "w1:p2", "indent": 2 }
+  ]
+}
+```
+
+Filtering stays the script's job: it receives the query as its last
+argument and can return only the matching nodes plus their ancestors.
+Return parents before their children, with each subtree kept together.
+The nearest preceding row with a smaller `indent` is the parent; skipped
+levels do not create extra rows. A row without a parent keeps its offset
+without drawing a branch to a missing ancestor. Offsets stop growing at ten
+levels, but deeper rows keep their original relationships. Connections that
+would overlap at that limit are omitted. Guides describe only displayed
+rows and stop at source boundaries, including truncated main-view results.
+
+**`valid`** `boolean`
+
+Defaults to `true`. Set `false` for informational rows or tree headings.
+They can be highlighted to read their preview, but Enter, Ctrl+Enter, and
+click activation do not run an action or close Raffi. These rows are not
+recorded as recent picks and do not count as selectable results for `--select-1`.
+
 **`icon.path`** `string`
 
 Absolute path to a PNG or SVG icon
@@ -497,42 +533,92 @@ pw github
 # Press Enter to copy password
 ```
 
-### Herdr Agent Sessions
+### Herdr Sessions
 
 The [Herdr filter script](https://github.com/chmouel/raffi/tree/main/scripts/herdr)
-lists Herdr agents and filters them by agent type, status, project directory, or
-terminal title. Select a result to focus that agent's pane.
+browses a [Herdr](https://herdr.dev) session as an indented tree of workspaces,
+tabs, and panes, using the `indent` field. Single-pane tabs, including
+shells, appear once as the tab/session row; tabs with multiple panes show
+their pane children. The query matches tab and pane details and keeps the
+ancestors of each match. Single-pane tabs retain their terminal preview.
+Select a workspace to focus it, a tab to focus it, or an agent pane to focus
+the agent.
 
 Install the script:
 
 ```bash
 mkdir -p ~/.config/raffi/scripts/herdr
 cp scripts/herdr/herdr_filter.py ~/.config/raffi/scripts/herdr/herdr_filter.py
+cp -R scripts/herdr/icons ~/.config/raffi/scripts/herdr/
 chmod +x ~/.config/raffi/scripts/herdr/herdr_filter.py
 ```
 
-Configure the filter:
+Copy the icon directory when upgrading too, including its license notices.
+The default `color` icons distinguish workspaces, sessions, shells, and
+agents. Preview headers use the same icons. Set `HERDR_ICON_SET` in the
+filter's `env` to choose `color`, `mono-dark` (pale marks for dark themes),
+or `mono-light` (dark marks for light themes). No icon font is required.
+
+For an agent-only status tree, set `HERDR_VIEW: status` in the same `env`
+block or add `args: ["--status"]`. Agents across workspaces appear under
+Working, Waiting (Herdr's `blocked`), Idle, Done, and Unknown; empty groups
+are hidden. Each agent appears once, including agents in split tabs, with
+workspace context in its subtitle. Plain shells stay in the workspace view.
+Group headings show matching counts and summary previews without an action.
+Agent rows retain focus actions and terminal previews. Search `waiting`
+or `blocked` to find agents needing attention. The workspace tree remains
+the default (`HERDR_VIEW: workspace` or `--tree`), and `--agents` stays flat.
+
+Configure the filter. Every item exports `HERDR_KIND` (`workspace`, `tab`,
+`agent`, or `pane`) and `HERDR_FOCUS`, the ID to focus, so the action
+dispatches on the kind:
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Herdr"
+      keyword: "herdr"
+      command: "~/.config/raffi/scripts/herdr/herdr_filter.py"
+      icon: "utilities-terminal"
+      env:
+        HERDR_ICON_SET: color
+      action: >-
+        case "$HERDR_KIND" in
+          workspace) herdr workspace focus "$HERDR_FOCUS" ;;
+          tab) herdr tab focus "$HERDR_FOCUS" ;;
+          agent) herdr agent focus "$HERDR_FOCUS" ;;
+          *) herdr tab focus "$HERDR_FOCUS" ;;
+        esac
+```
+
+To list only recognized agents instead of the whole tree, add
+`args: ["--agents"]` and focus agents directly:
 
 ```yaml raffi.yaml
 addons:
   script_filters:
     - name: "Herdr Agents"
-      keyword: "herdr"
+      keyword: "hagents"
       command: "~/.config/raffi/scripts/herdr/herdr_filter.py"
+      args: ["--agents"]
       icon: "utilities-terminal"
-      action: 'herdr agent focus "$RAFFI_VALUE"'
+      action: 'herdr agent focus "$HERDR_FOCUS"'
 ```
 
-To raise the terminal window before focusing the Herdr pane, replace the action
-with the matching command below. Change `kitty` to your terminal's class or app
-ID:
+To raise the terminal window before focusing, prepend the matching command
+below to the action above. Change `kitty` to your terminal's class or app ID:
 
 Hyprland:
 
 ```yaml
 action: >-
   hyprctl dispatch focuswindow class:kitty;
-  herdr agent focus "$RAFFI_VALUE"
+  case "$HERDR_KIND" in
+    workspace) herdr workspace focus "$HERDR_FOCUS" ;;
+    tab) herdr tab focus "$HERDR_FOCUS" ;;
+    agent) herdr agent focus "$HERDR_FOCUS" ;;
+    *) herdr tab focus "$HERDR_FOCUS" ;;
+  esac
 ```
 
 Sway:
@@ -540,7 +626,12 @@ Sway:
 ```yaml
 action: >-
   swaymsg '[app_id="kitty"] focus';
-  herdr agent focus "$RAFFI_VALUE"
+  case "$HERDR_KIND" in
+    workspace) herdr workspace focus "$HERDR_FOCUS" ;;
+    tab) herdr tab focus "$HERDR_FOCUS" ;;
+    agent) herdr agent focus "$HERDR_FOCUS" ;;
+    *) herdr tab focus "$HERDR_FOCUS" ;;
+  esac
 ```
 
 niri (requires `jq`):
@@ -549,11 +640,18 @@ niri (requires `jq`):
 action: >-
   id=$(niri msg -j windows | jq -r '.[] | select(.app_id == "kitty") | .id' | head -n1);
   [ -z "$id" ] || niri msg action focus-window --id "$id";
-  herdr agent focus "$RAFFI_VALUE"
+  case "$HERDR_KIND" in
+    workspace) herdr workspace focus "$HERDR_FOCUS" ;;
+    tab) herdr tab focus "$HERDR_FOCUS" ;;
+    agent) herdr agent focus "$HERDR_FOCUS" ;;
+    *) herdr tab focus "$HERDR_FOCUS" ;;
+  esac
 ```
 
-With the preview pane open, the selected agent shows its status, directory,
-and recent terminal output, refreshed every 2 seconds.
+With the preview pane open, the selected row shows a live preview refreshed
+every 2 seconds: agent panes show their status, directory, and recent
+terminal output; tabs show their pane list (and the terminal of single-pane
+tabs); workspaces show their tab list and active tab.
 
 See the script's
 [README](https://github.com/chmouel/raffi/blob/main/scripts/herdr/README.md) for
