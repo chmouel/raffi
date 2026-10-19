@@ -1432,6 +1432,9 @@ impl LauncherApp {
                 let Some(result) = results.clone() else {
                     return Task::none();
                 };
+                if !result.items.get(row).is_some_and(|item| item.valid) {
+                    return Task::none();
+                }
                 let Some(keyword) = self
                     .addons
                     .script_filters

@@ -312,9 +312,15 @@ impl ScriptFilterPreview {
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct ScriptFilterItem {
     pub title: String,
+    #[serde(default = "crate::default_true")]
+    pub valid: bool,
     pub subtitle: Option<String>,
     pub arg: Option<String>,
     pub icon: Option<ScriptFilterIcon>,
+    /// Tree-view indentation level: each level shifts the row further right
+    /// (default 0). Raffi extension, ignored by Alfred.
+    #[serde(default)]
+    pub indent: u32,
     /// Optional preview for the right-hand pane: text or a local file/image
     /// path, or a rich preview object.
     #[serde(default)]

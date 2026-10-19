@@ -237,6 +237,17 @@ mod tests {
     use std::time::{Duration, Instant};
 
     #[test]
+    fn test_script_filter_validity_defaults_true_and_preserves_false() {
+        let result = parse_script_filter_output(
+            r#"{"items":[{"title":"Agent"},{"title":"Working","valid":false}]}"#,
+            None,
+        )
+        .unwrap();
+        assert!(result.items[0].valid);
+        assert!(!result.items[1].valid);
+    }
+
+    #[test]
     fn test_superseded_timer_wakes_early() {
         let live = AtomicU64::new(2);
         let start = Instant::now();
@@ -294,6 +305,34 @@ mod tests {
         assert!(result.items[0].preview.is_none());
         assert!(result.items[0].quicklookurl.is_none());
         assert!(result.items[0].text.is_none());
+        assert_eq!(result.items[0].indent, 0);
+    }
+
+    #[test]
+    fn test_parse_script_filter_output_with_indent_levels() {
+        let stdout = r#"{"items":[
+            {"title":"workspace","arg":"w1"},
+            {"title":"tab","arg":"w1:t1","indent":1},
+            {"title":"pane","arg":"w1:p1","indent":2}
+        ]}"#;
+        let result = parse_script_filter_output(stdout, None).expect("valid tree json");
+
+        assert_eq!(
+            result
+                .items
+                .iter()
+                .map(|item| item.indent)
+                .collect::<Vec<_>>(),
+            [0, 1, 2]
+        );
+        // Absurd levels are clamped when rendered, not when parsed.
+        let stdout = r#"{"items":[{"title":"deep","indent":999}]}"#;
+        let result = parse_script_filter_output(stdout, None).expect("valid json");
+        assert_eq!(result.items[0].indent, 999);
+        assert_eq!(
+            super::super::view::indent_left(999),
+            super::super::view::indent_left(10)
+        );
     }
 
     #[test]
@@ -470,8 +509,10 @@ mod tests {
         };
         let item = super::ScriptFilterItem {
             title: "\u{1b}[32mAgent\u{1b}[0m".into(),
+            valid: true,
             subtitle: None,
             arg: Some("w1:p1".into()),
+            indent: 0,
             icon: None,
             preview: None,
             variables: [("PANE".to_string(), "p1".to_string())].into(),

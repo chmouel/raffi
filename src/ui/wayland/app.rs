@@ -1104,8 +1104,8 @@ impl LauncherApp {
             if self.script_filter.loading {
                 consider(false);
             } else if let Some(result) = &self.script_filter.results {
-                for _ in &result.items {
-                    consider(true);
+                for item in &result.items {
+                    consider(item.valid);
                 }
             }
             if self.text_snippets.loading {
@@ -1170,7 +1170,7 @@ impl LauncherApp {
                     Source::Snippets { filtered, .. } => filtered.get(row).is_some(),
                     Source::ScriptFilter { results, .. } => results
                         .as_ref()
-                        .is_some_and(|result| result.items.get(row).is_some()),
+                        .is_some_and(|result| result.items.get(row).is_some_and(|item| item.valid)),
                 };
                 consider(selectable);
             }
@@ -1183,7 +1183,7 @@ impl LauncherApp {
                     Source::Snippets { filtered, .. } => filtered.get(row).is_some(),
                     Source::ScriptFilter { results, .. } => results
                         .as_ref()
-                        .is_some_and(|result| result.items.get(row).is_some()),
+                        .is_some_and(|result| result.items.get(row).is_some_and(|item| item.valid)),
                 };
                 consider(selectable);
             }
@@ -3436,6 +3436,9 @@ impl LauncherApp {
         let mut pick = None;
         if let Some(result) = &self.script_filter.results {
             if let Some(item) = result.items.get(index) {
+                if !item.valid {
+                    return Task::none();
+                }
                 if let Some(config) = self
                     .script_filter
                     .config_index

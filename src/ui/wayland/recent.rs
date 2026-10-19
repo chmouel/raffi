@@ -68,8 +68,10 @@ impl StoredItem {
     pub fn to_item(&self) -> ScriptFilterItem {
         ScriptFilterItem {
             title: self.title.clone(),
+            valid: true,
             subtitle: self.subtitle.clone(),
             arg: self.arg.clone(),
+            indent: 0,
             icon: self
                 .icon
                 .clone()

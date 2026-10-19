@@ -54,6 +54,123 @@ fn test_app_with_fallbacks(addons: AddonsConfig, fallback_paths: Vec<String>) ->
     app
 }
 
+#[test]
+fn test_script_filter_tree_guides_follow_sibling_branches() {
+    let items = tree_items(&[0, 1, 2, 2, 1, 0, 1, 2]);
+    let guides = super::view::tree_guide_segments(&items);
+    let segments = |index: usize| guides[index].clone();
+    use super::view::TreeGuideSegments as Segment;
+
+    assert!(segments(0).is_empty());
+    assert_eq!(
+        segments(1),
+        vec![Segment {
+            above: true,
+            below: true,
+            elbow: true,
+        }]
+    );
+    assert_eq!(
+        segments(2),
+        vec![
+            Segment {
+                above: true,
+                below: true,
+                elbow: false,
+            },
+            Segment {
+                above: true,
+                below: true,
+                elbow: true,
+            },
+        ]
+    );
+    assert_eq!(
+        segments(3),
+        vec![
+            Segment {
+                above: true,
+                below: true,
+                elbow: false,
+            },
+            Segment {
+                above: true,
+                below: false,
+                elbow: true,
+            },
+        ]
+    );
+    assert_eq!(
+        segments(4),
+        vec![Segment {
+            above: true,
+            below: false,
+            elbow: true,
+        }]
+    );
+    assert!(segments(5).is_empty());
+    assert_eq!(
+        segments(7),
+        vec![
+            Segment {
+                above: false,
+                below: false,
+                elbow: false,
+            },
+            Segment {
+                above: true,
+                below: false,
+                elbow: true,
+            },
+        ]
+    );
+}
+
+#[test]
+fn test_script_filter_tree_guides_keep_raw_depths_and_visible_boundaries() {
+    let items = tree_items(&[0, 10, 11, 10, u32::MAX]);
+    let guides = super::view::tree_guide_segments(&items);
+    assert!(guides[1][9].elbow);
+    assert!(guides[1][9].below);
+    assert!(!guides[2][9].elbow);
+    assert!(guides[2][9].below);
+    assert!(!guides[3][9].below);
+    assert!(!guides[4].iter().any(|segment| segment.elbow));
+
+    let truncated = super::view::tree_guide_segments(&items[..3]);
+    assert!(!truncated[1][9].below);
+    assert!(!truncated[2][9].below);
+
+    let irregular = super::view::tree_guide_segments(&tree_items(&[2, 0, 2]));
+    assert!(!irregular[0]
+        .iter()
+        .any(|segment| segment.above || segment.below || segment.elbow));
+    assert!(!irregular[2][0].above);
+    assert!(irregular[2][1].elbow);
+}
+
+fn tree_items(depths: &[u32]) -> Vec<ScriptFilterItem> {
+    depths
+        .iter()
+        .map(|&indent| {
+            let mut item = plain_item("tree");
+            item.indent = indent;
+            item
+        })
+        .collect()
+}
+
+#[test]
+fn test_script_filter_tree_guides_large_flat_subtree() {
+    let mut depths = vec![2; 10_000];
+    depths[0] = 0;
+    depths[1] = 1;
+    let guides = super::view::tree_guide_segments(&tree_items(&depths));
+    assert_eq!(guides.len(), depths.len());
+    assert!(guides[2][1].below);
+    assert!(!guides.last().unwrap()[1].below);
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn test_preview_script_filter_reads_virtual_file_with_zero_reported_size() {
@@ -70,8 +187,10 @@ fn test_preview_script_filter_reads_virtual_file_with_zero_reported_size() {
         default_icon: None,
         items: vec![ScriptFilterItem {
             title: "CPU info".into(),
+            valid: true,
             subtitle: None,
             arg: None,
+            indent: 0,
             icon: None,
             preview: None,
             quicklookurl: Some("file:///proc/cpuinfo".into()),
@@ -2441,8 +2560,10 @@ fn test_preview_script_filter_precedence() {
         items: vec![
             ScriptFilterItem {
                 title: "Item 1".into(),
+                valid: true,
                 subtitle: Some("Fallback subtitle".into()),
                 arg: Some("arg1".into()),
+                indent: 0,
                 icon: None,
                 preview: Some(super::types::ScriptFilterPreview::Text(
                     "Explicit preview body".into(),
@@ -2456,8 +2577,10 @@ fn test_preview_script_filter_precedence() {
             },
             ScriptFilterItem {
                 title: "Item 2".into(),
+                valid: true,
                 subtitle: Some("Fallback subtitle".into()),
                 arg: Some("arg2".into()),
+                indent: 0,
                 icon: None,
                 preview: None,
                 quicklookurl: None,
@@ -2503,8 +2626,10 @@ fn test_preview_script_filter_decodes_file_url_paths() {
     let localhost_file_url = format!("file://localhost{escaped_path}");
     let make_item = |quicklookurl| ScriptFilterItem {
         title: "File".into(),
+        valid: true,
         subtitle: None,
         arg: None,
+        indent: 0,
         icon: None,
         preview: None,
         quicklookurl: Some(quicklookurl),
@@ -2565,8 +2690,10 @@ fn dynamic_preview_app(items: Vec<ScriptFilterItem>) -> LauncherApp {
 fn plain_item(title: &str) -> ScriptFilterItem {
     ScriptFilterItem {
         title: title.into(),
+        valid: true,
         subtitle: None,
         arg: Some(format!("{title}-arg")),
+        indent: 0,
         icon: None,
         preview: Some(super::types::ScriptFilterPreview::Text(
             "static body".into(),
@@ -2575,6 +2702,103 @@ fn plain_item(title: &str) -> ScriptFilterItem {
         variables: Default::default(),
         text: None,
     }
+}
+
+#[test]
+fn test_script_filter_invalid_headings_do_not_activate_or_record() {
+    let mut heading = plain_item("Working");
+    heading.valid = false;
+    let mut app = dynamic_preview_app(vec![heading]);
+    app.main_view.names = vec![Some("script_filters.Agents".into())];
+    app.search_query = "ag working".into();
+    app.script_filter.action = Some("true".into());
+    app.script_filter.secondary_action = Some("true".into());
+    app.history.items.clear();
+    app.main_view.recent.clear();
+    for modifiers in [
+        iced::keyboard::Modifiers::empty(),
+        iced::keyboard::Modifiers::CTRL,
+    ] {
+        app.view.current_modifiers = modifiers;
+        let task = app.handle_script_filter_selected(0);
+        assert_eq!(task.units(), 0, "no exit or action task");
+        assert!(app.main_view.recent.is_empty());
+        assert!(app.history.items.is_empty());
+        assert_eq!(app.search_query, "ag working");
+        let preview = app.resolve_selected_preview().unwrap();
+        assert!(!preview
+            .metadata
+            .iter()
+            .any(|(name, _)| name == "Enter" || name == "Ctrl+Enter"));
+    }
+}
+
+#[test]
+fn test_script_filter_invalid_main_view_heading_preserves_mode() {
+    use super::main_view::{Block, Source};
+    let mut addons = AddonsConfig::default();
+    addons.script_filters.push(issues_filter());
+    let mut app = main_view_app(&["script_filters.Issues"], Vec::new(), addons);
+    let _ = app.update(Message::SearchChanged("working".into()));
+    let mut heading = plain_item("Working");
+    heading.valid = false;
+    let Source::ScriptFilter { results, .. } = &mut app.main_view.sources[0] else {
+        panic!("script filter source");
+    };
+    *results = Some(ScriptFilterResult {
+        default_icon: None,
+        items: vec![heading],
+    });
+    app.main_view.recent.clear();
+    app.history.items.clear();
+    for modifiers in [
+        iced::keyboard::Modifiers::empty(),
+        iced::keyboard::Modifiers::CTRL,
+    ] {
+        app.view.current_modifiers = modifiers;
+        let task = app.activate_main_view(Block::BeforeLaunchers, 0);
+        assert_eq!(task.units(), 0);
+        assert_eq!(app.search_query, "working");
+        assert!(app.script_filter.config_index.is_none());
+        assert!(app.main_view.recent.is_empty());
+        assert!(app.history.items.is_empty());
+    }
+}
+
+#[test]
+fn test_select_1_ignores_script_filter_invalid_headings() {
+    let mut heading = plain_item("Working");
+    heading.valid = false;
+    let mut app = dynamic_preview_app(vec![heading.clone()]);
+    app.main_view.names = vec![Some("script_filters.Agents".into())];
+    app.search_query = "ag working".into();
+    app.script_filter.action = Some("true".into());
+    app.select_1_query = Some(app.search_query.clone());
+    app.select_1_ready = true;
+    app.view.show_preview = false;
+    assert_eq!(app.update(Message::Submit).units(), 0);
+    assert!(app.select_1_query.is_none());
+    assert!(app.main_view.recent.is_empty());
+
+    app.script_filter
+        .results
+        .as_mut()
+        .unwrap()
+        .items
+        .push(plain_item("Agent"));
+    app.select_1_query = Some(app.search_query.clone());
+    app.select_1_ready = true;
+    let generation = app.script_filter.preview_generation;
+    assert!(
+        app.update(Message::ScriptFilterPreviewDue(
+            generation.wrapping_sub(1),
+            0
+        ))
+        .units()
+            > 0
+    );
+    assert_eq!(app.main_view.recent.len(), 1);
+    assert_eq!(app.main_view.recent[0].key, "Agent-arg");
 }
 
 fn prepared(text: &str, refresh: Option<std::time::Duration>) -> super::types::PreparedPreview {
@@ -6977,8 +7201,10 @@ fn test_main_view_script_filter_waits_for_min_length_and_drops_stale_runs() {
         default_icon: None,
         items: vec![ScriptFilterItem {
             title: title.into(),
+            valid: true,
             subtitle: None,
             arg: None,
+            indent: 0,
             icon: None,
             preview: None,
             quicklookurl: None,
@@ -7049,8 +7275,10 @@ fn test_main_view_late_rows_keep_the_selection() {
     let items = (0..2)
         .map(|index| ScriptFilterItem {
             title: format!("mail issue {index}"),
+            valid: true,
             subtitle: None,
             arg: None,
+            indent: 0,
             icon: None,
             preview: None,
             quicklookurl: None,
@@ -7146,8 +7374,10 @@ fn issue_items(count: usize) -> ScriptFilterResult {
         items: (0..count)
             .map(|index| ScriptFilterItem {
                 title: format!("issue {index}"),
+                valid: true,
                 subtitle: None,
                 arg: None,
+                indent: 0,
                 icon: None,
                 preview: None,
                 quicklookurl: None,

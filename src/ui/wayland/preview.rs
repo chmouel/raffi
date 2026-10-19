@@ -1023,10 +1023,12 @@ impl LauncherApp {
             metadata.push(("Copy Text".to_string(), copy_text.clone()));
         }
 
-        let primary = action.unwrap_or("copy");
-        metadata.push(("Enter".to_string(), describe_action(primary)));
-        if let Some(secondary) = secondary_action {
-            metadata.push(("Ctrl+Enter".to_string(), describe_action(secondary)));
+        if item.valid {
+            let primary = action.unwrap_or("copy");
+            metadata.push(("Enter".to_string(), describe_action(primary)));
+            if let Some(secondary) = secondary_action {
+                metadata.push(("Ctrl+Enter".to_string(), describe_action(secondary)));
+            }
         }
 
         let mut data = PreviewData {

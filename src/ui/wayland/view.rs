@@ -1,5 +1,8 @@
 use std::path::{Path, PathBuf};
 
+use iced::advanced::{
+    layout, mouse, overlay, renderer, widget, Clipboard, Layout, Renderer as _, Shell, Widget,
+};
 use iced::widget::{
     button, container, image, mouse_area, rich_text, scrollable, span, svg, text, text_input,
     Column, Row, Space,
@@ -16,6 +19,243 @@ use super::theme::ThemeColors;
 use super::types::ScriptFilterItem;
 
 type HintSpan<'a> = iced::widget::text::Span<'a, (), iced::Font>;
+
+/// Horizontal shift of one tree-view indentation level.
+const INDENT_STEP: f32 = 24.0;
+/// Highest indentation level rendered; deeper levels keep this shift.
+const MAX_INDENT: u32 = 10;
+const TREE_GUIDE_THICKNESS: f32 = 1.0;
+const ITEM_SPACING: f32 = 6.0;
+
+/// Left padding added to an item row for tree-view indentation.
+pub(super) fn indent_left(indent: u32) -> f32 {
+    indent.min(MAX_INDENT) as f32 * INDENT_STEP
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct TreeGuideSegments {
+    pub(super) above: bool,
+    pub(super) below: bool,
+    pub(super) elbow: bool,
+}
+
+pub(super) fn tree_guide_segments(items: &[ScriptFilterItem]) -> Vec<Vec<TreeGuideSegments>> {
+    let mut parents = vec![None; items.len()];
+    let mut siblings = vec![false; items.len()];
+    let mut stack: Vec<usize> = Vec::new();
+    for (index, item) in items.iter().enumerate() {
+        while let Some(&previous) = stack.last() {
+            if items[previous].indent < item.indent {
+                break;
+            }
+            stack.pop();
+            if items[previous].indent == item.indent {
+                siblings[previous] = true;
+            }
+        }
+        parents[index] = stack.last().copied();
+        stack.push(index);
+    }
+
+    let mut guides: Vec<Vec<TreeGuideSegments>> = Vec::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        let mut segments = vec![
+            TreeGuideSegments {
+                above: false,
+                below: false,
+                elbow: false
+            };
+            item.indent.min(MAX_INDENT) as usize
+        ];
+        if let Some(parent) = parents[index] {
+            for (segment, inherited) in segments.iter_mut().zip(&guides[parent]) {
+                segment.above = inherited.below;
+                segment.below = inherited.below;
+            }
+            if item.indent <= MAX_INDENT {
+                segments[item.indent as usize - 1] = TreeGuideSegments {
+                    above: true,
+                    below: siblings[index],
+                    elbow: true,
+                };
+            }
+        }
+        guides.push(segments);
+    }
+    guides
+}
+
+fn with_tree_guide<'a>(
+    row: impl Into<Element<'a, Message>>,
+    segments: Vec<TreeGuideSegments>,
+    padding: f32,
+    theme: ThemeColors,
+) -> Element<'a, Message> {
+    Element::new(TreeGuides {
+        content: row.into(),
+        segments,
+        padding,
+        color: iced::Color {
+            a: theme.border.a * 0.75,
+            ..theme.border
+        },
+    })
+}
+
+struct TreeGuides<'a> {
+    content: Element<'a, Message>,
+    segments: Vec<TreeGuideSegments>,
+    padding: f32,
+    color: iced::Color,
+}
+
+impl Widget<Message, iced::Theme, iced::Renderer> for TreeGuides<'_> {
+    fn tag(&self) -> widget::tree::Tag {
+        self.content.as_widget().tag()
+    }
+
+    fn state(&self) -> widget::tree::State {
+        self.content.as_widget().state()
+    }
+
+    fn children(&self) -> Vec<widget::Tree> {
+        self.content.as_widget().children()
+    }
+
+    fn diff(&self, tree: &mut widget::Tree) {
+        self.content.as_widget().diff(tree);
+    }
+
+    fn size(&self) -> iced::Size<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn size_hint(&self) -> iced::Size<Length> {
+        self.content.as_widget().size_hint()
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut widget::Tree,
+        renderer: &iced::Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        self.content.as_widget_mut().layout(tree, renderer, limits)
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut widget::Tree,
+        event: &iced::Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &iced::Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &iced::Rectangle,
+    ) {
+        self.content.as_widget_mut().update(
+            tree, event, layout, cursor, renderer, clipboard, shell, viewport,
+        );
+    }
+
+    fn draw(
+        &self,
+        tree: &widget::Tree,
+        renderer: &mut iced::Renderer,
+        theme: &iced::Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &iced::Rectangle,
+    ) {
+        self.content
+            .as_widget()
+            .draw(tree, renderer, theme, style, layout, cursor, viewport);
+        let bounds = layout.bounds();
+        let center = bounds.center_y();
+        for (level, segment) in self.segments.iter().enumerate() {
+            let x = bounds.x + self.padding + level as f32 * INDENT_STEP + INDENT_STEP / 2.0;
+            let top = if segment.above {
+                bounds.y - ITEM_SPACING / 2.0
+            } else {
+                center
+            };
+            let bottom = if segment.below {
+                bounds.y + bounds.height + ITEM_SPACING / 2.0
+            } else {
+                center
+            };
+            for rect in [
+                iced::Rectangle::new(
+                    iced::Point::new(x, top),
+                    iced::Size::new(TREE_GUIDE_THICKNESS, bottom - top),
+                ),
+                iced::Rectangle::new(
+                    iced::Point::new(x, center),
+                    iced::Size::new(
+                        if segment.elbow {
+                            INDENT_STEP / 2.0
+                        } else {
+                            0.0
+                        },
+                        TREE_GUIDE_THICKNESS,
+                    ),
+                ),
+            ] {
+                if rect.width > 0.0 && rect.height > 0.0 {
+                    if let Some(bounds) = rect.intersection(viewport) {
+                        renderer.fill_quad(
+                            renderer::Quad {
+                                bounds,
+                                ..Default::default()
+                            },
+                            self.color,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &widget::Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &iced::Rectangle,
+        renderer: &iced::Renderer,
+    ) -> mouse::Interaction {
+        self.content
+            .as_widget()
+            .mouse_interaction(tree, layout, cursor, viewport, renderer)
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut widget::Tree,
+        layout: Layout<'_>,
+        renderer: &iced::Renderer,
+        operation: &mut dyn widget::Operation,
+    ) {
+        self.content
+            .as_widget_mut()
+            .operate(tree, layout, renderer, operation);
+    }
+
+    fn overlay<'a>(
+        &'a mut self,
+        tree: &'a mut widget::Tree,
+        layout: Layout<'a>,
+        renderer: &iced::Renderer,
+        viewport: &iced::Rectangle,
+        translation: iced::Vector,
+    ) -> Option<overlay::Element<'a, Message, iced::Theme, iced::Renderer>> {
+        self.content
+            .as_widget_mut()
+            .overlay(tree, layout, renderer, viewport, translation)
+    }
+}
 
 pub(super) fn file_browser_shortcut_message(
     character: &str,
@@ -471,6 +711,7 @@ impl LauncherApp {
         source: usize,
         row: usize,
         display_idx: usize,
+        guides: &[Vec<TreeGuideSegments>],
     ) -> Option<Element<'_, Message>> {
         let t = self.view.theme;
         let fs = self.view.font_sizes;
@@ -579,15 +820,28 @@ impl LauncherApp {
         for badge in badges {
             item_row = item_row.push(badge_pill(badge, t, fs.subtitle));
         }
+        let indent = match &self.main_view.sources[source] {
+            MainViewSource::ScriptFilter { results, .. } => {
+                let result = results.as_ref()?;
+                indent_left(result.items.get(row)?.indent)
+            }
+            _ => 0.0,
+        };
         let is_selected = display_idx == self.selected_index;
-        Some(
-            button(item_row)
-                .on_press(Message::ItemClicked(display_idx))
-                .padding(fs.item_padding)
-                .width(Length::Fill)
-                .style(item_button_style(t, is_selected, t.text_main))
-                .into(),
-        )
+        let item_button = button(item_row)
+            .on_press(Message::ItemClicked(display_idx))
+            .padding(iced::Padding {
+                left: fs.item_padding + indent,
+                ..fs.item_padding.into()
+            })
+            .width(Length::Fill)
+            .style(item_button_style(t, is_selected, t.text_main));
+        Some(with_tree_guide(
+            item_button,
+            guides.get(row).cloned().unwrap_or_default(),
+            fs.item_padding,
+            t,
+        ))
     }
 
     fn help_items_column(&self) -> Column<'_, Message> {
@@ -1103,7 +1357,20 @@ impl LauncherApp {
             );
         }
 
-        let mut items_column = Column::new().spacing(6);
+        let mut items_column = Column::new().spacing(ITEM_SPACING);
+        let main_view_guides: Vec<_> = self
+            .main_view
+            .sources
+            .iter()
+            .enumerate()
+            .map(|(source, entry)| match entry {
+                MainViewSource::ScriptFilter {
+                    results: Some(result),
+                    ..
+                } => tree_guide_segments(&result.items[..self.main_view.source_rows(source)]),
+                _ => Vec::new(),
+            })
+            .collect();
 
         let has_script_filter = self.script_filter.results.is_some()
             || self.script_filter.loading
@@ -1215,7 +1482,8 @@ impl LauncherApp {
             items_column = items_column.push(help_button);
             special_item_idx += 1;
         } else if let Some(sf_result) = &self.script_filter.results {
-            for item in &sf_result.items {
+            let guides = tree_guide_segments(&sf_result.items);
+            for (item, guides) in sf_result.items.iter().zip(guides) {
                 let is_selected = self.selected_index == special_item_idx;
                 let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
 
@@ -1268,11 +1536,15 @@ impl LauncherApp {
 
                 let item_button = button(item_row)
                     .on_press(Message::ItemClicked(special_item_idx))
-                    .padding(fs.item_padding)
+                    .padding(iced::Padding {
+                        left: fs.item_padding + indent_left(item.indent),
+                        ..fs.item_padding.into()
+                    })
                     .width(Length::Fill)
                     .style(item_button_style(t, is_selected, t.text_main));
 
-                items_column = items_column.push(item_button);
+                items_column =
+                    items_column.push(with_tree_guide(item_button, guides, fs.item_padding, t));
                 special_item_idx += 1;
             }
         }
@@ -1888,7 +2160,9 @@ impl LauncherApp {
         let main_view_before = self.main_view.row_count(Block::BeforeLaunchers);
         let main_view_after = self.main_view.row_count(Block::AfterLaunchers);
         for (source, row) in self.main_view.rows(Block::BeforeLaunchers) {
-            if let Some(row) = self.main_view_row(source, row, special_item_idx) {
+            if let Some(row) =
+                self.main_view_row(source, row, special_item_idx, &main_view_guides[source])
+            {
                 items_column = items_column.push(row);
             }
             special_item_idx += 1;
@@ -1973,7 +2247,12 @@ impl LauncherApp {
 
         let after_start_idx = special_item_idx + self.filtered_configs.len();
         for (offset, (source, row)) in self.main_view.rows(Block::AfterLaunchers).enumerate() {
-            if let Some(row) = self.main_view_row(source, row, after_start_idx + offset) {
+            if let Some(row) = self.main_view_row(
+                source,
+                row,
+                after_start_idx + offset,
+                &main_view_guides[source],
+            ) {
                 items_column = items_column.push(row);
             }
         }
