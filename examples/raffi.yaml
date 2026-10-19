@@ -170,6 +170,8 @@ addons:
     # GitHub pull requests with CI status. Install scripts/github/pr.py first.
     # "pr" lists your open pull requests, "pr owner/repo" those of a repository,
     # "pr review", "pr assigned" and "pr involved" the ones that concern you.
+    # Cross-repository results group under owner headings when multiple owners
+    # are present; single-owner and fixed-repository results stay flat.
     # The preview pane shows reviewers, merge state, checks, closed issues,
     # description, latest comments and changed files. Each row exports
     # PR_URL, PR_REPO, PR_NUMBER and PR_BRANCH to the actions.

@@ -484,11 +484,17 @@ pr owner/repo login
 # Ctrl+Enter: copy its URL
 ```
 
+Cross-repository modes group results under non-actionable repository-owner
+headings (organizations or user accounts) when the filtered results span
+multiple owners. Pull requests are indented beneath each heading; single-owner
+results and fixed `owner/repo` queries stay flat.
+
 Add `args: ["--repo", "owner/repo"]` to give a repository its own keyword, and
 `ALIAS_<name>` variables in `env` for short repository names. Each row exports
 `PR_URL`, `PR_REPO`, `PR_NUMBER` and `PR_BRANCH` to the actions.
 
-Each pull request shows the avatar of its repository owner, cached under
+Each pull request shows the avatar of its repository owner, or of its author
+when every listed pull request comes from the same repository, cached under
 `~/.cache/raffi/github-avatars/`. With the preview pane open, the selected pull
 request shows its branches, each reviewer's verdict, merge state, unresolved
 threads, checks, the issues it closes, its description with the markdown

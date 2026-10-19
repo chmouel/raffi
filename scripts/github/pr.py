@@ -139,7 +139,7 @@ fragment pr on PullRequest {
   number title url isDraft headRefName reviewDecision mergeable
   additions deletions updatedAt
   repository { nameWithOwner owner { login avatarUrl(size: 128) } }
-  author { login }
+  author { login avatarUrl(size: 128) }
   reviewThreads(first: 100) { nodes { isResolved } }
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
 }
@@ -346,17 +346,17 @@ def avatar_path(owner: str) -> Path:
     return AVATAR_DIR / f"{owner}.svg"
 
 
-def owner_icon(repository: dict) -> str | None:
-    """Path of the repository owner's avatar, downloaded on first use."""
-    owner = repository.get("owner") or {}
-    if not owner.get("avatarUrl"):
+def account_icon(account: dict | None) -> str | None:
+    """Path of a GitHub account's avatar, downloaded on first use."""
+    account = account or {}
+    if not account.get("avatarUrl"):
         return None
-    path = avatar_path(owner["login"])
+    path = avatar_path(account["login"])
     if path.exists():
         return str(path)
     try:
         with urllib.request.urlopen(
-            owner["avatarUrl"], timeout=AVATAR_TIMEOUT
+            account["avatarUrl"], timeout=AVATAR_TIMEOUT
         ) as response:
             mime = response.headers.get_content_type()
             data = base64.b64encode(response.read()).decode()
@@ -411,12 +411,38 @@ def list_items(query: str, repo_arg: str | None = None) -> list[dict]:
         return [error_item("GitHub error", str(error))]
 
     needle = needle.casefold()
+    matches: list[tuple[dict, dict]] = []
     for pr in filter(None, pulls):
         item = build_item(pr, show_repo=target in MODES)
         text = f"{item['title']} {item['subtitle']} {author_login(pr)}"
         if needle in ANSI.sub("", text).casefold():
-            if icon := owner_icon(pr["repository"]):
-                item["icon"] = {"path": icon}
+            matches.append((pr, item))
+
+    # Within one repository every owner avatar is the same, so show who
+    # opened each pull request instead.
+    single_repo = len({pr["repository"]["nameWithOwner"] for pr, _ in matches}) == 1
+    for pr, item in matches:
+        account = pr.get("author") if single_repo else pr["repository"].get("owner")
+        if icon := account_icon(account):
+            item["icon"] = {"path": icon}
+
+    if target not in MODES:
+        items.extend(item for _, item in matches)
+        return items
+
+    groups: dict[str, list[dict]] = {}
+    for pr, item in matches:
+        owner = pr["repository"]["nameWithOwner"].split("/", 1)[0]
+        groups.setdefault(owner, []).append(item)
+
+    if len(groups) < 2:
+        items.extend(item for _, item in matches)
+        return items
+
+    for owner, owner_items in groups.items():
+        items.append({"title": owner, "indent": 0, "valid": False})
+        for item in owner_items:
+            item["indent"] = 1
             items.append(item)
     return items
 

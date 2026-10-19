@@ -10,14 +10,14 @@ from unittest.mock import MagicMock, patch
 import pr
 
 
-def node(number, title, ci_state=None, draft=False):
+def node(number, title, ci_state=None, draft=False, repo="owner/repo"):
     rollup = {"state": ci_state} if ci_state else None
     return {
         "number": number,
         "title": title,
-        "url": f"https://github.com/owner/repo/pull/{number}",
+        "url": f"https://github.com/{repo}/pull/{number}",
         "isDraft": draft,
-        "repository": {"nameWithOwner": "owner/repo"},
+        "repository": {"nameWithOwner": repo},
         "author": {"login": "alice"},
         "commits": {"nodes": [{"commit": {"statusCheckRollup": rollup}}]},
     }
@@ -177,6 +177,7 @@ class ListItemsTests(unittest.TestCase):
         self.assertEqual(
             [item["title"] for item in items[1:]], ["PR #1: Fix login - alice"]
         )
+        self.assertTrue(all("indent" not in item for item in items[1:]))
         self.assertIn("\x1b[31mCI: Failed\x1b[0m \u00b7 Open", items[1]["subtitle"])
         self.assertEqual(
             items[1]["variables"],
@@ -194,6 +195,67 @@ class ListItemsTests(unittest.TestCase):
         self.assertEqual(items[0]["arg"], "https://github.com/pulls")
         self.assertEqual(items[1]["title"], "PR #2: Add docs - owner/repo")
         self.assertTrue(items[1]["subtitle"].startswith("Draft"))
+
+    def test_cross_repository_modes_group_pulls_by_owner(self):
+        pulls = [
+            node(1, "First", repo="alice/one"),
+            node(2, "Second", repo="org-b/two"),
+            node(3, "Third", repo="alice/three"),
+        ]
+        response = {"search": {"nodes": pulls}}
+        expected = [
+            ("alice", 0, False),
+            ("PR #1: First - alice/one", 1, None),
+            ("PR #3: Third - alice/three", 1, None),
+            ("org-b", 0, False),
+            ("PR #2: Second - org-b/two", 1, None),
+        ]
+
+        for mode in ("myprs", "review", "assigned", "involved"):
+            with self.subTest(mode=mode):
+                items, _ = self.list(mode, response)
+                self.assertEqual(
+                    [
+                        (item["title"], item.get("indent"), item.get("valid"))
+                        for item in items[1:]
+                    ],
+                    expected,
+                )
+
+    def test_single_owner_cross_repository_results_stay_flat(self):
+        pulls = [
+            node(1, "First", repo="org/one"),
+            node(2, "Second", repo="org/two"),
+        ]
+        items, _ = self.list("myprs", {"search": {"nodes": pulls}})
+
+        self.assertEqual(
+            [item["title"] for item in items[1:]],
+            ["PR #1: First - org/one", "PR #2: Second - org/two"],
+        )
+        self.assertTrue(all("indent" not in item for item in items[1:]))
+
+    def test_filtering_precedes_owner_grouping(self):
+        pulls = [
+            node(1, "Needle one", repo="alice/one"),
+            node(2, "Other", repo="alice/two"),
+            node(3, "Needle three", repo="org-b/three"),
+            node(4, "Other", repo="org-c/four"),
+        ]
+        items, _ = self.list("myprs needle", {"search": {"nodes": pulls}})
+
+        self.assertEqual(
+            [
+                (item["title"], item.get("indent"), item.get("valid"))
+                for item in items[1:]
+            ],
+            [
+                ("alice", 0, False),
+                ("PR #1: Needle one - alice/one", 1, None),
+                ("org-b", 0, False),
+                ("PR #3: Needle three - org-b/three", 1, None),
+            ],
+        )
 
     def test_modes_search_their_own_pull_requests(self):
         items, run_gh = self.list("review", {"search": {"nodes": PULLS}})
@@ -364,8 +426,8 @@ class AvatarTests(unittest.TestCase):
                 pr.urllib.request, "urlopen", return_value=response
             ) as urlopen,
         ):
-            path = pr.owner_icon(repository)
-            self.assertEqual(pr.owner_icon(repository), path)
+            path = pr.account_icon(repository["owner"])
+            self.assertEqual(pr.account_icon(repository["owner"]), path)
             self.assertEqual(path, f"{tmp}/octo.svg")
             svg = Path(path).read_text()
             preview = pr.build_preview(
@@ -378,10 +440,47 @@ class AvatarTests(unittest.TestCase):
 
     def test_no_avatar_falls_back_to_github_icon(self):
         with patch.object(pr.urllib.request, "urlopen", side_effect=OSError("offline")):
-            self.assertIsNone(
-                pr.owner_icon({"owner": {"login": "x", "avatarUrl": "u"}})
+            self.assertIsNone(pr.account_icon({"login": "x", "avatarUrl": "u"}))
+        self.assertIsNone(pr.account_icon(None))
+
+    def test_single_repository_rows_show_author_avatars(self):
+        def pull(number, repo, author):
+            return dict(
+                node(number, "Fix", repo=repo),
+                author={"login": author, "avatarUrl": f"https://avatars/{author}"},
+                repository={
+                    "nameWithOwner": repo,
+                    "owner": {
+                        "login": repo.split("/")[0],
+                        "avatarUrl": "https://avatars/owner",
+                    },
+                },
             )
-        self.assertIsNone(pr.owner_icon({"nameWithOwner": "x/y"}))
+
+        def icons(query, nodes, response_key):
+            response = (
+                {"search": {"nodes": nodes}}
+                if response_key == "search"
+                else {"repository": {"pullRequests": {"nodes": nodes}}}
+            )
+            with (
+                patch.object(pr, "run_gh", return_value={"data": response}),
+                patch.object(
+                    pr, "account_icon", side_effect=lambda a: f"/{a['login']}.svg"
+                ),
+            ):
+                items = pr.list_items(query)
+            return [item["icon"]["path"] for item in items if "icon" in item]
+
+        same_repo = [pull(1, "org/one", "alice"), pull(2, "org/one", "bob")]
+        self.assertEqual(
+            icons("org/one", same_repo, "repository"), ["/alice.svg", "/bob.svg"]
+        )
+        self.assertEqual(
+            icons("review", same_repo, "search"), ["/alice.svg", "/bob.svg"]
+        )
+        mixed = [pull(1, "org/one", "alice"), pull(2, "org/two", "bob")]
+        self.assertEqual(icons("review", mixed, "search"), ["/org.svg", "/org.svg"])
 
 
 if __name__ == "__main__":

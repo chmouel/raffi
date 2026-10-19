@@ -69,6 +69,11 @@ author, state, CI status, review decision, "Conflicts", unresolved threads and
 size. The first row opens the matching pull request list on GitHub. Enter
 opens the selected pull request, Ctrl+Enter copies its URL.
 
+Cross-repository modes group results under non-actionable repository-owner
+headings when the filtered results span multiple owners. Pull requests are
+indented beneath each heading; single-owner results and `owner/repo` queries
+stay flat.
+
 Each row also passes these variables to `action` and `secondary_action`:
 `PR_URL`, `PR_REPO` (owner/repo), `PR_NUMBER` and `PR_BRANCH`. For example,
 to copy the branch name with Ctrl+Enter:
@@ -77,7 +82,8 @@ to copy the branch name with Ctrl+Enter:
       secondary_action: 'echo -n "$PR_BRANCH" | wl-copy'
 ```
 
-Each pull request shows the avatar of the repository owner. Avatars are
+Each pull request shows the avatar of the repository owner, or of its author
+when every listed pull request comes from the same repository. Avatars are
 downloaded once into `~/.cache/raffi/github-avatars/` (or under
 `$XDG_CACHE_HOME`); delete that directory to refresh them. When an avatar
 cannot be downloaded, the entry's icon is used instead.
