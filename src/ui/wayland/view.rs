@@ -438,8 +438,14 @@ fn scrollable_style(
 }
 
 /// A small rounded label at the end of a row.
+/// Opacity of rows drawn dimmed, such as muted Slack conversations.
+const DIMMED_OPACITY: f32 = 0.45;
+
 fn badge_pill<'a>(label: String, t: ThemeColors, size: f32) -> Element<'a, Message> {
-    let accent = t.accent;
+    tinted_badge_pill(label, t.accent, size)
+}
+
+fn tinted_badge_pill<'a>(label: String, accent: iced::Color, size: f32) -> Element<'a, Message> {
     container(text(label).size(size).color(accent))
         .padding([3.0, 10.0])
         .style(move |_theme| container::Style {
@@ -455,6 +461,10 @@ fn badge_pill<'a>(label: String, t: ThemeColors, size: f32) -> Element<'a, Messa
 
 /// Build an icon widget for `path`, or `None` when the file is missing.
 fn icon_element<'a>(path: &Path, size: f32) -> Option<Element<'a, Message>> {
+    faded_icon_element(path, size, 1.0)
+}
+
+fn faded_icon_element<'a>(path: &Path, size: f32, opacity: f32) -> Option<Element<'a, Message>> {
     if !path.exists() {
         return None;
     }
@@ -469,12 +479,14 @@ fn icon_element<'a>(path: &Path, size: f32) -> Option<Element<'a, Message>> {
             .width(Length::Fixed(size))
             .height(Length::Fixed(size))
             .content_fit(iced::ContentFit::Contain)
+            .opacity(opacity)
             .into()
     } else {
         image(PathBuf::from(path))
             .width(Length::Fixed(size))
             .height(Length::Fixed(size))
             .content_fit(iced::ContentFit::Contain)
+            .opacity(opacity)
             .into()
     })
 }
@@ -1736,12 +1748,17 @@ impl LauncherApp {
                     continue;
                 };
                 let is_selected = self.selected_index == special_item_idx;
+                // Faded towards the background so dimmed rows stand apart
+                // from the others in any theme.
+                let faded = |color: iced::Color, alpha: f32| iced::Color {
+                    a: color.a * alpha,
+                    ..color
+                };
                 let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
-                if let Some(icon) = item
-                    .icon
-                    .as_deref()
-                    .and_then(|path| icon_element(Path::new(path), 40.0))
-                {
+                if let Some(icon) = item.icon.as_deref().and_then(|path| {
+                    let opacity = if item.dimmed { DIMMED_OPACITY } else { 1.0 };
+                    faded_icon_element(Path::new(path), 40.0, opacity)
+                }) {
                     item_row = item_row.push(icon);
                 }
                 let subtitle = if let Some(reason) = &item.unavailable {
@@ -1752,21 +1769,36 @@ impl LauncherApp {
                     text(format!("Press Enter again to {verb}"))
                         .size(fs.subtitle)
                         .color(t.accent)
+                } else if item.dimmed {
+                    text(item.subtitle.clone())
+                        .size(fs.subtitle)
+                        .color(faded(t.text_muted, DIMMED_OPACITY))
                 } else {
                     text(item.subtitle.clone())
                         .size(fs.subtitle)
                         .color(t.text_muted)
                 };
+                let title_color = if item.dimmed {
+                    faded(t.text_muted, DIMMED_OPACITY)
+                } else {
+                    t.text_main
+                };
                 let text_col = Column::new()
-                    .push(text(item.title.clone()).size(fs.item).color(t.text_main))
+                    .push(text(item.title.clone()).size(fs.item).color(title_color))
                     .push(subtitle);
                 item_row = item_row.push(text_col.width(Length::Fill));
                 let notes = self
                     .command_list
                     .is_extra_row(row)
                     .then(|| super::bitwarden::NOTES_BADGE.to_string());
+                let badge_color = if item.dimmed {
+                    faded(t.text_muted, DIMMED_OPACITY)
+                } else {
+                    t.accent
+                };
                 for badge in notes.iter().chain(&item.badge) {
-                    item_row = item_row.push(badge_pill(badge.clone(), t, fs.subtitle));
+                    item_row =
+                        item_row.push(tinted_badge_pill(badge.clone(), badge_color, fs.subtitle));
                 }
                 items_column = items_column.push(
                     button(item_row)

@@ -147,6 +147,7 @@ pub(super) fn parse_items(
                 details,
                 badge: otp.contains(&entry.id).then(|| "OTP".to_string()),
                 domains: domains_of(uris.iter().map(String::as_str)),
+                dimmed: false,
             }
         })
         .collect();

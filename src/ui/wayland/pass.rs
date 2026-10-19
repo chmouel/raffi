@@ -124,6 +124,7 @@ fn entry_item(name: &str) -> CommandItem {
         details,
         badge: None,
         domains: entry_domains(name),
+        dimmed: false,
     }
 }
 
@@ -147,6 +148,7 @@ pub(super) fn command_item(identity: &str, title: &str, subtitle: &str, icon: &s
         details: Vec::new(),
         badge: None,
         domains: Vec::new(),
+        dimmed: false,
     }
 }
 

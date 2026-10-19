@@ -117,6 +117,9 @@ pub(super) struct CommandItem {
     /// Base domains of the sites the row is for; a filter naming one of
     /// them, such as a pasted URL, lists the row first.
     pub domains: Vec<String>,
+    /// Drawn in the theme's muted colour and listed last when nothing is
+    /// typed, as for muted Slack conversations.
+    pub dimmed: bool,
 }
 
 impl CommandItem {
@@ -143,6 +146,7 @@ impl CommandItem {
             details: Vec::new(),
             badge: None,
             domains: Vec::new(),
+            dimmed: false,
         }
     }
 }
@@ -490,11 +494,15 @@ pub(super) fn filter_items_into(
     let used = |item: &CommandItem| usage.get(&item.identity).copied().unwrap_or(0);
     if query.is_empty() {
         out.extend(0..items.len());
-        if !usage.is_empty() {
+        if !usage.is_empty() || items.iter().any(|item| item.dimmed) {
             // Rows without match text, such as errors, stay on top.
             out.sort_by_key(|&index| {
                 let item = &items[index];
-                (!item.match_text.is_empty(), std::cmp::Reverse(used(item)))
+                (
+                    !item.match_text.is_empty(),
+                    item.dimmed,
+                    std::cmp::Reverse(used(item)),
+                )
             });
         }
         return;

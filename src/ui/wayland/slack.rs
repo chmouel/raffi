@@ -2,7 +2,7 @@
 //! set the status, presence and notification snooze, with a user (`xoxp-`)
 //! or browser session (`xoxc-`) token. Web API calls live in `slack_api`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Datelike, Local, TimeZone};
@@ -1194,11 +1194,47 @@ pub(super) struct Unread {
     pub mentions: u64,
     /// Unread messages, when counted.
     pub count: Option<usize>,
+    pub muted: bool,
 }
 
-/// Conversations `client.counts` reports with unread messages, newest
-/// first.
-pub(super) fn counts_unread(reply: &Value) -> Vec<Unread> {
+/// The conversations muted in a `users.prefs.get` reply: from
+/// `all_notifications_prefs`, a JSON document in a string, and the older
+/// `muted_channels` list.
+pub(super) fn muted_channels(reply: &Value) -> HashSet<String> {
+    let prefs = &reply["prefs"];
+    let notifications = match &prefs["all_notifications_prefs"] {
+        Value::String(text) => serde_json::from_str(text).unwrap_or(Value::Null),
+        other => other.clone(),
+    };
+    let mut muted: HashSet<String> = notifications["channels"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(_, channel)| channel["muted"].as_bool() == Some(true))
+        .map(|(id, _)| id.clone())
+        .collect();
+    muted.extend(
+        prefs["muted_channels"]
+            .as_str()
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string),
+    );
+    muted
+}
+
+/// Unmuted conversations first, newest first in each group, so muted ones
+/// only fill what the cap leaves.
+fn sort_unread(unread: &mut Vec<Unread>) {
+    unread.sort_by(|a, b| a.muted.cmp(&b.muted).then_with(|| b.latest.cmp(&a.latest)));
+    unread.truncate(MAX_UNREAD);
+}
+
+/// Conversations `client.counts` reports with unread messages, unmuted
+/// then muted, newest first.
+pub(super) fn counts_unread(reply: &Value, muted: &HashSet<String>) -> Vec<Unread> {
     let mut unread: Vec<Unread> = ["channels", "mpims", "ims"]
         .into_iter()
         .filter_map(|key| reply[key].as_array())
@@ -1212,11 +1248,11 @@ pub(super) fn counts_unread(reply: &Value) -> Vec<Unread> {
                 latest: text("latest"),
                 mentions: entry["mention_count"].as_u64().unwrap_or(0),
                 count: None,
+                muted: muted.contains(entry["id"].as_str()?),
             })
         })
         .collect();
-    unread.sort_by(|a, b| b.latest.cmp(&a.latest));
-    unread.truncate(MAX_UNREAD);
+    sort_unread(&mut unread);
     unread
 }
 
@@ -1247,7 +1283,12 @@ pub(super) fn resolve_conversation(entry: &str, directory: &Directory) -> Option
 
 /// Count the unread messages of each configured conversation, a few at a
 /// time. Blocking.
-fn check_configured(client: &Client, directory: &Directory, entries: &[String]) -> Vec<Unread> {
+fn check_configured(
+    client: &Client,
+    directory: &Directory,
+    entries: &[String],
+    muted: &HashSet<String>,
+) -> Vec<Unread> {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
 
@@ -1264,7 +1305,13 @@ fn check_configured(client: &Client, directory: &Directory, entries: &[String]) 
                 while let Some(channel) = channels.get(next.fetch_add(1, Ordering::Relaxed)) {
                     match check_conversation(client, channel) {
                         Ok(Some(unread)) => {
-                            found.lock().unwrap_or_else(|e| e.into_inner()).push(unread)
+                            found
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .push(Unread {
+                                    muted: muted.contains(channel),
+                                    ..unread
+                                })
                         }
                         Ok(None) => {}
                         Err(error) => crate::debug_log!("slack: cannot check {channel}: {error}"),
@@ -1274,7 +1321,7 @@ fn check_configured(client: &Client, directory: &Directory, entries: &[String]) 
         }
     });
     let mut found = found.into_inner().unwrap_or_else(|e| e.into_inner());
-    found.sort_by(|a, b| b.latest.cmp(&a.latest));
+    sort_unread(&mut found);
     found
 }
 
@@ -1302,6 +1349,7 @@ fn check_conversation(client: &Client, channel: &str) -> Result<Option<Unread>, 
         latest: latest.to_string(),
         mentions: 0,
         count: Some(messages.len()),
+        muted: false,
     }))
 }
 
@@ -1336,14 +1384,19 @@ pub(super) fn unread_rows(
             }
             item.subtitle = parts.join(" · ");
             item.match_text = label.trim_start_matches(['#', '@']).to_string();
-            item.badge = directory
-                .conversation(&entry.channel)
-                .map(|c| match c.kind {
-                    ConversationKind::Direct => "Direct",
-                    ConversationKind::Group => "Group",
-                    _ => "Channel",
-                })
-                .map(str::to_string);
+            item.badge = if entry.muted {
+                Some("Muted")
+            } else {
+                directory
+                    .conversation(&entry.channel)
+                    .map(|c| match c.kind {
+                        ConversationKind::Direct => "Direct",
+                        ConversationKind::Group => "Group",
+                        _ => "Channel",
+                    })
+            }
+            .map(str::to_string);
+            item.dimmed = entry.muted;
             item.details = vec![
                 ("Enter".to_string(), target_name(open_in).to_string()),
                 ("Ctrl+Enter".to_string(), "Mark as read".to_string()),
@@ -1363,12 +1416,28 @@ pub(super) fn unread_rows(
         .collect()
 }
 
+/// The conversations the user muted, or none when Slack does not say.
+fn fetch_muted(client: &Client) -> HashSet<String> {
+    match client.call("users.prefs.get", &[]) {
+        Ok(reply) => muted_channels(&reply),
+        Err(error) => {
+            crate::debug_log!("slack: users.prefs.get failed: {error}");
+            HashSet::new()
+        }
+    }
+}
+
 /// Conversations with unread messages, from `client.counts` when the token
-/// allows it, else from the configured list. Blocking.
+/// allows it, else from the configured list, muted ones last. Blocking.
 pub(super) fn load_unread(config: crate::SlackAddonConfig) -> Result<Vec<CommandItem>, String> {
     let (client, directory) = connect(&config)?;
-    let unread = match client.call("client.counts", &[("thread_counts_by_channel", "true")]) {
-        Ok(reply) => counts_unread(&reply),
+    let (counts, muted) = std::thread::scope(|scope| {
+        let muted = scope.spawn(|| fetch_muted(&client));
+        let counts = client.call("client.counts", &[("thread_counts_by_channel", "true")]);
+        (counts, muted.join().unwrap_or_default())
+    });
+    let unread = match counts {
+        Ok(reply) => counts_unread(&reply, &muted),
         Err(error) if config.unread_conversations.is_empty() => {
             crate::debug_log!("slack: client.counts failed: {error}");
             return Err("Slack does not list unread conversations for this token: \
@@ -1377,7 +1446,7 @@ pub(super) fn load_unread(config: crate::SlackAddonConfig) -> Result<Vec<Command
         }
         Err(error) => {
             crate::debug_log!("slack: client.counts failed, checking the configured list: {error}");
-            check_configured(&client, &directory, &config.unread_conversations)
+            check_configured(&client, &directory, &config.unread_conversations, &muted)
         }
     };
     if unread.is_empty() {
@@ -1878,7 +1947,7 @@ mod tests {
             ],
             "ims": [{"id": "D1", "has_unreads": true, "last_read": "3.0", "latest": "7.0"}],
         });
-        let unread = counts_unread(&reply);
+        let unread = counts_unread(&reply, &HashSet::new());
         let ids: Vec<&str> = unread.iter().map(|u| u.channel.as_str()).collect();
         assert_eq!(ids, ["D1", "C1"]);
         assert_eq!(unread[1].mentions, 2);
@@ -1894,6 +1963,39 @@ mod tests {
             })
         );
         assert!(rows[1].subtitle.starts_with("2 mentions"));
+    }
+
+    #[test]
+    fn test_muted_unread_come_last_dimmed_and_only_fill_the_cap() {
+        let prefs = json!({"prefs": {
+            "all_notifications_prefs": r#"{"channels": {"M1": {"muted": true}, "C1": {"muted": false}}}"#,
+            "muted_channels": "M2,",
+        }});
+        let muted = muted_channels(&prefs);
+        assert_eq!(muted, HashSet::from(["M1".to_string(), "M2".to_string()]));
+
+        let entry = |id: &str, latest: usize| json!({"id": id, "has_unreads": true, "last_read": "0", "latest": format!("{latest:03}.0")});
+        let mut channels = vec![entry("M1", 999), entry("M2", 998)];
+        channels.extend((0..MAX_UNREAD).map(|i| entry(&format!("C{i}"), i)));
+        let unread = counts_unread(&json!({ "channels": channels }), &muted);
+        assert_eq!(unread.len(), MAX_UNREAD);
+        assert!(
+            unread.iter().all(|u| !u.muted),
+            "unmuted fill the cap first"
+        );
+
+        let unread = counts_unread(
+            &json!({"channels": [entry("M1", 9), entry("C1", 1)], "ims": [entry("D1", 5)]}),
+            &muted,
+        );
+        let rows = unread_rows(&unread, &directory(), SlackOpenIn::Desktop, now());
+        let ids: Vec<&str> = unread.iter().map(|u| u.channel.as_str()).collect();
+        assert_eq!(ids, ["D1", "C1", "M1"]);
+        assert_eq!(
+            rows.iter().map(|r| r.dimmed).collect::<Vec<_>>(),
+            [false, false, true]
+        );
+        assert_eq!(rows[2].badge.as_deref(), Some("Muted"));
     }
 
     #[test]

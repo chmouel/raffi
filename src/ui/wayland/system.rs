@@ -194,6 +194,7 @@ impl SystemEntry {
             ],
             badge: None,
             domains: Vec::new(),
+            dimmed: false,
         }
     }
 }

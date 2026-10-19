@@ -249,6 +249,7 @@ fn process_item(process: &Process) -> CommandItem {
         ],
         badge: None,
         domains: Vec::new(),
+        dimmed: false,
     }
 }
 

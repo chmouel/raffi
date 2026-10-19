@@ -366,6 +366,7 @@ fn control_item(
         secondary: None,
         badge: None,
         domains: Vec::new(),
+        dimmed: false,
     }
 }
 
@@ -569,6 +570,7 @@ fn device_item(kind: Kind, device: &Device, is_default: bool, keep_open: bool) -
         }),
         badge: None,
         domains: Vec::new(),
+        dimmed: false,
     }
 }
 

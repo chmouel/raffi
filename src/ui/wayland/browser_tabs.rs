@@ -324,6 +324,7 @@ fn tab_item(
         ],
         badge: badge.map(str::to_string),
         domains: domains_of([tab.url.as_str()]),
+        dimmed: false,
         title,
     }
 }

@@ -8054,3 +8054,25 @@ fn test_slack_status_fill_and_debounced_search() {
     let _ = app.update(Message::SlackSearchDue(session, "deploy".into()));
     assert_ne!(app.command_list.generation, generation, "the search runs");
 }
+
+#[test]
+fn test_command_list_lists_dimmed_rows_last_until_a_filter_is_typed() {
+    use super::command_list::{filter_items_into, CommandItem};
+    let item = |id: &str, dimmed: bool| CommandItem {
+        match_text: id.into(),
+        dimmed,
+        ..CommandItem::info(id, id.into(), "icon")
+    };
+    let items = [
+        item("ops-muted", true),
+        item("dev", false),
+        item("ops", false),
+    ];
+    let matcher = fuzzy_matcher::skim::SkimMatcherV2::default();
+    let usage = std::collections::HashMap::from([("ops-muted".to_string(), 5)]);
+    let mut out = Vec::new();
+    filter_items_into(&items, "", &matcher, &usage, false, &mut out);
+    assert_eq!(out, [1, 2, 0], "muted last even when used most");
+    filter_items_into(&items, "muted", &matcher, &usage, false, &mut out);
+    assert_eq!(out, [0], "filtering still finds muted rows");
+}

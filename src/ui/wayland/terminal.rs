@@ -89,6 +89,7 @@ pub(super) fn run_item(
         ],
         badge: None,
         domains: Vec::new(),
+        dimmed: false,
     }
 }
 
