@@ -13,6 +13,8 @@ mod wayland;
 
 use self::fuzzel::FuzzelUI;
 #[cfg(feature = "wayland")]
+pub(crate) use self::wayland::clear_slack_cache;
+#[cfg(feature = "wayland")]
 use self::wayland::WaylandUI;
 #[cfg(feature = "wayland")]
 pub(crate) use self::wayland::THUMBNAIL_DIR_NAME;
@@ -177,6 +179,16 @@ pub fn get_recent_cache_path() -> Result<PathBuf> {
 pub fn get_vault_mru_cache_path() -> Result<PathBuf> {
     let mut path = get_mru_cache_path()?;
     path.set_file_name("vault.cache");
+    Ok(path)
+}
+
+/// Get the Slack addon cache directory: workspace directory, usage and
+/// avatars.
+#[cfg(feature = "wayland")]
+pub fn get_slack_cache_dir() -> Result<PathBuf> {
+    let mut path = get_mru_cache_path()?;
+    path.set_file_name("slack");
+    std::fs::create_dir_all(&path)?;
     Ok(path)
 }
 

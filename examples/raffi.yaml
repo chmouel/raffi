@@ -436,6 +436,20 @@ addons:
   #   clipboard_timeout: 45
   #   type_delay_ms: 200
 
+  # Slack (native UI only, off by default). Type "slack " to open channels,
+  # DMs and people, "slack search <words>", "slack people <name>",
+  # "slack unread", or
+  # "slack status Lunch :pizza: 1h". The token is a user token (xoxp-) from
+  # your own Slack app, or a browser session token (xoxc-) with its "d"
+  # cookie. Ctrl+P previews the latest messages.
+  # slack:
+  #   enabled: true
+  #   trigger: slack
+  #   token_command: "pass show slack/token"
+  #   cookie_command: "pass show slack/cookie"   # xoxc- tokens only
+  #   open_in: desktop                            # desktop | browser
+  #   unread_conversations: ["#ops", "@alice"]    # for xoxp- tokens
+
   # Unit conversion (native UI only). Type "10 km to mi", "70f to c" or
   # "5 GB in MB" without any keyword. Enter copies the number, Ctrl+Enter
   # copies it with the unit.

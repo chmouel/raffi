@@ -13,7 +13,7 @@ The native UI includes several built-in addons that can be configured under the 
 ## Keywords
 
 Script filters, web searches, text snippets, the emoji picker, the clipboard
-history browser, system commands, the window switcher, media controls, the audio switcher, the process killer, Bluetooth, the password store, Bitwarden and developer tools are reached by
+history browser, system commands, the window switcher, media controls, the audio switcher, the process killer, Bluetooth, the password store, Bitwarden, Slack and developer tools are reached by
 typing their keyword followed by a space. Typing `sn` on its own searches your
 launchers as usual, while `sn ` enters the snippet source.
 
@@ -1350,6 +1350,55 @@ addons:
   bitwarden:
     trigger: vault
     clipboard_timeout: 20
+```
+
+## Slack
+
+Opens Slack conversations and people, searches messages, lists unread
+conversations, and sets your status, presence and notification snooze, in
+one workspace. Native UI only, off by default.
+See [Slack](../../features/slack/) for usage and for getting a token.
+
+### Configuration
+
+**`addons.slack.enabled`** `boolean` (default: `false`)
+
+**`addons.slack.trigger`** `string` (default: `slack`)
+
+Keyword that opens the Slack list. Type it followed by a space.
+
+**`addons.slack.token_command`** `string`
+
+Shell command printing the Slack token on its first line: a user token
+(`xoxp-`) from your own Slack app, or the session token (`xoxc-`) of a
+logged-in browser. Run when the Slack list first opens. Required.
+
+**`addons.slack.cookie_command`** `string`
+
+Shell command printing the value of the browser's `d` cookie. Required
+with a session (`xoxc-`) token, ignored with a user token.
+
+**`addons.slack.open_in`** `"desktop" | "browser"` (default: `desktop`)
+
+Where Enter opens conversations and messages: the Slack desktop app
+(`slack://` links) or `app.slack.com`. Ctrl+Enter uses the other one.
+
+**`addons.slack.unread_conversations`** `string[]` (default: `[]`)
+
+Conversations checked by `slack unread` when Slack does not say which
+conversations have unread messages, as with user tokens: `#channel`,
+`@handle` for the direct conversation, or a conversation id. At most 30.
+
+### Example
+
+```yaml
+addons:
+  slack:
+    enabled: true
+    token_command: "pass show slack/token"
+    cookie_command: "pass show slack/cookie"
+    open_in: browser
+    unread_conversations: ["#ops", "@alice"]
 ```
 
 ## Developer Tools

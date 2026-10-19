@@ -1020,6 +1020,53 @@ impl Default for BitwardenAddonConfig {
     }
 }
 
+/// Where the Slack addon opens conversations
+#[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SlackOpenIn {
+    /// The Slack desktop app, through `slack://` links
+    #[default]
+    Desktop,
+    /// The browser, through `https://app.slack.com` links
+    Browser,
+}
+
+/// Configuration for the Slack addon (native UI only)
+#[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
+#[schemars(deny_unknown_fields)]
+pub struct SlackAddonConfig {
+    /// Off by default: the addon needs a Slack token.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Keyword that opens the Slack list (default: `slack`).
+    #[serde(default)]
+    pub trigger: Option<String>,
+    /// Shell command printing the Slack token: a user token (`xoxp-`) from
+    /// your own Slack app, or the session token (`xoxc-`) of a logged-in
+    /// browser tab.
+    #[serde(default)]
+    pub token_command: Option<String>,
+    /// Shell command printing the value of the `d` cookie, needed with a
+    /// session (`xoxc-`) token.
+    #[serde(default)]
+    pub cookie_command: Option<String>,
+    /// Open conversations in the desktop app or in the browser (default:
+    /// desktop). Ctrl+Enter uses the other one.
+    #[serde(default)]
+    pub open_in: SlackOpenIn,
+    /// Conversations to check for unread messages (`#channel`, `@user` or
+    /// an id), up to 30, used when Slack does not report unread
+    /// conversations for the token, as with `xoxp-` tokens.
+    #[serde(default)]
+    pub unread_conversations: Vec<String>,
+}
+
+impl SlackAddonConfig {
+    pub fn trigger(&self) -> &str {
+        self.trigger.as_deref().unwrap_or("slack")
+    }
+}
+
 /// Container for all addon configurations
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
@@ -1062,6 +1109,8 @@ pub struct AddonsConfig {
     pub pass: PassAddonConfig,
     #[serde(default)]
     pub bitwarden: BitwardenAddonConfig,
+    #[serde(default)]
+    pub slack: SlackAddonConfig,
     #[serde(default)]
     pub devtools: DevtoolsAddonConfig,
     #[serde(default)]
@@ -3002,6 +3051,8 @@ pub fn run(args: Args) -> Result<()> {
     if args.refresh_cache {
         clear_icon_cache()?;
         clear_emoji_cache()?;
+        #[cfg(feature = "wayland")]
+        ui::clear_slack_cache();
     }
 
     let default_config_path = format!(

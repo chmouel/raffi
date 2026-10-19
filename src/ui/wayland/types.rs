@@ -517,6 +517,11 @@ pub(crate) enum Message {
     /// The preview of the page at the URL for the browser tab list of this
     /// session; None when the row was left before it was looked up.
     TabPreviewLoaded(u64, String, Option<Vec<super::preview::PreviewBody>>),
+    /// The Slack search for these terms in this list session is due.
+    SlackSearchDue(u64, String),
+    /// The preview of the Slack row with this identity in this list
+    /// session; None when the row was left before it loaded.
+    SlackPreviewLoaded(u64, String, Option<super::slack::Preview>),
     /// Rows of the main view command list source at this index, from its
     /// load of this generation.
     MainViewLoaded(

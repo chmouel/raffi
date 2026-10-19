@@ -44,7 +44,8 @@ impl SystemEntry {
             | DeferredAction::Secret(_)
             | DeferredAction::BrowserTab(_)
             | DeferredAction::BrowserHostSetup { .. }
-            | DeferredAction::TerminalTab { .. } => String::new(),
+            | DeferredAction::TerminalTab { .. }
+            | DeferredAction::Slack(_) => String::new(),
         }
     }
 }
@@ -116,7 +117,8 @@ fn program(action: &DeferredAction) -> Option<&str> {
         | DeferredAction::Secret(_)
         | DeferredAction::BrowserTab(_)
         | DeferredAction::BrowserHostSetup { .. }
-        | DeferredAction::TerminalTab { .. } => None,
+        | DeferredAction::TerminalTab { .. }
+        | DeferredAction::Slack(_) => None,
         DeferredAction::Bluetooth(_) => Some("bluetoothctl"),
     }
 }

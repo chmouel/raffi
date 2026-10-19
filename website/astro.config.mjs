@@ -51,6 +51,7 @@ export default defineConfig({
             { label: 'Password Store', slug: 'features/password-store' },
             { label: 'Run in Terminal', slug: 'features/terminal' },
             { label: 'Script Filters', slug: 'features/script-filters' },
+            { label: 'Slack', slug: 'features/slack' },
             { label: 'System Commands', slug: 'features/system-commands' },
             { label: 'Text Snippets', slug: 'features/text-snippets' },
             { label: 'Themes', slug: 'features/themes' },

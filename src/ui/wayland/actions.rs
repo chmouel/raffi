@@ -260,6 +260,8 @@ pub(super) enum DeferredAction {
         window: Vec<String>,
         raise: Option<(u32, String)>,
     },
+    /// Call the Slack Web API.
+    Slack(super::slack::SlackAction),
 }
 
 impl DeferredAction {
@@ -284,6 +286,7 @@ impl DeferredAction {
                 window,
                 raise,
             } => open_in_terminal_tab(*kind, tab, window, raise.as_ref(), DEFERRED_TIMEOUT),
+            Self::Slack(action) => super::slack::run_action(action),
         }
     }
 
@@ -299,6 +302,7 @@ impl DeferredAction {
             Self::Secret(_) => "secret",
             Self::BrowserTab(_) | Self::BrowserHostSetup { .. } => "browser tabs",
             Self::TerminalTab { .. } => "terminal",
+            Self::Slack(_) => "slack",
         }
     }
 

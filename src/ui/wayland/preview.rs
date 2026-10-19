@@ -1261,6 +1261,7 @@ impl LauncherApp {
             icon: item.icon.clone().map(PreviewIcon::File),
             bodies: super::browser_tabs::tab_target(item)
                 .and_then(|tab| list.previews.get(&tab.url))
+                .or_else(|| list.previews.get(&item.identity))
                 .cloned()
                 .unwrap_or_default(),
             metadata: item.details.clone(),
@@ -1981,6 +1982,33 @@ fn describe_addon_by_keyword(
         let mut rows = vault_key_rows();
         rows.push(("Requires".to_string(), "rbw".to_string()));
         return ("Bitwarden".to_string(), rows);
+    }
+
+    if addons.slack.enabled && keyword == addons.slack.trigger() {
+        let trigger = addons.slack.trigger();
+        return (
+            "Slack".to_string(),
+            vec![
+                (
+                    "Usage".to_string(),
+                    format!("{trigger} <name> opens a channel, DM or person"),
+                ),
+                (
+                    "Search".to_string(),
+                    format!("{trigger} search <words>"),
+                ),
+                ("People".to_string(), format!("{trigger} people <name>")),
+                ("Unread".to_string(), format!("{trigger} unread")),
+                (
+                    "Status".to_string(),
+                    format!("{trigger} status <text> [:emoji:] [30m|2h|today]"),
+                ),
+                (
+                    "Ctrl+Enter".to_string(),
+                    "Open in the other app (browser or desktop), or mark an unread conversation read".to_string(),
+                ),
+            ],
+        );
     }
 
     if addons.devtools.enabled && keyword == addons.devtools.trigger() {

@@ -576,6 +576,7 @@ pub(super) struct LauncherApp {
     pub emoji: EmojiState,
     pub command_list: super::command_list::CommandListState,
     pub vault: super::vault::VaultState,
+    pub slack: super::slack_mode::SlackState,
     pub devtools: DevtoolsState,
     pub clipboard: ClipboardState,
     pub fallbacks: Vec<ResolvedFallback>,

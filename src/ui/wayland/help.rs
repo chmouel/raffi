@@ -227,6 +227,20 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         });
     }
 
+    if addons.slack.enabled {
+        let trigger = addons.slack.trigger();
+        entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
+            trigger: trigger.to_string(),
+            title: "Slack".to_string(),
+            usage: format!(
+                "{trigger} <name>, {trigger} search <words>, {trigger} people <name>, {trigger} unread, {trigger} status <text>"
+            ),
+            icon: Some(super::slack::SLACK_ICON.to_string()),
+            completion: Some(format!("{trigger} ")),
+        });
+    }
+
     if addons.devtools.enabled {
         let trigger = addons.devtools.trigger();
         entries.push(HelpEntry {

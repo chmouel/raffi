@@ -28,6 +28,9 @@ mod preview;
 mod recent;
 mod script_filters;
 mod secret_io;
+mod slack;
+mod slack_api;
+mod slack_mode;
 mod snippets;
 mod state;
 mod support;
@@ -55,6 +58,7 @@ use std::sync::{Arc, Mutex};
 use super::{UISettings, UI};
 use crate::{AddonsConfig, RaffiConfig};
 
+pub(crate) use self::slack_api::clear_cache as clear_slack_cache;
 use self::state::{LauncherApp, SharedSelection};
 use self::theme::ThemeColors;
 pub(crate) use self::thumbnails::DIR_NAME as THUMBNAIL_DIR_NAME;

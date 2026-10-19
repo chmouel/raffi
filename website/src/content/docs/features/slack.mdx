@@ -1,0 +1,218 @@
+---
+title: Slack
+description: Open Slack conversations, search messages, read unread ones and set your status
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Type `slack ` (with the trailing space) to list your Slack channels, group
+conversations and the people of your workspace, under a few actions: unread
+messages, message search, status, presence and notification snooze. Words
+after the keyword filter the list. Conversations and people you open often
+come first.
+
+<Aside type="note">
+The Slack addon is only available in native mode, works with one workspace,
+and is off by default: it needs a Slack token, read from a command you
+choose. Raffi does not send messages.
+</Aside>
+
+| Key        | Action                                                    |
+|------------|-----------------------------------------------------------|
+| Enter      | Open the conversation, person or message                  |
+| Ctrl+Enter | Open it in the other app (browser or desktop)             |
+| Ctrl+P     | Show the preview pane                                     |
+
+Opening a person opens your direct conversation with them, or their
+profile when you have none. Raffi opens
+links in the Slack desktop app by default (`slack://` links); set
+`open_in: browser` to open `app.slack.com` instead.
+
+Compositors such as Hyprland don't let Slack bring its own window to the
+front, so on Hyprland, niri and sway raffi focuses the Slack window itself
+after opening the link. If Slack isn't running yet, raffi waits a few
+seconds for its window.
+
+## Getting a token
+
+Raffi reads the token from `token_command` every time it starts the Slack
+list, so the token can live in a password manager. Two kinds of token work.
+
+### A user token from your own Slack app
+
+This is the token Slack supports for this. Some workspaces only let admins
+install apps, or ask an admin to approve them; if you cannot, use a
+browser session token instead.
+
+1. Open [api.slack.com/apps](https://api.slack.com/apps), choose
+   Create New App, then From an app manifest, and pick your workspace.
+2. Paste this manifest:
+
+   ```yaml
+   display_information:
+     name: Raffi
+   oauth_config:
+     scopes:
+       user:
+         - channels:history
+         - channels:read
+         - channels:write
+         - dnd:read
+         - dnd:write
+         - groups:history
+         - groups:read
+         - groups:write
+         - im:history
+         - im:read
+         - im:write
+         - mpim:history
+         - mpim:read
+         - mpim:write
+         - search:read
+         - users.profile:read
+         - users.profile:write
+         - users:read
+         - users:write
+   settings:
+     org_deploy_enabled: false
+     socket_mode_enabled: false
+     token_rotation_enabled: false
+   ```
+
+3. Install the app to the workspace, then copy the User OAuth Token
+   (`xoxp-...`) from OAuth & Permissions, and store it:
+
+   ```sh
+   pass insert slack/token
+   ```
+
+### A browser session token
+
+Without an app, Raffi can use the session of a browser where you are logged
+in to Slack: an `xoxc-` token plus the `d` cookie that goes with it.
+
+1. Open your workspace at `https://app.slack.com` and open the browser
+   developer tools.
+2. In the console, print the token of the open workspace:
+
+   ```js
+   JSON.parse(localStorage.localConfig_v2).teams[location.pathname.split('/')[2]].token
+   ```
+
+3. In the storage tab (Application in Chrome, Storage in Firefox), copy
+   the value of the `d` cookie of `https://app.slack.com`. It starts with
+   `xoxd-`. Paste it as it is, still URL encoded.
+4. Store both, for instance with `pass insert slack/token` and
+   `pass insert slack/cookie`, and set `cookie_command`.
+
+<Aside type="caution">
+Slack does not document session tokens for this use. Logging out of
+Slack in that browser ends the session and the token stops working, and
+your workspace may forbid using the session outside the browser. When
+Slack refuses the token, Raffi shows that instead of the cached list: log
+in again, copy the new token and `d` cookie into your password store, and
+the next `slack` query picks them up.
+</Aside>
+
+## Configuration
+
+```yaml
+addons:
+  slack:
+    enabled: true
+    token_command: "pass show slack/token"
+    cookie_command: "pass show slack/cookie"   # session tokens only
+    open_in: desktop                            # or browser
+```
+
+See the [addon reference](../../reference/addon-configuration/#slack) for
+every field.
+
+## Status, presence and snooze
+
+The action rows show your current status, presence and snooze. Set status
+fills in `slack status `; type the status after it:
+
+```text
+slack status Lunch :pizza: 1h
+slack status In a meeting 30m
+slack status Away :palm_tree: today
+```
+
+The first `:emoji:` becomes the status emoji. A duration at the end
+(`30m`, `2h`, `1h30m`, `1d`) or `today` clears the status after that time
+or at midnight; a bare number such as `room 42` stays in the text. Clear
+status removes it.
+
+Snooze rows pause notifications for 30 minutes, 1 hour, 2 hours or until
+9:00 tomorrow, and `slack snooze 45m` for any other duration. Resume
+notifications ends the snooze. Raffi stays open after these actions and
+updates the rows.
+
+## Search
+
+`slack search <words>` searches your messages once you stop typing. The
+words use Slack's search syntax, so `in:#ops from:@alice deploy` works.
+Replies show a Thread pill. Enter opens the message in its conversation.
+
+## People
+
+`slack people <name>` finds people by name once you stop typing, the ones
+you have a conversation with first. Enter opens your direct conversation
+with them, or their profile.
+
+## Enterprise Grid
+
+An Enterprise Grid organization can have tens of thousands of people, so
+the list holds your channels, your conversations and the people you talk
+to. Use `slack people <name>` to find anyone else in the organization.
+That needs a browser session token. With a user token it only finds the
+people of your conversations, and Slack may refuse to list the
+conversations of the organization at all.
+
+## Unread messages
+
+`slack unread` lists the conversations with unread messages, newest first,
+with your mentions there or the number of unread messages. Enter opens the
+conversation and Ctrl+Enter marks it read.
+
+With a browser session token Slack says which conversations have unread
+messages. With a user token it does not, so list the conversations to
+check, up to 30:
+
+```yaml
+addons:
+  slack:
+    unread_conversations: ["#ops", "#releases", "@alice"]
+```
+
+## Previews
+
+With the preview pane open (Ctrl+P), the selected row shows:
+
+| Row               | Preview                                              |
+|-------------------|------------------------------------------------------|
+| Channel or group  | The latest messages                                  |
+| Person            | Their avatar and your latest direct messages         |
+| Search result     | The messages around it, or its thread up to it       |
+| Unread            | The unread messages                                  |
+
+Previews load after a short pause on a row. Errors, such as a missing
+scope, show in the pane.
+
+## Caching and privacy
+
+The list of conversations and people is kept in
+`~/.cache/raffi/slack/directory.json` and refreshed in the background
+after an hour, or right away with the Reload conversations and people row.
+Avatars are kept in `~/.cache/raffi/slack/avatars/`, and how often you
+open each conversation in `~/.cache/raffi/slack/usage.cache`.
+`raffi --refresh-cache` removes the list and the avatars. Raffi never writes the token or the
+cookie to disk and keeps them in memory only while it runs; message text
+is never cached.
+
+To open the list from a key binding, pass the keyword as the initial query:
+
+```sh
+raffi -u native -i "slack "
+```

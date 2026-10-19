@@ -96,6 +96,9 @@
             "$ref": "#/$defs/ScriptFilterConfig"
           }
         },
+        "slack": {
+          "$ref": "#/$defs/SlackAddonConfig"
+        },
         "system": {
           "$ref": "#/$defs/SystemAddonConfig"
         },
@@ -1162,6 +1165,69 @@
         "name",
         "command",
         "keyword"
+      ]
+    },
+    "SlackAddonConfig": {
+      "description": "Configuration for the Slack addon (native UI only)",
+      "type": "object",
+      "properties": {
+        "cookie_command": {
+          "description": "Shell command printing the value of the `d` cookie, needed with a\nsession (`xoxc-`) token.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "enabled": {
+          "description": "Off by default: the addon needs a Slack token.",
+          "type": "boolean",
+          "default": false
+        },
+        "open_in": {
+          "description": "Open conversations in the desktop app or in the browser (default:\ndesktop). Ctrl+Enter uses the other one.",
+          "$ref": "#/$defs/SlackOpenIn"
+        },
+        "token_command": {
+          "description": "Shell command printing the Slack token: a user token (`xoxp-`) from\nyour own Slack app, or the session token (`xoxc-`) of a logged-in\nbrowser tab.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "trigger": {
+          "description": "Keyword that opens the Slack list (default: `slack`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "unread_conversations": {
+          "description": "Conversations to check for unread messages (`#channel`, `@user` or\nan id), up to 30, used when Slack does not report unread\nconversations for the token, as with `xoxp-` tokens.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SlackOpenIn": {
+      "description": "Where the Slack addon opens conversations",
+      "oneOf": [
+        {
+          "description": "The Slack desktop app, through `slack://` links",
+          "type": "string",
+          "const": "desktop"
+        },
+        {
+          "description": "The browser, through `https://app.slack.com` links",
+          "type": "string",
+          "const": "browser"
+        }
       ]
     },
     "SortMode": {

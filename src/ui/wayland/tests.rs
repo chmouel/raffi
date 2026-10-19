@@ -7963,3 +7963,94 @@ fn test_ctrl_tab_completes_where_the_main_view_does_not_show() {
     let _ = app.update(Message::MainViewCycle(false));
     assert_eq!(app.main_view.focus, None, "keyword modes keep their list");
 }
+
+#[test]
+fn test_route_query_slack_needs_enabling() {
+    let mut addons = AddonsConfig::default();
+    assert_eq!(route_query("slack general", &addons), QueryMode::Standard);
+
+    addons.slack.enabled = true;
+    assert_eq!(
+        route_query("slack general", &addons),
+        QueryMode::CommandList {
+            addon: CommandListAddon::Slack,
+            query: "general".into()
+        }
+    );
+    assert_eq!(keyword_suggestions("sla", &addons)[0].keyword, "slack");
+
+    addons.slack.trigger = Some("sl".into());
+    assert_eq!(
+        route_query("sl search deploy", &addons),
+        QueryMode::CommandList {
+            addon: CommandListAddon::Slack,
+            query: "search deploy".into()
+        }
+    );
+}
+
+#[test]
+fn test_slack_load_without_token_command_explains_setup() {
+    let error = super::slack::load_home(crate::SlackAddonConfig {
+        enabled: true,
+        ..Default::default()
+    })
+    .unwrap_err();
+    assert!(error.contains("addons.slack.token_command"), "{error}");
+}
+
+#[test]
+fn test_slack_status_fill_and_debounced_search() {
+    let mut addons = AddonsConfig::default();
+    addons.slack.enabled = true;
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+
+    let task = app.update(Message::SearchChanged("slack ".into()));
+    assert!(task.units() > 0, "the home list loads");
+    assert_eq!(app.command_list.status(), Some("Loading Slack..."));
+    let rows = super::slack::home_rows(
+        &super::slack_api::Directory::default(),
+        &super::slack::Live::default(),
+        crate::SlackOpenIn::Desktop,
+        &std::collections::HashMap::new(),
+        chrono::Local::now(),
+    );
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(rows)));
+
+    // Picking "Set status" puts `status ` after the keyword.
+    let _ = app.update(Message::SearchChanged("slack set status".into()));
+    assert_eq!(command_list_titles(&app)[0], "Set status");
+    let _ = app.update(Message::Submit);
+    assert_eq!(app.search_query, "slack status ");
+    assert!(deferred_action(&app).is_none());
+    assert_eq!(command_list_titles(&app)[0], "Type the status to set");
+    assert_eq!(
+        app.command_list.generation, generation,
+        "home is not reloaded"
+    );
+
+    let _ = app.update(Message::SearchChanged(
+        "slack status Lunch :pizza: 1h".into(),
+    ));
+    assert_eq!(command_list_titles(&app)[0], "Set status to :pizza: Lunch");
+
+    // A search waits for two characters, then for the typing to settle.
+    let _ = app.update(Message::SearchChanged("slack search d".into()));
+    assert_eq!(
+        command_list_titles(&app),
+        vec!["Type the words to search for"]
+    );
+    let task = app.update(Message::SearchChanged("slack search deploy".into()));
+    assert!(task.units() > 0, "the search is scheduled");
+    let generation = app.command_list.generation;
+    let session = app.command_list.session;
+    let _ = app.update(Message::SlackSearchDue(session, "dep".into()));
+    assert_eq!(
+        app.command_list.generation, generation,
+        "stale terms are ignored"
+    );
+    let _ = app.update(Message::SlackSearchDue(session, "deploy".into()));
+    assert_ne!(app.command_list.generation, generation, "the search runs");
+}

@@ -659,6 +659,15 @@ pub(super) fn route_query(query: &str, addons: &AddonsConfig) -> QueryMode {
         }
     }
 
+    if addons.slack.enabled {
+        if let Some(query) = extract_keyword_query(input, addons.slack.trigger()) {
+            return QueryMode::CommandList {
+                addon: CommandListAddon::Slack,
+                query,
+            };
+        }
+    }
+
     if addons.devtools.enabled {
         if let Some(payload) = extract_raw_keyword_payload(input, addons.devtools.trigger()) {
             return QueryMode::Devtools { payload };
@@ -826,6 +835,14 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
             keyword: addons.bitwarden.trigger().to_string(),
             subtitle: "Copy or type passwords from Bitwarden".to_string(),
             icon: Some(BITWARDEN_ICON.to_string()),
+        });
+    }
+
+    if addons.slack.enabled && matches(addons.slack.trigger()) {
+        suggestions.push(KeywordSuggestion {
+            keyword: addons.slack.trigger().to_string(),
+            subtitle: "Open Slack conversations, search messages or set your status".to_string(),
+            icon: Some(super::slack::SLACK_ICON.to_string()),
         });
     }
 
@@ -998,6 +1015,7 @@ impl LauncherApp {
                     vault
                 },
                 devtools: DevtoolsState::default(),
+                slack: Default::default(),
                 clipboard: ClipboardState::default(),
                 fallbacks,
                 main_view: Default::default(),
@@ -1228,6 +1246,9 @@ impl LauncherApp {
 
     /// Look up the page preview of the selected browser tab, one at a time.
     fn ensure_tab_preview(&mut self) -> Task<Message> {
+        if self.view.show_preview && self.command_list.addon == Some(CommandListAddon::Slack) {
+            return self.ensure_slack_preview();
+        }
         let tab = (self.view.show_preview
             && self.command_list.addon == Some(CommandListAddon::BrowserTabs))
         .then(|| {
@@ -1457,6 +1478,10 @@ impl LauncherApp {
                     }
                 }
                 Task::none()
+            }
+            Message::SlackSearchDue(session, terms) => self.handle_slack_search_due(session, terms),
+            Message::SlackPreviewLoaded(session, identity, preview) => {
+                self.handle_slack_preview_loaded(session, identity, preview)
             }
             Message::FaviconsFetched(session, fetched) if session & MAIN_VIEW_SESSION != 0 => {
                 self.handle_main_view_favicons(session, fetched)
@@ -2156,6 +2181,9 @@ impl LauncherApp {
         addon: CommandListAddon,
         query: String,
     ) -> Task<Message> {
+        if addon == CommandListAddon::Slack {
+            return self.handle_slack_query(query);
+        }
         let entered = self.command_list.enter(addon);
         self.command_list.set_query(query);
         match addon {
@@ -2262,6 +2290,8 @@ impl LauncherApp {
                 self.set_command_list_items(Vec::new());
                 Task::none()
             }
+            // Handled above.
+            CommandListAddon::Slack => Task::none(),
             CommandListAddon::Bitwarden if !entered => self.search_vault_notes(),
             CommandListAddon::Pass if !entered => Task::none(),
             CommandListAddon::Pass | CommandListAddon::Bitwarden => {
@@ -2681,7 +2711,7 @@ impl LauncherApp {
 
     /// Run `load` off the UI thread; its result is dropped if the list has
     /// moved on by then. A refresh keeps the current rows until it lands.
-    fn load_command_list(
+    pub(super) fn load_command_list(
         &mut self,
         load: impl FnOnce() -> Result<Vec<super::command_list::CommandItem>, String> + Send + 'static,
         refresh: bool,
@@ -2753,6 +2783,7 @@ impl LauncherApp {
                     self.load_command_list(super::browser_tabs::load_tabs, true)
                 }
                 CommandListAddon::Bluetooth => self.load_bluetooth(true),
+                CommandListAddon::Slack => self.load_slack(true),
                 CommandListAddon::System
                 | CommandListAddon::Windows
                 | CommandListAddon::Pass
@@ -2826,7 +2857,10 @@ impl LauncherApp {
         item.primary.as_ref()?.progress.as_deref()
     }
 
-    fn set_command_list_items(&mut self, mut items: Vec<super::command_list::CommandItem>) {
+    pub(super) fn set_command_list_items(
+        &mut self,
+        mut items: Vec<super::command_list::CommandItem>,
+    ) {
         for item in &mut items {
             item.icon = item
                 .icon_names
@@ -4039,10 +4073,16 @@ impl LauncherApp {
                 Task::none()
             }
             Selection::Run(action, identity, keep_open) => {
+                if let DeferredAction::Slack(super::slack::SlackAction::Fill(text)) = &action {
+                    return self.fill_slack_query(text);
+                }
                 if !self.in_flight.begin(addon.name(), &identity) {
                     return Task::none();
                 }
                 self.record_command_list_pick(addon, &identity);
+                if addon == CommandListAddon::Slack && !keep_open {
+                    self.record_slack_pick(&identity);
+                }
                 if keep_open {
                     crate::debug_log!("{}: running {identity}", addon.name());
                     let session = self.command_list.session;

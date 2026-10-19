@@ -25,6 +25,7 @@ pub(super) enum CommandListAddon {
     Pass,
     Bitwarden,
     Terminal,
+    Slack,
 }
 
 impl CommandListAddon {
@@ -41,6 +42,7 @@ impl CommandListAddon {
             Self::Pass => "pass",
             Self::Bitwarden => "bitwarden",
             Self::Terminal => "terminal",
+            Self::Slack => "slack",
         }
     }
 
@@ -56,6 +58,7 @@ impl CommandListAddon {
             Self::Pass => "Password",
             Self::Bitwarden => "Bitwarden",
             Self::Terminal => "Terminal",
+            Self::Slack => "Slack",
         }
     }
 
@@ -71,6 +74,7 @@ impl CommandListAddon {
             Self::Pass => "Loading password store...",
             Self::Bitwarden => "Loading Bitwarden vault...",
             Self::Terminal => "Loading...",
+            Self::Slack => "Loading Slack...",
         }
     }
 }
@@ -460,6 +464,7 @@ pub(super) fn run_kept_open(action: &DeferredAction) -> Result<(), String> {
         DeferredAction::Signal(target) => return super::kill::send_signal(target),
         DeferredAction::Bluetooth(args) => return super::bluetooth::run_action(args),
         DeferredAction::BrowserTab(action) => return super::browser_tabs::run(action),
+        DeferredAction::Slack(action) => return super::slack::run_action(action),
         DeferredAction::BrowserHostSetup { force } => {
             return crate::browser_host::install_current(*force).map(|_| ())
         }

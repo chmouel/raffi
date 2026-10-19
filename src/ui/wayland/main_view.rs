@@ -763,7 +763,10 @@ impl LauncherApp {
                 let ctx = super::pass::PassContext::new(&self.addons.pass);
                 Box::new(move || super::pass::load_entries(&ctx))
             }
-            CommandListAddon::Kill | CommandListAddon::Bitwarden | CommandListAddon::Terminal => {
+            CommandListAddon::Kill
+            | CommandListAddon::Bitwarden
+            | CommandListAddon::Terminal
+            | CommandListAddon::Slack => {
                 self.update_main_view(|main_view| main_view.loaded_nothing(source));
                 return Task::none();
             }
@@ -1355,7 +1358,8 @@ impl LauncherApp {
                     CommandListAddon::Pass => self.addons.pass.trigger(),
                     CommandListAddon::Kill
                     | CommandListAddon::Bitwarden
-                    | CommandListAddon::Terminal => return Task::none(),
+                    | CommandListAddon::Terminal
+                    | CommandListAddon::Slack => return Task::none(),
                 }
                 .to_string();
                 self.main_view.stale.insert(source);

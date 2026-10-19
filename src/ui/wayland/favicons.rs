@@ -103,7 +103,7 @@ pub(super) fn cached(dir: &Path, host: &str) -> Cached {
 /// The file extension for image `data`, or None for what rows cannot show.
 /// SVG is refused: its renderer reads files the image refers to and decodes
 /// embedded images without limits.
-fn extension(data: &[u8]) -> Option<&'static str> {
+pub(super) fn extension(data: &[u8]) -> Option<&'static str> {
     if data.starts_with(b"\x89PNG") {
         return Some("png");
     }
