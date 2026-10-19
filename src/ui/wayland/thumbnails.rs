@@ -17,7 +17,7 @@ use resvg::usvg::fontdb;
 const SIZE: u32 = 128;
 
 /// Bump when thumbnail output changes so older files are not reused.
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 
 pub(crate) const DIR_NAME: &str = "icon-thumbnails";
 
@@ -132,6 +132,59 @@ fn write_thumbnail(
     std::fs::rename(&partial, thumbnail).map_err(|error| error.to_string())
 }
 
+/// Point generic families such as `sans-serif` at installed fonts. fontdb
+/// takes the first font fontconfig prefers for them even when it is not
+/// installed, and usvg then drops the text.
+fn use_installed_generic_families(database: &mut fontdb::Database) {
+    const SANS: &[&str] = &["DejaVu Sans", "Noto Sans", "Liberation Sans", "Cantarell"];
+    const SERIF: &[&str] = &["DejaVu Serif", "Noto Serif", "Liberation Serif"];
+    const MONO: &[&str] = &["DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono"];
+    let installed = |database: &fontdb::Database, family: fontdb::Family| {
+        database
+            .query(&fontdb::Query {
+                families: &[family],
+                ..Default::default()
+            })
+            .is_some()
+    };
+    let pick = |database: &fontdb::Database, names: &[&str]| -> Option<String> {
+        names
+            .iter()
+            .find(|name| installed(database, fontdb::Family::Name(name)))
+            .map(|name| name.to_string())
+            .or_else(|| {
+                database
+                    .faces()
+                    .find_map(|face| face.families.first().map(|(name, _)| name.clone()))
+            })
+    };
+    type Setter = fn(&mut fontdb::Database, String);
+    let setters: [(fontdb::Family, &[&str], Setter); 5] = [
+        (fontdb::Family::SansSerif, SANS, |db, name| {
+            db.set_sans_serif_family(name)
+        }),
+        (fontdb::Family::Serif, SERIF, |db, name| {
+            db.set_serif_family(name)
+        }),
+        (fontdb::Family::Monospace, MONO, |db, name| {
+            db.set_monospace_family(name)
+        }),
+        (fontdb::Family::Cursive, SANS, |db, name| {
+            db.set_cursive_family(name)
+        }),
+        (fontdb::Family::Fantasy, SANS, |db, name| {
+            db.set_fantasy_family(name)
+        }),
+    ];
+    for (family, names, set) in setters {
+        if !installed(database, family) {
+            if let Some(name) = pick(database, names) {
+                set(database, name);
+            }
+        }
+    }
+}
+
 /// Render an SVG so its longest side is [`SIZE`]. System fonts are loaded
 /// once per batch so SVG text renders as it would in iced.
 fn rasterize_svg(
@@ -145,6 +198,7 @@ fn rasterize_svg(
         .get_or_init(|| {
             let mut database = fontdb::Database::new();
             database.load_system_fonts();
+            use_installed_generic_families(&mut database);
             Arc::new(database)
         })
         .clone();
@@ -236,12 +290,19 @@ mod tests {
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><text x="0" y="56" font-size="64" font-family="sans-serif">W</text></svg>"#,
         )
         .unwrap();
-        let fonts = OnceCell::new();
-        let image = rasterize_svg(&vector, &fonts).unwrap().to_rgba8();
-        std::fs::remove_dir_all(&dir).unwrap();
-        if fonts.get().unwrap().is_empty() {
+        let mut database = fontdb::Database::new();
+        database.load_system_fonts();
+        if database.is_empty() {
+            std::fs::remove_dir_all(&dir).unwrap();
             return;
         }
+        // As when fontconfig prefers fonts that are not installed.
+        database.set_sans_serif_family("Raffi Missing Sans");
+        database.set_serif_family("Raffi Missing Serif");
+        use_installed_generic_families(&mut database);
+        let fonts = OnceCell::from(Arc::new(database));
+        let image = rasterize_svg(&vector, &fonts).unwrap().to_rgba8();
+        std::fs::remove_dir_all(&dir).unwrap();
         assert!(image.pixels().any(|pixel| pixel.0[3] > 0));
     }
 }
