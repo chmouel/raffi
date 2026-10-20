@@ -94,6 +94,7 @@ pub struct UISettings {
     pub clipboard_history: ClipboardHistory,
     pub terminal_classes: Vec<String>,
     pub show_preview: Option<bool>,
+    pub show_tips: bool,
     pub preview: PreviewConfig,
     pub default_script_shell: String,
 }
@@ -119,6 +120,7 @@ impl Default for UISettings {
             clipboard_history: ClipboardHistory::default(),
             terminal_classes: Vec::new(),
             show_preview: None,
+            show_tips: true,
             preview: PreviewConfig::default(),
             default_script_shell: "bash".to_string(),
         }

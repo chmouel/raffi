@@ -72,6 +72,10 @@ Controls the Alfred-style right-hand preview and details pane in the native UI.
 
   Addon results (text snippets, file browser, script filters, emoji, calculator, currency, web searches) always show a preview. Plain launcher entries only show one when this is `true`, or when the entry itself sets `show_preview: true`. Press **Ctrl+P** to toggle the pane at runtime; when nothing is shown for a launcher, the first press turns launcher previews on.
 
+**`show_tips`** `boolean` (default: `true`)
+
+Shows a tip in the empty search box of the native UI, such as `Type to search... (tip: clip for Clipboard history)`, picked from your enabled addons and changed on each launch. Set it to `false` to keep the plain `Type to search...`.
+
 
 ## Preview Pane
 
@@ -221,7 +225,7 @@ Accepted entries:
   - `browser_tabs`, `windows`, `system`, `media`, `audio`, `bluetooth`, `pass`
   - `text_snippets.<name>` and `script_filters.<name>`, where `<name>` is the source's `name` field. The `addons.<type>."<name>"` form used by `fallbacks` works too.
 
-When `main_view` is unset, the main list shows launchers only, as before. When it is set, only the listed sources appear, so keep `launchers` in the list if you still want your launchers.
+When `main_view` is unset, the main list shows launchers only, as before. The exception is a first run with no config file at all: Raffi then uses `launchers`, `windows`, `browser_tabs`, `system` and `media`, and each of them stays hidden when its compositor or tool is missing. Any config file, even an empty one, turns this off. When it is set, only the listed sources appear, so keep `launchers` in the list if you still want your launchers.
 
 Results are grouped by source in the order you list them, and each addon row carries a small badge naming where it comes from. Each addon adds at most 5 rows, ranked the same way as in its own mode, except that an addon row only shows when every word you typed appears in it, so typing `brave` does not bring up a tab whose title merely has those letters scattered through it. A tab for the site a pasted URL names, and a snippet whose keyword starts with your query, still show. Script filters do their own matching and are left alone.
 

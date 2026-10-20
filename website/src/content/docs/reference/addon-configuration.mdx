@@ -34,8 +34,16 @@ addons:
 The file browser (`/`, `~/`) and the currency converter (`$`) are prefix
 triggers rather than keywords, and are not affected.
 
-Press **Ctrl+/** in the native UI to open help, with addon keywords and actions
-in one section and keyboard shortcuts in another. Typing filters both sections.
+You can also type what you are looking for instead of the keyword. Typing a
+whole word such as `volume`, `password`, `clipboard`, `lock` or `files` lists
+the addon that handles it, here `audio`, `pass`/`bw`, `clip`, `sys` and `~/`.
+These words only match in full, so they never get in the way while you type a
+longer launcher name. When a query matches nothing at all, Raffi lists the
+keywords whose help text mentions it instead, so `switcher` offers the window
+switcher. If no help text matches either, the empty list points at **Ctrl+/**.
+
+Press **Ctrl+/**, or type `?` on its own, in the native UI to open help, with
+addon keywords and actions in one section and keyboard shortcuts in another. Typing filters both sections.
 Opening help temporarily clears the current query; Escape or **Ctrl+/** restores
 it. Enter or Tab on a keyword row applies its completion.
 

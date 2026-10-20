@@ -1,4 +1,5 @@
 use super::preview::describe_file_action;
+use super::state::KeywordSuggestion;
 use crate::AddonsConfig;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -532,4 +533,65 @@ pub(super) fn filter_help_entries(entries: &[HelpEntry], query: &str) -> Vec<usi
         })
         .map(|(index, _)| index)
         .collect()
+}
+
+/// Most help rows offered in the main list when nothing else matches.
+const MAX_HELP_SUGGESTIONS: usize = 5;
+
+/// Keyword rows built from the help entries matching `query`, offered when
+/// the query matches nothing else so a feature can be found by what it does.
+/// Only rows that arm a keyword are kept.
+pub(super) fn help_suggestions(entries: &[HelpEntry], query: &str) -> Vec<KeywordSuggestion> {
+    let mut suggestions: Vec<KeywordSuggestion> = Vec::new();
+    for index in filter_help_entries(entries, query) {
+        let entry = &entries[index];
+        let Some(completion) = entry.completion.as_deref() else {
+            continue;
+        };
+        if entry.section != HelpSection::KeywordsAndActions {
+            continue;
+        }
+        let keyword = completion.trim_end().to_string();
+        if suggestions.iter().any(|known| known.keyword == keyword) {
+            continue;
+        }
+        suggestions.push(KeywordSuggestion {
+            keyword,
+            subtitle: entry.title.clone(),
+            icon: entry.icon.clone(),
+        });
+        if suggestions.len() == MAX_HELP_SUGGESTIONS {
+            break;
+        }
+    }
+    suggestions
+}
+
+pub(super) const DEFAULT_PLACEHOLDER: &str = "Type to search...";
+
+/// Search box tips naming a keyword and what it opens, built from the help
+/// rows so only enabled addons are advertised.
+pub(super) fn search_tips(
+    entries: &[HelpEntry],
+    addons: &AddonsConfig,
+    question_mark: bool,
+) -> Vec<String> {
+    let tip =
+        |keyword: &str, what: &str| format!("{DEFAULT_PLACEHOLDER} (tip: {keyword} for {what})");
+    let mut tips = Vec::new();
+    if question_mark {
+        tips.push(tip("?", "all keywords"));
+    }
+    if addons.calculator.enabled {
+        tips.push(tip("2+2", "Calculator"));
+    }
+    for entry in entries {
+        if entry.section != HelpSection::KeywordsAndActions {
+            continue;
+        }
+        if let Some(completion) = entry.completion.as_deref() {
+            tips.push(tip(completion.trim_end(), &entry.title));
+        }
+    }
+    tips
 }

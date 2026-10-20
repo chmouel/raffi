@@ -372,6 +372,8 @@ pub(super) struct ViewState {
     /// Live window size, updated on resize events, used to size image previews.
     pub window_size: iced::Size,
     pub default_script_shell: String,
+    /// Text shown in the empty search box.
+    pub placeholder: String,
 }
 
 impl ViewState {
@@ -391,6 +393,7 @@ impl ViewState {
             show_preview: true,
             show_launcher_preview: false,
             default_script_shell: "bash".to_string(),
+            placeholder: super::help::DEFAULT_PLACEHOLDER.to_string(),
         }
     }
 

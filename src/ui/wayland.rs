@@ -171,6 +171,7 @@ fn run_wayland_ui(
     let main_view = settings.main_view.clone();
     let clipboard_history = settings.clipboard_history;
     let show_preview = settings.show_preview;
+    let show_tips = settings.show_tips;
     let select_1 = settings.select_1;
     let preview_style = theme::PreviewStyle::resolve(
         &theme_colors,
@@ -229,6 +230,9 @@ fn run_wayland_ui(
             app.hyprland = hyprland.clone();
             app.deferred_action = deferred_action_for_new.clone();
             let preload = app.configure_main_view(main_view.as_deref());
+            if show_tips {
+                app.show_search_tip();
+            }
             (app, Task::batch([task, preload]))
         },
         LauncherApp::update,

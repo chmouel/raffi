@@ -729,6 +729,14 @@
           ],
           "default": null
         },
+        "show_tips": {
+          "description": "Show a tip about a keyword in the empty search box, such as\n`clip for Clipboard history` (native UI only, default: true).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
         "sort_mode": {
           "$ref": "#/$defs/SortMode"
         },

@@ -262,11 +262,16 @@ Integrate Raffi with your Wayland compositor:
 
 ### Keyword Help
 
-Press **Ctrl+/** to open help, with addon keywords and actions in one section and
-keyboard shortcuts in another. Typing filters both sections. Opening help
+Press **Ctrl+/**, or type `?` on its own, to open help, with addon keywords and
+actions in one section and keyboard shortcuts in another. Typing filters both sections. Opening help
 temporarily clears any existing search query so all entries are visible;
 Escape or **Ctrl+/** restores the query. Press Enter or Tab on a keyword row to
 use its completion instead.
+
+You do not need to know the keywords up front. The empty search box shows a
+tip such as `clip for Clipboard history`, a different one each time. Typing a word
+like `volume`, `password` or `lock` suggests the addon that handles it, and a
+query that matches nothing lists the keywords whose help mentions it.
 
 <Image src={keywordSuggestionScreenshot} alt="Keyword suggestion row while typing a trigger" width={800} />
 

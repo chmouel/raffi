@@ -25,6 +25,7 @@ version: 1
 #   show_preview: true       # Right-hand preview pane. Addons (snippets, files, script filters...)
 #                            # preview automatically; plain launchers only when this is true or the
 #                            # launcher sets show_preview: true. Toggle at runtime with Ctrl+P.
+#   show_tips: true          # Keyword tip in the empty search box, e.g. "clip for Clipboard history"
 #   preview:                 # Appearance of the preview pane
 #     font_size: 16          # Base preview text size in px (default: 16)
 #     font_family: "Inter"   # Font for the pane (default: the UI font)
@@ -46,7 +47,8 @@ version: 1
 #     - addons.web_searches."DuckDuckGo"       # Opens DuckDuckGo search with the current query
 #     - addons.script_filters."Search Google"  # Switches to the script filter mode
 #     - addons.terminal                        # Runs the query in a terminal
-#   main_view:               # Mix addon results into the main list (native UI only); Ctrl+Tab shows one source at a time
+#   main_view:               # Mix addon results into the main list (native UI only); Ctrl+Tab shows one source at a time.
+#                            # With no config file at all, raffi uses launchers, windows, browser_tabs, system, media.
 #     - launchers            # Keep launchers; once main_view is set they only show if listed
 #     - browser_tabs         # Typing "gmail" lists matching tabs, up to 5 per addon;
 #                            # with no query, your 5 latest addon picks are listed;
@@ -75,10 +77,12 @@ addons:
   # matching keywords at the top of the results; Enter or Tab on one of those
   # rows completes the input for you. Suggestions start after
   # keyword_min_chars characters (default 3), or as soon as a keyword is typed
-  # in full.
+  # in full. Whole words such as "volume", "password" or "lock" suggest the
+  # addon that handles them, and a query matching nothing lists the keywords
+  # whose help mentions it.
   # keyword_min_chars: 3
   #
-  # Press Ctrl+/ in the native UI to see addon keywords/actions and keyboard
+  # Press Ctrl+/ (or type ? alone) in the native UI to see addon keywords/actions and keyboard
   # shortcuts in separate sections. Typing filters both; opening help clears
   # the current query temporarily, and Escape restores it. Enter or Tab on a
   # keyword row applies its completion.

@@ -2218,15 +2218,16 @@ impl LauncherApp {
             && !has_keyword_suggestions
             && main_view_before + main_view_after == 0
         {
-            let no_results = container(
-                text("No matching results found.")
-                    .size(fs.subtitle)
-                    .color(t.text_muted),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(iced::Alignment::Center)
-            .align_y(iced::Alignment::Center);
+            let message = if matches!(self.query_class.mode, super::app::QueryMode::Standard) {
+                "No matching results found. Ctrl+/ lists every keyword."
+            } else {
+                "No matching results found."
+            };
+            let no_results = container(text(message).size(fs.subtitle).color(t.text_muted))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::Alignment::Center)
+                .align_y(iced::Alignment::Center);
             items_column = items_column.push(no_results);
         } else {
             for (idx, &config_idx) in self.filtered_configs.iter().enumerate() {
@@ -2343,9 +2344,14 @@ impl LauncherApp {
         }
 
         let sep = span("  ·  ").size(fs.hint).color(t.border);
-        let mut hint_spans: Vec<HintSpan<'_>> = Vec::new();
+        // Keywords come first so a narrow window never cuts this hint off.
+        let mut hint_spans: Vec<HintSpan<'_>> = vec![
+            span("Ctrl+/").size(fs.hint).color(t.accent),
+            span(" keywords").size(fs.hint).color(t.text_muted),
+        ];
 
         if self.main_view.active && !self.main_view.stops.is_empty() {
+            hint_spans.push(sep.clone());
             hint_spans.push(span("Ctrl+Tab").size(fs.hint).color(t.accent));
             hint_spans.push(
                 span(format!(" {}", self.main_view_focus_label()))
@@ -2474,9 +2480,6 @@ impl LauncherApp {
         }
         hint_spans.push(span("Ctrl+P").size(fs.hint).color(t.accent));
         hint_spans.push(span(" preview").size(fs.hint).color(t.text_muted));
-        hint_spans.push(sep.clone());
-        hint_spans.push(span("Ctrl+/").size(fs.hint).color(t.accent));
-        hint_spans.push(span(" keywords").size(fs.hint).color(t.text_muted));
 
         if self.file_browser.dragging {
             hint_spans.clear();
@@ -2487,7 +2490,7 @@ impl LauncherApp {
             );
         }
 
-        self.shell("Type to search...", hint_spans, items_column)
+        self.shell(&self.view.placeholder, hint_spans, items_column)
     }
 
     pub(super) fn subscription(&self) -> iced::Subscription<Message> {

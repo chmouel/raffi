@@ -108,6 +108,23 @@ pub(super) fn resolve(entries: &[String], addons: &AddonsConfig) -> Vec<Entry> {
     resolved
 }
 
+/// Keyword of a command list addon that can be a main view source.
+pub(super) fn list_trigger(addon: CommandListAddon, addons: &AddonsConfig) -> Option<&str> {
+    Some(match addon {
+        CommandListAddon::System => addons.system.trigger(),
+        CommandListAddon::Windows => addons.windows.trigger(),
+        CommandListAddon::BrowserTabs => addons.browser_tabs.trigger(),
+        CommandListAddon::Media => addons.media.trigger(),
+        CommandListAddon::Audio => addons.audio.trigger(),
+        CommandListAddon::Bluetooth => addons.bluetooth.trigger(),
+        CommandListAddon::Pass => addons.pass.trigger(),
+        CommandListAddon::Kill
+        | CommandListAddon::Bitwarden
+        | CommandListAddon::Terminal
+        | CommandListAddon::Slack => return None,
+    })
+}
+
 /// The `main_view` name a command list addon's picks are kept under, for
 /// the addons whose picks come back on an empty query.
 pub(super) fn recent_list_name(addon: CommandListAddon) -> Option<&'static str> {
@@ -1095,6 +1112,28 @@ impl LauncherApp {
         Task::batch(tasks)
     }
 
+    /// Drop the keyword rows offered for what an addon does when its own
+    /// rows already show here, as "reboot" lists the Reboot system row.
+    pub(super) fn drop_suggestions_listed_in_main_view(&mut self, query: &str) {
+        let input = query.trim().to_lowercase();
+        let listed: Vec<&str> = (0..self.main_view.sources.len())
+            .filter(|&source| self.main_view.source_rows(source) > 0)
+            .filter_map(|source| match &self.main_view.sources[source] {
+                Source::List(list) => list
+                    .addon
+                    .and_then(|addon| list_trigger(addon, &self.addons)),
+                _ => None,
+            })
+            .collect();
+        if listed.is_empty() {
+            return;
+        }
+        self.keyword_suggestions.retain(|suggestion| {
+            suggestion.keyword.to_lowercase().starts_with(&input)
+                || !listed.contains(&suggestion.keyword.as_str())
+        });
+    }
+
     /// Run a script filter source for `query` once typing pauses. Earlier
     /// results stay listed until the new ones arrive.
     fn run_main_view_script_filter(&mut self, source: usize, query: String) -> Task<Message> {
@@ -1348,20 +1387,10 @@ impl LauncherApp {
                 let items = list.items.clone();
                 let usage = list.usage.clone();
                 let previews = list.previews.clone();
-                let trigger = match addon {
-                    CommandListAddon::System => self.addons.system.trigger(),
-                    CommandListAddon::Windows => self.addons.windows.trigger(),
-                    CommandListAddon::BrowserTabs => self.addons.browser_tabs.trigger(),
-                    CommandListAddon::Media => self.addons.media.trigger(),
-                    CommandListAddon::Audio => self.addons.audio.trigger(),
-                    CommandListAddon::Bluetooth => self.addons.bluetooth.trigger(),
-                    CommandListAddon::Pass => self.addons.pass.trigger(),
-                    CommandListAddon::Kill
-                    | CommandListAddon::Bitwarden
-                    | CommandListAddon::Terminal
-                    | CommandListAddon::Slack => return Task::none(),
-                }
-                .to_string();
+                let Some(trigger) = list_trigger(addon, &self.addons) else {
+                    return Task::none();
+                };
+                let trigger = trigger.to_string();
                 self.main_view.stale.insert(source);
                 self.command_list.enter(addon);
                 if addon == CommandListAddon::Audio {

@@ -26,7 +26,9 @@ use super::emoji::{
     download_and_load_emoji_data, emoji_fallback_entries, filter_emoji_into,
     load_emoji_data_from_disk, resolve_emoji_file_names,
 };
-use super::help::{add_main_view_shortcut, filter_help_entries, help_entries};
+use super::help::{
+    add_main_view_shortcut, filter_help_entries, help_entries, help_suggestions, search_tips,
+};
 use super::main_view::{Block, Focus, Source, MAIN_VIEW_SESSION};
 use super::pass::PassContext;
 use super::preview::image_mime_type;
@@ -729,6 +731,9 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
         let keyword = keyword.to_lowercase();
         keyword == input_lower || (long_enough && keyword.starts_with(&input_lower))
     };
+    // Feature words such as "volume" for the audio addon, matched whole so
+    // they do not push launchers down while a longer name is being typed.
+    let intent = |words: &[&str]| words.iter().any(|word| *word == input_lower);
 
     let mut suggestions = Vec::new();
 
@@ -764,7 +769,7 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
 
     if addons.emoji.enabled {
         let trigger = addons.emoji.trigger.as_deref().unwrap_or("emoji");
-        if matches(trigger) {
+        if matches(trigger) || intent(&["emoji", "emojis", "smiley", "symbol", "icon", "icons"]) {
             suggestions.push(KeywordSuggestion {
                 keyword: trigger.to_string(),
                 subtitle: "Browse emoji and icons".to_string(),
@@ -773,7 +778,10 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
         }
     }
 
-    if addons.clipboard.enabled && matches(addons.clipboard.trigger()) {
+    if addons.clipboard.enabled
+        && (matches(addons.clipboard.trigger())
+            || intent(&["clipboard", "copy", "paste", "copied"]))
+    {
         suggestions.push(KeywordSuggestion {
             keyword: addons.clipboard.trigger().to_string(),
             subtitle: "Browse clipboard history".to_string(),
@@ -798,7 +806,28 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
         }
     }
 
-    if addons.system.enabled && matches(addons.system.trigger()) {
+    if addons.file_browser.enabled && intent(&["file", "files", "folder", "folders", "directory"]) {
+        suggestions.push(KeywordSuggestion {
+            keyword: "~/".to_string(),
+            subtitle: "Browse files, or type a path such as /etc/".to_string(),
+            icon: None,
+        });
+    }
+
+    if addons.system.enabled
+        && (matches(addons.system.trigger())
+            || intent(&[
+                "lock",
+                "logout",
+                "suspend",
+                "sleep",
+                "hibernate",
+                "reboot",
+                "shutdown",
+                "poweroff",
+                "power",
+            ]))
+    {
         suggestions.push(KeywordSuggestion {
             keyword: addons.system.trigger().to_string(),
             subtitle: "Lock, suspend, hibernate, log out, reboot or shut down".to_string(),
@@ -806,7 +835,9 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
         });
     }
 
-    if addons.windows.enabled && matches(addons.windows.trigger()) {
+    if addons.windows.enabled
+        && (matches(addons.windows.trigger()) || intent(&["window", "windows"]))
+    {
         suggestions.push(KeywordSuggestion {
             keyword: addons.windows.trigger().to_string(),
             subtitle: "Switch to an open window".to_string(),
@@ -814,7 +845,9 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
         });
     }
 
-    if addons.browser_tabs.enabled && matches(addons.browser_tabs.trigger()) {
+    if addons.browser_tabs.enabled
+        && (matches(addons.browser_tabs.trigger()) || intent(&["tab", "tabs", "browser"]))
+    {
         suggestions.push(KeywordSuggestion {
             keyword: addons.browser_tabs.trigger().to_string(),
             subtitle: "Switch to or close a browser tab".to_string(),
@@ -822,7 +855,10 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
         });
     }
 
-    if addons.media.enabled && matches(addons.media.trigger()) {
+    if addons.media.enabled
+        && (matches(addons.media.trigger())
+            || intent(&["music", "play", "pause", "player", "song", "track"]))
+    {
         suggestions.push(KeywordSuggestion {
             keyword: addons.media.trigger().to_string(),
             subtitle: "Play, pause or skip in media players".to_string(),
@@ -830,7 +866,19 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
         });
     }
 
-    if addons.audio.enabled && matches(addons.audio.trigger()) {
+    if addons.audio.enabled
+        && (matches(addons.audio.trigger())
+            || intent(&[
+                "volume",
+                "sound",
+                "mute",
+                "unmute",
+                "speaker",
+                "speakers",
+                "microphone",
+                "mic",
+            ]))
+    {
         suggestions.push(KeywordSuggestion {
             keyword: addons.audio.trigger().to_string(),
             subtitle: "Switch or mute audio outputs and inputs".to_string(),
@@ -838,7 +886,8 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
         });
     }
 
-    if addons.kill.enabled && matches(addons.kill.trigger()) {
+    if addons.kill.enabled && (matches(addons.kill.trigger()) || intent(&["process", "processes"]))
+    {
         suggestions.push(KeywordSuggestion {
             keyword: addons.kill.trigger().to_string(),
             subtitle: "Stop one of your processes".to_string(),
@@ -846,7 +895,10 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
         });
     }
 
-    if addons.bluetooth.enabled && matches(addons.bluetooth.trigger()) {
+    if addons.bluetooth.enabled
+        && (matches(addons.bluetooth.trigger())
+            || intent(&["bluetooth", "headphones", "headset", "earbuds"]))
+    {
         suggestions.push(KeywordSuggestion {
             keyword: addons.bluetooth.trigger().to_string(),
             subtitle: "Connect Bluetooth devices or turn Bluetooth on and off".to_string(),
@@ -854,7 +906,9 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
         });
     }
 
-    if addons.pass.enabled && matches(addons.pass.trigger()) {
+    if addons.pass.enabled
+        && (matches(addons.pass.trigger()) || intent(&["password", "passwords", "otp"]))
+    {
         suggestions.push(KeywordSuggestion {
             keyword: addons.pass.trigger().to_string(),
             subtitle: "Copy or type passwords from pass".to_string(),
@@ -862,7 +916,10 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
         });
     }
 
-    if addons.bitwarden.enabled && matches(addons.bitwarden.trigger()) {
+    if addons.bitwarden.enabled
+        && (matches(addons.bitwarden.trigger())
+            || intent(&["bitwarden", "password", "passwords", "otp", "vault"]))
+    {
         suggestions.push(KeywordSuggestion {
             keyword: addons.bitwarden.trigger().to_string(),
             subtitle: "Copy or type passwords from Bitwarden".to_string(),
@@ -870,7 +927,7 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
         });
     }
 
-    if addons.slack.enabled && matches(addons.slack.trigger()) {
+    if addons.slack.enabled && (matches(addons.slack.trigger()) || intent(&["slack", "chat"])) {
         suggestions.push(KeywordSuggestion {
             keyword: addons.slack.trigger().to_string(),
             subtitle: "Open Slack conversations, search messages or set your status".to_string(),
@@ -878,7 +935,19 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
         });
     }
 
-    if addons.devtools.enabled && matches(addons.devtools.trigger()) {
+    if addons.devtools.enabled
+        && (matches(addons.devtools.trigger())
+            || intent(&[
+                "base64",
+                "encode",
+                "decode",
+                "hash",
+                "json",
+                "sha256",
+                "md5",
+                "urlencode",
+            ]))
+    {
         suggestions.push(KeywordSuggestion {
             keyword: addons.devtools.trigger().to_string(),
             subtitle: "Encode, decode, hash or reformat text".to_string(),
@@ -886,7 +955,9 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
         });
     }
 
-    if addons.terminal.enabled && matches(addons.terminal.trigger()) {
+    if addons.terminal.enabled
+        && (matches(addons.terminal.trigger()) || intent(&["terminal", "shell"]))
+    {
         suggestions.push(KeywordSuggestion {
             keyword: addons.terminal.trigger().to_string(),
             subtitle: "Run a command in a terminal".to_string(),
@@ -895,6 +966,13 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
     }
 
     suggestions
+}
+
+/// Whether typing `?` alone opens the keyword help, which it does unless a
+/// configured keyword or trigger is `?`.
+pub(super) fn question_mark_opens_help(addons: &AddonsConfig) -> bool {
+    matches!(route_query("?", addons), QueryMode::Standard)
+        && keyword_suggestions("?", addons).is_empty()
 }
 
 /// Fetch the raw Wayland handles of the main window, if any, so the
@@ -1607,6 +1685,11 @@ impl LauncherApp {
             return Task::none();
         }
 
+        if query.trim() == "?" && question_mark_opens_help(&self.addons) {
+            self.search_query.clear();
+            return self.toggle_help();
+        }
+
         let class = classify_query(&query, &self.addons);
         let log_query = class.loggable_query(&query, &self.addons);
         self.search_query = query.clone();
@@ -1674,6 +1757,7 @@ impl LauncherApp {
             ""
         };
         tasks.push(self.refresh_main_view(main_view_query));
+        self.drop_suggestions_listed_in_main_view(main_view_query);
         match qmode {
             QueryMode::FileBrowser { expanded, filter } => {
                 self.handle_file_browser_query(&expanded, &filter);
@@ -1804,13 +1888,65 @@ impl LauncherApp {
             }
         }
 
-        if focused {
+        let currency_task = if focused {
             self.currency.clear();
-        } else if let Some(task) = self.handle_currency_query(&query, &mut tasks) {
-            return task;
+            None
+        } else {
+            self.handle_currency_query(&query, &mut tasks)
+        };
+        if !focused && matches!(self.query_class.mode, QueryMode::Standard) {
+            self.suggest_help_when_empty(&query);
         }
 
-        Task::batch(tasks)
+        currency_task.unwrap_or_else(|| Task::batch(tasks))
+    }
+
+    /// Offer the help rows matching a query that matches nothing else, so a
+    /// feature can be found by what it does rather than by its keyword.
+    fn suggest_help_when_empty(&mut self, query: &str) {
+        let query = query.trim();
+        if query.chars().count() < self.addons.keyword_min_chars()
+            || self.total_items() != self.fallback_count()
+            || self.main_view.has_loading()
+        {
+            return;
+        }
+        self.ensure_help_entries();
+        self.keyword_suggestions = help_suggestions(&self.help_entries, query);
+        if !self.keyword_suggestions.is_empty() {
+            crate::debug_log!(
+                "help: {} rows offered for an unmatched query",
+                self.keyword_suggestions.len()
+            );
+            self.view.refresh_ids();
+        }
+    }
+
+    /// Put a keyword tip, picked anew on each launch, in the search box.
+    pub(super) fn show_search_tip(&mut self) {
+        self.ensure_help_entries();
+        let tips = search_tips(
+            &self.help_entries,
+            &self.addons,
+            question_mark_opens_help(&self.addons),
+        );
+        if tips.is_empty() {
+            return;
+        }
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.subsec_nanos() as usize)
+            .unwrap_or_default();
+        self.view.placeholder = tips[seed % tips.len()].clone();
+    }
+
+    fn ensure_help_entries(&mut self) {
+        if self.help_entries.is_empty() {
+            self.help_entries = help_entries(&self.addons);
+            if !self.main_view.stops.is_empty() {
+                add_main_view_shortcut(&mut self.help_entries);
+            }
+        }
     }
 
     fn handle_currency_query(
@@ -4366,11 +4502,20 @@ impl LauncherApp {
             || self.web_search.active.is_some()
     }
 
+    /// Whether the query is the start of a suggested keyword. Rows offered
+    /// for what a feature does leave the fallbacks listed.
+    fn typing_keyword(&self) -> bool {
+        let input = self.search_query.trim().to_lowercase();
+        self.keyword_suggestions
+            .iter()
+            .any(|suggestion| suggestion.keyword.to_lowercase().starts_with(&input))
+    }
+
     pub(super) fn fallback_count(&self) -> usize {
         if !self.view.help_active
             && !self.search_query.trim().is_empty()
             && !self.is_in_addon_mode()
-            && self.keyword_suggestions.is_empty()
+            && !self.typing_keyword()
             && self.main_view.focused().is_none()
         {
             self.fallbacks.len()
@@ -4525,12 +4670,7 @@ impl LauncherApp {
 
         self.help_saved_query = Some(std::mem::take(&mut self.search_query));
         self.view.help_active = true;
-        if self.help_entries.is_empty() {
-            self.help_entries = help_entries(&self.addons);
-            if !self.main_view.stops.is_empty() {
-                add_main_view_shortcut(&mut self.help_entries);
-            }
-        }
+        self.ensure_help_entries();
         self.filtered_configs.clear();
         self.keyword_suggestions.clear();
         self.inline_result = None;
@@ -4562,7 +4702,11 @@ impl LauncherApp {
         self.view.help_active = false;
         self.help_filtered.clear();
         crate::debug_log!("help: closed");
+        // Escape also unfocuses the text input, which would swallow typing.
+        let input_id = self.view.search_input_id.clone();
         self.handle_search_changed(query)
+            .chain(focus(input_id.clone()))
+            .chain(move_cursor_to_end(input_id))
     }
 
     fn refresh_help_filter(&mut self) {
@@ -4593,7 +4737,12 @@ impl LauncherApp {
             return Task::none();
         };
 
-        let new_query = format!("{} ", suggestion.keyword);
+        // A path such as `~/` is already complete; a space would end it.
+        let new_query = if suggestion.keyword.ends_with('/') {
+            suggestion.keyword.clone()
+        } else {
+            format!("{} ", suggestion.keyword)
+        };
         crate::debug_log!("keyword suggestion: completing to {new_query:?}");
         let input_id = self.view.search_input_id.clone();
         self.update(Message::SearchChanged(new_query))

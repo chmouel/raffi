@@ -1331,9 +1331,32 @@ pub struct GeneralConfig {
     /// is set in `general` or on the launcher entry. Can also be toggled at runtime with Ctrl+P.
     #[serde(default)]
     pub show_preview: Option<bool>,
+    /// Show a tip about a keyword in the empty search box, such as
+    /// `clip for Clipboard history` (native UI only, default: true).
+    #[serde(default)]
+    pub show_tips: Option<bool>,
     /// Appearance of the right-hand preview pane (font, size, colours, width)
     #[serde(default)]
     pub preview: PreviewConfig,
+}
+
+/// Main view sources used when there is no config file. They need no setup,
+/// and each one hides itself when its tool or compositor is missing.
+#[cfg(feature = "wayland")]
+const FIRST_RUN_MAIN_VIEW: &[&str] = &["launchers", "windows", "browser_tabs", "system", "media"];
+
+/// General settings used when there is no config file at all.
+fn first_run_general() -> GeneralConfig {
+    GeneralConfig {
+        #[cfg(feature = "wayland")]
+        main_view: Some(
+            FIRST_RUN_MAIN_VIEW
+                .iter()
+                .map(|name| name.to_string())
+                .collect(),
+        ),
+        ..GeneralConfig::default()
+    }
 }
 
 /// Complete parsed configuration
@@ -3199,7 +3222,7 @@ pub fn run(args: Args) -> Result<()> {
         process_config(config, &args)?
     } else {
         ParsedConfig {
-            general: GeneralConfig::default(),
+            general: first_run_general(),
             addons: AddonsConfig::default(),
             entries: Vec::new(),
         }
@@ -3315,6 +3338,7 @@ pub fn run(args: Args) -> Result<()> {
         clipboard_history: general.clipboard_history,
         terminal_classes: general.terminal_classes.clone(),
         show_preview: general.show_preview,
+        show_tips: general.show_tips.unwrap_or(true),
         preview: general.preview.clone(),
         default_script_shell: default_script_shell.clone(),
     };

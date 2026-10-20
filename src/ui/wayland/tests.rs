@@ -4,7 +4,7 @@ use super::app::{
     loggable_query, route_query, tilde_path, QueryMode,
 };
 use super::command_list::CommandListAddon;
-use super::help::{filter_help_entries, help_entries, HelpSection};
+use super::help::{filter_help_entries, help_entries, search_tips, HelpSection};
 use super::hyprland::HyprAction;
 use super::placeholders::Expanded;
 use super::preview::{
@@ -490,6 +490,119 @@ fn test_keyword_suggestions_suppress_fallbacks() {
         icon: None,
     }];
     assert_eq!(app.fallback_count(), 0);
+}
+
+fn suggested_keywords(query: &str, addons: &AddonsConfig) -> Vec<String> {
+    keyword_suggestions(query, addons)
+        .into_iter()
+        .map(|suggestion| suggestion.keyword)
+        .collect()
+}
+
+#[test]
+fn test_keyword_suggestions_match_feature_words() {
+    let mut addons = AddonsConfig::default();
+    assert_eq!(suggested_keywords("volume", &addons), vec!["audio"]);
+    assert_eq!(suggested_keywords("Lock", &addons), vec!["sys"]);
+    assert_eq!(suggested_keywords("files", &addons), vec!["~/"]);
+    // Feature words only match whole.
+    assert!(suggested_keywords("volum", &addons).is_empty());
+    assert!(suggested_keywords("vol", &addons).is_empty());
+
+    addons.pass.enabled = false;
+    assert_eq!(suggested_keywords("password", &addons), vec!["bw"]);
+    addons.bitwarden.enabled = false;
+    assert!(suggested_keywords("password", &addons).is_empty());
+}
+
+#[test]
+fn test_feature_word_suggestions_keep_fallbacks() {
+    let mut addons = AddonsConfig::default();
+    addons.web_searches.push(WebSearchConfig {
+        name: "Google".into(),
+        keyword: "g".into(),
+        url: "https://google.com/search?q={query}".into(),
+        icon: None,
+    });
+    let mut app = test_app_with_fallbacks(addons, vec!["addons.web_searches.Google".into()]);
+    let _ = app.update(Message::SearchChanged("volume".into()));
+    assert_eq!(app.keyword_suggestions.len(), 1);
+    assert_eq!(app.fallback_count(), 1);
+}
+
+#[test]
+fn test_unmatched_query_offers_help_rows() {
+    let mut app = test_app(help_addons());
+    let _ = app.update(Message::SearchChanged("switcher".into()));
+    let keywords: Vec<&str> = app
+        .keyword_suggestions
+        .iter()
+        .map(|suggestion| suggestion.keyword.as_str())
+        .collect();
+    assert_eq!(keywords, vec!["win"]);
+
+    let _ = app.update(Message::SearchChanged("zzzz".into()));
+    assert!(app.keyword_suggestions.is_empty());
+}
+
+#[test]
+fn test_help_rows_not_offered_when_a_launcher_matches() {
+    let mut app = test_app(help_addons());
+    app.configs = vec![RaffiConfig {
+        description: Some("Switcher".into()),
+        binary: Some("switcher".into()),
+        ..Default::default()
+    }];
+    let _ = app.update(Message::SearchChanged("switcher".into()));
+    assert_eq!(app.filtered_configs, vec![0]);
+    assert!(app.keyword_suggestions.is_empty());
+}
+
+#[test]
+fn test_question_mark_opens_help() {
+    let mut app = test_app(help_addons());
+    let _ = app.update(Message::SearchChanged("?".into()));
+    assert!(app.view.help_active);
+    assert!(app.search_query.is_empty());
+
+    let _ = app.update(Message::ToggleHelp);
+    assert!(!app.view.help_active);
+    assert!(app.search_query.is_empty());
+}
+
+#[test]
+fn test_question_mark_keyword_wins_over_help() {
+    let mut addons = AddonsConfig::default();
+    addons.web_searches.push(WebSearchConfig {
+        name: "Ask".into(),
+        keyword: "?".into(),
+        url: "https://example.com/?q={query}".into(),
+        icon: None,
+    });
+    let mut app = test_app(addons);
+    let _ = app.update(Message::SearchChanged("?".into()));
+    assert!(!app.view.help_active);
+    assert_eq!(app.search_query, "?");
+}
+
+#[test]
+fn test_search_tips_follow_enabled_addons() {
+    let mut addons = AddonsConfig::default();
+    addons.clipboard.enabled = true;
+    let tips = search_tips(&help_entries(&addons), &addons, true);
+    assert!(tips
+        .iter()
+        .any(|tip| tip.contains("tip: ? for all keywords")));
+    assert!(tips
+        .iter()
+        .any(|tip| tip.contains("tip: clip for Clipboard history")));
+
+    addons.clipboard.enabled = false;
+    addons.calculator.enabled = false;
+    let tips = search_tips(&help_entries(&addons), &addons, false);
+    assert!(!tips
+        .iter()
+        .any(|tip| tip.contains("clip for") || tip.contains("?") || tip.contains("2+2")));
 }
 
 fn snippet_addons() -> AddonsConfig {
