@@ -559,42 +559,6 @@ impl LauncherApp {
             .unwrap_or_else(|| format!("slack:open:{url}"));
         let action = slack::open_action(url);
         let keep_open = !self.should_close(self.addons.slack.close_on_action);
-        if !self
-            .in_flight
-            .begin(CommandListAddon::Slack.name(), &identity)
-        {
-            return Task::none();
-        }
-        self.record_slack_pick(&identity);
-        if keep_open {
-            self.save_query_to_history();
-            let session = self.command_list.session;
-            return Task::perform(
-                async move {
-                    let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                    std::thread::spawn(move || {
-                        let result = super::command_list::run_kept_open(&action);
-                        let _ = sender.send(result);
-                    });
-                    let result = receiver
-                        .await
-                        .unwrap_or_else(|_| Err("action stopped unexpectedly".to_string()));
-                    (identity, result)
-                },
-                move |(identity, result)| {
-                    Message::CommandListActionDone(
-                        CommandListAddon::Slack,
-                        session,
-                        identity,
-                        result,
-                    )
-                },
-            );
-        }
-        if let Ok(mut slot) = self.deferred_action.lock() {
-            *slot = Some(action);
-        }
-        self.save_query_to_history();
-        iced::exit()
+        self.run_command_list_action(CommandListAddon::Slack, identity, action, keep_open)
     }
 }

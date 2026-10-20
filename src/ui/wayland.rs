@@ -30,6 +30,7 @@ mod script_filters;
 mod secret_io;
 mod slack;
 mod slack_api;
+mod slack_emoji;
 mod slack_mode;
 mod snippets;
 mod state;

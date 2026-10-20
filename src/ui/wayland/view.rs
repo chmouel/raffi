@@ -698,6 +698,45 @@ fn mrkdwn_spans_to_iced<'a>(
         .collect()
 }
 
+/// Container style shared by the chat feed's tinted blocks: a background and
+/// hairline border derived from `background` and `border` with the given
+/// alphas and corner radius.
+fn tinted_block(
+    background: iced::Color,
+    background_alpha: f32,
+    border: iced::Color,
+    border_alpha: f32,
+    radius: f32,
+) -> impl Fn(&iced::Theme) -> container::Style {
+    move |_theme| container::Style {
+        background: Some(iced::Background::Color(iced::Color {
+            a: background_alpha,
+            ..background
+        })),
+        border: iced::Border {
+            color: iced::Color {
+                a: border_alpha,
+                ..border
+            },
+            width: 1.0,
+            radius: radius.into(),
+        },
+        ..Default::default()
+    }
+}
+
+/// Horizontal hairline flanking a chat day-divider pill.
+fn divider_line<'a>(color: iced::Color) -> Element<'a, Message> {
+    container(Space::new())
+        .width(Length::Fill)
+        .height(Length::Fixed(1.0))
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(iced::Color { a: 0.35, ..color })),
+            ..Default::default()
+        })
+        .into()
+}
+
 fn render_chat_avatar<'a>(group: &ChatMessageGroup, ps: &PreviewStyle) -> Element<'a, Message> {
     const AVATAR_SIZE: f32 = 28.0;
     if let Some(path) = group.avatar.as_deref() {
@@ -737,22 +776,12 @@ fn render_chat_avatar<'a>(group: &ChatMessageGroup, ps: &PreviewStyle) -> Elemen
         .height(Length::Fixed(AVATAR_SIZE))
         .align_x(iced::Alignment::Center)
         .align_y(iced::Alignment::Center)
-        .style(move |_theme| container::Style {
-            background: Some(iced::Background::Color(iced::Color { a: 0.18, ..tint })),
-            border: iced::Border {
-                color: iced::Color { a: 0.38, ..tint },
-                width: 1.0,
-                radius: 6.0.into(),
-            },
-            ..Default::default()
-        })
+        .style(tinted_block(tint, 0.18, tint, 0.38, 6.0))
         .into()
 }
 
 fn render_chat_feed<'a>(entries: Vec<ChatEntry>, ps: &PreviewStyle) -> Element<'a, Message> {
     if entries.is_empty() {
-        let bg_block = ps.bg_block;
-        let border = ps.border;
         return container(
             text("No messages")
                 .size(ps.text)
@@ -761,15 +790,13 @@ fn render_chat_feed<'a>(entries: Vec<ChatEntry>, ps: &PreviewStyle) -> Element<'
         )
         .padding(12.0)
         .width(Length::Fill)
-        .style(move |_theme| container::Style {
-            background: Some(iced::Background::Color(bg_block)),
-            border: iced::Border {
-                color: iced::Color { a: 0.55, ..border },
-                width: 1.0,
-                radius: 8.0.into(),
-            },
-            ..Default::default()
-        })
+        .style(tinted_block(
+            ps.bg_block,
+            ps.bg_block.a,
+            ps.border,
+            0.55,
+            8.0,
+        ))
         .into();
     }
 
@@ -786,28 +813,6 @@ fn render_chat_feed<'a>(entries: Vec<ChatEntry>, ps: &PreviewStyle) -> Element<'
     for entry in entries {
         match entry {
             ChatEntry::DayDivider(label) => {
-                let border = ps.border;
-                let bg_block = ps.bg_block;
-                let left_line = container(Space::new())
-                    .width(Length::Fill)
-                    .height(Length::Fixed(1.0))
-                    .style(move |_theme| container::Style {
-                        background: Some(iced::Background::Color(iced::Color {
-                            a: 0.35,
-                            ..border
-                        })),
-                        ..Default::default()
-                    });
-                let right_line = container(Space::new())
-                    .width(Length::Fill)
-                    .height(Length::Fixed(1.0))
-                    .style(move |_theme| container::Style {
-                        background: Some(iced::Background::Color(iced::Color {
-                            a: 0.35,
-                            ..border
-                        })),
-                        ..Default::default()
-                    });
                 let pill = container(
                     text(label)
                         .size(ps.small * 0.92)
@@ -815,23 +820,21 @@ fn render_chat_feed<'a>(entries: Vec<ChatEntry>, ps: &PreviewStyle) -> Element<'
                         .font(medium_font),
                 )
                 .padding([2.0, 10.0])
-                .style(move |_theme| container::Style {
-                    background: Some(iced::Background::Color(bg_block)),
-                    border: iced::Border {
-                        color: iced::Color { a: 0.5, ..border },
-                        width: 1.0,
-                        radius: 10.0.into(),
-                    },
-                    ..Default::default()
-                });
+                .style(tinted_block(
+                    ps.bg_block,
+                    ps.bg_block.a,
+                    ps.border,
+                    0.5,
+                    10.0,
+                ));
                 feed = feed.push(
                     Row::new()
                         .spacing(8)
                         .align_y(iced::Alignment::Center)
                         .width(Length::Fill)
-                        .push(left_line)
+                        .push(divider_line(ps.border))
                         .push(pill)
-                        .push(right_line),
+                        .push(divider_line(ps.border)),
                 );
             }
             ChatEntry::Messages(group) => {
@@ -873,7 +876,6 @@ fn render_chat_feed<'a>(entries: Vec<ChatEntry>, ps: &PreviewStyle) -> Element<'
                                 );
                             }
                             MrkdwnBlock::Quote(quote) => {
-                                let accent = ps.accent;
                                 msg_col = msg_col.push(
                                     container(
                                         rich_text(mrkdwn_spans_to_iced(&quote, ps, ps.text_muted))
@@ -882,24 +884,10 @@ fn render_chat_feed<'a>(entries: Vec<ChatEntry>, ps: &PreviewStyle) -> Element<'
                                     )
                                     .padding([6.0, 10.0])
                                     .width(Length::Fill)
-                                    .style(move |_theme| {
-                                        container::Style {
-                                            background: Some(iced::Background::Color(
-                                                iced::Color { a: 0.07, ..accent },
-                                            )),
-                                            border: iced::Border {
-                                                color: iced::Color { a: 0.32, ..accent },
-                                                width: 1.0,
-                                                radius: 6.0.into(),
-                                            },
-                                            ..Default::default()
-                                        }
-                                    }),
+                                    .style(tinted_block(ps.accent, 0.07, ps.accent, 0.32, 6.0)),
                                 );
                             }
                             MrkdwnBlock::Code(code) => {
-                                let bg_block = ps.bg_block;
-                                let border = ps.border;
                                 msg_col = msg_col.push(
                                     container(
                                         text(code)
@@ -910,17 +898,13 @@ fn render_chat_feed<'a>(entries: Vec<ChatEntry>, ps: &PreviewStyle) -> Element<'
                                     )
                                     .padding([8.0, 10.0])
                                     .width(Length::Fill)
-                                    .style(move |_theme| {
-                                        container::Style {
-                                            background: Some(iced::Background::Color(bg_block)),
-                                            border: iced::Border {
-                                                color: iced::Color { a: 0.55, ..border },
-                                                width: 1.0,
-                                                radius: 6.0.into(),
-                                            },
-                                            ..Default::default()
-                                        }
-                                    }),
+                                    .style(tinted_block(
+                                        ps.bg_block,
+                                        ps.bg_block.a,
+                                        ps.border,
+                                        0.55,
+                                        6.0,
+                                    )),
                                 );
                             }
                         }
@@ -929,8 +913,6 @@ fn render_chat_feed<'a>(entries: Vec<ChatEntry>, ps: &PreviewStyle) -> Element<'
                     if !msg.reactions.is_empty() || msg.replies > 0 {
                         let mut pills = Row::new().spacing(6).align_y(iced::Alignment::Center);
                         for (emoji, count) in msg.reactions.into_iter().take(6) {
-                            let bg_block = ps.bg_block;
-                            let border = ps.border;
                             pills = pills.push(
                                 container(
                                     text(format!("{emoji} {count}"))
@@ -939,17 +921,13 @@ fn render_chat_feed<'a>(entries: Vec<ChatEntry>, ps: &PreviewStyle) -> Element<'
                                         .font(ps.font),
                                 )
                                 .padding([2.0, 7.0])
-                                .style(move |_theme| {
-                                    container::Style {
-                                        background: Some(iced::Background::Color(bg_block)),
-                                        border: iced::Border {
-                                            color: iced::Color { a: 0.5, ..border },
-                                            width: 1.0,
-                                            radius: 10.0.into(),
-                                        },
-                                        ..Default::default()
-                                    }
-                                }),
+                                .style(tinted_block(
+                                    ps.bg_block,
+                                    ps.bg_block.a,
+                                    ps.border,
+                                    0.5,
+                                    10.0,
+                                )),
                             );
                         }
                         if msg.replies > 0 {
@@ -967,20 +945,7 @@ fn render_chat_feed<'a>(entries: Vec<ChatEntry>, ps: &PreviewStyle) -> Element<'
                                         .font(medium_font),
                                 )
                                 .padding([2.0, 8.0])
-                                .style(move |_theme| {
-                                    container::Style {
-                                        background: Some(iced::Background::Color(iced::Color {
-                                            a: 0.12,
-                                            ..accent
-                                        })),
-                                        border: iced::Border {
-                                            color: iced::Color { a: 0.35, ..accent },
-                                            width: 1.0,
-                                            radius: 10.0.into(),
-                                        },
-                                        ..Default::default()
-                                    }
-                                }),
+                                .style(tinted_block(accent, 0.12, accent, 0.35, 10.0)),
                             );
                         }
                         msg_col = msg_col.push(pills);
@@ -996,22 +961,10 @@ fn render_chat_feed<'a>(entries: Vec<ChatEntry>, ps: &PreviewStyle) -> Element<'
                     }
 
                     let msg_box: Element<'_, Message> = if msg.highlighted {
-                        let accent = ps.accent;
                         container(msg_col)
                             .padding([6.0, 8.0])
                             .width(Length::Fill)
-                            .style(move |_theme| container::Style {
-                                background: Some(iced::Background::Color(iced::Color {
-                                    a: 0.11,
-                                    ..accent
-                                })),
-                                border: iced::Border {
-                                    color: iced::Color { a: 0.42, ..accent },
-                                    width: 1.0,
-                                    radius: 6.0.into(),
-                                },
-                                ..Default::default()
-                            })
+                            .style(tinted_block(ps.accent, 0.11, ps.accent, 0.42, 6.0))
                             .into()
                     } else {
                         msg_col.into()
@@ -1020,7 +973,7 @@ fn render_chat_feed<'a>(entries: Vec<ChatEntry>, ps: &PreviewStyle) -> Element<'
                     if msg.desktop_url.is_some() || msg.browser_url.is_some() {
                         body_col = body_col.push(
                             mouse_area(msg_box)
-                                .on_press(Message::SlackPreviewOpen {
+                                .on_release(Message::SlackPreviewOpen {
                                     desktop_url: msg.desktop_url,
                                     browser_url: msg.browser_url,
                                 })

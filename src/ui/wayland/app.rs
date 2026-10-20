@@ -4638,49 +4638,62 @@ impl LauncherApp {
                 if let DeferredAction::Slack(super::slack::SlackAction::Fill(text)) = &action {
                     return self.fill_slack_query(text);
                 }
-                if !self.in_flight.begin(addon.name(), &identity) {
-                    return Task::none();
-                }
-                self.record_command_list_pick(addon, &identity);
-                if addon == CommandListAddon::Slack {
-                    self.record_slack_pick(&identity);
-                }
-                if keep_open {
-                    crate::debug_log!("{}: running {identity}", addon.name());
-                    self.save_query_to_history();
-                    let session = self.command_list.session;
-                    return Task::perform(
-                        async move {
-                            let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                            std::thread::spawn(move || {
-                                let result = if matches!(
-                                    addon,
-                                    CommandListAddon::Terminal | CommandListAddon::System
-                                ) {
-                                    action.run()
-                                } else {
-                                    super::command_list::run_kept_open(&action)
-                                };
-                                let _ = sender.send(result);
-                            });
-                            let result = receiver
-                                .await
-                                .unwrap_or_else(|_| Err("action stopped unexpectedly".to_string()));
-                            (identity, result)
-                        },
-                        move |(identity, result)| {
-                            Message::CommandListActionDone(addon, session, identity, result)
-                        },
-                    );
-                }
-                crate::debug_log!("{}: running {identity} after close", addon.name());
-                if let Ok(mut slot) = self.deferred_action.lock() {
-                    *slot = Some(action);
-                }
-                self.save_query_to_history();
-                iced::exit()
+                self.run_command_list_action(addon, identity, action, keep_open)
             }
         }
+    }
+
+    /// Shared tail of the command-list run paths: mark the run in flight,
+    /// record the picks, then either run the action in the background while
+    /// staying open or defer it until Raffi has closed.
+    pub(super) fn run_command_list_action(
+        &mut self,
+        addon: CommandListAddon,
+        identity: String,
+        action: DeferredAction,
+        keep_open: bool,
+    ) -> Task<Message> {
+        if !self.in_flight.begin(addon.name(), &identity) {
+            return Task::none();
+        }
+        self.record_command_list_pick(addon, &identity);
+        if addon == CommandListAddon::Slack {
+            self.record_slack_pick(&identity);
+        }
+        if keep_open {
+            crate::debug_log!("{}: running {identity}", addon.name());
+            self.save_query_to_history();
+            let session = self.command_list.session;
+            return Task::perform(
+                async move {
+                    let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                    std::thread::spawn(move || {
+                        let result = if matches!(
+                            addon,
+                            CommandListAddon::Terminal | CommandListAddon::System
+                        ) {
+                            action.run()
+                        } else {
+                            super::command_list::run_kept_open(&action)
+                        };
+                        let _ = sender.send(result);
+                    });
+                    let result = receiver
+                        .await
+                        .unwrap_or_else(|_| Err("action stopped unexpectedly".to_string()));
+                    (identity, result)
+                },
+                move |(identity, result)| {
+                    Message::CommandListActionDone(addon, session, identity, result)
+                },
+            );
+        }
+        crate::debug_log!("{}: running {identity} after close", addon.name());
+        if let Ok(mut slot) = self.deferred_action.lock() {
+            *slot = Some(action);
+        }
+        self.save_query_to_history();
+        iced::exit()
     }
 
     /// Keep a tab or window run with its main action as a recent pick;

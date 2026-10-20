@@ -13,6 +13,7 @@ use super::actions::DeferredAction;
 use super::command_list::{CommandAction, CommandItem, QUERY_ROW};
 use super::preview::{ChatEntry, ChatMessage, ChatMessageGroup, PreviewBody};
 use super::slack_api::{self, Client, Conversation, ConversationKind, Directory, User, Workspace};
+use super::slack_emoji::slack_emoji;
 use super::tab_preview::Wanted;
 use crate::SlackOpenIn;
 
@@ -25,6 +26,8 @@ const SEARCH_COUNT: &str = "40";
 const MAX_UNREAD: usize = 30;
 /// Messages shown in a preview.
 const PREVIEW_MESSAGES: usize = 12;
+/// Recent messages kept around a search hit inside its conversation.
+const CONVERSATION_CONTEXT_MESSAGES: usize = 6;
 const MAX_MESSAGE_CHARS: usize = 600;
 const MAX_TITLE_CHARS: usize = 120;
 const MAX_AVATAR_BYTES: u64 = 512 * 1024;
@@ -199,356 +202,6 @@ fn is_emoji_code(word: &str) -> bool {
         && word[1..word.len() - 1]
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || "_+-'".contains(c))
-}
-
-/// Convert a standard Slack emoji shortcode name (without colons) to Unicode.
-pub(super) fn slack_emoji(name: &str) -> Option<&'static str> {
-    Some(match name {
-        // Faces & people
-        "grinning" => "😀",
-        "smiley" => "😃",
-        "smile" => "😄",
-        "grin" => "😁",
-        "laughing" | "satisfied" => "😆",
-        "sweat_smile" => "😅",
-        "rofl" | "rolling_on_the_floor_laughing" => "🤣",
-        "joy" => "😂",
-        "slightly_smiling_face" => "🙂",
-        "upside_down_face" => "🙃",
-        "melting_face" => "🫠",
-        "wink" => "😉",
-        "blush" => "😊",
-        "innocent" => "😇",
-        "smiling_face_with_3_hearts" => "🥰",
-        "heart_eyes" => "😍",
-        "star-struck" | "grinning_face_with_star_eyes" => "🤩",
-        "kissing_heart" => "😘",
-        "kissing" => "😗",
-        "relaxed" => "☺️",
-        "kissing_closed_eyes" => "😚",
-        "kissing_smiling_eyes" => "😙",
-        "smiling_face_with_tear" => "🥲",
-        "yum" => "😋",
-        "stuck_out_tongue" => "😛",
-        "stuck_out_tongue_winking_eye" => "😜",
-        "zany_face" => "🤪",
-        "stuck_out_tongue_closed_eyes" => "😝",
-        "money_mouth_face" => "🤑",
-        "hugging_face" | "hugs" => "🤗",
-        "face_with_hand_over_mouth" | "hand_over_mouth" => "🤭",
-        "shushing_face" => "🤫",
-        "thinking_face" | "thinking" => "🤔",
-        "saluting_face" => "🫡",
-        "zipper_mouth_face" => "🤐",
-        "face_with_raised_eyebrow" | "raised_eyebrow" => "🤨",
-        "neutral_face" => "😐",
-        "expressionless" => "😑",
-        "no_mouth" => "😶",
-        "dotted_line_face" => "🫥",
-        "smirk" => "😏",
-        "unamused" => "😒",
-        "face_with_rolling_eyes" | "roll_eyes" => "🙄",
-        "grimacing" => "😬",
-        "lying_face" => "🤥",
-        "relieved" => "😌",
-        "pensive" => "😔",
-        "sleepy" => "😪",
-        "drooling_face" => "🤤",
-        "sleeping" => "😴",
-        "mask" => "😷",
-        "face_with_thermometer" => "🤒",
-        "face_with_head_bandage" => "🤕",
-        "nauseated_face" => "🤢",
-        "face_vomiting" => "🤮",
-        "sneezing_face" => "🤧",
-        "hot_face" => "🥵",
-        "cold_face" => "🥶",
-        "woozy_face" => "🥴",
-        "dizzy_face" => "😵",
-        "exploding_head" => "🤯",
-        "cowboy_hat_face" => "🤠",
-        "partying_face" => "🥳",
-        "disguised_face" => "🥸",
-        "sunglasses" => "😎",
-        "nerd_face" => "🤓",
-        "face_with_monocle" | "monocle_face" => "🧐",
-        "confused" => "😕",
-        "face_with_diagonal_mouth" => "🫤",
-        "worried" => "😟",
-        "slightly_frowning_face" => "🙁",
-        "frowning_face" | "white_frowning_face" => "☹️",
-        "open_mouth" => "😮",
-        "hushed" => "😯",
-        "astonished" => "😲",
-        "flushed" => "😳",
-        "pleading_face" => "🥺",
-        "face_holding_back_tears" | "holding_back_tears" => "🥹",
-        "frowning" => "😦",
-        "anguished" => "😧",
-        "fearful" => "😨",
-        "cold_sweat" => "😰",
-        "disappointed_relieved" => "😥",
-        "cry" => "😢",
-        "sob" => "😭",
-        "scream" => "😱",
-        "confounded" => "😖",
-        "persevere" => "😣",
-        "disappointed" => "😞",
-        "sweat" => "😓",
-        "weary" => "😩",
-        "tired_face" => "😫",
-        "yawning_face" => "🥱",
-        "triumph" => "😤",
-        "rage" | "pout" => "😡",
-        "angry" => "😠",
-        "face_with_symbols_on_mouth" | "cursing_face" => "🤬",
-        "smiling_imp" => "😈",
-        "imp" => "👿",
-        "skull" => "💀",
-        "skull_and_crossbones" => "☠️",
-        "hankey" | "poop" | "shit" => "💩",
-        "clown_face" => "🤡",
-        "ghost" => "👻",
-        "alien" => "👽",
-        "space_invader" => "👾",
-        "robot_face" | "robot" => "🤖",
-        "see_no_evil" => "🙈",
-        "hear_no_evil" => "🙉",
-        "speak_no_evil" => "🙊",
-        // Hands & gestures
-        "wave" => "👋",
-        "raised_back_of_hand" => "🤚",
-        "raised_hand" | "hand" => "✋",
-        "vulcan_salute" => "🖖",
-        "ok_hand" => "👌",
-        "pinched_fingers" => "🤌",
-        "pinching_hand" => "🤏",
-        "v" => "✌️",
-        "crossed_fingers" | "hand_with_index_and_middle_fingers_crossed" => "🤞",
-        "love_you_gesture" => "🤟",
-        "the_horns" | "metal" => "🤘",
-        "call_me_hand" => "🤙",
-        "point_left" => "👈",
-        "point_right" => "👉",
-        "point_up_2" => "👆",
-        "middle_finger" => "🖕",
-        "point_down" => "👇",
-        "point_up" => "☝️",
-        "+1" | "thumbsup" => "👍",
-        "-1" | "thumbsdown" => "👎",
-        "fist" => "✊",
-        "facepunch" | "punch" => "👊",
-        "left-facing_fist" => "🤛",
-        "right-facing_fist" => "🤜",
-        "clap" => "👏",
-        "raised_hands" => "🙌",
-        "heart_hands" => "🫶",
-        "open_hands" => "👐",
-        "palms_up_together" => "🤲",
-        "handshake" => "🤝",
-        "pray" => "🙏",
-        "writing_hand" => "✍️",
-        "muscle" => "💪",
-        "eyes" => "👀",
-        "eye" => "👁️",
-        "brain" => "🧠",
-        "shrug" | "person_shrugging" | "man-shrugging" | "woman-shrugging" => "🤷",
-        "facepalm" | "person_facepalming" | "man-facepalming" | "woman-facepalming" => "🤦",
-        "raising_hand" | "person_raising_hand" => "🙋",
-        "bow" | "person_bowing" => "🙇",
-        // Hearts & symbols
-        "heart" | "red_heart" => "❤️",
-        "orange_heart" => "🧡",
-        "yellow_heart" => "💛",
-        "green_heart" => "💚",
-        "blue_heart" => "💙",
-        "purple_heart" => "💜",
-        "brown_heart" => "🤎",
-        "black_heart" => "🖤",
-        "white_heart" => "🤍",
-        "pink_heart" => "🩷",
-        "broken_heart" => "💔",
-        "heart_exclamation" | "heavy_heart_exclamation_mark_ornament" => "❣️",
-        "two_hearts" => "💕",
-        "revolving_hearts" => "💞",
-        "heartbeat" => "💓",
-        "heartpulse" => "💗",
-        "sparkling_heart" => "💖",
-        "cupid" => "💘",
-        "gift_heart" => "💝",
-        "100" => "💯",
-        "anger" => "💢",
-        "boom" | "collision" => "💥",
-        "dizzy" => "💫",
-        "sweat_drops" => "💦",
-        "dash" => "💨",
-        "speech_balloon" => "💬",
-        "thought_balloon" => "💭",
-        "zzz" => "💤",
-        // Nature, food & activities
-        "fire" => "🔥",
-        "sparkles" => "✨",
-        "star" => "⭐",
-        "star2" => "🌟",
-        "zap" => "⚡",
-        "sunny" | "sun" => "☀️",
-        "cloud" => "☁️",
-        "rainbow" => "🌈",
-        "snowflake" => "❄️",
-        "palm_tree" => "🌴",
-        "evergreen_tree" => "🌲",
-        "deciduous_tree" => "🌳",
-        "seedling" => "🌱",
-        "four_leaf_clover" => "🍀",
-        "rose" => "🌹",
-        "sunflower" => "🌻",
-        "tada" => "🎉",
-        "confetti_ball" => "🎊",
-        "balloon" => "🎈",
-        "birthday" => "🎂",
-        "gift" => "🎁",
-        "trophy" => "🏆",
-        "first_place_medal" | "medal" => "🥇",
-        "second_place_medal" => "🥈",
-        "third_place_medal" => "🥉",
-        "coffee" => "☕",
-        "tea" => "🍵",
-        "beer" => "🍺",
-        "beers" => "🍻",
-        "clinking_glasses" => "🥂",
-        "wine_glass" => "🍷",
-        "cocktail" => "🍸",
-        "tropical_drink" => "🍹",
-        "pizza" => "🍕",
-        "hamburger" => "🍔",
-        "fries" => "🍟",
-        "taco" => "🌮",
-        "burrito" => "🌯",
-        "ramen" => "🍜",
-        "sushi" => "🍣",
-        "croissant" => "🥐",
-        "cake" | "shortcake" => "🍰",
-        "cookie" => "🍪",
-        "doughnut" => "🍩",
-        "popcorn" => "🍿",
-        "apple" => "🍎",
-        "banana" => "🍌",
-        "avocado" => "🥑",
-        // Objects, work & status
-        "rocket" => "🚀",
-        "airplane" => "✈️",
-        "house" | "house_with_garden" => "🏠",
-        "office" => "🏢",
-        "hospital" => "🏥",
-        "computer" | "laptop" => "💻",
-        "desktop_computer" => "🖥️",
-        "keyboard" => "⌨️",
-        "iphone" | "mobile_phone" => "📱",
-        "phone" | "telephone" | "telephone_receiver" => "📞",
-        "bulb" => "💡",
-        "flashlight" => "🔦",
-        "wrench" => "🔧",
-        "hammer" => "🔨",
-        "hammer_and_wrench" => "🛠️",
-        "gear" => "⚙️",
-        "nut_and_bolt" => "🔩",
-        "link" => "🔗",
-        "chains" => "⛓️",
-        "toolbox" => "🧰",
-        "magnet" => "🧲",
-        "test_tube" => "🧪",
-        "microscope" => "🔬",
-        "telescope" => "🔭",
-        "pill" => "💊",
-        "key" => "🔑",
-        "lock" => "🔒",
-        "unlock" => "🔓",
-        "bell" => "🔔",
-        "no_bell" => "🔕",
-        "mega" | "loudspeaker" => "📢",
-        "mag" => "🔍",
-        "mag_right" => "🔎",
-        "memo" | "pencil" => "📝",
-        "pencil2" => "✏️",
-        "book" | "open_book" => "📖",
-        "books" => "📚",
-        "clipboard" => "📋",
-        "pushpin" => "📌",
-        "round_pushpin" => "📍",
-        "paperclip" => "📎",
-        "file_folder" => "📁",
-        "open_file_folder" => "📂",
-        "calendar" | "date" | "spiral_calendar_pad" => "📅",
-        "chart_with_upwards_trend" => "📈",
-        "chart_with_downwards_trend" => "📉",
-        "bar_chart" => "📊",
-        "package" => "📦",
-        "email" | "envelope" => "✉️",
-        "inbox_tray" => "📥",
-        "outbox_tray" => "📤",
-        "wastebasket" => "🗑️",
-        "moneybag" => "💰",
-        "money_with_wings" => "💸",
-        "gem" => "💎",
-        "hourglass" | "hourglass_flowing_sand" => "⏳",
-        "alarm_clock" => "⏰",
-        "stopwatch" => "⏱️",
-        "watch" => "⌚",
-        "bug" => "🐛",
-        "bee" | "honeybee" => "🐝",
-        "lady_beetle" | "beetle" => "🐞",
-        "turtle" => "🐢",
-        "snake" => "🐍",
-        "octopus" => "🐙",
-        "crab" => "🦀",
-        "whale" => "🐳",
-        "dolphin" => "🐬",
-        "dog" => "🐶",
-        "cat" => "🐱",
-        "fox_face" => "🦊",
-        "bear" => "🐻",
-        "panda_face" => "🐼",
-        "koala" => "🐨",
-        "lion_face" | "lion" => "🦁",
-        "unicorn_face" | "unicorn" => "🦄",
-        "penguin" => "🐧",
-        "duck" => "🦆",
-        "owl" => "🦉",
-        // Status & checkmarks
-        "white_check_mark" | "check" => "✅",
-        "heavy_check_mark" => "✔️",
-        "ballot_box_with_check" => "☑️",
-        "x" | "cross_mark" => "❌",
-        "heavy_multiplication_x" => "✖️",
-        "warning" => "⚠️",
-        "no_entry" => "⛔",
-        "no_entry_sign" | "prohibited" => "🚫",
-        "question" => "❓",
-        "grey_question" => "❔",
-        "exclamation" | "heavy_exclamation_mark" => "❗",
-        "grey_exclamation" => "❕",
-        "bangbang" => "‼️",
-        "interrobang" => "⁉️",
-        "information_source" | "info" => "ℹ️",
-        "recycle" => "♻️",
-        "arrows_counterclockwise" => "🔄",
-        "arrow_right" => "➡️",
-        "arrow_left" => "⬅️",
-        "arrow_up" => "⬆️",
-        "arrow_down" => "⬇️",
-        "red_circle" => "🔴",
-        "large_orange_circle" | "orange_circle" => "🟠",
-        "large_yellow_circle" | "yellow_circle" => "🟡",
-        "large_green_circle" | "green_circle" => "🟢",
-        "large_blue_circle" | "blue_circle" => "🔵",
-        "large_purple_circle" | "purple_circle" => "🟣",
-        "white_circle" => "⚪",
-        "black_circle" => "⚫",
-        "checkered_flag" => "🏁",
-        "triangular_flag_on_post" => "🚩",
-        "white_flag" => "🏳️",
-        _ => return None,
-    })
 }
 
 /// Replace known `:shortcode:` tokens in `text` with Unicode emojis,
@@ -1732,10 +1385,38 @@ pub(super) fn fetch_images(
         return ImagesOutcome::Skipped;
     };
     let agent = image_agent();
-    let queue = std::sync::Mutex::new(wants.users.into_iter());
+    let team = wants.team.clone();
+    let found = download_avatars(&agent, &dir, wants.users, &current, &mut || {
+        // The workspace icon rides the scope's main thread, the fourth
+        // worker, while the avatar downloads run.
+        let Some(team) = team.as_ref().filter(|_| current()) else {
+            return Vec::new();
+        };
+        match fetch_workspace_icon(&client, &agent, &dir, team, account) {
+            Some(path) => vec![(team.clone(), path)],
+            None => Vec::new(),
+        }
+    });
+    ImagesOutcome::Attempted(found)
+}
+
+/// Download the `(id, url)` avatar pairs in `users` with three scoped
+/// workers, polling `current` before each download so a stale generation
+/// stops early. `alongside` runs on the scope's main thread while the
+/// workers download and returns its own `(id, path)` finds to merge in.
+fn download_avatars(
+    agent: &ureq::Agent,
+    dir: &Path,
+    users: Vec<(String, String)>,
+    current: &(dyn Fn() -> bool + Sync),
+    alongside: &mut dyn FnMut() -> Vec<(String, String)>,
+) -> Vec<(String, String)> {
+    let queue = std::sync::Mutex::new(users.into_iter());
     let found = std::sync::Mutex::new(Vec::new());
+    let mut alongside_finds = Vec::new();
     std::thread::scope(|scope| {
-        // Three for avatars, the fourth for the workspace icon.
+        // Three workers overlap the slow avatar downloads; extra work like
+        // the workspace icon runs on the scope's main thread meanwhile.
         for _ in 0..3 {
             scope.spawn(|| loop {
                 if !current() {
@@ -1745,22 +1426,18 @@ pub(super) fn fetch_images(
                 let Some((id, url)) = next else {
                     break;
                 };
-                if let Some(path) = download_image(&agent, &dir, &id, &url) {
+                if let Some(path) = download_image(agent, dir, &id, &url) {
                     if let Ok(mut found) = found.lock() {
                         found.push((id, path));
                     }
                 }
             });
         }
-        if let Some(team) = wants.team.as_ref().filter(|_| current()) {
-            if let Some(path) = fetch_workspace_icon(&client, &agent, &dir, team, account) {
-                if let Ok(mut found) = found.lock() {
-                    found.push((team.clone(), path));
-                }
-            }
-        }
+        alongside_finds = alongside();
     });
-    ImagesOutcome::Attempted(found.into_inner().unwrap_or_default())
+    let mut found = found.into_inner().unwrap_or_default();
+    found.append(&mut alongside_finds);
+    found
 }
 
 /// The workspace icon, asked again once a week. A failed refresh keeps the
@@ -2614,24 +2291,8 @@ fn fetch_message_avatars(directory: &Directory, list: &[Value]) -> HashMap<Strin
         return avatars;
     }
     let agent = image_agent();
-    let queue = std::sync::Mutex::new(missing.into_iter());
-    let found = std::sync::Mutex::new(Vec::new());
-    std::thread::scope(|scope| {
-        for _ in 0..3 {
-            scope.spawn(|| loop {
-                let next = queue.lock().ok().and_then(|mut q| q.next());
-                let Some((id, url)) = next else {
-                    break;
-                };
-                if let Some(path) = download_image(&agent, &dir, &id, &url) {
-                    if let Ok(mut found) = found.lock() {
-                        found.push((id, path));
-                    }
-                }
-            });
-        }
-    });
-    avatars.extend(found.into_inner().unwrap_or_default());
+    let found = download_avatars(&agent, &dir, missing, &|| true, &mut || Vec::new());
+    avatars.extend(found);
     avatars
 }
 
@@ -3067,7 +2728,7 @@ fn preview_bodies(
                     })
             }
             None => recent(client, channel, &[("latest", ts), ("inclusive", "true")]).map(|list| {
-                let start = list.len().saturating_sub(6);
+                let start = list.len().saturating_sub(CONVERSATION_CONTEXT_MESSAGES);
                 vec![build_chat(
                     &list[start..],
                     channel,
