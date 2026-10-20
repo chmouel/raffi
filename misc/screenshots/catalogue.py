@@ -119,7 +119,7 @@ SHOTS = [
     Shot("bitwarden", "bw "),
     Shot("terminal", "> cargo test --all-features"),
     Shot("installed-apps", "Demo browser", tweak=addon("apps", {"enabled": True})),
-    Shot("file-browser-filter", "~/Documents/", ("ctrl+period", "ctrl+s")),
+    Shot("file-browser-filter", "~/Documents/", ("ctrl+Tab", "ctrl+s")),
     Shot("theme-nord", theme="nord"),
     Shot("kill-process", "kill {worker}", crop=(550, 110, 1100, 505), needs=frozenset({"worker"})),
     # Taller window for tree and rich previews, 1120x720.

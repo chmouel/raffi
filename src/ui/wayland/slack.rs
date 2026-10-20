@@ -54,6 +54,16 @@ pub(super) enum View {
 }
 
 impl View {
+    /// Name shown after Ctrl+Tab in the footer.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Home => "Home",
+            Self::Search(_) => "Search",
+            Self::Unread => "Unread",
+            Self::People(_) => "People",
+        }
+    }
+
     /// The text a debounced view looks up.
     pub fn terms(&self) -> Option<&str> {
         match self {
@@ -74,6 +84,31 @@ pub(super) fn parse_view(query: &str) -> (View, String) {
         "unread" => (View::Unread, rest.to_string()),
         "people" => (View::People(rest.trim().to_string()), String::new()),
         _ => (View::Home, query.to_string()),
+    }
+}
+
+/// `query` switched to the next view Ctrl+Tab cycles through, Home, Unread
+/// then People, or the previous one when `backwards`, keeping the text typed
+/// after the view word. A search counts as Home. Home is skipped when the
+/// text would read as another view, such as `search errors`.
+pub(super) fn cycle_view(query: &str, backwards: bool) -> String {
+    const STOPS: [&str; 3] = ["", "unread", "people"];
+    let (view, filter) = parse_view(query);
+    let (at, text) = match view {
+        View::Home => (0, filter),
+        View::Search(terms) => (0, terms),
+        View::Unread => (1, filter),
+        View::People(terms) => (2, terms),
+    };
+    let home_fits = matches!(parse_view(&text).0, View::Home);
+    let step = if backwards { STOPS.len() - 1 } else { 1 };
+    let mut next = (at + step) % STOPS.len();
+    if next == 0 && !home_fits {
+        next = (next + step) % STOPS.len();
+    }
+    match STOPS[next] {
+        "" => text,
+        word => format!("{word} {text}"),
     }
 }
 
@@ -2825,6 +2860,23 @@ mod tests {
             DeferredAction::Slack(action) => Some(action.clone()),
             _ => None,
         }
+    }
+
+    #[test]
+    fn test_cycle_view_keeps_text_and_skips_an_ambiguous_home() {
+        let cycle = |query: &str, backwards| cycle_view(query, backwards);
+        assert_eq!(cycle("ops", false), "unread ops");
+        assert_eq!(cycle("search deploy", false), "unread deploy");
+        assert_eq!(cycle("people ada", false), "ada");
+        assert_eq!(cycle("ops", true), "people ops");
+        // Home can't hold text starting with a view word, so it is skipped
+        // rather than turning into that view.
+        assert_eq!(cycle("people search errors", false), "unread search errors");
+        assert_eq!(cycle("unread people x", true), "people people x");
+        assert_eq!(
+            parse_view(&cycle("unread people x", true)).0,
+            View::People("people x".into())
+        );
     }
 
     #[test]

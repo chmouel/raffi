@@ -213,6 +213,52 @@ impl TextSnippetState {
     }
 }
 
+/// Which clipboard items are listed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum ClipboardView {
+    #[default]
+    All,
+    Images,
+    /// Text that is a single URL.
+    Urls,
+}
+
+impl ClipboardView {
+    pub fn cycle(self, backwards: bool) -> Self {
+        match (self, backwards) {
+            (Self::All, false) | (Self::Urls, true) => Self::Images,
+            (Self::Images, false) | (Self::All, true) => Self::Urls,
+            (Self::Urls, false) | (Self::Images, true) => Self::All,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Images => "Images",
+            Self::Urls => "URLs",
+        }
+    }
+
+    /// Plural of what a filtered view lists, None for every item.
+    pub fn noun(self) -> Option<&'static str> {
+        match self {
+            Self::All => None,
+            Self::Images => Some("images"),
+            Self::Urls => Some("URLs"),
+        }
+    }
+
+    /// Kind the CopyQ list script keeps, empty for every item.
+    pub fn kind(self) -> &'static str {
+        match self {
+            Self::All => "",
+            Self::Images => "image",
+            Self::Urls => "url",
+        }
+    }
+}
+
 /// Clipboard history browser. Items come from CopyQ page by page; each scan
 /// has its own generation so pages from an older scan are dropped.
 #[derive(Debug, Clone, Default)]
@@ -224,11 +270,8 @@ pub(super) struct ClipboardState {
     /// action results.
     pub session: u64,
     pub query: String,
-    /// List only image items.
-    pub images_only: bool,
-    /// Whether the images keyword opened the browser; Ctrl+I overrides
-    /// `images_only` until the keyword changes.
-    pub image_keyword: bool,
+    /// Which items are listed, cycled with Ctrl+Tab.
+    pub view: ClipboardView,
     /// Tab, total row count and newest item seen by the current scan.
     pub tab: String,
     pub total: usize,
@@ -282,13 +325,13 @@ impl ClipboardState {
     pub fn status(&self) -> String {
         if let Some(error) = &self.error {
             error.clone()
-        } else if self.images_only {
+        } else if let Some(noun) = self.view.noun() {
             if self.loading {
-                "Searching clipboard images...".into()
+                format!("Searching clipboard {noun}...")
             } else if self.query.is_empty() {
-                "No images in clipboard history".into()
+                format!("No {noun} in clipboard history")
             } else {
-                "No clipboard images match".into()
+                format!("No clipboard {noun} match")
             }
         } else if self.loading {
             if self.query.is_empty() {
@@ -325,7 +368,7 @@ pub(super) struct FileBrowserState {
     pub sort: crate::FileBrowserSort,
     /// Flip the order of `sort` (from the `sort_reverse` setting).
     pub sort_reverse: bool,
-    /// Files/directories filter, cycled with Ctrl+.; survives leaving the
+    /// Files/directories filter, cycled with Ctrl+Tab; survives leaving the
     /// browser.
     pub show: crate::FileBrowserShow,
     /// Best match for the typed text among entries hidden by `show`, so Tab

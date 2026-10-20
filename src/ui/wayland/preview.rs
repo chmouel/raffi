@@ -1732,12 +1732,10 @@ impl LauncherApp {
             "Ctrl+Enter".to_string(),
             describe_clipboard_action(config.secondary_action),
         ));
-        let images = if self.clipboard.images_only {
-            "Show all items"
-        } else {
-            "Show only images"
-        };
-        metadata.push(("Ctrl+I".to_string(), images.to_string()));
+        metadata.push((
+            "Ctrl+Tab".to_string(),
+            "Switch between all items, images and URLs".to_string(),
+        ));
         metadata.push(("Ctrl+D".to_string(), "Delete this entry".to_string()));
         metadata.push(("Ctrl+R".to_string(), "Refresh the list".to_string()));
 
@@ -2093,7 +2091,7 @@ fn describe_addon_by_keyword(
                 ),
                 (
                     "Show".to_string(),
-                    format!("{} (Ctrl+. cycles)", addons.file_browser.show.label()),
+                    format!("{} (Ctrl+Tab cycles)", addons.file_browser.show.label()),
                 ),
                 (
                     "Enter".to_string(),

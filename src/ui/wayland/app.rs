@@ -27,7 +27,7 @@ use super::emoji::{
     load_emoji_data_from_disk, resolve_emoji_file_names,
 };
 use super::help::{
-    add_main_view_shortcut, filter_help_entries, help_entries, help_suggestions, search_tips,
+    add_cycle_view_shortcut, filter_help_entries, help_entries, help_suggestions, search_tips,
 };
 use super::main_view::{Block, Focus, Source, MAIN_VIEW_SESSION};
 use super::pass::PassContext;
@@ -90,7 +90,6 @@ pub(super) enum QueryMode {
     },
     Clipboard {
         query: String,
-        images_only: bool,
     },
     WebSearch {
         config_index: usize,
@@ -150,10 +149,7 @@ impl std::fmt::Debug for QueryMode {
                 .field("query", query)
                 .finish(),
             Self::Emoji { query } => f.debug_struct("Emoji").field("query", query).finish(),
-            Self::Clipboard { images_only, .. } => f
-                .debug_struct("Clipboard")
-                .field("images_only", images_only)
-                .finish_non_exhaustive(),
+            Self::Clipboard { .. } => f.debug_struct("Clipboard").finish_non_exhaustive(),
             Self::WebSearch {
                 config_index,
                 query,
@@ -209,14 +205,8 @@ impl QueryClass {
     /// The query as it may appear in debug logs.
     pub(super) fn loggable_query(&self, query: &str, addons: &AddonsConfig) -> String {
         match &self.mode {
-            QueryMode::Clipboard { images_only, .. } => {
-                let clipboard = &addons.clipboard;
-                let trigger = if *images_only {
-                    clipboard.image_trigger()
-                } else {
-                    clipboard.trigger()
-                };
-                format!("{trigger} <redacted>")
+            QueryMode::Clipboard { .. } => {
+                format!("{} <redacted>", addons.clipboard.trigger())
             }
             _ if self.sensitive => "<redacted>".to_string(),
             _ => query.trim().to_string(),
@@ -386,19 +376,6 @@ fn expand_file_browser_query(trimmed: &str) -> String {
     }
 }
 
-/// Whether `new` is `old` with exactly one `c` inserted somewhere.
-pub(super) fn is_single_insert(old: &str, new: &str, c: char) -> bool {
-    if new.len() != old.len() + c.len_utf8() {
-        return false;
-    }
-    let prefix = old
-        .char_indices()
-        .zip(new.chars())
-        .find(|((_, a), b)| a != b)
-        .map_or(old.len(), |((i, _), _)| i);
-    new[prefix..].starts_with(c) && new[prefix + c.len_utf8()..] == old[prefix..]
-}
-
 /// Fido/ido-style "go up a directory": when `new` is `old` with its trailing
 /// `/` deleted, return the parent directory query (with a trailing `/`) and
 /// the name of the directory that was left. `~/` goes up to the parent of
@@ -448,10 +425,9 @@ pub(super) fn fido_restart(old: &str, new: &str) -> Option<String> {
     }
 }
 
-/// Theme icon names for the clipboard keywords; rows show no icon when the
-/// theme lacks them.
+/// Theme icon names for the keywords; rows show no icon when the theme lacks
+/// them.
 pub(super) const CLIPBOARD_ICON: &str = "copyq";
-pub(super) const CLIPBOARD_IMAGES_ICON: &str = "image-x-generic";
 pub(super) const SYSTEM_ICON: &str = "system-shutdown";
 pub(super) const WINDOWS_ICON: &str = "preferences-system-windows";
 pub(super) const BROWSER_TABS_ICON: &str = "web-browser";
@@ -477,7 +453,6 @@ pub(super) const SNIPPET_ICON: &str = "accessories-text-editor";
 pub(super) fn fallback_emoji(icon: &str) -> Option<&'static str> {
     Some(match icon {
         CLIPBOARD_ICON => "📋",
-        CLIPBOARD_IMAGES_ICON => "🖼️",
         SYSTEM_ICON => "🔌",
         WINDOWS_ICON => "🪟",
         BROWSER_TABS_ICON => "🌐",
@@ -523,14 +498,13 @@ fn is_user_input(message: &Message) -> bool {
             | Message::FileBrowserRowPressed { .. }
             | Message::FileBrowserRowReleased(_)
             | Message::TabComplete
-            | Message::MainViewCycle(_)
+            | Message::CycleView(_)
             | Message::FileBrowserToggleHidden
             | Message::FileBrowserCopyPath
             | Message::FileBrowserCopyImage
             | Message::FileBrowserOpenSelected
             | Message::FileBrowserOpenFileManager
             | Message::FileBrowserCycleSort
-            | Message::FileBrowserCycleShow
             | Message::HistoryPrevious
             | Message::HistoryNext
             | Message::ToggleHelp
@@ -545,7 +519,6 @@ fn is_user_input(message: &Message) -> bool {
             | Message::KeywordSuggestionSelected(_)
             | Message::ClipboardSelected(_)
             | Message::ClipboardRefresh
-            | Message::ClipboardToggleImages
             | Message::ClipboardDelete
             | Message::VaultShortcut(_)
     )
@@ -614,16 +587,7 @@ pub(super) fn route_query(query: &str, addons: &AddonsConfig) -> QueryMode {
 
     if addons.clipboard.is_enabled() {
         if let Some(query) = extract_keyword_query(input, addons.clipboard.trigger()) {
-            return QueryMode::Clipboard {
-                query,
-                images_only: false,
-            };
-        }
-        if let Some(query) = extract_keyword_query(input, addons.clipboard.image_trigger()) {
-            return QueryMode::Clipboard {
-                query,
-                images_only: true,
-            };
+            return QueryMode::Clipboard { query };
         }
     }
 
@@ -826,13 +790,6 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
             keyword: addons.clipboard.trigger().to_string(),
             subtitle: "Browse clipboard history".to_string(),
             icon: Some(CLIPBOARD_ICON.to_string()),
-        });
-    }
-    if addons.clipboard.is_enabled() && matches(addons.clipboard.image_trigger()) {
-        suggestions.push(KeywordSuggestion {
-            keyword: addons.clipboard.image_trigger().to_string(),
-            subtitle: "Browse images in clipboard history".to_string(),
-            icon: Some(CLIPBOARD_IMAGES_ICON.to_string()),
         });
     }
 
@@ -1571,7 +1528,7 @@ impl LauncherApp {
             Message::WaylandHandles(handles) => self.handle_wayland_handles(handles),
             Message::DragEvent(event) => self.handle_drag_event(event),
             Message::TabComplete => self.handle_tab_complete(),
-            Message::MainViewCycle(backwards) => self.handle_main_view_cycle(backwards),
+            Message::CycleView(backwards) => self.handle_cycle_view(backwards),
             Message::FileBrowserToggleHidden => self.handle_file_browser_toggle_hidden(),
             Message::FileBrowserCopyPath => self.handle_file_browser_copy_path(),
             Message::FileBrowserCopyImage => self.handle_file_browser_copy_image(),
@@ -1587,7 +1544,6 @@ impl LauncherApp {
             Message::FileBrowserOpenSelected => self.handle_file_browser_open_selected(),
             Message::FileBrowserOpenFileManager => self.handle_file_browser_open_file_manager(),
             Message::FileBrowserCycleSort => self.handle_file_browser_cycle_sort(),
-            Message::FileBrowserCycleShow => self.handle_file_browser_cycle_show(),
             Message::ModifiersChanged(modifiers) => {
                 if modifiers != self.view.current_modifiers {
                     self.command_list.armed = None;
@@ -1720,7 +1676,6 @@ impl LauncherApp {
                 self.handle_clipboard_action_done(session, result)
             }
             Message::ClipboardRefresh => self.handle_refresh(),
-            Message::ClipboardToggleImages => self.handle_clipboard_toggle_images(),
             Message::ClipboardDelete => self.handle_clipboard_delete(),
             Message::ClipboardDeleteDone(session, result) => {
                 self.handle_clipboard_delete_done(session, result)
@@ -1827,14 +1782,6 @@ impl LauncherApp {
 
     pub(super) fn handle_search_changed(&mut self, query: String) -> Task<Message> {
         if self.view.current_modifiers.alt() && !self.history.search_in_progress {
-            return Task::none();
-        }
-        // Ctrl+. cycles the file browser filter, but the text input still
-        // types the ".", since only control characters are skipped there.
-        if self.view.current_modifiers.control()
-            && self.file_browser.active
-            && is_single_insert(&self.search_query, &query, '.')
-        {
             return Task::none();
         }
 
@@ -2012,7 +1959,7 @@ impl LauncherApp {
                 self.handle_emoji_query(query, &mut tasks);
                 self.web_search.clear();
             }
-            QueryMode::Clipboard { query, images_only } => {
+            QueryMode::Clipboard { query } => {
                 self.file_browser.clear();
                 self.script_filter.clear();
                 self.text_snippets.clear();
@@ -2024,7 +1971,7 @@ impl LauncherApp {
                 if let Some(drag) = &self.drag {
                     drag.disarm();
                 }
-                self.handle_clipboard_query(query, images_only, &mut tasks);
+                self.handle_clipboard_query(query, &mut tasks);
                 return Task::batch(tasks);
             }
             QueryMode::CommandList { addon, query } => {
@@ -2141,12 +2088,12 @@ impl LauncherApp {
     fn ensure_help_entries(&mut self) {
         if self.help_entries.is_empty() {
             self.help_entries = help_entries(&self.addons);
-            if !self.main_view.stops.is_empty() {
-                add_main_view_shortcut(
-                    &mut self.help_entries,
-                    self.main_view.chips != crate::MainViewChips::Off,
-                );
-            }
+            add_cycle_view_shortcut(
+                &mut self.help_entries,
+                &self.addons,
+                !self.main_view.stops.is_empty(),
+                self.main_view.chips != crate::MainViewChips::Off,
+            );
         }
     }
 
@@ -2332,9 +2279,9 @@ impl LauncherApp {
         {
             self.file_browser.error = Some(match show {
                 crate::FileBrowserShow::Directories => {
-                    "No directories here (Ctrl+. to show all)".to_string()
+                    "No directories here (Ctrl+Tab to show all)".to_string()
                 }
-                _ => "No files here (Ctrl+. for directories)".to_string(),
+                _ => "No files here (Ctrl+Tab for directories)".to_string(),
             });
         }
     }
@@ -4373,14 +4320,100 @@ impl LauncherApp {
         }
     }
 
-    /// Ctrl+Tab: narrow the main view to its next source, or back to all
-    /// of them; Tab completion where the main view does not show.
-    fn handle_main_view_cycle(&mut self, backwards: bool) -> Task<Message> {
-        if self.view.help_active || !self.main_view.active || self.main_view.stops.is_empty() {
+    /// Ctrl+Tab, backwards with Shift: switch to the next view of what is
+    /// showing. Tab completion where nothing has views.
+    fn handle_cycle_view(&mut self, backwards: bool) -> Task<Message> {
+        if self.view.help_active {
             return self.handle_tab_complete();
         }
-        self.main_view.cycle(backwards);
-        self.handle_search_changed(self.search_query.clone())
+        if self.clipboard.active {
+            return self.handle_clipboard_cycle_view(backwards);
+        }
+        if self.file_browser.active {
+            self.file_browser.show = self.file_browser.show.cycle(backwards);
+            return Task::done(Message::SearchChanged(self.search_query.clone()));
+        }
+        match self.command_list.addon {
+            Some(CommandListAddon::Slack) => return self.handle_slack_cycle_view(backwards),
+            Some(CommandListAddon::Audio) => {
+                let view = self.command_list.audio_view.cycle(backwards);
+                self.command_list.set_audio_view(view);
+                return self.handle_search_changed(self.search_query.clone());
+            }
+            _ => {}
+        }
+        if self.main_view.active && !self.main_view.stops.is_empty() {
+            self.main_view.cycle(backwards);
+            return self.handle_search_changed(self.search_query.clone());
+        }
+        self.handle_tab_complete()
+    }
+
+    /// Name of the view Ctrl+Tab switched to, for the footer; None where
+    /// Ctrl+Tab has no views.
+    pub(super) fn cycle_view_label(&self) -> Option<String> {
+        if self.view.help_active {
+            return None;
+        }
+        if self.clipboard.active {
+            return Some(self.clipboard.view.label().to_string());
+        }
+        if self.file_browser.active {
+            return Some(self.file_browser.show.title().to_string());
+        }
+        match self.command_list.addon {
+            Some(CommandListAddon::Slack) => {
+                return self
+                    .slack
+                    .view
+                    .as_ref()
+                    .map(|view| view.label().to_string());
+            }
+            Some(CommandListAddon::Audio) => {
+                return Some(self.command_list.audio_view.label().to_string());
+            }
+            _ => {}
+        }
+        (self.main_view.active && !self.main_view.stops.is_empty())
+            .then(|| self.main_view_focus_label())
+    }
+
+    /// Ctrl+Tab in Slack: rewrite the view word after the keyword, going
+    /// Home, Unread, People, keeping the rest of the text. The typed keyword
+    /// stays when it still routes there; a launcher alias carrying its own
+    /// view or text falls back to the Slack trigger. Nothing changes when a
+    /// launcher keyword shadowing the trigger makes the view unreachable.
+    fn handle_slack_cycle_view(&mut self, backwards: bool) -> Task<Message> {
+        let slack_query = |input: &str| match route_query(
+            &expand_launcher_keyword(input, &self.addons),
+            &self.addons,
+        ) {
+            QueryMode::CommandList {
+                addon: CommandListAddon::Slack,
+                query,
+            } => Some(query),
+            _ => None,
+        };
+        let Some(query) = slack_query(&self.search_query) else {
+            return Task::none();
+        };
+        let cycled = super::slack::cycle_view(&query, backwards);
+        let typed = self.search_query.trim_end();
+        let heads = [
+            typed.strip_suffix(query.as_str()).map(str::trim_end),
+            Some(self.addons.slack.trigger()),
+        ];
+        let Some(new_query) = heads
+            .into_iter()
+            .flatten()
+            .map(|head| format!("{head} {cycled}"))
+            .find(|candidate| slack_query(candidate).as_deref() == Some(cycled.trim_end()))
+        else {
+            return Task::none();
+        };
+        self.search_query = new_query.clone();
+        let input_id = self.view.search_input_id.clone();
+        Task::done(Message::SearchChanged(new_query)).chain(move_cursor_to_end(input_id))
     }
 
     fn handle_tab_complete(&mut self) -> Task<Message> {
@@ -4448,15 +4481,6 @@ impl LauncherApp {
                 self.file_browser.sort_reverse,
             );
         }
-        let query = self.search_query.clone();
-        Task::done(Message::SearchChanged(query))
-    }
-
-    fn handle_file_browser_cycle_show(&mut self) -> Task<Message> {
-        if !self.file_browser.active {
-            return Task::none();
-        }
-        self.file_browser.show = self.file_browser.show.next();
         let query = self.search_query.clone();
         Task::done(Message::SearchChanged(query))
     }

@@ -220,6 +220,8 @@ pub(super) struct CommandListState {
     /// Keep only rows holding every word of the query, for lists mixed
     /// into the main view where a loose fuzzy match is noise.
     pub strict: bool,
+    /// Devices the audio list shows; All for every other list.
+    pub audio_view: super::audio::View,
 }
 
 /// Identity of the row `CommandListState::query_row` builds.
@@ -247,8 +249,16 @@ impl CommandListState {
         self.preview_inflight = None;
         self.preview_wanted.clear();
         self.query_row = None;
+        self.audio_view = super::audio::View::All;
         self.generation = self.generation.wrapping_add(1);
         self.session = self.session.wrapping_add(1);
+    }
+
+    /// Show the audio devices of `view` only.
+    pub fn set_audio_view(&mut self, view: super::audio::View) {
+        self.audio_view = view;
+        self.armed = None;
+        self.refilter();
     }
 
     /// Enter `addon`, keeping the current state when it is already active.
@@ -407,6 +417,12 @@ impl CommandListState {
             self.strict,
             &mut self.filtered,
         );
+        if self.audio_view != super::audio::View::All {
+            let view = self.audio_view;
+            let items = &self.items;
+            self.filtered
+                .retain(|&index| view.keeps(&items[index].identity));
+        }
         self.extra_start = self.filtered.len();
         let Some((_, identities)) = &self.extra else {
             return;

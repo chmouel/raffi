@@ -176,6 +176,8 @@ The design pattern is consistent across addons:
 - render temporary results inside the single launcher window
 - perform the action on submit
 - persist search history before exit when appropriate
+- switch between the addon's views with Ctrl+Tab through `handle_cycle_view`
+  (see `AGENTS.md`), never with a key of its own
 
 ## Persistence and Cache Files
 

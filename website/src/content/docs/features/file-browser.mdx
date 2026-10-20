@@ -65,7 +65,7 @@ Start the file browser by typing one of these prefixes:
 | **Ctrl+Y** | Copy the selected path to the clipboard, regardless of configured actions |
 | **Ctrl+Alt+Y** | Copy a supported image file to the clipboard |
 | **Ctrl+S** | Cycle the sort order: name, modified date, created date |
-| **Ctrl+.** | Cycle the listing: all entries, files only, directories only |
+| **Ctrl+Tab** / **Ctrl+Shift+Tab** | Cycle the listing: all entries, files only, directories only |
 | **Ctrl+J** / **Ctrl+K** | Scroll the right-hand preview pane down / up |
 | **Ctrl+P** | Toggle right-hand file/directory/image preview pane |
 | **Esc** | Exit file browser |
@@ -371,7 +371,7 @@ Reverse the order of whichever `sort` mode is active: Z to A for `name`, oldest 
 
 **`show`** `string` (default: `all`)
 
-Which entries the listing starts with. Press Ctrl+. to cycle through the modes while browsing; the hint bar shows the current one, and Raffi keeps it until it closes.
+Which entries the listing starts with. Press Ctrl+Tab to cycle through the modes while browsing (Ctrl+Shift+Tab goes back); the hint bar shows the current one, and Raffi keeps it until it closes.
 
 - `all`: directories and files
 - `files`: files only

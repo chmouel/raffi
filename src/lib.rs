@@ -269,7 +269,7 @@ pub struct FileBrowserAddonConfig {
     #[serde(default)]
     pub sort_reverse: bool,
     /// Initial filter of the listing: `all`, `files` or `directories`;
-    /// Ctrl+. cycles through them.
+    /// Ctrl+Tab cycles through them.
     #[serde(default)]
     pub show: FileBrowserShow,
     /// Command that previews the selected entry in the native preview pane.
@@ -342,12 +342,22 @@ fn accept_directories_aliases(schema: &mut schemars::Schema) {
 }
 
 impl FileBrowserShow {
-    /// The mode after this one, wrapping around.
-    pub fn next(self) -> Self {
+    /// The mode after this one, or before it when `backwards`, wrapping
+    /// around.
+    pub fn cycle(self, backwards: bool) -> Self {
+        match (self, backwards) {
+            (Self::All, false) | (Self::Directories, true) => Self::Files,
+            (Self::Files, false) | (Self::All, true) => Self::Directories,
+            (Self::Directories, false) | (Self::Files, true) => Self::All,
+        }
+    }
+
+    /// Name shown after Ctrl+Tab in the footer.
+    pub fn title(self) -> &'static str {
         match self {
-            Self::All => Self::Files,
-            Self::Files => Self::Directories,
-            Self::Directories => Self::All,
+            Self::All => "All",
+            Self::Files => "Files",
+            Self::Directories => "Directories",
         }
     }
 
@@ -557,9 +567,6 @@ pub struct ClipboardAddonConfig {
     /// Keyword that opens the history (default: `clip`).
     #[serde(default)]
     pub trigger: Option<String>,
-    /// Keyword that opens the history showing only images (default: `clipimg`).
-    #[serde(default)]
-    pub image_trigger: Option<String>,
     /// Hide text entries shorter than this many characters, ignoring
     /// surrounding whitespace (default: 3). Images and files are always shown.
     #[serde(default)]
@@ -598,10 +605,6 @@ impl ClipboardAddonConfig {
         self.min_chars.unwrap_or(3)
     }
 
-    pub fn image_trigger(&self) -> &str {
-        self.image_trigger.as_deref().unwrap_or("clipimg")
-    }
-
     /// Whether either action needs the Hyprland paste target.
     pub fn uses_hypr_paste(&self) -> bool {
         self.is_enabled()
@@ -615,7 +618,6 @@ impl Default for ClipboardAddonConfig {
         Self {
             enabled: None,
             trigger: None,
-            image_trigger: None,
             min_chars: None,
             backend: ClipboardBackend::default(),
             action: default_clipboard_action(),
@@ -4629,9 +4631,19 @@ mod tests {
         assert_eq!(parse("directory"), FileBrowserShow::Directories);
         assert!(serde_yaml::from_str::<FileBrowserShow>("links").is_err());
         assert_eq!(FileBrowserAddonConfig::default().show, FileBrowserShow::All);
-        assert_eq!(FileBrowserShow::All.next(), FileBrowserShow::Files);
-        assert_eq!(FileBrowserShow::Files.next(), FileBrowserShow::Directories);
-        assert_eq!(FileBrowserShow::Directories.next(), FileBrowserShow::All);
+        assert_eq!(FileBrowserShow::All.cycle(false), FileBrowserShow::Files);
+        assert_eq!(
+            FileBrowserShow::Files.cycle(false),
+            FileBrowserShow::Directories
+        );
+        assert_eq!(
+            FileBrowserShow::Directories.cycle(false),
+            FileBrowserShow::All
+        );
+        assert_eq!(
+            FileBrowserShow::All.cycle(true),
+            FileBrowserShow::Directories
+        );
     }
 
     #[test]
@@ -5528,7 +5540,6 @@ mod tests {
         let defaults = parse("shell:\n  binary: sh\n").unwrap().addons.clipboard;
         assert_eq!(defaults.enabled, None);
         assert_eq!(defaults.trigger(), "clip");
-        assert_eq!(defaults.image_trigger(), "clipimg");
         assert_eq!(defaults.min_chars(), 3);
         assert_eq!(defaults.backend, ClipboardBackend::Copyq);
         assert_eq!(defaults.action, ClipboardAction::Copy);
@@ -5541,7 +5552,6 @@ addons:
   clipboard:
     enabled: true
     trigger: cb
-    image_trigger: cbi
     min_chars: 1
     backend: copyq
     action: hypr_paste
@@ -5555,7 +5565,6 @@ shell:
         .clipboard;
         assert!(config.is_enabled());
         assert_eq!(config.trigger(), "cb");
-        assert_eq!(config.image_trigger(), "cbi");
         assert_eq!(config.min_chars(), 1);
         assert_eq!(config.action, ClipboardAction::HyprPaste);
         assert_eq!(config.secondary_action, ClipboardAction::Copy);

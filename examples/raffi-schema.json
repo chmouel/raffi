@@ -359,14 +359,6 @@
           ],
           "default": null
         },
-        "image_trigger": {
-          "description": "Keyword that opens the history showing only images (default: `clipimg`).",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
         "min_chars": {
           "description": "Hide text entries shorter than this many characters, ignoring\nsurrounding whitespace (default: 3). Images and files are always shown.",
           "type": [
@@ -656,7 +648,7 @@
           "default": null
         },
         "show": {
-          "description": "Initial filter of the listing: `all`, `files` or `directories`;\nCtrl+. cycles through them.",
+          "description": "Initial filter of the listing: `all`, `files` or `directories`;\nCtrl+Tab cycles through them.",
           "$ref": "#/$defs/FileBrowserShow"
         },
         "show_hidden": {

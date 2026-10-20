@@ -462,17 +462,6 @@ fn item_row_style(
     }
 }
 
-/// Ctrl+. on any layout: iced reports the unshifted key in `key`, so a
-/// layout where "." needs Shift only shows it in `modified_key`.
-pub(super) fn is_ctrl_period(
-    key: &iced::keyboard::Key,
-    modified_key: &iced::keyboard::Key,
-    modifiers: iced::keyboard::Modifiers,
-) -> bool {
-    let is_period = |key: &iced::keyboard::Key| matches!(key, iced::keyboard::Key::Character(c) if c.as_str() == ".");
-    modifiers.control() && (is_period(key) || is_period(modified_key))
-}
-
 const PREVIEW_ROW_SPACING: f32 = 12.0;
 const PREVIEW_DIVIDER_WIDTH: f32 = 1.0;
 const PREVIEW_PANE_LEFT_PADDING: f32 = 14.0;
@@ -3007,14 +2996,10 @@ impl LauncherApp {
             hint_spans.push(span("Left/Right").size(fs.hint).color(t.accent));
             hint_spans.push(span(" plugins").size(fs.hint).color(t.text_muted));
         }
-        if self.main_view.active && !self.main_view.stops.is_empty() {
+        if let Some(label) = self.cycle_view_label() {
             hint_spans.push(sep.clone());
             hint_spans.push(span("Ctrl+Tab").size(fs.hint).color(t.accent));
-            hint_spans.push(
-                span(format!(" {}", self.main_view_focus_label()))
-                    .size(fs.hint)
-                    .color(t.text_main),
-            );
+            hint_spans.push(span(format!(" {label}")).size(fs.hint).color(t.text_main));
         }
         if self.history.max_items > 0 {
             if !hint_spans.is_empty() {
@@ -3055,13 +3040,6 @@ impl LauncherApp {
                 .size(fs.hint)
                 .color(t.text_muted),
             );
-            hint_spans.push(sep.clone());
-            hint_spans.push(span("Ctrl+.").size(fs.hint).color(t.accent));
-            hint_spans.push(
-                span(format!(" show: {}", self.file_browser.show.label()))
-                    .size(fs.hint)
-                    .color(t.text_muted),
-            );
         }
         if self.clipboard.active {
             if !hint_spans.is_empty() {
@@ -3091,14 +3069,6 @@ impl LauncherApp {
             }
             hint_spans.push(span("Ctrl+R").size(fs.hint).color(t.accent));
             hint_spans.push(span(" refresh").size(fs.hint).color(t.text_muted));
-            hint_spans.push(sep.clone());
-            hint_spans.push(span("Ctrl+I").size(fs.hint).color(t.accent));
-            let images = if self.clipboard.images_only {
-                " all items"
-            } else {
-                " images only"
-            };
-            hint_spans.push(span(images).size(fs.hint).color(t.text_muted));
             hint_spans.push(sep.clone());
             hint_spans.push(span("Ctrl+D").size(fs.hint).color(t.accent));
             hint_spans.push(span(" delete").size(fs.hint).color(t.text_muted));
@@ -3200,7 +3170,7 @@ impl LauncherApp {
                 key: keyboard::Key::Named(Named::Tab),
                 modifiers,
                 ..
-            }) if modifiers.control() => Some(Message::MainViewCycle(modifiers.shift())),
+            }) if modifiers.control() => Some(Message::CycleView(modifiers.shift())),
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Named(Named::Tab),
                 ..
@@ -3235,14 +3205,6 @@ impl LauncherApp {
                 ..
             }) if c.as_str() == "s" && modifiers.control() => Some(Message::FileBrowserCycleSort),
             Event::Keyboard(keyboard::Event::KeyPressed {
-                ref key,
-                ref modified_key,
-                modifiers,
-                ..
-            }) if is_ctrl_period(key, modified_key, modifiers) => {
-                Some(Message::FileBrowserCycleShow)
-            }
-            Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Character(ref c),
                 modifiers,
                 ..
@@ -3267,11 +3229,6 @@ impl LauncherApp {
                 modifiers,
                 ..
             }) if c.as_str() == "r" && modifiers.control() => Some(Message::ClipboardRefresh),
-            Event::Keyboard(keyboard::Event::KeyPressed {
-                key: keyboard::Key::Character(ref c),
-                modifiers,
-                ..
-            }) if c.as_str() == "i" && modifiers.control() => Some(Message::ClipboardToggleImages),
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Character(ref c),
                 modifiers,

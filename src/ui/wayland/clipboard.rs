@@ -308,7 +308,7 @@ impl CopyQ {
         tab: &str,
         start: usize,
         query: &str,
-        images_only: bool,
+        only_kind: &str,
         min_chars: usize,
     ) -> Result<Page, String> {
         let query = query.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -320,7 +320,7 @@ impl CopyQ {
                 &PAGE_SIZE.to_string(),
                 &query,
                 &EXCERPT_CHARS.to_string(),
-                if images_only { "image" } else { "" },
+                only_kind,
                 &min_chars.to_string(),
             ],
             LIST_TIMEOUT,
@@ -864,12 +864,13 @@ mod tests {
     }
 
     /// Runs against a disposable CopyQ session filled with synthetic items:
-    /// `copyq -s raffitest` with text, HTML, image and URI-list entries.
+    /// `copyq -s raffitest` with text, HTML, image and URI-list entries, and
+    /// a text entry holding only a URL.
     #[test]
     #[ignore = "needs a running `copyq -s raffitest` session"]
     fn test_copyq_session_round_trip() {
         let copyq = CopyQ::with_session("raffitest");
-        let page = copyq.list_page("", 0, "", false, 0).unwrap();
+        let page = copyq.list_page("", 0, "", "", 0).unwrap();
         assert!(page.stable);
         let html = page
             .items
@@ -885,13 +886,13 @@ mod tests {
             assert!(preview.image.unwrap().is_ok());
         }
 
-        let long = copyq.list_page("", 0, "", false, 3).unwrap();
+        let long = copyq.list_page("", 0, "", "", 3).unwrap();
         assert!(long.items.iter().all(|item| {
             !matches!(item.kind, ItemKind::Text | ItemKind::Html)
                 || item.excerpt.trim().chars().count() >= 3
         }));
 
-        let images = copyq.list_page("", 0, "", true, 0).unwrap();
+        let images = copyq.list_page("", 0, "", "image", 0).unwrap();
         assert!(images.items.iter().all(|item| item.kind == ItemKind::Image));
         assert_eq!(
             images.items.len(),
@@ -901,6 +902,13 @@ mod tests {
                 .count()
         );
 
+        let urls = copyq.list_page("", 0, "", "url", 0).unwrap();
+        assert!(!urls.items.is_empty());
+        assert!(urls.items.iter().all(|item| {
+            matches!(item.kind, ItemKind::Text | ItemKind::Html)
+                && !item.excerpt.trim().contains(char::is_whitespace)
+        }));
+
         let stale = ItemRef {
             id: "0".repeat(64),
             ..reference.clone()
@@ -909,11 +917,11 @@ mod tests {
         assert!(copyq.delete(&stale).unwrap_err().contains("no longer"));
 
         copyq.delete(&reference).unwrap();
-        let after = copyq.list_page("", 0, "", false, 0).unwrap();
+        let after = copyq.list_page("", 0, "", "", 0).unwrap();
         assert_eq!(after.total, page.total - 1);
         assert!(after.items.iter().all(|item| item.id != reference.id));
         assert!(copyq
-            .list_page("", 0, "zz-no-match-zz", false, 0)
+            .list_page("", 0, "zz-no-match-zz", "", 0)
             .unwrap()
             .items
             .is_empty());

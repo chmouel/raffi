@@ -41,6 +41,15 @@ A behavior change is not done until these match it:
   `misc/screenshots/catalogue.py` if it is new (see
   `misc/screenshots/README.md`).
 
+## Conventions
+
+- Switching views or modes inside a list always uses Ctrl+Tab, with
+  Ctrl+Shift+Tab going backwards. Hook the new view into `handle_cycle_view`
+  and `cycle_view_label` in `src/ui/wayland/app.rs`, so the footer shows the
+  current view and the help lists it. Do not add a one-off key for this. If a
+  request asks for a different key, remind the requester of this rule and
+  use Ctrl+Tab unless they insist.
+
 ## Gotchas
 
 - Unit tests must not write to `~/.cache/raffi`. `get_mru_cache_path()` in

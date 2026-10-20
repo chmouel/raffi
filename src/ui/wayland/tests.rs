@@ -1,7 +1,7 @@
 use super::actions::DeferredAction;
 use super::app::{
-    classify_query, fido_restart, fido_updir, is_single_insert, keyword_suggestions,
-    loggable_query, route_query, tilde_path, QueryMode,
+    classify_query, fido_restart, fido_updir, keyword_suggestions, loggable_query, route_query,
+    tilde_path, QueryMode,
 };
 use super::command_list::CommandListAddon;
 use super::help::{filter_help_entries, help_entries, search_tips, HelpSection};
@@ -1550,42 +1550,6 @@ fn test_file_browser_cycle_sort_reorders_entries() {
 }
 
 #[test]
-fn test_is_single_insert() {
-    assert!(is_single_insert("abc", "abc.", '.'));
-    assert!(is_single_insert("abc", "a.bc", '.'));
-    assert!(is_single_insert("", ".", '.'));
-    assert!(is_single_insert("a.", "a..", '.'));
-    assert!(is_single_insert("é", ".é", '.'));
-    assert!(!is_single_insert("abc", "abc", '.'));
-    assert!(!is_single_insert("abc", "abcx", '.'));
-    assert!(!is_single_insert("abc", "ab.", '.'));
-    assert!(!is_single_insert("abc", "abc..", '.'));
-}
-
-#[test]
-fn test_file_browser_ctrl_period_does_not_type_a_period() {
-    let dir = std::env::temp_dir().join(format!("raffi-fb-ctrl-period-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let root = format!("{}/", dir.display());
-
-    let mut app = test_app(AddonsConfig::default());
-    let _ = app.update(Message::SearchChanged(root.clone()));
-    assert!(app.file_browser.active);
-
-    let _ = app.update(Message::ModifiersChanged(iced::keyboard::Modifiers::CTRL));
-    let _ = app.update(Message::SearchChanged(format!("{root}.")));
-    let _ = app.update(Message::FileBrowserCycleShow);
-    assert_eq!(app.search_query, root);
-    assert_eq!(app.file_browser.show, crate::FileBrowserShow::Files);
-
-    let _ = app.update(Message::ModifiersChanged(iced::keyboard::Modifiers::empty()));
-    let _ = app.update(Message::SearchChanged(format!("{root}.")));
-    assert_eq!(app.search_query, format!("{root}."));
-
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
 fn test_file_browser_cycle_show_filters_entries() {
     let dir = std::env::temp_dir().join(format!("raffi-fb-show-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("sub")).unwrap();
@@ -1602,13 +1566,13 @@ fn test_file_browser_cycle_show_filters_entries() {
     };
 
     let mut app = test_app(AddonsConfig::default());
-    let _ = app.update(Message::FileBrowserCycleShow);
+    let _ = app.update(Message::CycleView(false));
     assert_eq!(app.file_browser.show, crate::FileBrowserShow::All);
 
     let _ = app.update(Message::SearchChanged(root.clone()));
     assert_eq!(names(&app), vec!["nest", "sub", "a.txt"]);
 
-    let _ = app.update(Message::FileBrowserCycleShow);
+    let _ = app.update(Message::CycleView(false));
     let _ = app.update(Message::SearchChanged(root.clone()));
     assert_eq!(app.file_browser.show, crate::FileBrowserShow::Files);
     assert_eq!(names(&app), vec!["a.txt"]);
@@ -1627,16 +1591,16 @@ fn test_file_browser_cycle_show_filters_entries() {
     assert!(names(&app).is_empty());
     assert_eq!(
         app.file_browser.error.as_deref(),
-        Some("No files here (Ctrl+. for directories)")
+        Some("No files here (Ctrl+Tab for directories)")
     );
 
-    let _ = app.update(Message::FileBrowserCycleShow);
+    let _ = app.update(Message::CycleView(false));
     let _ = app.update(Message::SearchChanged(format!("{root}sub/")));
     assert_eq!(app.file_browser.show, crate::FileBrowserShow::Directories);
     assert!(names(&app).is_empty());
     assert_eq!(
         app.file_browser.error.as_deref(),
-        Some("No directories here (Ctrl+. to show all)")
+        Some("No directories here (Ctrl+Tab to show all)")
     );
 
     // The mode survives leaving and re-entering the browser.
@@ -1646,41 +1610,19 @@ fn test_file_browser_cycle_show_filters_entries() {
     assert_eq!(app.file_browser.show, crate::FileBrowserShow::Directories);
     assert_eq!(names(&app), vec!["nest", "sub"]);
 
-    let _ = app.update(Message::FileBrowserCycleShow);
-    let _ = app.update(Message::SearchChanged(root));
+    let _ = app.update(Message::CycleView(false));
+    let _ = app.update(Message::SearchChanged(root.clone()));
     assert_eq!(app.file_browser.show, crate::FileBrowserShow::All);
     assert_eq!(names(&app), vec!["nest", "sub", "a.txt"]);
+    assert_eq!(app.cycle_view_label().as_deref(), Some("All"));
+
+    // Shift goes back.
+    let _ = app.update(Message::CycleView(true));
+    let _ = app.update(Message::SearchChanged(root));
+    assert_eq!(app.file_browser.show, crate::FileBrowserShow::Directories);
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Directories"));
 
     let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn test_ctrl_period_maps_on_any_layout() {
-    use iced::keyboard::{Key, Modifiers};
-    let period = Key::Character(".".into());
-    let semicolon = Key::Character(";".into());
-
-    assert!(super::view::is_ctrl_period(
-        &period,
-        &period,
-        Modifiers::CTRL
-    ));
-    // Layouts where "." needs Shift report the unshifted key in `key`.
-    assert!(super::view::is_ctrl_period(
-        &semicolon,
-        &period,
-        Modifiers::CTRL | Modifiers::SHIFT
-    ));
-    assert!(!super::view::is_ctrl_period(
-        &period,
-        &period,
-        Modifiers::empty()
-    ));
-    assert!(!super::view::is_ctrl_period(
-        &semicolon,
-        &semicolon,
-        Modifiers::CTRL
-    ));
 }
 
 #[test]
@@ -2099,7 +2041,6 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "Ctrl+Y",
             "Ctrl+Alt+Y",
             "Ctrl+S",
-            "Ctrl+.",
             "Ctrl+U",
             "Ctrl+O",
             "Alt+P/N",
@@ -3648,29 +3589,18 @@ fn test_clipboard_routing_and_suggestion() {
         route_query("clip  two words ", &addons),
         QueryMode::Clipboard {
             query: "two words".into(),
-            images_only: false,
         }
     );
     assert_eq!(route_query("clip", &addons), QueryMode::Standard);
-    assert_eq!(
-        route_query("clipimg cat", &addons),
-        QueryMode::Clipboard {
-            query: "cat".into(),
-            images_only: true,
-        }
-    );
     let suggestions = keyword_suggestions("cli", &addons);
     let keywords: Vec<_> = suggestions.iter().map(|s| s.keyword.as_str()).collect();
-    assert_eq!(keywords, vec!["clip", "clipimg"]);
+    assert_eq!(keywords, vec!["clip"]);
     assert_eq!(suggestions[0].icon.as_deref(), Some("copyq"));
 
     addons.clipboard.trigger = Some("cb".into());
     assert_eq!(
         route_query("cb x", &addons),
-        QueryMode::Clipboard {
-            query: "x".into(),
-            images_only: false,
-        }
+        QueryMode::Clipboard { query: "x".into() }
     );
     assert_eq!(route_query("clip x", &addons), QueryMode::Standard);
     assert!(help_entries(&addons)
@@ -3867,10 +3797,7 @@ fn test_clipboard_previews_are_bound_to_session_and_item() {
         preview.bodies.first(),
         Some(PreviewBody::Prose { content, .. }) if content == "Loading preview..."
     ));
-    assert!(preview
-        .metadata
-        .iter()
-        .any(|(key, value)| key == "Ctrl+I" && value == "Show only images"));
+    assert!(preview.metadata.iter().any(|(key, _)| key == "Ctrl+Tab"));
     assert!(preview.metadata.iter().any(|(key, _)| key == "Ctrl+R"));
 
     let session = app.clipboard.session;
@@ -3991,41 +3918,45 @@ fn test_clipboard_actions_are_captured_and_never_fall_back() {
 }
 
 #[test]
-fn test_clipboard_images_only_keyword_and_toggle() {
+fn test_clipboard_ctrl_tab_cycles_views() {
+    use super::state::ClipboardView;
     let mut app = test_app(clipboard_addons());
     open_clipboard(&mut app, "clip ");
-    assert!(!app.clipboard.images_only);
+    assert_eq!(app.clipboard.view, ClipboardView::All);
+    assert_eq!(app.cycle_view_label().as_deref(), Some("All"));
 
     let generation = app.clipboard.generation;
-    let _ = app.update(Message::ClipboardToggleImages);
-    assert!(app.clipboard.images_only);
+    let _ = app.update(Message::CycleView(false));
+    assert_eq!(app.clipboard.view, ClipboardView::Images);
     assert_ne!(
         app.clipboard.generation, generation,
         "rescans with the filter"
     );
     assert_eq!(app.clipboard.status(), "Searching clipboard images...");
 
-    // Typing keeps the Ctrl+I choice.
+    // Typing keeps the view.
     open_clipboard(&mut app, "clip cat");
-    assert!(app.clipboard.images_only);
+    assert_eq!(app.clipboard.view, ClipboardView::Images);
     let _ = app.update(Message::ClipboardPage(
         app.clipboard.generation,
         Ok(clip_page("h", 1, 1, Vec::new())),
     ));
     assert_eq!(app.clipboard.status(), "No clipboard images match");
 
-    // The images keyword starts filtered, and Ctrl+I shows everything again.
-    open_clipboard(&mut app, "clipimg ");
-    assert!(app.clipboard.images_only);
-    let _ = app.update(Message::ClipboardToggleImages);
-    assert!(!app.clipboard.images_only);
-    open_clipboard(&mut app, "clip ");
-    assert!(!app.clipboard.images_only);
+    let _ = app.update(Message::CycleView(false));
+    assert_eq!(app.clipboard.view, ClipboardView::Urls);
+    assert_eq!(app.cycle_view_label().as_deref(), Some("URLs"));
+    assert_eq!(app.clipboard.status(), "Searching clipboard URLs...");
+    let _ = app.update(Message::CycleView(false));
+    assert_eq!(app.clipboard.view, ClipboardView::All);
+    let _ = app.update(Message::CycleView(true));
+    assert_eq!(app.clipboard.view, ClipboardView::Urls);
 
+    // Reopening the browser lists every item again.
     let _ = app.update(Message::SearchChanged("fire".into()));
-    let _ = app.update(Message::ClipboardToggleImages);
     assert!(!app.clipboard.active);
-    assert!(!app.clipboard.images_only);
+    open_clipboard(&mut app, "clip ");
+    assert_eq!(app.clipboard.view, ClipboardView::All);
 }
 
 #[test]
@@ -4564,17 +4495,7 @@ fn test_default_triggers_do_not_shadow_each_other_or_web_searches() {
     ));
     assert!(matches!(
         route_query("clip x", &addons),
-        QueryMode::Clipboard {
-            images_only: false,
-            ..
-        }
-    ));
-    assert!(matches!(
-        route_query("clipimg x", &addons),
-        QueryMode::Clipboard {
-            images_only: true,
-            ..
-        }
+        QueryMode::Clipboard { .. }
     ));
     assert!(matches!(
         route_query("sys x", &addons),
@@ -5745,6 +5666,51 @@ fn test_route_query_audio_trigger() {
 
     addons.audio.enabled = false;
     assert_eq!(route_query("audio razer", &addons), QueryMode::Standard);
+}
+
+#[test]
+fn test_audio_ctrl_tab_cycles_outputs_and_inputs() {
+    let mut app = audio_app("audio ");
+    assert_eq!(app.cycle_view_label().as_deref(), Some("All"));
+    let _ = app.update(Message::CycleView(false));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Outputs"));
+    assert_eq!(
+        command_list_titles(&app),
+        vec![
+            "Volume",
+            "Volume up",
+            "Volume down",
+            "Unmute output",
+            "Outputs",
+            "Ryzen HD Audio Controller Pro",
+            "✓ Razer Seiren V2 Pro Analog Stereo",
+            "WH-1000XM4",
+        ]
+    );
+    let _ = app.update(Message::CycleView(false));
+    assert_eq!(
+        command_list_titles(&app),
+        vec![
+            "Volume",
+            "Mute microphone",
+            "Inputs",
+            "Ryzen HD Audio Controller Pro",
+            "✓ Razer Seiren V2 Pro Mono",
+        ]
+    );
+    // The view stays while typing; a volume only sets outputs.
+    let _ = app.update(Message::SearchChanged("audio 40".into()));
+    assert!(!command_list_titles(&app)
+        .iter()
+        .any(|title| title.starts_with("Set output volume")));
+    let _ = app.update(Message::CycleView(true));
+    assert_eq!(app.command_list.audio_view, super::audio::View::Outputs);
+    assert_eq!(command_list_titles(&app)[0], "Set output volume to 40%");
+
+    // Entering the list again shows every device.
+    let _ = app.update(Message::SearchChanged(String::new()));
+    let app = audio_app("audio ");
+    assert_eq!(app.command_list.audio_view, super::audio::View::All);
 }
 
 #[test]
@@ -8263,7 +8229,7 @@ fn test_main_view_empty_query_lists_recent_picks() {
     assert_eq!(main_view_titles(&app), ["Mail"], "typing lists matches");
 
     let _ = app.update(Message::SearchChanged(String::new()));
-    let _ = app.update(Message::MainViewCycle(false));
+    let _ = app.update(Message::CycleView(false));
     assert_eq!(
         main_view_titles(&app),
         ["Raffi", "Mail"],
@@ -8434,7 +8400,7 @@ fn test_main_view_ctrl_tab_focuses_each_source_then_all() {
     );
     assert_eq!(app.main_view_focus_label(), "All");
 
-    let _ = app.update(Message::MainViewCycle(false));
+    let _ = app.update(Message::CycleView(false));
     assert_eq!(app.main_view_focus_label(), "Tabs");
     assert!(app.keyword_suggestions.is_empty(), "no plugin rows");
     assert!(app.filtered_configs.is_empty(), "launchers are hidden");
@@ -8446,19 +8412,19 @@ fn test_main_view_ctrl_tab_focuses_each_source_then_all() {
     assert_eq!(app.total_items(), 1);
     assert_eq!(app.resolve_selected_preview().unwrap().title, "Mail");
 
-    let _ = app.update(Message::MainViewCycle(false));
+    let _ = app.update(Message::CycleView(false));
     assert_eq!(app.main_view_focus_label(), "Launchers");
     assert_eq!(app.filtered_configs, vec![0]);
     assert_eq!(app.total_items(), 1, "no tab row");
 
-    let _ = app.update(Message::MainViewCycle(false));
+    let _ = app.update(Message::CycleView(false));
     assert_eq!(app.main_view_focus_label(), "System");
-    let _ = app.update(Message::MainViewCycle(false));
+    let _ = app.update(Message::CycleView(false));
     assert_eq!(app.main_view_focus_label(), "All");
     assert_eq!(app.total_items(), 1 + 1 + 1, "tab, launcher and fallback");
 
     let _ = app.update(Message::MoveDown);
-    let _ = app.update(Message::MainViewCycle(true));
+    let _ = app.update(Message::CycleView(true));
     assert_eq!(app.main_view_focus_label(), "System", "Shift goes back");
     assert_eq!(app.selected_index, 0);
 
@@ -8500,8 +8466,8 @@ fn test_main_view_focus_lists_every_match_without_inline_rows() {
     let _ = app.update(Message::SearchChanged("mail".into()));
     assert_eq!(app.total_items(), super::main_view::MAX_ROWS);
 
-    let _ = app.update(Message::MainViewCycle(false));
-    let _ = app.update(Message::MainViewCycle(false));
+    let _ = app.update(Message::CycleView(false));
+    let _ = app.update(Message::CycleView(false));
     assert_eq!(app.main_view_focus_label(), "Notes");
     assert_eq!(app.total_items(), 8, "no cap on a focused source");
     let _ = app.update(Message::SearchChanged(String::new()));
@@ -8509,7 +8475,7 @@ fn test_main_view_focus_lists_every_match_without_inline_rows() {
 
     let _ = app.update(Message::SearchChanged("1+1".into()));
     assert!(app.inline_result.is_none(), "inline rows only show in All");
-    let _ = app.update(Message::MainViewCycle(false));
+    let _ = app.update(Message::CycleView(false));
     assert!(app.inline_result.is_some());
 }
 
@@ -8517,12 +8483,12 @@ fn test_main_view_focus_lists_every_match_without_inline_rows() {
 fn test_ctrl_tab_completes_where_the_main_view_does_not_show() {
     let mut app = test_app(snippet_addons());
     let _ = app.update(Message::SearchChanged("sn".into()));
-    let _ = app.update(Message::MainViewCycle(false));
+    let _ = app.update(Message::CycleView(false));
     assert_eq!(app.search_query, "sn ", "no main_view configured");
 
     let mut app = main_view_app(&["text_snippets.Snippets"], Vec::new(), snippet_addons());
     let _ = app.update(Message::SearchChanged("sn em".into()));
-    let _ = app.update(Message::MainViewCycle(false));
+    let _ = app.update(Message::CycleView(false));
     assert_eq!(app.main_view.focus, None, "keyword modes keep their list");
 }
 
@@ -8549,6 +8515,56 @@ fn test_route_query_slack_needs_enabling() {
             query: "search deploy".into()
         }
     );
+}
+
+#[test]
+fn test_slack_ctrl_tab_rewrites_the_view_word() {
+    let mut addons = AddonsConfig::default();
+    addons.slack.enabled = true;
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+    let _ = app.update(Message::SearchChanged("slack ops".into()));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Home"));
+    for (backwards, query, label) in [
+        (false, "slack unread ops", "Unread"),
+        (false, "slack people ops", "People"),
+        (false, "slack ops", "Home"),
+        (true, "slack people ops", "People"),
+        (true, "slack unread ops", "Unread"),
+        (true, "slack ops", "Home"),
+    ] {
+        let _ = app.update(Message::CycleView(backwards));
+        assert_eq!(app.search_query, query);
+        let _ = app.update(Message::SearchChanged(query.into()));
+        assert_eq!(app.cycle_view_label().as_deref(), Some(label));
+    }
+    // A search counts as Home; an empty rest keeps the trailing space.
+    let _ = app.update(Message::SearchChanged("slack search".into()));
+    let _ = app.update(Message::CycleView(false));
+    assert_eq!(app.search_query, "slack unread ");
+
+    // A plain alias stays; one carrying a view falls back to the trigger.
+    app.addons.launcher_keywords = vec![
+        launcher_keyword("sk", "slack"),
+        launcher_keyword("su", "slack unread"),
+    ];
+    let _ = app.update(Message::SearchChanged("sk ops".into()));
+    let _ = app.update(Message::CycleView(false));
+    assert_eq!(app.search_query, "sk unread ops");
+    let _ = app.update(Message::SearchChanged("su ops".into()));
+    let _ = app.update(Message::CycleView(false));
+    assert_eq!(app.search_query, "slack people ops");
+    let _ = app.update(Message::SearchChanged("slack people ops".into()));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("People"));
+
+    // When a launcher keyword shadows the trigger, no typed query reaches
+    // the other views, so Ctrl+Tab leaves the query alone.
+    app.addons.launcher_keywords = vec![launcher_keyword("slack", "slack unread")];
+    let _ = app.update(Message::SearchChanged("slack ops".into()));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Unread"));
+    let task = app.update(Message::CycleView(false));
+    assert_eq!(task.units(), 0);
+    assert_eq!(app.search_query, "slack ops");
 }
 
 #[test]

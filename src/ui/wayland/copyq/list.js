@@ -5,6 +5,20 @@ var phrase = terms.join(" ");
 var previewChars = parseInt(str(arguments[5]));
 var onlyKind = str(arguments[6]);
 var minChars = parseInt(str(arguments[7])) || 0;
+// A whole text that is one URL: any scheme followed by "://", or one of the
+// schemes written without it, then no whitespace, control character or
+// angle bracket. Built without backslashes, see prelude.js.
+var URL_SCHEME = new RegExp("^([a-z][a-z0-9+.-]*://|(mailto|tel|magnet|urn|sms|geo):)", "i");
+function isUrl(text) {
+  text = text.trim();
+  var scheme = URL_SCHEME.exec(text);
+  if (!scheme || scheme[0].length == text.length) return false;
+  for (var i = 0; i < text.length; i++) {
+    var c = text.charAt(i), code = text.charCodeAt(i);
+    if (code < 32 || (code >= 127 && code < 160) || c.trim() == "" || c == "<" || c == ">") return false;
+  }
+  return true;
+}
 function tierOf(text) {
   if (!terms.length) return 0;
   var lower = text.toLowerCase();
@@ -20,13 +34,17 @@ var items = [];
 for (var row = start; row < end; row++) {
   var item = getItem(row);
   var keys = formatsOf(item);
-  if (onlyKind && kindOf(keys) != onlyKind) continue;
-  var text = textOf(item);
   var kind = kindOf(keys);
-  if ((kind == "text" || kind == "html") && text.trim().length < minChars) continue;
+  var isText = kind == "text" || kind == "html";
+  if (onlyKind == "url") {
+    if (!isText) continue;
+  } else if (onlyKind && kind != onlyKind) continue;
+  var text = textOf(item);
+  if (onlyKind == "url" && !isUrl(text)) continue;
+  if (isText && text.trim().length < minChars) continue;
   var tier = tierOf(text);
   if (tier < 0) continue;
-  items.push({ r: row, id: fingerprint(item), f: keys, k: kindOf(keys), n: text.length, p: text.substring(0, previewChars), t: tier, c: copyTimeOf(item) });
+  items.push({ r: row, id: fingerprint(item), f: keys, k: kind, n: text.length, p: text.substring(0, previewChars), t: tier, c: copyTimeOf(item) });
 }
 var stable = count() == total && (total ? fingerprint(getItem(0)) : "") == head;
 emit({ tab: tabName, total: total, head: head, next: end, stable: stable, items: items });

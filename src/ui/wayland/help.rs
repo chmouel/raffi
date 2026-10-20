@@ -102,15 +102,6 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             icon: Some(super::app::CLIPBOARD_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
         });
-        let trigger = addons.clipboard.image_trigger();
-        entries.push(HelpEntry {
-            section: HelpSection::KeywordsAndActions,
-            trigger: trigger.to_string(),
-            title: "Clipboard images".to_string(),
-            usage: format!("{trigger} <text>"),
-            icon: Some(super::app::CLIPBOARD_IMAGES_ICON.to_string()),
-            completion: Some(format!("{trigger} ")),
-        });
     }
 
     for config in &addons.web_searches {
@@ -419,19 +410,9 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
                 "Cycle sort order",
                 "File browser: name, modified date, created date",
             ),
-            shortcut(
-                "Ctrl+.",
-                "Cycle files/directories",
-                "File browser: all entries, files only, directories only",
-            ),
         ]);
     }
     if addons.clipboard.is_enabled() {
-        entries.push(shortcut(
-            "Ctrl+I",
-            "Show only images",
-            "Clipboard history: switch between all items and images only",
-        ));
         entries.push(shortcut(
             "Ctrl+D",
             "Delete clipboard entry",
@@ -502,9 +483,31 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
     entries
 }
 
-/// List Ctrl+Tab and the chip arrows after Tab, for a configured
-/// `general.main_view`.
-pub(super) fn add_main_view_shortcut(entries: &mut Vec<HelpEntry>, chips: bool) {
+/// List Ctrl+Tab after Tab with the views it cycles through, and the chip
+/// arrows when `chips` is set. `main_view` tells whether `general.main_view`
+/// has sources to cycle.
+pub(super) fn add_cycle_view_shortcut(
+    entries: &mut Vec<HelpEntry>,
+    addons: &AddonsConfig,
+    main_view: bool,
+    chips: bool,
+) {
+    let views = [
+        (main_view, "main view: each source, then all"),
+        (
+            addons.clipboard.is_enabled(),
+            "clipboard: all, images, URLs",
+        ),
+        (
+            addons.file_browser.enabled,
+            "file browser: all, files, directories",
+        ),
+        (addons.slack.enabled, "Slack: home, unread, people"),
+        (addons.audio.enabled, "audio: all, outputs, inputs"),
+    ]
+    .into_iter()
+    .filter_map(|(enabled, views)| enabled.then_some(views))
+    .collect::<Vec<_>>();
     let at = entries
         .iter()
         .position(|entry| entry.section == HelpSection::KeyboardShortcuts && entry.trigger == "Tab")
@@ -517,12 +520,15 @@ pub(super) fn add_main_view_shortcut(entries: &mut Vec<HelpEntry>, chips: bool) 
         icon: None,
         completion: None,
     };
-    let mut rows = vec![row(
-        "Ctrl+Tab",
-        "Cycle main view sources",
-        "Lists one main_view source at a time, then all of them; Shift goes back",
-    )];
-    if chips {
+    let mut rows = Vec::new();
+    if !views.is_empty() {
+        rows.push(row(
+            "Ctrl+Tab",
+            "Cycle views",
+            &format!("Switches the view, Shift goes back. {}", views.join("; ")),
+        ));
+    }
+    if main_view && chips {
         rows.push(row(
             "Left/Right",
             "Pick a plugin chip",

@@ -15,6 +15,49 @@ const DEFAULT_MARK: &str = "✓";
 pub(super) const SET_VOLUME: &str = super::command_list::QUERY_ROW;
 pub(super) const SET_VOLUME_ICON: &str = "audio-volume-high";
 
+/// Which devices the audio list shows, cycled with Ctrl+Tab.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum View {
+    #[default]
+    All,
+    Outputs,
+    Inputs,
+}
+
+impl View {
+    pub(super) fn cycle(self, backwards: bool) -> Self {
+        match (self, backwards) {
+            (Self::All, false) | (Self::Inputs, true) => Self::Outputs,
+            (Self::Outputs, false) | (Self::All, true) => Self::Inputs,
+            (Self::Inputs, false) | (Self::Outputs, true) => Self::All,
+        }
+    }
+
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Outputs => "Outputs",
+            Self::Inputs => "Inputs",
+        }
+    }
+
+    /// Whether the row with `identity` shows in this view. Rows tied to
+    /// neither side, such as the Volume header or an error, always show.
+    pub(super) fn keeps(self, identity: &str) -> bool {
+        let output = matches!(
+            identity,
+            SET_VOLUME | "volume/up" | "volume/down" | "volume/mute-output" | "sink"
+        ) || identity.starts_with("sink/");
+        let input =
+            matches!(identity, "volume/mute-input" | "source") || identity.starts_with("source/");
+        match self {
+            Self::All => true,
+            Self::Outputs => !input,
+            Self::Inputs => !output,
+        }
+    }
+}
+
 /// What the audio rows do, from the addon configuration.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct AudioOptions {

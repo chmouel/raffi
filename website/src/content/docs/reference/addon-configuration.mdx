@@ -283,7 +283,7 @@ Reverse the active sort: Z to A, or oldest first for `modified`/`created`. Direc
 
 **`addons.file_browser.show`** `string` (default: `all`)
 
-Which entries the listing starts with: `all`, `files` or `directories` (`dirs` and `directory` work too). Cycle with Ctrl+. at runtime. When directories are hidden you can still type or Tab-complete a directory path to enter it.
+Which entries the listing starts with: `all`, `files` or `directories` (`dirs` and `directory` work too). Cycle with Ctrl+Tab at runtime (Ctrl+Shift+Tab goes back). When directories are hidden you can still type or Tab-complete a directory path to enter it.
 
   ```yaml
   addons:
@@ -351,7 +351,7 @@ Command that previews the selected entry in the preview pane. When unset, raffi 
 - Ctrl+Y: Copy the selected path to the clipboard, regardless of configured actions
 - Ctrl+Alt+Y: Copy a supported image file to the clipboard
 - Ctrl+S: Cycle the sort order (name, modified, created)
-- Ctrl+.: Cycle the listing between all entries, files only and directories only
+- Ctrl+Tab: Cycle the listing between all entries, files only and directories only
 
 Directories are listed first in accent color.
 
@@ -957,11 +957,6 @@ Turns the clipboard browser on or off. When unset, it is on if a CopyQ process i
 **`addons.clipboard.trigger`** `string` (default: `clip`)
 
 Keyword that opens the history. Type it followed by a space.
-
-**`addons.clipboard.image_trigger`** `string` (default: `clipimg`)
-
-Keyword that opens the history showing only images. **Ctrl+I** switches
-between images only and all items in either case.
 
 **`addons.clipboard.min_chars`** `integer` (default: `3`)
 

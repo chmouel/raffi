@@ -74,18 +74,16 @@ or from [copyq-commands](https://github.com/hluk/copyq-commands/blob/master/comm
 (in CopyQ, press F6 and paste it). Raffi reads the time from either version.
 Items copied before you add the command show no time.
 
-## Images only
+## Images and URLs
 
-Press **Ctrl+I** to list only images, and again to list everything. You can
-also open the browser with only images by typing `clipimg ` (the
-`image_trigger` setting), or bind a key to it:
+Press **Ctrl+Tab** to go from all items to images only, then to URLs only,
+then back to all items. **Ctrl+Shift+Tab** goes the other way, and the footer
+shows the current view. A URL is a text item that holds nothing but a link
+with a scheme, such as `https://...`, `file:///...` or `mailto:...`.
 
-```sh
-raffi -u native -i "clipimg "
-```
-
-Ctrl+I works there too, and your choice holds while you type. Search words
-still apply to images, though most images carry no text to match.
+Your choice holds while you type, and Raffi lists everything again the next
+time you open the browser. Search words still apply to images, though most
+images carry no text to match.
 
 ## Previews
 
@@ -139,7 +137,6 @@ addons:
   clipboard:
     enabled: true
     trigger: clip
-    image_trigger: clipimg
     min_chars: 3
     backend: copyq
     action: copy

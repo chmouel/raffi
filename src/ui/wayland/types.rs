@@ -472,8 +472,9 @@ pub(crate) enum Message {
     /// Lifecycle of a drag-and-drop session started from the file browser.
     DragEvent(super::dnd::DragEvent),
     TabComplete,
-    /// Ctrl+Tab (backwards with Shift): focus the next main view source.
-    MainViewCycle(bool),
+    /// Ctrl+Tab (backwards with Shift): switch to the next view of what is
+    /// showing, such as a main view source or a clipboard filter.
+    CycleView(bool),
     FileBrowserToggleHidden,
     FileBrowserCopyPath,
     FileBrowserCopyImage,
@@ -484,8 +485,6 @@ pub(crate) enum Message {
     FileBrowserOpenFileManager,
     /// Switch the file browser to the next sort mode.
     FileBrowserCycleSort,
-    /// Cycle the file browser between all entries, files and directories.
-    FileBrowserCycleShow,
     ModifiersChanged(iced::keyboard::Modifiers),
     HistoryPrevious,
     HistoryNext,
@@ -577,7 +576,6 @@ pub(crate) enum Message {
         std::result::Result<Option<super::hyprland::Hyprland>, String>,
     ),
     ClipboardRefresh,
-    ClipboardToggleImages,
     ClipboardDelete,
     ClipboardDeleteDone(u64, std::result::Result<String, String>),
     /// Text typed in the masked password prompt, never shown by `Debug`.

@@ -13,24 +13,8 @@ const PREVIEW_CACHE_SIZE: usize = 8;
 
 impl LauncherApp {
     /// Enter or update the clipboard browser for `query`.
-    pub(super) fn handle_clipboard_query(
-        &mut self,
-        query: String,
-        image_keyword: bool,
-        tasks: &mut Vec<Task<Message>>,
-    ) {
+    pub(super) fn handle_clipboard_query(&mut self, query: String, tasks: &mut Vec<Task<Message>>) {
         let state = &mut self.clipboard;
-        // Switching between the two keywords resets the Ctrl+I override.
-        if state.active && state.image_keyword != image_keyword {
-            state.image_keyword = image_keyword;
-            state.images_only = image_keyword;
-            state.query = query;
-            state.follow = None;
-            state.restarts = 0;
-            state.error = None;
-            tasks.push(self.start_clipboard_scan());
-            return;
-        }
         if state.active && state.query == query {
             let follow = state.follow.clone();
             self.restore_clipboard_selection(follow.as_deref());
@@ -39,8 +23,6 @@ impl LauncherApp {
         if !state.active {
             state.clear();
             state.active = true;
-            state.image_keyword = image_keyword;
-            state.images_only = image_keyword;
         }
         state.query = query;
         state.follow = None;
@@ -58,10 +40,10 @@ impl LauncherApp {
         state.scanned = 0;
         let generation = state.generation;
         let query = state.query.clone();
-        let images_only = state.images_only;
+        let kind = state.view.kind();
         let min_chars = self.addons.clipboard.min_chars();
         Task::perform(
-            async move { CopyQ::default().list_page("", 0, &query, images_only, min_chars) },
+            async move { CopyQ::default().list_page("", 0, &query, kind, min_chars) },
             move |result| Message::ClipboardPage(generation, result),
         )
     }
@@ -129,11 +111,11 @@ impl LauncherApp {
             let generation = state.generation;
             let tab = state.tab.clone();
             let query = state.query.clone();
-            let images_only = state.images_only;
+            let kind = state.view.kind();
             let min_chars = self.addons.clipboard.min_chars();
             let start = page.next;
             Task::perform(
-                async move { CopyQ::default().list_page(&tab, start, &query, images_only, min_chars) },
+                async move { CopyQ::default().list_page(&tab, start, &query, kind, min_chars) },
                 move |result| Message::ClipboardPage(generation, result),
             )
         } else {
@@ -212,14 +194,14 @@ impl LauncherApp {
         self.start_clipboard_scan()
     }
 
-    /// Ctrl+I: switch between all items and images only.
-    pub(super) fn handle_clipboard_toggle_images(&mut self) -> Task<Message> {
+    /// Ctrl+Tab: list the next view, all items, images or URLs.
+    pub(super) fn handle_clipboard_cycle_view(&mut self, backwards: bool) -> Task<Message> {
         if !self.clipboard.active || self.view.help_active {
             return Task::none();
         }
         self.follow_clipboard_selection();
         let state = &mut self.clipboard;
-        state.images_only = !state.images_only;
+        state.view = state.view.cycle(backwards);
         state.restarts = 0;
         state.error = None;
         self.start_clipboard_scan()
