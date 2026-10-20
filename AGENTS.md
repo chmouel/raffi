@@ -1,80 +1,63 @@
-# Raffi Repository Guide
+# Raffi
 
-Repository-local instructions for coding agents working in this tree.
+Raffi is a YAML-driven application launcher written in Rust, with a `fuzzel`
+frontend and a native iced UI with built-in addons. `DESIGN.md` maps the
+architecture; user docs live in `website/src/content/docs/` (Astro Starlight).
 
-## First Read
+## Commands
 
-- Read `CLAUDE.md` before changing code. Today it adds one repo-specific rule: update docs and `examples/raffi.yaml` when behavior changes.
-- Do not modify git history or create commits unless the user explicitly asks.
-- The worktree may already contain user edits. Do not revert unrelated changes.
-
-## Project Shape
-
-- Rust application code lives in `src/`.
-- CLI entrypoint is `src/main.rs`; runtime orchestration and config parsing live in `src/lib.rs`.
-- UI backends live in `src/ui/`:
-  - `src/ui/fuzzel.rs` for the external `fuzzel` integration.
-  - `src/ui/wayland*` for the native iced UI and addons.
-- User-facing examples live in `examples/`.
-- Documentation site lives in `website/` and is built with Astro Starlight.
-- Release and CI workflows live in `.github/workflows/`.
-
-## Expected Workflow
-
-- Prefer the existing task runner when it matches the task:
-  - `make build`
-  - `make test`
-  - `make clippy`
-  - `make sanity`
-- If you run Rust commands directly, mirror CI:
-  - `cargo check`
-  - `cargo test`
+- Build and check: `make build`, `make test`, `make clippy`, `make sanity`.
+- After a Rust change, run what CI runs:
   - `cargo fmt --all -- --check`
-  - `cargo clippy -- -D warnings`
-- For docs site work, use the existing `website/package.json` scripts.
-- Use `uv` for Python tooling when Python is necessary. Use `python3`, not `python`.
+  - `cargo clippy --all-targets -- -D warnings`
+  - `cargo test`
+- Docs site: `cd website && npm run dev` or `npm run build`.
+- Python tooling goes through `uv run`; call `python3`, never `python`.
 
-## Change Coupling
+## Layout
 
-When changing behavior, keep the surrounding docs and examples aligned.
+- `src/lib.rs` holds CLI args, config loading, and `run()`. Old flat configs
+  are migrated to the v1 `launchers:` format on load, so keep both readable.
+- `src/ui/fuzzel.rs` is the fuzzel backend; `src/ui/wayland.rs` and
+  `src/ui/wayland/` are the native UI and its addons.
+- The native UI sits behind the `wayland` Cargo feature (on by default).
+  `--no-default-features` builds a fuzzel-only binary, so code outside
+  `src/ui/wayland*` must still compile without it.
 
-- Config format, CLI flags, addon behavior, or screenshots/docs references:
-  - update `README.md` when the top-level project description changes
-  - update relevant files under `website/src/content/docs/`
-  - update `examples/raffi.yaml` if the example config should reflect the new behavior
-- Config schema changes:
-  - refresh `examples/raffi-schema.json`
-- Native UI behavior changes:
-  - check `src/ui/wayland/tests.rs` and add or adjust tests
-  - if the change is visible in the docs screenshots, update
-    `misc/screenshots/catalogue.py` if needed and re-shoot with
-    `make screenshots SHOTS="name ..."` (see `misc/screenshots/README.md`)
-- Sorting, history, MRU, or search behavior changes:
-  - check `src/ui/wayland/support.rs` tests as well as the app tests
+## Keep related files in sync
 
-## Architecture Notes
+A behavior change is not done until these match it:
 
-- `run()` in `src/lib.rs` is the main runtime path:
-  - resolve config path
-  - optionally clear caches
-  - auto-write `raffi-schema.json` and `launchers-schema.json` next to the user
-    config if missing or outdated
-  - read and normalize config
-  - choose UI backend
-  - execute the selected launcher or script
-- Config loading supports migration from the old flat format to the current v1 `launchers:` format.
-- The native UI is feature-gated by the `wayland` Cargo feature. A no-default-features build is intentionally smaller and only supports the `fuzzel` path.
+- Config, CLI flags, or addon behavior: the relevant page under
+  `website/src/content/docs/`, `examples/raffi.yaml` when the example should
+  show it, and `README.md` if the top-level description changes.
+- Config structs: regenerate both checked-in schemas with
+  `cargo run -- --generate-schemas --configfile examples/raffi.yaml`.
+  The schema tests in `src/lib.rs` fail when they drift.
+- Native UI behavior: tests in `src/ui/wayland/tests.rs`. Sorting, history,
+  MRU, and search changes also have tests in `src/ui/wayland/support.rs`.
+- Visible UI changes: re-shoot the docs screenshots with
+  `make screenshots SHOTS="name ..."`, adding the shot to
+  `misc/screenshots/catalogue.py` if it is new (see
+  `misc/screenshots/README.md`).
 
-## Validation Expectations
+## Gotchas
 
-- Run the smallest relevant verification set for the files you changed.
-- For docs-only changes, say that you did not run Rust tests if you skipped them.
-- For code changes, prefer at least targeted `cargo test`, and run broader checks when the change touches shared code paths.
+- Unit tests must not write to `~/.cache/raffi`. `get_mru_cache_path()` in
+  `src/ui/mod.rs` errors under `cfg!(test)`, which disables the usage caches in
+  tests; derive any new cache path from it to keep that guarantee.
+- The main view reads `window_session` from compositor env vars such as
+  `NIRI_SOCKET`. Tests that involve recent window picks need to pin
+  `app.main_view.window_session`, or they fail on a developer's desktop.
+- iced's `text_input` loses focus on Escape. A `Message::Cancel` path that
+  keeps raffi open has to re-focus the search input, as `close_help` does in
+  `src/ui/wayland/app.rs`, or typing stops working.
+- To run the native UI headlessly, use Xvfb with `DISPLAY` set and
+  `WAYLAND_DISPLAY` unset. Headless sway fails because it has no seat pointer.
+  Window transparency only works with the GPU renderer.
 
-## Documentation Deliverables
+## Finishing
 
-Before finishing, report:
-
-- commands/tests run and their results
-- files changed
-- remaining risks, TODOs, or anything not verified
+Run the smallest checks that cover the change. Report the commands you ran and
+their results, and say what was not verified, for example "docs only, no cargo
+tests run".
