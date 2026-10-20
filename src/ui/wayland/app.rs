@@ -1668,6 +1668,10 @@ impl LauncherApp {
                 self.slack.scroll = offset;
                 Task::none()
             }
+            Message::SlackPreviewOpen {
+                desktop_url,
+                browser_url,
+            } => self.handle_slack_preview_open(desktop_url, browser_url),
             Message::FaviconsFetched(session, fetched) if session & MAIN_VIEW_SESSION != 0 => {
                 self.handle_main_view_favicons(session, fetched)
             }

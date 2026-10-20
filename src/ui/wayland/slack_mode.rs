@@ -531,4 +531,70 @@ impl LauncherApp {
         }
         Task::none()
     }
+
+    pub(super) fn handle_slack_preview_open(
+        &mut self,
+        desktop_url: Option<String>,
+        browser_url: Option<String>,
+    ) -> Task<Message> {
+        let mut open_in = self.addons.slack.open_in;
+        if self.view.current_modifiers.control() {
+            open_in = match open_in {
+                crate::SlackOpenIn::Desktop => crate::SlackOpenIn::Browser,
+                crate::SlackOpenIn::Browser => crate::SlackOpenIn::Desktop,
+            };
+        }
+        let url = match open_in {
+            crate::SlackOpenIn::Desktop => desktop_url.or(browser_url),
+            crate::SlackOpenIn::Browser => browser_url.or(desktop_url),
+        };
+        let Some(url) = url.filter(|u| !u.is_empty()) else {
+            return Task::none();
+        };
+        let identity = self
+            .selected_index
+            .checked_sub(self.command_list_offset())
+            .and_then(|row| self.command_list.item(row))
+            .map(|item| item.identity.clone())
+            .unwrap_or_else(|| format!("slack:open:{url}"));
+        let action = slack::open_action(url);
+        let keep_open = !self.should_close(self.addons.slack.close_on_action);
+        if !self
+            .in_flight
+            .begin(CommandListAddon::Slack.name(), &identity)
+        {
+            return Task::none();
+        }
+        self.record_slack_pick(&identity);
+        if keep_open {
+            self.save_query_to_history();
+            let session = self.command_list.session;
+            return Task::perform(
+                async move {
+                    let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                    std::thread::spawn(move || {
+                        let result = super::command_list::run_kept_open(&action);
+                        let _ = sender.send(result);
+                    });
+                    let result = receiver
+                        .await
+                        .unwrap_or_else(|_| Err("action stopped unexpectedly".to_string()));
+                    (identity, result)
+                },
+                move |(identity, result)| {
+                    Message::CommandListActionDone(
+                        CommandListAddon::Slack,
+                        session,
+                        identity,
+                        result,
+                    )
+                },
+            );
+        }
+        if let Ok(mut slot) = self.deferred_action.lock() {
+            *slot = Some(action);
+        }
+        self.save_query_to_history();
+        iced::exit()
+    }
 }

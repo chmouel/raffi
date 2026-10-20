@@ -9229,3 +9229,178 @@ fn test_vault_keep_open_tracks_copy_completion_and_errors() {
     assert!(!app.vault.busy());
     assert_eq!(command_list_titles(&app)[0], "copy not confirmed");
 }
+
+#[test]
+fn test_slack_mrkdwn_parsing_and_chat_preview_header() {
+    use super::preview::{
+        parse_mrkdwn_blocks, parse_mrkdwn_spans, ChatEntry, ChatMessage, ChatMessageGroup,
+        MrkdwnBlock, MrkdwnSpan, MrkdwnStyle, PreviewBody,
+    };
+
+    let blocks = parse_mrkdwn_blocks("Hello world\n> quoted line\n```cargo test\n```\nafter");
+    assert_eq!(
+        blocks,
+        vec![
+            MrkdwnBlock::Paragraph("Hello world".into()),
+            MrkdwnBlock::Quote("quoted line".into()),
+            MrkdwnBlock::Code("cargo test".into()),
+            MrkdwnBlock::Paragraph("after".into()),
+        ]
+    );
+
+    let spans = parse_mrkdwn_spans(
+        "Hey @alice check #ops: *bold*, _italic_, ~old~, `fn_name()`, snake_case_var and https://example.com/a.",
+    );
+    assert_eq!(
+        spans,
+        vec![
+            MrkdwnSpan {
+                text: "Hey ".into(),
+                style: MrkdwnStyle::Plain,
+            },
+            MrkdwnSpan {
+                text: "@alice".into(),
+                style: MrkdwnStyle::Mention,
+            },
+            MrkdwnSpan {
+                text: " check ".into(),
+                style: MrkdwnStyle::Plain,
+            },
+            MrkdwnSpan {
+                text: "#ops".into(),
+                style: MrkdwnStyle::Mention,
+            },
+            MrkdwnSpan {
+                text: ": ".into(),
+                style: MrkdwnStyle::Plain,
+            },
+            MrkdwnSpan {
+                text: "bold".into(),
+                style: MrkdwnStyle::Bold,
+            },
+            MrkdwnSpan {
+                text: ", ".into(),
+                style: MrkdwnStyle::Plain,
+            },
+            MrkdwnSpan {
+                text: "italic".into(),
+                style: MrkdwnStyle::Italic,
+            },
+            MrkdwnSpan {
+                text: ", ".into(),
+                style: MrkdwnStyle::Plain,
+            },
+            MrkdwnSpan {
+                text: "old".into(),
+                style: MrkdwnStyle::Strike,
+            },
+            MrkdwnSpan {
+                text: ", ".into(),
+                style: MrkdwnStyle::Plain,
+            },
+            MrkdwnSpan {
+                text: "fn_name()".into(),
+                style: MrkdwnStyle::Code,
+            },
+            MrkdwnSpan {
+                text: ", snake_case_var and ".into(),
+                style: MrkdwnStyle::Plain,
+            },
+            MrkdwnSpan {
+                text: "https://example.com/a".into(),
+                style: MrkdwnStyle::Link,
+            },
+            MrkdwnSpan {
+                text: ".".into(),
+                style: MrkdwnStyle::Plain,
+            },
+        ]
+    );
+
+    let mut addons = AddonsConfig::default();
+    addons.slack.enabled = true;
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+    let _ = app.update(Message::SearchChanged("slack ".into()));
+    let mut row =
+        super::command_list::CommandItem::info("slack:conv:C1", "#general".into(), "slack");
+    row.subtitle = "Company-wide announcements".into();
+    row.badge = Some("Channel".into());
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(vec![row])));
+    app.command_list.previews.insert(
+        "slack:conv:C1".into(),
+        vec![PreviewBody::Chat {
+            heading: Some("Recent messages".into()),
+            entries: vec![
+                ChatEntry::DayDivider("Today".into()),
+                ChatEntry::Messages(ChatMessageGroup {
+                    author: "Alice".into(),
+                    is_self: true,
+                    avatar: None,
+                    time: "14:22".into(),
+                    messages: vec![ChatMessage {
+                        time: None,
+                        text: "Ship it 🚀 *now*".into(),
+                        reactions: vec![("👍".into(), 2)],
+                        replies: 1,
+                        highlighted: true,
+                        truncated: false,
+                        desktop_url: Some(
+                            "slack://channel?team=T1&id=C1&message=1.0&thread_ts=1.0".into(),
+                        ),
+                        browser_url: Some(
+                            "https://acme.slack.com/archives/C1/p10?thread_ts=1.0&cid=C1".into(),
+                        ),
+                    }],
+                }),
+            ],
+        }],
+    );
+    app.view.show_preview = true;
+    let preview = app
+        .resolve_selected_preview()
+        .expect("Slack chat preview built");
+    assert_eq!(preview.title, "#general");
+    assert_eq!(
+        preview.subtitle.as_deref(),
+        Some("Company-wide announcements")
+    );
+    assert_eq!(preview.badge.as_deref(), Some("Channel"));
+    let _ = app.view();
+
+    // Clicking a thread in the preview opens the thread URL and exits by default
+    let task = app.update(Message::SlackPreviewOpen {
+        desktop_url: Some("slack://channel?team=T1&id=C1&message=1.0&thread_ts=1.0".into()),
+        browser_url: Some("https://acme.slack.com/archives/C1/p10?thread_ts=1.0&cid=C1".into()),
+    });
+    assert!(task.units() > 0);
+    let Some(super::actions::DeferredAction::Slack(action)) = deferred_action(&app) else {
+        panic!("expected a Slack action");
+    };
+    assert_eq!(
+        action,
+        super::slack::SlackAction::Open(
+            "slack://channel?team=T1&id=C1&message=1.0&thread_ts=1.0".into()
+        )
+    );
+
+    // Ctrl+Click opens in the alternate target (browser when open_in is desktop)
+    app.in_flight = Default::default();
+    app.view.current_modifiers = iced::keyboard::Modifiers::CTRL;
+    let task = app.update(Message::SlackPreviewOpen {
+        desktop_url: Some("slack://channel?team=T1&id=C1&message=1.0&thread_ts=1.0".into()),
+        browser_url: Some("https://acme.slack.com/archives/C1/p10?thread_ts=1.0&cid=C1".into()),
+    });
+    assert!(task.units() > 0);
+    let Some(super::actions::DeferredAction::Command(args)) = deferred_action(&app) else {
+        panic!("expected an xdg-open command action");
+    };
+    assert_eq!(
+        args,
+        vec![
+            "xdg-open".to_string(),
+            "https://acme.slack.com/archives/C1/p10?thread_ts=1.0&cid=C1".to_string(),
+        ]
+    );
+}

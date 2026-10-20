@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 
 use super::actions::DeferredAction;
 use super::command_list::{CommandAction, CommandItem, QUERY_ROW};
-use super::preview::PreviewBody;
+use super::preview::{ChatEntry, ChatMessage, ChatMessageGroup, PreviewBody};
 use super::slack_api::{self, Client, Conversation, ConversationKind, Directory, User, Workspace};
 use super::tab_preview::Wanted;
 use crate::SlackOpenIn;
@@ -201,8 +201,394 @@ fn is_emoji_code(word: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || "_+-'".contains(c))
 }
 
+/// Convert a standard Slack emoji shortcode name (without colons) to Unicode.
+pub(super) fn slack_emoji(name: &str) -> Option<&'static str> {
+    Some(match name {
+        // Faces & people
+        "grinning" => "😀",
+        "smiley" => "😃",
+        "smile" => "😄",
+        "grin" => "😁",
+        "laughing" | "satisfied" => "😆",
+        "sweat_smile" => "😅",
+        "rofl" | "rolling_on_the_floor_laughing" => "🤣",
+        "joy" => "😂",
+        "slightly_smiling_face" => "🙂",
+        "upside_down_face" => "🙃",
+        "melting_face" => "🫠",
+        "wink" => "😉",
+        "blush" => "😊",
+        "innocent" => "😇",
+        "smiling_face_with_3_hearts" => "🥰",
+        "heart_eyes" => "😍",
+        "star-struck" | "grinning_face_with_star_eyes" => "🤩",
+        "kissing_heart" => "😘",
+        "kissing" => "😗",
+        "relaxed" => "☺️",
+        "kissing_closed_eyes" => "😚",
+        "kissing_smiling_eyes" => "😙",
+        "smiling_face_with_tear" => "🥲",
+        "yum" => "😋",
+        "stuck_out_tongue" => "😛",
+        "stuck_out_tongue_winking_eye" => "😜",
+        "zany_face" => "🤪",
+        "stuck_out_tongue_closed_eyes" => "😝",
+        "money_mouth_face" => "🤑",
+        "hugging_face" | "hugs" => "🤗",
+        "face_with_hand_over_mouth" | "hand_over_mouth" => "🤭",
+        "shushing_face" => "🤫",
+        "thinking_face" | "thinking" => "🤔",
+        "saluting_face" => "🫡",
+        "zipper_mouth_face" => "🤐",
+        "face_with_raised_eyebrow" | "raised_eyebrow" => "🤨",
+        "neutral_face" => "😐",
+        "expressionless" => "😑",
+        "no_mouth" => "😶",
+        "dotted_line_face" => "🫥",
+        "smirk" => "😏",
+        "unamused" => "😒",
+        "face_with_rolling_eyes" | "roll_eyes" => "🙄",
+        "grimacing" => "😬",
+        "lying_face" => "🤥",
+        "relieved" => "😌",
+        "pensive" => "😔",
+        "sleepy" => "😪",
+        "drooling_face" => "🤤",
+        "sleeping" => "😴",
+        "mask" => "😷",
+        "face_with_thermometer" => "🤒",
+        "face_with_head_bandage" => "🤕",
+        "nauseated_face" => "🤢",
+        "face_vomiting" => "🤮",
+        "sneezing_face" => "🤧",
+        "hot_face" => "🥵",
+        "cold_face" => "🥶",
+        "woozy_face" => "🥴",
+        "dizzy_face" => "😵",
+        "exploding_head" => "🤯",
+        "cowboy_hat_face" => "🤠",
+        "partying_face" => "🥳",
+        "disguised_face" => "🥸",
+        "sunglasses" => "😎",
+        "nerd_face" => "🤓",
+        "face_with_monocle" | "monocle_face" => "🧐",
+        "confused" => "😕",
+        "face_with_diagonal_mouth" => "🫤",
+        "worried" => "😟",
+        "slightly_frowning_face" => "🙁",
+        "frowning_face" | "white_frowning_face" => "☹️",
+        "open_mouth" => "😮",
+        "hushed" => "😯",
+        "astonished" => "😲",
+        "flushed" => "😳",
+        "pleading_face" => "🥺",
+        "face_holding_back_tears" | "holding_back_tears" => "🥹",
+        "frowning" => "😦",
+        "anguished" => "😧",
+        "fearful" => "😨",
+        "cold_sweat" => "😰",
+        "disappointed_relieved" => "😥",
+        "cry" => "😢",
+        "sob" => "😭",
+        "scream" => "😱",
+        "confounded" => "😖",
+        "persevere" => "😣",
+        "disappointed" => "😞",
+        "sweat" => "😓",
+        "weary" => "😩",
+        "tired_face" => "😫",
+        "yawning_face" => "🥱",
+        "triumph" => "😤",
+        "rage" | "pout" => "😡",
+        "angry" => "😠",
+        "face_with_symbols_on_mouth" | "cursing_face" => "🤬",
+        "smiling_imp" => "😈",
+        "imp" => "👿",
+        "skull" => "💀",
+        "skull_and_crossbones" => "☠️",
+        "hankey" | "poop" | "shit" => "💩",
+        "clown_face" => "🤡",
+        "ghost" => "👻",
+        "alien" => "👽",
+        "space_invader" => "👾",
+        "robot_face" | "robot" => "🤖",
+        "see_no_evil" => "🙈",
+        "hear_no_evil" => "🙉",
+        "speak_no_evil" => "🙊",
+        // Hands & gestures
+        "wave" => "👋",
+        "raised_back_of_hand" => "🤚",
+        "raised_hand" | "hand" => "✋",
+        "vulcan_salute" => "🖖",
+        "ok_hand" => "👌",
+        "pinched_fingers" => "🤌",
+        "pinching_hand" => "🤏",
+        "v" => "✌️",
+        "crossed_fingers" | "hand_with_index_and_middle_fingers_crossed" => "🤞",
+        "love_you_gesture" => "🤟",
+        "the_horns" | "metal" => "🤘",
+        "call_me_hand" => "🤙",
+        "point_left" => "👈",
+        "point_right" => "👉",
+        "point_up_2" => "👆",
+        "middle_finger" => "🖕",
+        "point_down" => "👇",
+        "point_up" => "☝️",
+        "+1" | "thumbsup" => "👍",
+        "-1" | "thumbsdown" => "👎",
+        "fist" => "✊",
+        "facepunch" | "punch" => "👊",
+        "left-facing_fist" => "🤛",
+        "right-facing_fist" => "🤜",
+        "clap" => "👏",
+        "raised_hands" => "🙌",
+        "heart_hands" => "🫶",
+        "open_hands" => "👐",
+        "palms_up_together" => "🤲",
+        "handshake" => "🤝",
+        "pray" => "🙏",
+        "writing_hand" => "✍️",
+        "muscle" => "💪",
+        "eyes" => "👀",
+        "eye" => "👁️",
+        "brain" => "🧠",
+        "shrug" | "person_shrugging" | "man-shrugging" | "woman-shrugging" => "🤷",
+        "facepalm" | "person_facepalming" | "man-facepalming" | "woman-facepalming" => "🤦",
+        "raising_hand" | "person_raising_hand" => "🙋",
+        "bow" | "person_bowing" => "🙇",
+        // Hearts & symbols
+        "heart" | "red_heart" => "❤️",
+        "orange_heart" => "🧡",
+        "yellow_heart" => "💛",
+        "green_heart" => "💚",
+        "blue_heart" => "💙",
+        "purple_heart" => "💜",
+        "brown_heart" => "🤎",
+        "black_heart" => "🖤",
+        "white_heart" => "🤍",
+        "pink_heart" => "🩷",
+        "broken_heart" => "💔",
+        "heart_exclamation" | "heavy_heart_exclamation_mark_ornament" => "❣️",
+        "two_hearts" => "💕",
+        "revolving_hearts" => "💞",
+        "heartbeat" => "💓",
+        "heartpulse" => "💗",
+        "sparkling_heart" => "💖",
+        "cupid" => "💘",
+        "gift_heart" => "💝",
+        "100" => "💯",
+        "anger" => "💢",
+        "boom" | "collision" => "💥",
+        "dizzy" => "💫",
+        "sweat_drops" => "💦",
+        "dash" => "💨",
+        "speech_balloon" => "💬",
+        "thought_balloon" => "💭",
+        "zzz" => "💤",
+        // Nature, food & activities
+        "fire" => "🔥",
+        "sparkles" => "✨",
+        "star" => "⭐",
+        "star2" => "🌟",
+        "zap" => "⚡",
+        "sunny" | "sun" => "☀️",
+        "cloud" => "☁️",
+        "rainbow" => "🌈",
+        "snowflake" => "❄️",
+        "palm_tree" => "🌴",
+        "evergreen_tree" => "🌲",
+        "deciduous_tree" => "🌳",
+        "seedling" => "🌱",
+        "four_leaf_clover" => "🍀",
+        "rose" => "🌹",
+        "sunflower" => "🌻",
+        "tada" => "🎉",
+        "confetti_ball" => "🎊",
+        "balloon" => "🎈",
+        "birthday" => "🎂",
+        "gift" => "🎁",
+        "trophy" => "🏆",
+        "first_place_medal" | "medal" => "🥇",
+        "second_place_medal" => "🥈",
+        "third_place_medal" => "🥉",
+        "coffee" => "☕",
+        "tea" => "🍵",
+        "beer" => "🍺",
+        "beers" => "🍻",
+        "clinking_glasses" => "🥂",
+        "wine_glass" => "🍷",
+        "cocktail" => "🍸",
+        "tropical_drink" => "🍹",
+        "pizza" => "🍕",
+        "hamburger" => "🍔",
+        "fries" => "🍟",
+        "taco" => "🌮",
+        "burrito" => "🌯",
+        "ramen" => "🍜",
+        "sushi" => "🍣",
+        "croissant" => "🥐",
+        "cake" | "shortcake" => "🍰",
+        "cookie" => "🍪",
+        "doughnut" => "🍩",
+        "popcorn" => "🍿",
+        "apple" => "🍎",
+        "banana" => "🍌",
+        "avocado" => "🥑",
+        // Objects, work & status
+        "rocket" => "🚀",
+        "airplane" => "✈️",
+        "house" | "house_with_garden" => "🏠",
+        "office" => "🏢",
+        "hospital" => "🏥",
+        "computer" | "laptop" => "💻",
+        "desktop_computer" => "🖥️",
+        "keyboard" => "⌨️",
+        "iphone" | "mobile_phone" => "📱",
+        "phone" | "telephone" | "telephone_receiver" => "📞",
+        "bulb" => "💡",
+        "flashlight" => "🔦",
+        "wrench" => "🔧",
+        "hammer" => "🔨",
+        "hammer_and_wrench" => "🛠️",
+        "gear" => "⚙️",
+        "nut_and_bolt" => "🔩",
+        "link" => "🔗",
+        "chains" => "⛓️",
+        "toolbox" => "🧰",
+        "magnet" => "🧲",
+        "test_tube" => "🧪",
+        "microscope" => "🔬",
+        "telescope" => "🔭",
+        "pill" => "💊",
+        "key" => "🔑",
+        "lock" => "🔒",
+        "unlock" => "🔓",
+        "bell" => "🔔",
+        "no_bell" => "🔕",
+        "mega" | "loudspeaker" => "📢",
+        "mag" => "🔍",
+        "mag_right" => "🔎",
+        "memo" | "pencil" => "📝",
+        "pencil2" => "✏️",
+        "book" | "open_book" => "📖",
+        "books" => "📚",
+        "clipboard" => "📋",
+        "pushpin" => "📌",
+        "round_pushpin" => "📍",
+        "paperclip" => "📎",
+        "file_folder" => "📁",
+        "open_file_folder" => "📂",
+        "calendar" | "date" | "spiral_calendar_pad" => "📅",
+        "chart_with_upwards_trend" => "📈",
+        "chart_with_downwards_trend" => "📉",
+        "bar_chart" => "📊",
+        "package" => "📦",
+        "email" | "envelope" => "✉️",
+        "inbox_tray" => "📥",
+        "outbox_tray" => "📤",
+        "wastebasket" => "🗑️",
+        "moneybag" => "💰",
+        "money_with_wings" => "💸",
+        "gem" => "💎",
+        "hourglass" | "hourglass_flowing_sand" => "⏳",
+        "alarm_clock" => "⏰",
+        "stopwatch" => "⏱️",
+        "watch" => "⌚",
+        "bug" => "🐛",
+        "bee" | "honeybee" => "🐝",
+        "lady_beetle" | "beetle" => "🐞",
+        "turtle" => "🐢",
+        "snake" => "🐍",
+        "octopus" => "🐙",
+        "crab" => "🦀",
+        "whale" => "🐳",
+        "dolphin" => "🐬",
+        "dog" => "🐶",
+        "cat" => "🐱",
+        "fox_face" => "🦊",
+        "bear" => "🐻",
+        "panda_face" => "🐼",
+        "koala" => "🐨",
+        "lion_face" | "lion" => "🦁",
+        "unicorn_face" | "unicorn" => "🦄",
+        "penguin" => "🐧",
+        "duck" => "🦆",
+        "owl" => "🦉",
+        // Status & checkmarks
+        "white_check_mark" | "check" => "✅",
+        "heavy_check_mark" => "✔️",
+        "ballot_box_with_check" => "☑️",
+        "x" | "cross_mark" => "❌",
+        "heavy_multiplication_x" => "✖️",
+        "warning" => "⚠️",
+        "no_entry" => "⛔",
+        "no_entry_sign" | "prohibited" => "🚫",
+        "question" => "❓",
+        "grey_question" => "❔",
+        "exclamation" | "heavy_exclamation_mark" => "❗",
+        "grey_exclamation" => "❕",
+        "bangbang" => "‼️",
+        "interrobang" => "⁉️",
+        "information_source" | "info" => "ℹ️",
+        "recycle" => "♻️",
+        "arrows_counterclockwise" => "🔄",
+        "arrow_right" => "➡️",
+        "arrow_left" => "⬅️",
+        "arrow_up" => "⬆️",
+        "arrow_down" => "⬇️",
+        "red_circle" => "🔴",
+        "large_orange_circle" | "orange_circle" => "🟠",
+        "large_yellow_circle" | "yellow_circle" => "🟡",
+        "large_green_circle" | "green_circle" => "🟢",
+        "large_blue_circle" | "blue_circle" => "🔵",
+        "large_purple_circle" | "purple_circle" => "🟣",
+        "white_circle" => "⚪",
+        "black_circle" => "⚫",
+        "checkered_flag" => "🏁",
+        "triangular_flag_on_post" => "🚩",
+        "white_flag" => "🏳️",
+        _ => return None,
+    })
+}
+
+/// Replace known `:shortcode:` tokens in `text` with Unicode emojis,
+/// stripping optional `:skin-tone-N:` suffixes after a resolved shortcode.
+pub(super) fn replace_emoji_shortcodes(text: &str) -> String {
+    if !text.contains(':') {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(colon) = rest.find(':') {
+        out.push_str(&rest[..colon]);
+        let after = &rest[colon + 1..];
+        let end = after
+            .find(|c: char| !(c.is_ascii_alphanumeric() || "_+-'".contains(c)))
+            .unwrap_or(after.len());
+        let name = &after[..end];
+        if !name.is_empty() && after[end..].starts_with(':') {
+            if let Some(emoji) = slack_emoji(name) {
+                out.push_str(emoji);
+                rest = &after[end + 1..];
+                if let Some(tone_rest) = rest.strip_prefix(":skin-tone-") {
+                    if let Some((_, after_tone)) = tone_rest.split_once(':') {
+                        if tone_rest.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                            rest = after_tone;
+                        }
+                    }
+                }
+                continue;
+            }
+        }
+        out.push(':');
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Slack message markup as plain text: mentions and links by name, entities
-/// decoded.
+/// decoded, and standard `:emoji:` shortcodes converted to Unicode.
 pub(super) fn plain_text(text: &str, directory: Option<&Directory>) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
@@ -218,9 +604,11 @@ pub(super) fn plain_text(text: &str, directory: Option<&Directory>) -> String {
         rest = &after[end + 1..];
     }
     out.push_str(rest);
-    out.replace("&lt;", "<")
+    let decoded = out
+        .replace("&lt;", "<")
         .replace("&gt;", ">")
-        .replace("&amp;", "&")
+        .replace("&amp;", "&");
+    replace_emoji_shortcodes(&decoded)
 }
 
 fn render_reference(inner: &str, directory: Option<&Directory>) -> String {
@@ -258,6 +646,32 @@ fn render_reference(inner: &str, directory: Option<&Directory>) -> String {
 /// Seconds since the epoch of a message timestamp such as `1700000000.0001`.
 fn ts_seconds(ts: &str) -> Option<i64> {
     ts.split('.').next()?.parse().ok()
+}
+
+/// Time of day (`HH:MM`) for a message inside a day-grouped feed.
+fn format_hhmm(ts: &str) -> String {
+    ts_seconds(ts)
+        .and_then(|secs| Local.timestamp_opt(secs, 0).single())
+        .map(|time| time.format("%H:%M").to_string())
+        .unwrap_or_default()
+}
+
+/// Calendar date and human-readable day divider label (`Today`, `Yesterday`,
+/// `September 1`, or `Sep 1, 2025`).
+fn day_label(ts: &str, now: DateTime<Local>) -> Option<(chrono::NaiveDate, String)> {
+    let time = ts_seconds(ts).and_then(|secs| Local.timestamp_opt(secs, 0).single())?;
+    let date = time.date_naive();
+    let today = now.date_naive();
+    let label = if date == today {
+        "Today".to_string()
+    } else if today.signed_duration_since(date).num_days() == 1 {
+        "Yesterday".to_string()
+    } else if date.year() == today.year() {
+        time.format("%B %-d").to_string()
+    } else {
+        time.format("%b %-d, %Y").to_string()
+    };
+    Some((date, label))
 }
 
 /// A message time: the time today, the day this year, the date before.
@@ -341,15 +755,18 @@ pub(super) fn message_url(
     }
 }
 
-/// Open `url`, marking `read` (`(channel, ts)`) as read when given.
-fn open(url: String) -> CommandAction {
-    let action = if url.starts_with("slack://") {
+pub(super) fn open_action(url: String) -> DeferredAction {
+    if url.starts_with("slack://") {
         DeferredAction::Slack(SlackAction::Open(url))
     } else {
         DeferredAction::Command(vec!["xdg-open".to_string(), url])
-    };
+    }
+}
+
+/// Open `url`, marking `read` (`(channel, ts)`) as read when given.
+fn open(url: String) -> CommandAction {
     CommandAction {
-        action,
+        action: open_action(url),
         confirm: None,
         keep_open: false,
         progress: None,
@@ -959,7 +1376,12 @@ fn user_row(
         user.label(),
         &USER_ICONS,
     );
-    let status = describe_status(&user.status_emoji, &user.status_text, 0, now);
+    let status = replace_emoji_shortcodes(&describe_status(
+        &user.status_emoji,
+        &user.status_text,
+        0,
+        now,
+    ));
     item.subtitle = [
         format!("@{}", user.name),
         user.title.clone(),
@@ -2073,42 +2495,211 @@ pub(super) fn has_preview(identity: &str) -> bool {
         .any(|prefix| identity.starts_with(prefix))
 }
 
-/// Messages as a preview text block, in the order given.
+/// Maximum gap in seconds between consecutive messages from the same sender
+/// before starting a new message group header.
+const GROUP_WINDOW_SECS: i64 = 10 * 60;
+
+fn message_reactions(message: &Value) -> Vec<(String, u64)> {
+    message["reactions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|reaction| {
+            let raw = reaction["name"].as_str()?.trim();
+            if raw.is_empty() {
+                return None;
+            }
+            let base = raw.split("::").next().unwrap_or(raw);
+            let count = reaction["count"].as_u64().unwrap_or(1).max(1);
+            let label = slack_emoji(base)
+                .map(str::to_string)
+                .unwrap_or_else(|| format!(":{base}:"));
+            Some((label, count))
+        })
+        .collect()
+}
+
+/// Cached and freshly downloaded avatars for the authors of `list`.
+fn fetch_message_avatars(directory: &Directory, list: &[Value]) -> HashMap<String, String> {
+    let Some(dir) = avatar_dir() else {
+        return HashMap::new();
+    };
+    let mut avatars = cached_avatars(&dir);
+    let mut missing = Vec::new();
+    let mut seen = HashSet::new();
+    for message in list {
+        let Some(id) = message["user"].as_str().filter(|id| !id.is_empty()) else {
+            continue;
+        };
+        if avatars.contains_key(id) || !seen.insert(id.to_string()) {
+            continue;
+        }
+        if let Some(user) = directory
+            .user(id)
+            .filter(|user| user.avatar.starts_with("https://"))
+        {
+            missing.push((id.to_string(), user.avatar.clone()));
+        }
+    }
+    if missing.is_empty() {
+        return avatars;
+    }
+    let agent = image_agent();
+    let queue = std::sync::Mutex::new(missing.into_iter());
+    let found = std::sync::Mutex::new(Vec::new());
+    std::thread::scope(|scope| {
+        for _ in 0..3 {
+            scope.spawn(|| loop {
+                let next = queue.lock().ok().and_then(|mut q| q.next());
+                let Some((id, url)) = next else {
+                    break;
+                };
+                if let Some(path) = download_image(&agent, &dir, &id, &url) {
+                    if let Ok(mut found) = found.lock() {
+                        found.push((id, path));
+                    }
+                }
+            });
+        }
+    });
+    avatars.extend(found.into_inner().unwrap_or_default());
+    avatars
+}
+
+fn chat_message_urls(
+    workspace: &Workspace,
+    channel: &str,
+    message: &Value,
+) -> (Option<String>, Option<String>) {
+    let ts = message["ts"].as_str().unwrap_or_default();
+    if channel.is_empty() || ts.is_empty() {
+        return (None, None);
+    }
+    let permalink = message["permalink"].as_str().unwrap_or_default();
+    let thread_ts = message["thread_ts"]
+        .as_str()
+        .filter(|t| !t.is_empty())
+        .or_else(|| permalink_thread(permalink));
+
+    let desktop_url = (!workspace.team_id.is_empty()).then(|| {
+        let mut url = message_url(SlackOpenIn::Desktop, workspace, channel, ts, permalink);
+        if let Some(thread_ts) = thread_ts {
+            url.push_str(&format!("&thread_ts={thread_ts}"));
+        }
+        url
+    });
+    let browser_url = if !permalink.is_empty() {
+        Some(permalink.to_string())
+    } else if !workspace.url.is_empty() {
+        let mut url = message_url(SlackOpenIn::Browser, workspace, channel, ts, "");
+        if let Some(thread_ts) = thread_ts {
+            url.push_str(&format!("?thread_ts={thread_ts}&cid={channel}"));
+        }
+        Some(url)
+    } else if !workspace.team_id.is_empty() {
+        Some(conversation_url(SlackOpenIn::Browser, workspace, channel))
+    } else {
+        None
+    };
+    (desktop_url, browser_url)
+}
+
+/// Messages as a structured chat feed with day dividers and grouped consecutive
+/// messages from the same sender.
 pub(super) fn messages_body(
     messages: &[Value],
+    channel: &str,
     heading: &str,
     directory: &Directory,
+    avatars: &HashMap<String, String>,
+    highlighted_ts: Option<&str>,
     now: DateTime<Local>,
 ) -> PreviewBody {
-    let mut truncated = false;
-    let blocks: Vec<String> = messages
-        .iter()
-        .map(|message| {
-            let (text, cut) = truncate(&message_text(message, directory), MAX_MESSAGE_CHARS);
-            truncated |= cut;
-            let ts = message["ts"].as_str().unwrap_or_default();
-            let mut block = format!(
-                "{} · {}\n{}",
-                author(message, directory),
-                format_ts(ts, now),
-                text
-            );
-            let replies = message["reply_count"].as_u64().unwrap_or(0);
-            if replies > 0 && message["thread_ts"].as_str() == Some(ts) {
-                let s = if replies == 1 { "y" } else { "ies" };
-                block.push_str(&format!("\n({replies} repl{s})"));
+    let mut entries: Vec<ChatEntry> = Vec::new();
+    let mut last_date: Option<chrono::NaiveDate> = None;
+    let mut last_sender: Option<String> = None;
+    let mut last_secs: Option<i64> = None;
+    let mut last_hhmm = String::new();
+
+    for message in messages {
+        let ts = message["ts"].as_str().unwrap_or_default();
+        if let Some((date, label)) = day_label(ts, now) {
+            if last_date != Some(date) {
+                entries.push(ChatEntry::DayDivider(label));
+                last_date = Some(date);
+                last_sender = None;
+                last_secs = None;
             }
-            block
-        })
-        .collect();
-    PreviewBody::Text {
+        }
+
+        let sender_id = message["user"].as_str().filter(|id| !id.is_empty());
+        let author_name = author(message, directory);
+        let sender_key = sender_id.unwrap_or(&author_name).to_string();
+        let is_self = sender_id.is_some_and(|id| {
+            !directory.workspace.user_id.is_empty() && id == directory.workspace.user_id
+        });
+        let avatar = sender_id.and_then(|id| avatars.get(id).cloned());
+        let hhmm = format_hhmm(ts);
+        let secs = ts_seconds(ts);
+
+        let (text, truncated) = truncate(&message_text(message, directory), MAX_MESSAGE_CHARS);
+        let reactions = message_reactions(message);
+        let replies = match message["reply_count"].as_u64().unwrap_or(0) {
+            n if n > 0 && message["thread_ts"].as_str() == Some(ts) => n,
+            _ => 0,
+        };
+        let highlighted = highlighted_ts.is_some_and(|hit| !hit.is_empty() && hit == ts);
+        let (desktop_url, browser_url) = chat_message_urls(&directory.workspace, channel, message);
+
+        let can_group = last_sender.as_deref() == Some(sender_key.as_str())
+            && match (last_secs, secs) {
+                (Some(prev), Some(curr)) => (curr - prev).abs() <= GROUP_WINDOW_SECS,
+                _ => false,
+            };
+
+        if can_group {
+            if let Some(ChatEntry::Messages(group)) = entries.last_mut() {
+                let time = (!hhmm.is_empty() && hhmm != last_hhmm).then(|| hhmm.clone());
+                group.messages.push(ChatMessage {
+                    time,
+                    text,
+                    reactions,
+                    replies,
+                    highlighted,
+                    truncated,
+                    desktop_url,
+                    browser_url,
+                });
+                last_secs = secs;
+                last_hhmm = hhmm;
+                continue;
+            }
+        }
+
+        last_sender = Some(sender_key);
+        last_secs = secs;
+        last_hhmm = hhmm.clone();
+        entries.push(ChatEntry::Messages(ChatMessageGroup {
+            author: author_name,
+            is_self,
+            avatar,
+            time: hhmm,
+            messages: vec![ChatMessage {
+                time: None,
+                text,
+                reactions,
+                replies,
+                highlighted,
+                truncated,
+                desktop_url,
+                browser_url,
+            }],
+        }));
+    }
+
+    PreviewBody::Chat {
         heading: Some(heading.to_string()),
-        content: if blocks.is_empty() {
-            "No messages".to_string()
-        } else {
-            blocks.join("\n\n")
-        },
-        truncated,
+        entries,
     }
 }
 
@@ -2174,10 +2765,24 @@ pub(super) fn load_preview(
     Some((vec![body], avatar))
 }
 
-/// A preview as kept on disk: the text blocks Slack previews are made of.
+#[derive(Serialize, Deserialize)]
+enum CachedBody {
+    Text {
+        heading: Option<String>,
+        content: String,
+        truncated: bool,
+    },
+    Chat {
+        heading: Option<String>,
+        entries: Vec<ChatEntry>,
+    },
+}
+
+/// A preview as kept on disk.
 #[derive(Serialize, Deserialize)]
 struct CachedPreview {
-    texts: Vec<(Option<String>, String, bool)>,
+    #[serde(default)]
+    bodies: Vec<CachedBody>,
     avatar: Option<String>,
 }
 
@@ -2200,17 +2805,34 @@ pub(super) fn cached_preview(identity: &str) -> Option<Preview> {
     let directory = slack_api::cached_directory()?;
     let (cached, _): (CachedPreview, _) =
         slack_api::read_cache(&preview_cache_name(identity), &directory.workspace)?;
-    Some(from_cached_preview(cached))
+    (!cached.bodies.is_empty()).then(|| from_cached_preview(cached))
 }
 
 fn from_cached_preview(cached: CachedPreview) -> Preview {
     let bodies = cached
-        .texts
+        .bodies
         .into_iter()
-        .map(|(heading, content, truncated)| PreviewBody::Text {
-            heading,
-            content,
-            truncated,
+        .map(|body| match body {
+            CachedBody::Text {
+                heading,
+                content,
+                truncated,
+            } => PreviewBody::Text {
+                heading,
+                content,
+                truncated,
+            },
+            CachedBody::Chat {
+                heading,
+                mut entries,
+            } => {
+                for entry in &mut entries {
+                    if let ChatEntry::Messages(group) = entry {
+                        group.avatar = group.avatar.take().filter(|path| Path::new(path).exists());
+                    }
+                }
+                PreviewBody::Chat { heading, entries }
+            }
         })
         .collect();
     let avatar = cached.avatar.filter(|path| Path::new(path).exists());
@@ -2232,21 +2854,29 @@ fn store_preview(
     }
 }
 
-/// The preview as kept on disk; none when it is not only text.
+/// The preview as kept on disk; none when it contains non-cacheable bodies.
 fn to_cached_preview(bodies: &[PreviewBody], avatar: Option<&str>) -> Option<CachedPreview> {
-    let texts: Option<Vec<_>> = bodies
+    let bodies: Option<Vec<_>> = bodies
         .iter()
         .map(|body| match body {
             PreviewBody::Text {
                 heading,
                 content,
                 truncated,
-            } => Some((heading.clone(), content.clone(), *truncated)),
+            } => Some(CachedBody::Text {
+                heading: heading.clone(),
+                content: content.clone(),
+                truncated: *truncated,
+            }),
+            PreviewBody::Chat { heading, entries } => Some(CachedBody::Chat {
+                heading: heading.clone(),
+                entries: entries.clone(),
+            }),
             _ => None,
         })
         .collect();
     Some(CachedPreview {
-        texts: texts?,
+        bodies: bodies?,
         avatar: avatar.map(str::to_string),
     })
 }
@@ -2302,20 +2932,47 @@ fn preview_bodies(
     let mut avatar = None;
     // On Enterprise Grid the directory lacks most people, so the ones the
     // messages show are looked up first.
-    let messages_body = |list: &[Value], heading: &str, directory: &std::sync::Arc<Directory>| {
+    let build_chat = |list: &[Value],
+                      channel: &str,
+                      heading: &str,
+                      highlighted_ts: Option<&str>,
+                      directory: &std::sync::Arc<Directory>| {
         let directory = slack_api::learn_users(client, directory, &message_users(list));
-        messages_body(list, heading, &directory, now)
+        let avatars = fetch_message_avatars(&directory, list);
+        messages_body(
+            list,
+            channel,
+            heading,
+            &directory,
+            &avatars,
+            highlighted_ts,
+            now,
+        )
     };
     let directory = &directory;
     let bodies = match parts.as_slice() {
-        ["slack", "conv", channel] => recent(client, channel, &[])
-            .map(|list| vec![messages_body(&list, "Recent messages", directory)]),
+        ["slack", "conv", channel] => recent(client, channel, &[]).map(|list| {
+            vec![build_chat(
+                &list,
+                channel,
+                "Recent messages",
+                None,
+                directory,
+            )]
+        }),
         ["slack", "user", user] => {
             let directory = &slack_api::learn_users(client, directory, &[user.to_string()]);
             avatar = directory.user(user).and_then(fetch_avatar);
             match directory.direct_with(user) {
-                Some(direct) => recent(client, &direct.id, &[])
-                    .map(|list| vec![messages_body(&list, "Direct messages", directory)]),
+                Some(direct) => recent(client, &direct.id, &[]).map(|list| {
+                    vec![build_chat(
+                        &list,
+                        &direct.id,
+                        "Direct messages",
+                        None,
+                        directory,
+                    )]
+                }),
                 None => Ok(Vec::new()),
             }
         }
@@ -2337,19 +2994,32 @@ fn preview_bodies(
                         let start = upto.saturating_sub(PREVIEW_MESSAGES).max(1).min(upto);
                         let mut shown: Vec<Value> = list.first().cloned().into_iter().collect();
                         shown.extend(list[start..upto].iter().cloned());
-                        vec![messages_body(&shown, "Thread", directory)]
+                        vec![build_chat(&shown, channel, "Thread", Some(ts), directory)]
                     })
             }
             None => recent(client, channel, &[("latest", ts), ("inclusive", "true")]).map(|list| {
                 let start = list.len().saturating_sub(6);
-                vec![messages_body(&list[start..], "Conversation", directory)]
+                vec![build_chat(
+                    &list[start..],
+                    channel,
+                    "Conversation",
+                    Some(ts),
+                    directory,
+                )]
             }),
         },
         ["slack", "unread", channel, last_read] => {
             let oldest = [("oldest", *last_read)];
             let extra: &[(&str, &str)] = if last_read.is_empty() { &[] } else { &oldest };
-            recent(client, channel, extra)
-                .map(|list| vec![messages_body(&list, "Unread messages", directory)])
+            recent(client, channel, extra).map(|list| {
+                vec![build_chat(
+                    &list,
+                    channel,
+                    "Unread messages",
+                    None,
+                    directory,
+                )]
+            })
         }
         _ => Ok(Vec::new()),
     };
@@ -2933,16 +3603,120 @@ mod tests {
         let Ok(bodies) = bodies else {
             panic!("preview failed");
         };
-        let [PreviewBody::Text {
-            heading, content, ..
-        }] = bodies.as_slice()
-        else {
-            panic!("expected one text body");
+        let [PreviewBody::Chat { heading, entries }] = bodies.as_slice() else {
+            panic!("expected one chat body");
         };
         assert_eq!(heading.as_deref(), Some("Thread"));
-        assert!(content.contains("parent") && content.contains("the hit"));
-        assert!(!content.contains("later reply"));
+        let texts: Vec<(&str, bool)> = entries
+            .iter()
+            .filter_map(|entry| match entry {
+                ChatEntry::Messages(group) => Some(&group.messages),
+                ChatEntry::DayDivider(_) => None,
+            })
+            .flatten()
+            .map(|msg| (msg.text.as_str(), msg.highlighted))
+            .collect();
+        assert_eq!(
+            texts,
+            [("parent", false), ("first reply", false), ("the hit", true)]
+        );
         assert_eq!(fake.methods(), ["conversations.replies"]);
+    }
+
+    #[test]
+    fn test_messages_body_groups_consecutive_messages_and_divides_days() {
+        let mut dir = directory();
+        dir.workspace.user_id = "U1".into();
+        let today = now();
+        let yesterday = today - chrono::Duration::days(1);
+        let t1 = format!("{}.0001", yesterday.timestamp());
+        let t2 = format!("{}.0001", today.timestamp() - 120);
+        let t3 = format!("{}.0001", today.timestamp() - 60);
+        let t4 = format!("{}.0001", today.timestamp() + 900);
+        let messages = [
+            json!({
+                "ts": t1,
+                "user": "U2",
+                "text": "deploy starting :rocket:",
+                "reply_count": 2,
+                "thread_ts": t1,
+                "reactions": [{"name": "+1::skin-tone-3", "count": 3}],
+            }),
+            json!({"ts": t2, "user": "U1", "text": "first line"}),
+            json!({"ts": t3, "user": "U1", "text": "follow up"}),
+            json!({"ts": t4, "user": "U1", "text": "15m later"}),
+        ];
+        let avatars = HashMap::from([("U1".to_string(), "/tmp/u1.png".to_string())]);
+        let PreviewBody::Chat { heading, entries } = messages_body(
+            &messages,
+            "C1",
+            "Recent messages",
+            &dir,
+            &avatars,
+            Some(&t3),
+            today,
+        ) else {
+            panic!("expected chat preview body");
+        };
+        assert_eq!(heading.as_deref(), Some("Recent messages"));
+        assert_eq!(entries.len(), 5);
+        assert_eq!(entries[0], ChatEntry::DayDivider("Yesterday".into()));
+        let ChatEntry::Messages(first_group) = &entries[1] else {
+            panic!("expected message group");
+        };
+        assert_eq!(first_group.author, "bob");
+        assert!(!first_group.is_self);
+        assert_eq!(first_group.messages[0].text, "deploy starting 🚀");
+        assert_eq!(first_group.messages[0].replies, 2);
+        assert_eq!(
+            first_group.messages[0].reactions,
+            vec![("👍".to_string(), 3)]
+        );
+        assert_eq!(
+            first_group.messages[0].desktop_url.as_deref(),
+            Some(format!("slack://channel?team=T1&id=C1&message={t1}&thread_ts={t1}").as_str())
+        );
+        assert_eq!(
+            first_group.messages[0].browser_url.as_deref(),
+            Some(
+                format!(
+                    "https://acme.slack.com/archives/C1/p{}?thread_ts={t1}&cid=C1",
+                    t1.replace('.', "")
+                )
+                .as_str()
+            )
+        );
+
+        assert_eq!(entries[2], ChatEntry::DayDivider("Today".into()));
+        let ChatEntry::Messages(grouped) = &entries[3] else {
+            panic!("expected grouped messages");
+        };
+        assert_eq!(grouped.author, "Alice");
+        assert!(grouped.is_self);
+        assert_eq!(grouped.avatar.as_deref(), Some("/tmp/u1.png"));
+        assert_eq!(grouped.messages.len(), 2);
+        assert_eq!(grouped.messages[0].text, "first line");
+        assert!(!grouped.messages[0].highlighted);
+        assert_eq!(grouped.messages[1].text, "follow up");
+        assert!(grouped.messages[1].highlighted);
+
+        let ChatEntry::Messages(later) = &entries[4] else {
+            panic!("expected separate group after 15m gap");
+        };
+        assert_eq!(later.messages.len(), 1);
+        assert_eq!(later.messages[0].text, "15m later");
+    }
+
+    #[test]
+    fn test_replace_emoji_shortcodes() {
+        assert_eq!(
+            replace_emoji_shortcodes("ship it :rocket: :+1::skin-tone-4: and :unknown_code:"),
+            "ship it 🚀 👍 and :unknown_code:"
+        );
+        assert_eq!(
+            replace_emoji_shortcodes("https://example.com:8080/path"),
+            "https://example.com:8080/path"
+        );
     }
 
     #[test]
@@ -3070,17 +3844,50 @@ mod tests {
     }
 
     #[test]
-    fn test_text_previews_survive_the_disk_cache() {
-        let body = PreviewBody::Text {
-            heading: Some("Unread messages".into()),
-            content: "alice · 09:00\nhello".into(),
-            truncated: true,
+    fn test_text_and_chat_previews_survive_the_disk_cache() {
+        let text_body = PreviewBody::Text {
+            heading: Some("Error".into()),
+            content: "network failure".into(),
+            truncated: false,
         };
-        let cached =
-            to_cached_preview(std::slice::from_ref(&body), Some("/no/avatar.png")).unwrap();
+        let chat_body = PreviewBody::Chat {
+            heading: Some("Unread messages".into()),
+            entries: vec![
+                ChatEntry::DayDivider("Today".into()),
+                ChatEntry::Messages(ChatMessageGroup {
+                    author: "Alice".into(),
+                    is_self: false,
+                    avatar: Some("/no/such/avatar.png".into()),
+                    time: "09:00".into(),
+                    messages: vec![ChatMessage {
+                        time: None,
+                        text: "hello".into(),
+                        reactions: vec![("👍".into(), 2)],
+                        replies: 1,
+                        highlighted: false,
+                        truncated: false,
+                        desktop_url: Some(
+                            "slack://channel?team=T1&id=C1&message=1.0&thread_ts=1.0".into(),
+                        ),
+                        browser_url: Some(
+                            "https://acme.slack.com/archives/C1/p10?thread_ts=1.0&cid=C1".into(),
+                        ),
+                    }],
+                }),
+            ],
+        };
+        let input = [text_body.clone(), chat_body];
+        let cached = to_cached_preview(&input, Some("/no/avatar.png")).unwrap();
         let data = serde_json::to_vec(&cached).unwrap();
         let (bodies, avatar) = from_cached_preview(serde_json::from_slice(&data).unwrap());
-        assert_eq!(bodies, [body]);
+        assert_eq!(bodies[0], text_body);
+        let PreviewBody::Chat { entries, .. } = &bodies[1] else {
+            panic!("expected chat body");
+        };
+        let ChatEntry::Messages(group) = &entries[1] else {
+            panic!("expected message group");
+        };
+        assert_eq!(group.avatar, None, "missing group avatar is dropped");
         assert_eq!(avatar, None, "an avatar gone from disk is dropped");
         let image = PreviewBody::Image {
             path: "/tmp/image.png".into(),

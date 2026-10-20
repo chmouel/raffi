@@ -530,6 +530,12 @@ pub(crate) enum Message {
     SlackImagesLoaded(u64, u64, u64, Vec<String>, super::slack::ImagesOutcome),
     /// The Slack list was scrolled to this relative offset.
     SlackListScrolled(f32),
+    /// A message or thread in the Slack preview pane was clicked to open in
+    /// the desktop app or browser.
+    SlackPreviewOpen {
+        desktop_url: Option<String>,
+        browser_url: Option<String>,
+    },
     /// Rows of the main view command list source at this index, from its
     /// load of this generation.
     MainViewLoaded(

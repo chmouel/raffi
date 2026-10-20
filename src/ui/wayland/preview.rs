@@ -37,6 +37,284 @@ pub(crate) enum PreviewIcon {
     Glyph(String),
 }
 
+/// A single message within a [`ChatMessageGroup`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ChatMessage {
+    /// Timestamp (`HH:MM`) shown for follow-up messages when different from the group header.
+    pub time: Option<String>,
+    /// Message text (with Slack mrkdwn and Unicode emoji shortcodes resolved).
+    pub text: String,
+    /// Emoji reactions `(emoji_or_shortcode, count)`.
+    pub reactions: Vec<(String, u64)>,
+    /// Thread reply count when `> 0`.
+    pub replies: u64,
+    /// Whether this message is the target search hit in a conversation/thread preview.
+    pub highlighted: bool,
+    /// Whether this message text was truncated.
+    pub truncated: bool,
+    /// Slack desktop URL (`slack://...`) for opening this message or thread.
+    #[serde(default)]
+    pub desktop_url: Option<String>,
+    /// Slack browser URL (`https://...`) for opening this message or thread.
+    #[serde(default)]
+    pub browser_url: Option<String>,
+}
+
+/// Consecutive messages from the same author on the same day.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ChatMessageGroup {
+    pub author: String,
+    pub is_self: bool,
+    pub avatar: Option<String>,
+    pub time: String,
+    pub messages: Vec<ChatMessage>,
+}
+
+/// An entry in a [`PreviewBody::Chat`] feed.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) enum ChatEntry {
+    DayDivider(String),
+    Messages(ChatMessageGroup),
+}
+
+/// Block-level structure inside a single Slack chat message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum MrkdwnBlock {
+    Paragraph(String),
+    Quote(String),
+    Code(String),
+}
+
+/// Inline style for a Slack `mrkdwn` text span.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MrkdwnStyle {
+    Plain,
+    Bold,
+    Italic,
+    Strike,
+    Code,
+    Mention,
+    Link,
+}
+
+/// A styled inline span parsed from Slack `mrkdwn`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MrkdwnSpan {
+    pub text: String,
+    pub style: MrkdwnStyle,
+}
+
+fn push_non_code_blocks(blocks: &mut Vec<MrkdwnBlock>, segment: &str) {
+    let trimmed = segment.trim_matches('\n');
+    if trimmed.is_empty() {
+        return;
+    }
+    let mut current_quote: Vec<&str> = Vec::new();
+    let mut current_para: Vec<&str> = Vec::new();
+
+    let flush_quote = |blocks: &mut Vec<MrkdwnBlock>, quote: &mut Vec<&str>| {
+        if !quote.is_empty() {
+            blocks.push(MrkdwnBlock::Quote(quote.join("\n")));
+            quote.clear();
+        }
+    };
+    let flush_para = |blocks: &mut Vec<MrkdwnBlock>, para: &mut Vec<&str>| {
+        if !para.is_empty() {
+            let text = para.join("\n");
+            if !text.trim().is_empty() {
+                blocks.push(MrkdwnBlock::Paragraph(text));
+            }
+            para.clear();
+        }
+    };
+
+    for line in trimmed.lines() {
+        if let Some(quoted) = line.strip_prefix("> ").or_else(|| line.strip_prefix('>')) {
+            flush_para(blocks, &mut current_para);
+            current_quote.push(quoted);
+        } else {
+            flush_quote(blocks, &mut current_quote);
+            current_para.push(line);
+        }
+    }
+    flush_quote(blocks, &mut current_quote);
+    flush_para(blocks, &mut current_para);
+}
+
+/// Split a Slack message into paragraphs, blockquotes (`> ...`), and fenced
+/// code blocks (` ```...``` `).
+pub(crate) fn parse_mrkdwn_blocks(text: &str) -> Vec<MrkdwnBlock> {
+    let mut blocks = Vec::new();
+    let mut rest = text;
+    while let Some(open) = rest.find("```") {
+        let after_open = &rest[open + 3..];
+        if let Some(close) = after_open.find("```") {
+            push_non_code_blocks(&mut blocks, &rest[..open]);
+            let code = after_open[..close].trim_matches('\n');
+            if !code.is_empty() {
+                blocks.push(MrkdwnBlock::Code(code.to_string()));
+            }
+            rest = &after_open[close + 3..];
+        } else {
+            break;
+        }
+    }
+    push_non_code_blocks(&mut blocks, rest);
+    if blocks.is_empty() && !text.is_empty() {
+        blocks.push(MrkdwnBlock::Paragraph(text.to_string()));
+    }
+    blocks
+}
+
+fn find_closing_delimiter(after_open: &str, delim: char) -> Option<usize> {
+    let line_end = after_open.find('\n').unwrap_or(after_open.len());
+    let line = &after_open[..line_end];
+    let first = line.chars().next()?;
+    if first.is_whitespace() || first == delim {
+        return None;
+    }
+    for (idx, ch) in line.char_indices() {
+        if ch != delim || idx == 0 {
+            continue;
+        }
+        let prev = line[..idx].chars().next_back()?;
+        if prev.is_whitespace() || prev == delim {
+            continue;
+        }
+        let after_delim = &after_open[idx + delim.len_utf8()..];
+        let valid_after = after_delim
+            .chars()
+            .next()
+            .is_none_or(|next| !next.is_alphanumeric());
+        if valid_after {
+            return Some(idx);
+        }
+    }
+    None
+}
+
+/// Parse inline Slack `mrkdwn` spans (`*bold*`, `_italic_`, `~strike~`,
+/// `` `code` ``, `@mentions`, `#channels`, and `http(s)://` links).
+pub(crate) fn parse_mrkdwn_spans(text: &str) -> Vec<MrkdwnSpan> {
+    let mut spans = Vec::new();
+    let mut plain = String::new();
+    let mut prev_char: Option<char> = None;
+    let mut i = 0;
+
+    let flush_plain = |spans: &mut Vec<MrkdwnSpan>, plain: &mut String| {
+        if !plain.is_empty() {
+            spans.push(MrkdwnSpan {
+                text: std::mem::take(plain),
+                style: MrkdwnStyle::Plain,
+            });
+        }
+    };
+
+    while i < text.len() {
+        let rest = &text[i..];
+        let ch = rest.chars().next().unwrap();
+        let ch_len = ch.len_utf8();
+
+        if ch == '`' {
+            let after = &rest[1..];
+            let line_end = after.find('\n').unwrap_or(after.len());
+            if let Some(end) = after[..line_end].find('`') {
+                let inner = &after[..end];
+                if !inner.is_empty() {
+                    flush_plain(&mut spans, &mut plain);
+                    spans.push(MrkdwnSpan {
+                        text: inner.to_string(),
+                        style: MrkdwnStyle::Code,
+                    });
+                    prev_char = Some('`');
+                    i += 1 + end + 1;
+                    continue;
+                }
+            }
+        }
+
+        if rest.starts_with("https://") || rest.starts_with("http://") {
+            let raw_len: usize = rest
+                .chars()
+                .take_while(|c| !c.is_whitespace() && !matches!(c, '>' | ')' | ']' | '"' | '\''))
+                .map(char::len_utf8)
+                .sum();
+            let url = rest[..raw_len].trim_end_matches(['.', ',', ';', ':', '!', '?']);
+            if url.len() > 8 {
+                flush_plain(&mut spans, &mut plain);
+                prev_char = url.chars().next_back();
+                spans.push(MrkdwnSpan {
+                    text: url.to_string(),
+                    style: MrkdwnStyle::Link,
+                });
+                i += url.len();
+                continue;
+            }
+        }
+
+        let at_word_start = prev_char.is_none_or(|p| {
+            p.is_whitespace() || matches!(p, '(' | '[' | '{' | '"' | '\'' | ':' | ',')
+        });
+        if at_word_start && (ch == '@' || ch == '#') {
+            let after = &rest[1..];
+            let raw_len: usize = after
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.'))
+                .map(char::len_utf8)
+                .sum();
+            let ident = after[..raw_len].trim_end_matches(['.', '-']);
+            if ident.chars().next().is_some_and(char::is_alphanumeric) {
+                let token_len = 1 + ident.len();
+                let token = &rest[..token_len];
+                flush_plain(&mut spans, &mut plain);
+                prev_char = token.chars().next_back();
+                spans.push(MrkdwnSpan {
+                    text: token.to_string(),
+                    style: MrkdwnStyle::Mention,
+                });
+                i += token_len;
+                continue;
+            }
+        }
+
+        let can_open = prev_char.is_none_or(|p| {
+            p.is_whitespace() || matches!(p, '(' | '[' | '{' | '"' | '\'' | '*' | '_' | '~')
+        });
+        if can_open && matches!(ch, '*' | '_' | '~') {
+            let after = &rest[1..];
+            if let Some(close) = find_closing_delimiter(after, ch) {
+                let inner = &after[..close];
+                let style = match ch {
+                    '*' => MrkdwnStyle::Bold,
+                    '_' => MrkdwnStyle::Italic,
+                    _ => MrkdwnStyle::Strike,
+                };
+                flush_plain(&mut spans, &mut plain);
+                spans.push(MrkdwnSpan {
+                    text: inner.to_string(),
+                    style,
+                });
+                prev_char = Some(ch);
+                i += 1 + close + 1;
+                continue;
+            }
+        }
+
+        plain.push(ch);
+        prev_char = Some(ch);
+        i += ch_len;
+    }
+
+    flush_plain(&mut spans, &mut plain);
+    if spans.is_empty() {
+        spans.push(MrkdwnSpan {
+            text: String::new(),
+            style: MrkdwnStyle::Plain,
+        });
+    }
+    spans
+}
+
 /// Main body block in the right-hand preview pane.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PreviewBody {
@@ -50,6 +328,11 @@ pub(crate) enum PreviewBody {
     AnsiText {
         heading: Option<String>,
         content: String,
+    },
+    /// Structured chat message feed (for Slack conversations, threads, and unreads).
+    Chat {
+        heading: Option<String>,
+        entries: Vec<ChatEntry>,
     },
     /// Scaled image or SVG preview (for File Browser images or QuickLook image paths).
     Image { path: String },
@@ -1260,10 +1543,14 @@ impl LauncherApp {
         list: &CommandListState,
         item: &CommandItem,
     ) -> PreviewData {
+        let is_slack = list.addon == Some(super::command_list::CommandListAddon::Slack);
         PreviewData {
             title: item.title.clone(),
-            subtitle: None,
-            badge: list.addon.map(|addon| addon.badge().to_string()),
+            subtitle: (is_slack && !item.subtitle.is_empty()).then(|| item.subtitle.clone()),
+            badge: item
+                .badge
+                .clone()
+                .or_else(|| list.addon.map(|addon| addon.badge().to_string())),
             icon: item.icon.clone().map(PreviewIcon::File),
             bodies: super::browser_tabs::tab_target(item)
                 .and_then(|tab| list.previews.get(&tab.url))

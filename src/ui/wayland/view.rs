@@ -12,10 +12,13 @@ use iced::{Element, Length};
 use super::ansi::ansi_to_spans;
 use super::browser::mimetype_icon_name;
 use super::main_view::{Block, Source as MainViewSource};
-use super::preview::{PreviewBody, PreviewData, PreviewIcon};
+use super::preview::{
+    parse_mrkdwn_blocks, parse_mrkdwn_spans, ChatEntry, ChatMessageGroup, MrkdwnBlock, MrkdwnStyle,
+    PreviewBody, PreviewData, PreviewIcon,
+};
 use super::snippets::{truncate_preview, SnippetIcon};
 use super::state::{LauncherApp, Message, ScriptFilterResult};
-use super::theme::ThemeColors;
+use super::theme::{PreviewStyle, ThemeColors};
 use super::types::ScriptFilterItem;
 
 type HintSpan<'a> = iced::widget::text::Span<'a, (), iced::Font>;
@@ -622,6 +625,431 @@ fn memory_image<'a>(handle: iced::widget::image::Handle, height: f32) -> Element
         .height(Length::Fixed(height))
         .content_fit(iced::ContentFit::Contain)
         .into()
+}
+
+fn mrkdwn_spans_to_iced<'a>(
+    content: &str,
+    ps: &PreviewStyle,
+    base_color: iced::Color,
+) -> Vec<HintSpan<'a>> {
+    let bold_font = iced::Font {
+        weight: iced::font::Weight::Bold,
+        ..ps.font
+    };
+    let italic_font = iced::Font {
+        style: iced::font::Style::Italic,
+        ..ps.font
+    };
+    let medium_font = iced::Font {
+        weight: iced::font::Weight::Medium,
+        ..ps.font
+    };
+    parse_mrkdwn_spans(content)
+        .into_iter()
+        .map(|part| match part.style {
+            MrkdwnStyle::Plain => span(part.text)
+                .size(ps.text)
+                .color(base_color)
+                .font(ps.font),
+            MrkdwnStyle::Bold => span(part.text)
+                .size(ps.text)
+                .color(base_color)
+                .font(bold_font),
+            MrkdwnStyle::Italic => span(part.text)
+                .size(ps.text)
+                .color(base_color)
+                .font(italic_font),
+            MrkdwnStyle::Strike => span(part.text)
+                .size(ps.text)
+                .color(ps.text_muted)
+                .font(ps.font)
+                .strikethrough(true),
+            MrkdwnStyle::Code => span(format!(" {} ", part.text))
+                .size(ps.small * 0.96)
+                .color(ps.accent)
+                .font(ps.mono_font)
+                .background(ps.bg_block)
+                .border(iced::Border {
+                    color: iced::Color {
+                        a: 0.45,
+                        ..ps.border
+                    },
+                    width: 1.0,
+                    radius: 4.0.into(),
+                }),
+            MrkdwnStyle::Mention => span(format!(" {} ", part.text))
+                .size(ps.text)
+                .color(ps.accent)
+                .font(medium_font)
+                .background(iced::Color {
+                    a: 0.14,
+                    ..ps.accent
+                })
+                .border(iced::Border {
+                    radius: 4.0.into(),
+                    ..Default::default()
+                }),
+            MrkdwnStyle::Link => span(part.text)
+                .size(ps.text)
+                .color(ps.accent)
+                .font(ps.font)
+                .underline(true),
+        })
+        .collect()
+}
+
+fn render_chat_avatar<'a>(group: &ChatMessageGroup, ps: &PreviewStyle) -> Element<'a, Message> {
+    const AVATAR_SIZE: f32 = 28.0;
+    if let Some(path) = group.avatar.as_deref() {
+        if let Some(img) = icon_element(Path::new(path), AVATAR_SIZE) {
+            return container(img)
+                .width(Length::Fixed(AVATAR_SIZE))
+                .height(Length::Fixed(AVATAR_SIZE))
+                .align_x(iced::Alignment::Center)
+                .align_y(iced::Alignment::Center)
+                .into();
+        }
+    }
+
+    let initial = group
+        .author
+        .trim_start_matches(['@', '#'])
+        .chars()
+        .find(|c| c.is_alphanumeric())
+        .or_else(|| group.author.chars().next())
+        .unwrap_or('?')
+        .to_uppercase()
+        .to_string();
+    let tint = if group.is_self {
+        ps.accent
+    } else {
+        let hash = group.author.bytes().fold(0usize, |acc, b| {
+            acc.wrapping_mul(31).wrapping_add(b as usize)
+        });
+        ps.ansi[1 + (hash % 6)]
+    };
+    let bold_font = iced::Font {
+        weight: iced::font::Weight::Bold,
+        ..ps.font
+    };
+    container(text(initial).size(ps.small).color(tint).font(bold_font))
+        .width(Length::Fixed(AVATAR_SIZE))
+        .height(Length::Fixed(AVATAR_SIZE))
+        .align_x(iced::Alignment::Center)
+        .align_y(iced::Alignment::Center)
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(iced::Color { a: 0.18, ..tint })),
+            border: iced::Border {
+                color: iced::Color { a: 0.38, ..tint },
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..Default::default()
+        })
+        .into()
+}
+
+fn render_chat_feed<'a>(entries: Vec<ChatEntry>, ps: &PreviewStyle) -> Element<'a, Message> {
+    if entries.is_empty() {
+        let bg_block = ps.bg_block;
+        let border = ps.border;
+        return container(
+            text("No messages")
+                .size(ps.text)
+                .color(ps.text_muted)
+                .font(ps.font),
+        )
+        .padding(12.0)
+        .width(Length::Fill)
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(bg_block)),
+            border: iced::Border {
+                color: iced::Color { a: 0.55, ..border },
+                width: 1.0,
+                radius: 8.0.into(),
+            },
+            ..Default::default()
+        })
+        .into();
+    }
+
+    let bold_font = iced::Font {
+        weight: iced::font::Weight::Bold,
+        ..ps.font
+    };
+    let medium_font = iced::Font {
+        weight: iced::font::Weight::Medium,
+        ..ps.font
+    };
+    let mut feed = Column::new().spacing(12).width(Length::Fill);
+
+    for entry in entries {
+        match entry {
+            ChatEntry::DayDivider(label) => {
+                let border = ps.border;
+                let bg_block = ps.bg_block;
+                let left_line = container(Space::new())
+                    .width(Length::Fill)
+                    .height(Length::Fixed(1.0))
+                    .style(move |_theme| container::Style {
+                        background: Some(iced::Background::Color(iced::Color {
+                            a: 0.35,
+                            ..border
+                        })),
+                        ..Default::default()
+                    });
+                let right_line = container(Space::new())
+                    .width(Length::Fill)
+                    .height(Length::Fixed(1.0))
+                    .style(move |_theme| container::Style {
+                        background: Some(iced::Background::Color(iced::Color {
+                            a: 0.35,
+                            ..border
+                        })),
+                        ..Default::default()
+                    });
+                let pill = container(
+                    text(label)
+                        .size(ps.small * 0.92)
+                        .color(ps.text_muted)
+                        .font(medium_font),
+                )
+                .padding([2.0, 10.0])
+                .style(move |_theme| container::Style {
+                    background: Some(iced::Background::Color(bg_block)),
+                    border: iced::Border {
+                        color: iced::Color { a: 0.5, ..border },
+                        width: 1.0,
+                        radius: 10.0.into(),
+                    },
+                    ..Default::default()
+                });
+                feed = feed.push(
+                    Row::new()
+                        .spacing(8)
+                        .align_y(iced::Alignment::Center)
+                        .width(Length::Fill)
+                        .push(left_line)
+                        .push(pill)
+                        .push(right_line),
+                );
+            }
+            ChatEntry::Messages(group) => {
+                let avatar = render_chat_avatar(&group, ps);
+                let author_color = if group.is_self {
+                    ps.accent
+                } else {
+                    ps.text_main
+                };
+                let mut header = Row::new()
+                    .spacing(8)
+                    .align_y(iced::Alignment::Center)
+                    .width(Length::Fill)
+                    .push(
+                        text(group.author)
+                            .size(ps.text)
+                            .color(author_color)
+                            .font(bold_font),
+                    );
+                if !group.time.is_empty() {
+                    header = header.push(
+                        text(group.time)
+                            .size(ps.small * 0.9)
+                            .color(ps.text_muted)
+                            .font(ps.font),
+                    );
+                }
+
+                let mut body_col = Column::new().spacing(6).width(Length::Fill);
+                for msg in group.messages {
+                    let mut msg_col = Column::new().spacing(5).width(Length::Fill);
+                    for block in parse_mrkdwn_blocks(&msg.text) {
+                        match block {
+                            MrkdwnBlock::Paragraph(para) => {
+                                msg_col = msg_col.push(
+                                    rich_text(mrkdwn_spans_to_iced(&para, ps, ps.text_main))
+                                        .font(ps.font)
+                                        .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
+                                );
+                            }
+                            MrkdwnBlock::Quote(quote) => {
+                                let accent = ps.accent;
+                                msg_col = msg_col.push(
+                                    container(
+                                        rich_text(mrkdwn_spans_to_iced(&quote, ps, ps.text_muted))
+                                            .font(ps.font)
+                                            .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
+                                    )
+                                    .padding([6.0, 10.0])
+                                    .width(Length::Fill)
+                                    .style(move |_theme| {
+                                        container::Style {
+                                            background: Some(iced::Background::Color(
+                                                iced::Color { a: 0.07, ..accent },
+                                            )),
+                                            border: iced::Border {
+                                                color: iced::Color { a: 0.32, ..accent },
+                                                width: 1.0,
+                                                radius: 6.0.into(),
+                                            },
+                                            ..Default::default()
+                                        }
+                                    }),
+                                );
+                            }
+                            MrkdwnBlock::Code(code) => {
+                                let bg_block = ps.bg_block;
+                                let border = ps.border;
+                                msg_col = msg_col.push(
+                                    container(
+                                        text(code)
+                                            .size(ps.small)
+                                            .color(ps.text_main)
+                                            .font(ps.mono_font)
+                                            .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
+                                    )
+                                    .padding([8.0, 10.0])
+                                    .width(Length::Fill)
+                                    .style(move |_theme| {
+                                        container::Style {
+                                            background: Some(iced::Background::Color(bg_block)),
+                                            border: iced::Border {
+                                                color: iced::Color { a: 0.55, ..border },
+                                                width: 1.0,
+                                                radius: 6.0.into(),
+                                            },
+                                            ..Default::default()
+                                        }
+                                    }),
+                                );
+                            }
+                        }
+                    }
+
+                    if !msg.reactions.is_empty() || msg.replies > 0 {
+                        let mut pills = Row::new().spacing(6).align_y(iced::Alignment::Center);
+                        for (emoji, count) in msg.reactions.into_iter().take(6) {
+                            let bg_block = ps.bg_block;
+                            let border = ps.border;
+                            pills = pills.push(
+                                container(
+                                    text(format!("{emoji} {count}"))
+                                        .size(ps.small * 0.9)
+                                        .color(ps.text_main)
+                                        .font(ps.font),
+                                )
+                                .padding([2.0, 7.0])
+                                .style(move |_theme| {
+                                    container::Style {
+                                        background: Some(iced::Background::Color(bg_block)),
+                                        border: iced::Border {
+                                            color: iced::Color { a: 0.5, ..border },
+                                            width: 1.0,
+                                            radius: 10.0.into(),
+                                        },
+                                        ..Default::default()
+                                    }
+                                }),
+                            );
+                        }
+                        if msg.replies > 0 {
+                            let accent = ps.accent;
+                            let label = if msg.replies == 1 {
+                                "💬 1 reply →".to_string()
+                            } else {
+                                format!("💬 {} replies →", msg.replies)
+                            };
+                            pills = pills.push(
+                                container(
+                                    text(label)
+                                        .size(ps.small * 0.9)
+                                        .color(accent)
+                                        .font(medium_font),
+                                )
+                                .padding([2.0, 8.0])
+                                .style(move |_theme| {
+                                    container::Style {
+                                        background: Some(iced::Background::Color(iced::Color {
+                                            a: 0.12,
+                                            ..accent
+                                        })),
+                                        border: iced::Border {
+                                            color: iced::Color { a: 0.35, ..accent },
+                                            width: 1.0,
+                                            radius: 10.0.into(),
+                                        },
+                                        ..Default::default()
+                                    }
+                                }),
+                            );
+                        }
+                        msg_col = msg_col.push(pills);
+                    }
+
+                    if msg.truncated {
+                        msg_col = msg_col.push(
+                            text("Message truncated…")
+                                .size(ps.small * 0.9)
+                                .color(ps.text_muted)
+                                .font(ps.font),
+                        );
+                    }
+
+                    let msg_box: Element<'_, Message> = if msg.highlighted {
+                        let accent = ps.accent;
+                        container(msg_col)
+                            .padding([6.0, 8.0])
+                            .width(Length::Fill)
+                            .style(move |_theme| container::Style {
+                                background: Some(iced::Background::Color(iced::Color {
+                                    a: 0.11,
+                                    ..accent
+                                })),
+                                border: iced::Border {
+                                    color: iced::Color { a: 0.42, ..accent },
+                                    width: 1.0,
+                                    radius: 6.0.into(),
+                                },
+                                ..Default::default()
+                            })
+                            .into()
+                    } else {
+                        msg_col.into()
+                    };
+
+                    if msg.desktop_url.is_some() || msg.browser_url.is_some() {
+                        body_col = body_col.push(
+                            mouse_area(msg_box)
+                                .on_press(Message::SlackPreviewOpen {
+                                    desktop_url: msg.desktop_url,
+                                    browser_url: msg.browser_url,
+                                })
+                                .interaction(iced::mouse::Interaction::Pointer),
+                        );
+                    } else {
+                        body_col = body_col.push(msg_box);
+                    }
+                }
+
+                let right_col = Column::new()
+                    .spacing(3)
+                    .width(Length::Fill)
+                    .push(header)
+                    .push(body_col);
+
+                feed = feed.push(
+                    Row::new()
+                        .spacing(10)
+                        .align_y(iced::Alignment::Start)
+                        .width(Length::Fill)
+                        .push(avatar)
+                        .push(right_col),
+                );
+            }
+        }
+    }
+
+    feed.into()
 }
 
 impl LauncherApp {
@@ -1305,6 +1733,17 @@ impl LauncherApp {
                         .width(Length::Fill)
                         .style(block_style),
                     );
+                    col = col.push(section);
+                }
+                PreviewBody::Chat {
+                    heading: h,
+                    entries,
+                } => {
+                    let mut section = Column::new().spacing(10).width(Length::Fill);
+                    if let Some(h) = h {
+                        section = section.push(heading(h));
+                    }
+                    section = section.push(render_chat_feed(entries, &ps));
                     col = col.push(section);
                 }
                 PreviewBody::Image { path } => {
