@@ -39,9 +39,30 @@ STATUS_GROUPS = (
 )
 AGENT_ICONS = frozenset(
     (
-        "pi", "claude", "codex", "gemini", "cursor", "devin", "agy", "cline",
-        "omp", "mastracode", "opencode", "copilot", "kimi", "kiro", "droid",
-        "amp", "grok", "hermes", "kilo", "qodercli", "qwen", "letta", "maki", "muse",
+        "pi",
+        "claude",
+        "codex",
+        "gemini",
+        "cursor",
+        "devin",
+        "agy",
+        "cline",
+        "omp",
+        "mastracode",
+        "opencode",
+        "copilot",
+        "kimi",
+        "kiro",
+        "droid",
+        "amp",
+        "grok",
+        "hermes",
+        "kilo",
+        "qodercli",
+        "qwen",
+        "letta",
+        "maki",
+        "muse",
     )
 )
 PREVIEW_REFRESH_SECONDS = 2
@@ -213,9 +234,9 @@ def tab_item(tab, panes):
     tab_id = text_field(tab, "tab_id")
     label = text_field(tab, "label") or tab_id
     status = text_field(tab, "agent_status", "unknown")
-    occupants = ", ".join(
-        text_field(pane, "agent") or "shell" for pane in panes
-    ) or "empty"
+    occupants = (
+        ", ".join(text_field(pane, "agent") or "shell" for pane in panes) or "empty"
+    )
     return {
         "title": f"{label} {status_span(status)}",
         "subtitle": focused_prefix(tab) + occupants,
@@ -275,9 +296,7 @@ def tree_nodes(workspaces, tabs, panes):
         workspace_id = text_field(workspace, "workspace_id")
         if not workspace_id:
             continue
-        workspace_tabs = sorted(
-            tabs_by_workspace.pop(workspace_id, []), key=number_of
-        )
+        workspace_tabs = sorted(tabs_by_workspace.pop(workspace_id, []), key=number_of)
         tab_nodes = []
         pane_total = 0
         for tab in workspace_tabs:
@@ -395,15 +414,29 @@ def build_status_items(workspaces, tabs, panes, query):
         seen.add(pane_id)
         tab_id = text_field(pane, "tab_id")
         tab_order, tab = tab_map.get(tab_id, (len(tabs), {}))
-        workspace_id = text_field(pane, "workspace_id") or text_field(tab, "workspace_id")
-        workspace_order, workspace = workspace_map.get(workspace_id, (len(workspaces), {}))
+        workspace_id = text_field(pane, "workspace_id") or text_field(
+            tab, "workspace_id"
+        )
+        workspace_order, workspace = workspace_map.get(
+            workspace_id, (len(workspaces), {})
+        )
         workspace_label = text_field(workspace, "label") or workspace_id or project
         tab_label = text_field(tab, "label") or tab_id or terminal_title or project
         group = status if status in groups else "unknown"
         group_label = dict(STATUS_GROUPS)[group]
         searchable = " ".join(
-            (workspace_label, workspace_id, tab_label, tab_id, agent,
-             status, group_label, cwd, project, terminal_title)
+            (
+                workspace_label,
+                workspace_id,
+                tab_label,
+                tab_id,
+                agent,
+                status,
+                group_label,
+                cwd,
+                project,
+                terminal_title,
+            )
         )
         if needle and needle not in searchable.casefold():
             continue
@@ -420,7 +453,9 @@ def build_status_items(workspaces, tabs, panes, query):
 
     items = []
     for status, label in STATUS_GROUPS:
-        members = [item for _, item in sorted(groups[status], key=lambda entry: entry[0])]
+        members = [
+            item for _, item in sorted(groups[status], key=lambda entry: entry[0])
+        ]
         if not members:
             continue
         symbol = "waiting" if status == "blocked" else status
@@ -438,7 +473,7 @@ def build_status_items(workspaces, tabs, panes, query):
                     "subtitle": count("agent", len(members)),
                     "icon": icon_path(f"status-{symbol}"),
                     "text": "\n".join(
-                        f'{item["title"]} · {item["subtitle"]}' for item in members
+                        f"{item['title']} · {item['subtitle']}" for item in members
                     ),
                 },
             }
@@ -515,9 +550,7 @@ def build_pane_preview(pane_id, height):
 
 def build_tab_preview(tab_id, height):
     tab = herdr_object(("tab", "get", tab_id), "tab")
-    panes = [
-        pane for pane in get_panes() if text_field(pane, "tab_id") == tab_id
-    ]
+    panes = [pane for pane in get_panes() if text_field(pane, "tab_id") == tab_id]
 
     lines = []
     for pane in panes:
@@ -562,11 +595,7 @@ def build_tab_preview(tab_id, height):
 def build_workspace_preview(workspace_id, height):
     workspace = herdr_object(("workspace", "get", workspace_id), "workspace")
     tabs = sorted(
-        (
-            tab
-            for tab in get_tabs()
-            if text_field(tab, "workspace_id") == workspace_id
-        ),
+        (tab for tab in get_tabs() if text_field(tab, "workspace_id") == workspace_id),
         key=number_of,
     )
 
@@ -703,9 +732,7 @@ def main(argv=None):
             items = build_agent_items(get_agents(), query)
         else:
             build = build_status_items if mode == "status" else build_tree_items
-            items = build(
-                get_workspaces(), get_tabs(), get_panes(), query
-            )
+            items = build(get_workspaces(), get_tabs(), get_panes(), query)
     except (
         FileNotFoundError,
         subprocess.CalledProcessError,

@@ -1244,6 +1244,16 @@
       "description": "Configuration for the Slack addon (native UI only)",
       "type": "object",
       "properties": {
+        "cache_minutes": {
+          "description": "Minutes the cached conversations, people, muted conversations and\nsearches count as fresh before Raffi asks Slack again (default: 60);\n0 asks every time. Cached rows and previews show at once while the\nfresh ones load.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
         "cookie_command": {
           "description": "Shell command printing the value of the `d` cookie, needed with a\nsession (`xoxc-`) token.",
           "type": [

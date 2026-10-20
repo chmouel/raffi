@@ -191,7 +191,7 @@ pre-commit install
 
 <p><img width="800" alt="Keyword suggestion while typing" src="website/src/assets/screenshots/keyword-suggestion.png" /></p>
 <p><img width="800" alt="Keyword and shortcut help list" src="website/src/assets/screenshots/keyword-help.png" /></p>
-<p><img width="800" alt="Keyboard shortcut help filtered to Ctrl shortcuts" src="website/src/assets/screenshots/keyword-help-shortcuts.png" /></p>
+<p><img width="800" alt="Keyboard shortcut help filtered to the preview shortcuts" src="website/src/assets/screenshots/keyword-help-shortcuts.png" /></p>
 <p><img width="800" alt="Inline launcher script shown in the preview pane" src="website/src/assets/screenshots/launcher-script-preview.png" /></p>
 <p><img width="800" alt="Timezone script filter with ANSI-formatted preview" src="website/src/assets/screenshots/script-filter-tz.png" /></p>
 <p><img width="800" alt="Pull request script filter with CI status and details" src="website/src/assets/screenshots/script-filter-pr.png" /></p>

@@ -46,6 +46,9 @@ When changing behavior, keep the surrounding docs and examples aligned.
   - refresh `examples/raffi-schema.json`
 - Native UI behavior changes:
   - check `src/ui/wayland/tests.rs` and add or adjust tests
+  - if the change is visible in the docs screenshots, update
+    `misc/screenshots/catalogue.py` if needed and re-shoot with
+    `make screenshots SHOTS="name ..."` (see `misc/screenshots/README.md`)
 - Sorting, history, MRU, or search behavior changes:
   - check `src/ui/wayland/support.rs` tests as well as the app tests
 

@@ -30,4 +30,10 @@ website-build:
 website-preview: website-build
 	cd website && npm run preview
 
-.PHONY: all build sanity test clippy coverage website-install website-dev website-build website-preview
+screenshots: build
+	uv run misc/screenshots/shoot.py $(SHOTS)
+
+screenshots-list:
+	uv run misc/screenshots/shoot.py --list
+
+.PHONY: all build sanity test clippy coverage website-install website-dev website-build website-preview screenshots screenshots-list
