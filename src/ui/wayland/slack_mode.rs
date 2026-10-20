@@ -132,20 +132,29 @@ impl LauncherApp {
         match self.slack.view.clone() {
             Some(View::Home) => {
                 let cached = (!refresh).then(|| slack::cached_home(&config)).flatten();
-                self.load_slack_cached(cached, refresh, move || slack::load_home(config))
+                self.load_slack_cached(cached, refresh, move || slack::load_home(config, refresh))
             }
             Some(View::Unread) => {
                 let cached = (!refresh).then(|| slack::cached_unread(&config)).flatten();
-                self.load_slack_cached(cached, refresh, move || slack::load_unread(config))
+                self.load_slack_cached(cached, refresh, move || slack::load_unread(config, refresh))
             }
             Some(View::Search(terms)) if terms.chars().count() >= MIN_SEARCH_CHARS => {
                 self.load_command_list(move || slack::load_search(config, terms), refresh)
             }
             Some(View::People(name)) if name.chars().count() >= MIN_SEARCH_CHARS => {
-                self.load_command_list(move || slack::load_people(config, name), refresh)
+                self.load_command_list(move || slack::load_people(config, name, refresh), refresh)
             }
             _ => Task::none(),
         }
+    }
+
+    /// Re-fetch the current Slack view and its previews from Slack.
+    pub(super) fn refresh_slack(&mut self) -> Task<Message> {
+        self.slack
+            .stale_previews
+            .extend(self.command_list.previews.keys().cloned());
+        self.command_list.preview_inflight = None;
+        self.load_slack(true).chain(self.ensure_slack_preview())
     }
 
     /// Show the cached rows, if any, while loading the fresh ones.
@@ -181,8 +190,15 @@ impl LauncherApp {
     }
 
     /// Count a conversation or person opened from the list, so it sorts
-    /// higher next time.
+    /// higher next time, and drop an unread row from the disk cache at once.
     pub(super) fn record_slack_pick(&mut self, identity: &str) {
+        if let Some(rest) = identity.strip_prefix("slack:unread:") {
+            let channel = rest.split(':').next().unwrap_or_default();
+            if !channel.is_empty() {
+                slack::forget_cached_unread(channel);
+            }
+            return;
+        }
         if !identity.starts_with("slack:conv:") && !identity.starts_with("slack:user:") {
             return;
         }

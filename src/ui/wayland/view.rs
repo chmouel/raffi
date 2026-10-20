@@ -2719,6 +2719,13 @@ impl LauncherApp {
                 hint_spans.push(span(label).size(fs.hint).color(t.text_muted));
             }
         }
+        if self.command_list.addon == Some(super::command_list::CommandListAddon::Slack) {
+            if !hint_spans.is_empty() {
+                hint_spans.push(sep.clone());
+            }
+            hint_spans.push(span("Ctrl+R").size(fs.hint).color(t.accent));
+            hint_spans.push(span(" refresh").size(fs.hint).color(t.text_muted));
+        }
         if !hint_spans.is_empty() {
             hint_spans.push(sep.clone());
         }

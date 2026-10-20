@@ -340,7 +340,7 @@ pub(super) fn message_url(
     }
 }
 
-/// Open `url`; a desktop link also focuses the Slack window.
+/// Open `url`, marking `read` (`(channel, ts)`) as read when given.
 fn open(url: String) -> CommandAction {
     let action = if url.starts_with("slack://") {
         DeferredAction::Slack(SlackAction::Open(url))
@@ -349,6 +349,15 @@ fn open(url: String) -> CommandAction {
     };
     CommandAction {
         action,
+        confirm: None,
+        keep_open: false,
+        progress: None,
+    }
+}
+
+fn open_unread(url: String, channel: String, ts: String) -> CommandAction {
+    CommandAction {
+        action: DeferredAction::Slack(SlackAction::OpenUnread { url, channel, ts }),
         confirm: None,
         keep_open: false,
         progress: None,
@@ -418,12 +427,33 @@ pub(super) enum SlackAction {
     /// Open a `slack://` link and focus the Slack window, which compositors
     /// such as Hyprland do not let Slack do itself.
     Open(String),
+    /// Open an unread conversation and mark it as read.
+    OpenUnread {
+        url: String,
+        channel: String,
+        ts: String,
+    },
 }
 
 /// Run `action` against Slack. Blocking: run it off the UI thread.
 pub(super) fn run_action(action: &SlackAction) -> Result<(), String> {
-    if let SlackAction::Open(url) = action {
-        return open_in_app(url);
+    match action {
+        SlackAction::Open(url) => return open_url(url),
+        SlackAction::OpenUnread { url, channel, ts } => {
+            forget_cached_unread(channel);
+            let opened = open_url(url);
+            if !ts.is_empty() {
+                if let Err(error) = slack_api::current_client().and_then(|client| {
+                    client
+                        .call("conversations.mark", &[("channel", channel), ("ts", ts)])
+                        .map(drop)
+                }) {
+                    crate::debug_log!("slack: cannot mark {channel} as read: {error}");
+                }
+            }
+            return opened;
+        }
+        _ => {}
     }
     let client = slack_api::current_client()?;
     let now = Local::now();
@@ -434,10 +464,27 @@ pub(super) fn run_action(action: &SlackAction) -> Result<(), String> {
     Ok(())
 }
 
+/// Drop `channel` from the unread cache at once, even before `auth.test`
+/// has answered in this run.
+pub(super) fn forget_cached_unread(channel: &str) {
+    if let Some(account) = slack_api::cached_account() {
+        slack_api::update_cache(
+            slack_api::UNREAD_FILE,
+            &account,
+            |unread: &mut Vec<Unread>| {
+                unread.retain(|entry| entry.channel != channel);
+            },
+        );
+    }
+}
+
 /// Bring the cached state in line with what `action` did, so a list shown
 /// from the cache before Slack answers does not show the old state.
 fn remember_action(action: &SlackAction, account: &Workspace, now: DateTime<Local>) {
-    if matches!(action, SlackAction::MarkRead { .. }) {
+    if matches!(
+        action,
+        SlackAction::MarkRead { .. } | SlackAction::OpenUnread { .. }
+    ) {
         slack_api::update_cache(slack_api::UNREAD_FILE, account, |unread| {
             apply_to_unread(unread, action)
         });
@@ -469,7 +516,8 @@ pub(super) fn apply_to_live(live: &mut Live, action: &SlackAction, now: DateTime
 }
 
 pub(super) fn apply_to_unread(unread: &mut Vec<Unread>, action: &SlackAction) {
-    if let SlackAction::MarkRead { channel, .. } = action {
+    if let SlackAction::MarkRead { channel, .. } | SlackAction::OpenUnread { channel, .. } = action
+    {
         unread.retain(|entry| &entry.channel != channel);
     }
 }
@@ -510,9 +558,11 @@ fn call_action(client: &Client, action: &SlackAction, now: DateTime<Local>) -> R
                 .map(drop)
         }
         SlackAction::EndSnooze => client.call("dnd.endSnooze", &[]).map(drop),
-        SlackAction::MarkRead { channel, ts } => client
-            .call("conversations.mark", &[("channel", channel), ("ts", ts)])
-            .map(drop),
+        SlackAction::MarkRead { channel, ts } | SlackAction::OpenUnread { channel, ts, .. } => {
+            client
+                .call("conversations.mark", &[("channel", channel), ("ts", ts)])
+                .map(drop)
+        }
         SlackAction::ReloadDirectory => slack_api::directory(client, true).map(drop),
         SlackAction::Open(_) => Ok(()),
     }
@@ -521,12 +571,13 @@ fn call_action(client: &Client, action: &SlackAction, now: DateTime<Local>) -> R
 /// How long to wait for the Slack window when the link starts Slack.
 const SLACK_START_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Hand `url` to the Slack app, then focus its window. Slack moves to the
-/// conversation whether or not it has focus.
-fn open_in_app(url: &str) -> Result<(), String> {
+/// Open `url`, focusing the Slack window when it is a `slack://` link.
+fn open_url(url: &str) -> Result<(), String> {
     DeferredAction::Command(vec!["xdg-open".to_string(), url.to_string()]).run()?;
-    if let Err(error) = super::windows::raise_app_window("slack", SLACK_START_WAIT) {
-        crate::debug_log!("slack: cannot focus the Slack window: {error}");
+    if url.starts_with("slack://") {
+        if let Err(error) = super::windows::raise_app_window("slack", SLACK_START_WAIT) {
+            crate::debug_log!("slack: cannot focus the Slack window: {error}");
+        }
     }
     Ok(())
 }
@@ -1025,16 +1076,17 @@ fn fetch_avatar(user: &User) -> Option<String> {
 }
 
 /// The client and directory, refreshing a directory past its freshness in
-/// the background so this load does not wait for it.
+/// the background unless `refresh` asks for a fresh one now.
 fn connect(
     config: &crate::SlackAddonConfig,
+    refresh: bool,
 ) -> Result<(std::sync::Arc<Client>, std::sync::Arc<Directory>), String> {
     let client = slack_api::client(
         config.token_command.as_deref(),
         config.cookie_command.as_deref(),
     )?;
-    let directory = slack_api::directory(&client, false)?;
-    if !directory.is_fresh(slack_api::now_secs()) {
+    let directory = slack_api::directory(&client, refresh)?;
+    if !refresh && !directory.is_fresh(slack_api::now_secs()) {
         refresh_directory_in_background(client.clone());
     }
     Ok((client, directory))
@@ -1055,8 +1107,11 @@ fn refresh_directory_in_background(client: std::sync::Arc<Client>) {
 }
 
 /// The home rows. Blocking.
-pub(super) fn load_home(config: crate::SlackAddonConfig) -> Result<Vec<CommandItem>, String> {
-    let (client, directory) = connect(&config)?;
+pub(super) fn load_home(
+    config: crate::SlackAddonConfig,
+    refresh: bool,
+) -> Result<Vec<CommandItem>, String> {
+    let (client, directory) = connect(&config, refresh)?;
     let replies = fetch_live(&client);
     // The directory may come from the cache, so this is the first call that
     // tells whether the user has been logged out.
@@ -1229,7 +1284,7 @@ pub(super) fn load_search(
     config: crate::SlackAddonConfig,
     terms: String,
 ) -> Result<Vec<CommandItem>, String> {
-    let (client, directory) = connect(&config)?;
+    let (client, directory) = connect(&config, false)?;
     let reply = client.call(
         "search.messages",
         &[
@@ -1288,8 +1343,9 @@ pub(super) fn cached_search(view: &View) -> Option<Vec<CommandItem>> {
 pub(super) fn load_people(
     config: crate::SlackAddonConfig,
     query: String,
+    refresh: bool,
 ) -> Result<Vec<CommandItem>, String> {
-    let (client, directory) = connect(&config)?;
+    let (client, directory) = connect(&config, refresh)?;
     let found: Vec<User> = if directory.workspace.enterprise && client.is_session() {
         let mut found = slack_api::search_people(&client, &directory.workspace, &query)?;
         // People you have a conversation with first.
@@ -1552,7 +1608,11 @@ pub(super) fn unread_rows(
                 ("Enter".to_string(), target_name(open_in).to_string()),
                 ("Ctrl+Enter".to_string(), "Mark as read".to_string()),
             ];
-            item.primary = Some(open(conversation_url(open_in, workspace, &entry.channel)));
+            item.primary = Some(open_unread(
+                conversation_url(open_in, workspace, &entry.channel),
+                entry.channel.clone(),
+                entry.latest.clone(),
+            ));
             if !entry.latest.is_empty() {
                 item.secondary = Some(run(
                     SlackAction::MarkRead {
@@ -1567,9 +1627,13 @@ pub(super) fn unread_rows(
         .collect()
 }
 
-/// The conversations the user muted, from the cache while it is fresh,
-/// else from Slack, or none when Slack does not say. Blocking unless cached.
-fn muted(client: &std::sync::Arc<Client>) -> HashSet<String> {
+/// The conversations the user muted, from the cache while it is fresh
+/// unless `refresh`, else from Slack, or none when Slack does not say.
+/// Blocking unless cached.
+fn muted(client: &std::sync::Arc<Client>, refresh: bool) -> HashSet<String> {
+    if refresh {
+        return fetch_muted(client).unwrap_or_default();
+    }
     let cached = client
         .known_identity()
         .and_then(|account| slack_api::read_cache(slack_api::MUTED_FILE, account));
@@ -1612,10 +1676,13 @@ fn fetch_muted(client: &Client) -> Option<HashSet<String>> {
 
 /// Conversations with unread messages, from `client.counts` when the token
 /// allows it, else from the configured list, muted ones last. Blocking.
-pub(super) fn load_unread(config: crate::SlackAddonConfig) -> Result<Vec<CommandItem>, String> {
-    let (client, directory) = connect(&config)?;
+pub(super) fn load_unread(
+    config: crate::SlackAddonConfig,
+    refresh: bool,
+) -> Result<Vec<CommandItem>, String> {
+    let (client, directory) = connect(&config, refresh)?;
     let (counts, muted) = std::thread::scope(|scope| {
-        let muted = scope.spawn(|| muted(&client));
+        let muted = scope.spawn(|| muted(&client, refresh));
         let counts = client.call("client.counts", &[("thread_counts_by_channel", "true")]);
         (counts, muted.join().unwrap_or_default())
     });
@@ -2076,7 +2143,9 @@ mod tests {
     fn command(action: &Option<CommandAction>) -> Option<String> {
         match &action.as_ref()?.action {
             DeferredAction::Command(args) => args.last().cloned(),
-            DeferredAction::Slack(SlackAction::Open(url)) => Some(url.clone()),
+            DeferredAction::Slack(SlackAction::Open(url) | SlackAction::OpenUnread { url, .. }) => {
+                Some(url.clone())
+            }
             _ => None,
         }
     }
@@ -2340,6 +2409,14 @@ mod tests {
         assert_eq!(rows[0].title, "@Alice");
         assert_eq!(rows[0].identity, "slack:unread:D1:3.0");
         assert_eq!(
+            slack_action(&rows[0].primary),
+            Some(SlackAction::OpenUnread {
+                url: "slack://channel?team=T1&id=D1".to_string(),
+                channel: "D1".to_string(),
+                ts: "7.0".to_string(),
+            })
+        );
+        assert_eq!(
             slack_action(&rows[1].secondary),
             Some(SlackAction::MarkRead {
                 channel: "C1".to_string(),
@@ -2515,13 +2592,20 @@ mod tests {
             channel: channel.into(),
             ..Unread::default()
         };
-        let mut unread = vec![entry("C1"), entry("C2")];
+        let mut unread = vec![entry("C1"), entry("C2"), entry("C3")];
         let read = SlackAction::MarkRead {
             channel: "C1".into(),
             ts: "1.0".into(),
         };
         apply_to_unread(&mut unread, &read);
-        assert_eq!(unread, [entry("C2")]);
+        assert_eq!(unread, [entry("C2"), entry("C3")]);
+        let opened = SlackAction::OpenUnread {
+            url: "slack://channel?team=T1&id=C2".into(),
+            channel: "C2".into(),
+            ts: "2.0".into(),
+        };
+        apply_to_unread(&mut unread, &opened);
+        assert_eq!(unread, [entry("C3")]);
     }
 
     #[test]

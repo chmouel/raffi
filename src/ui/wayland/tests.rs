@@ -2061,6 +2061,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "Ctrl+J",
             "Ctrl+K",
             "Ctrl+P",
+            "Ctrl+R",
             "Ctrl+H",
             "Ctrl+O",
             "Ctrl+B",
@@ -2138,6 +2139,7 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
             "Ctrl+J",
             "Ctrl+K",
             "Ctrl+P",
+            "Ctrl+R",
             "Alt+P/N",
             "Tab",
             "Ctrl+/",
@@ -2153,7 +2155,14 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
         .collect();
     assert_eq!(
         by_ctrl,
-        vec!["Ctrl+J", "Ctrl+K", "Ctrl+P", "Ctrl+/", "Ctrl+Enter"]
+        vec![
+            "Ctrl+J",
+            "Ctrl+K",
+            "Ctrl+P",
+            "Ctrl+R",
+            "Ctrl+/",
+            "Ctrl+Enter"
+        ]
     );
 
     let by_scroll: Vec<&str> = filter_help_entries(&entries, "scroll")
@@ -2191,7 +2200,7 @@ fn test_help_entries_skip_disabled_addons() {
     assert!(entries
         .iter()
         .all(|entry| entry.section == HelpSection::KeyboardShortcuts));
-    assert_eq!(entries.len(), 10);
+    assert_eq!(entries.len(), 11);
 }
 
 #[test]
@@ -8493,10 +8502,13 @@ fn test_route_query_slack_needs_enabling() {
 
 #[test]
 fn test_slack_load_without_token_command_explains_setup() {
-    let error = super::slack::load_home(crate::SlackAddonConfig {
-        enabled: true,
-        ..Default::default()
-    })
+    let error = super::slack::load_home(
+        crate::SlackAddonConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        false,
+    )
     .unwrap_err();
     assert!(error.contains("addons.slack.token_command"), "{error}");
 }
@@ -8616,6 +8628,122 @@ fn test_slack_previews_of_another_account_are_dropped() {
     ));
     assert_eq!(app.command_list.previews[&identity], [text("account B")]);
     assert_eq!(app.command_list.preview_inflight, None);
+}
+
+#[test]
+fn test_slack_unread_enter_produces_open_unread_action() {
+    let mut addons = AddonsConfig::default();
+    addons.slack.enabled = true;
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+
+    let _ = app.update(Message::SearchChanged("slack unread ".into()));
+    let unread = [super::slack::Unread {
+        channel: "C1".into(),
+        last_read: "1.0".into(),
+        latest: "5.0".into(),
+        mentions: 1,
+        count: Some(3),
+        muted: false,
+    }];
+    let mut dir = super::slack_api::Directory::default();
+    dir.workspace.team_id = "T1".into();
+    let rows = super::slack::unread_rows(
+        &unread,
+        &dir,
+        crate::SlackOpenIn::Desktop,
+        chrono::Local::now(),
+    );
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(rows)));
+
+    let _ = app.update(Message::Submit);
+    let Some(super::actions::DeferredAction::Slack(action)) = deferred_action(&app) else {
+        panic!("expected a Slack action");
+    };
+    assert_eq!(
+        action,
+        super::slack::SlackAction::OpenUnread {
+            url: "slack://channel?team=T1&id=C1".into(),
+            channel: "C1".into(),
+            ts: "5.0".into(),
+        }
+    );
+}
+
+#[test]
+fn test_ctrl_r_refreshes_slack_view_and_preview() {
+    let mut addons = AddonsConfig::default();
+    addons.slack.enabled = true;
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+
+    let _ = app.update(Message::SearchChanged("slack unread ".into()));
+    let identity = "slack:unread:C1:1.0".to_string();
+    let rows = vec![super::command_list::CommandItem::info(
+        &identity,
+        "#general".into(),
+        "icon",
+    )];
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(rows)));
+    let text = super::preview::PreviewBody::Text {
+        heading: None,
+        content: "cached preview".into(),
+        truncated: false,
+    };
+    app.command_list
+        .previews
+        .insert(identity.clone(), vec![text.clone()]);
+
+    let before_generation = app.command_list.generation;
+    let before_preview_req = app.slack.preview_request;
+    let task = app.update(Message::ClipboardRefresh);
+    assert!(task.units() > 0, "Ctrl+R refreshes Slack");
+    assert_ne!(app.command_list.generation, before_generation);
+    assert_eq!(
+        command_list_titles(&app),
+        vec!["#general"],
+        "existing rows stay visible while refreshing"
+    );
+    assert_ne!(
+        app.slack.preview_request, before_preview_req,
+        "selected preview is refreshed too"
+    );
+    assert_eq!(app.command_list.preview_inflight.as_ref(), Some(&identity));
+}
+
+#[test]
+fn test_ctrl_r_refreshes_command_list_and_file_browser() {
+    let mut addons = AddonsConfig::default();
+    addons.kill.enabled = true;
+    addons.file_browser.enabled = true;
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+
+    let _ = app.update(Message::SearchChanged("kill ".into()));
+    let generation = app.command_list.generation;
+    let rows = vec![super::command_list::CommandItem::info(
+        "pid:1",
+        "init".into(),
+        "icon",
+    )];
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(rows)));
+    let task = app.update(Message::ClipboardRefresh);
+    assert!(task.units() > 0, "Ctrl+R reloads command list");
+    assert_ne!(app.command_list.generation, generation);
+    assert_eq!(command_list_titles(&app), vec!["init"]);
+
+    let dir = std::env::temp_dir().join(format!("raffi-ctrl-r-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("first.txt"), "a").unwrap();
+    let query = format!("{}/", dir.display());
+    let _ = app.update(Message::SearchChanged(query));
+    assert_eq!(app.file_browser.entries.len(), 1);
+    std::fs::write(dir.join("second.txt"), "b").unwrap();
+    let _ = app.update(Message::ClipboardRefresh);
+    assert_eq!(app.file_browser.entries.len(), 2);
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]

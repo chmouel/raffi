@@ -1049,10 +1049,31 @@ pub(super) fn update_cache<T: Serialize + DeserializeOwned>(
     workspace: &Workspace,
     update: impl FnOnce(&mut T),
 ) {
-    if let Some((mut value, _)) = read_cache::<T>(name, workspace) {
-        update(&mut value);
-        write_cache(name, workspace, &value);
+    if let Some(path) = cache_path(name) {
+        update_cache_at(&path, workspace, now_secs(), update);
     }
+}
+
+pub(super) fn update_cache_at<T: Serialize + DeserializeOwned>(
+    path: &Path,
+    workspace: &Workspace,
+    now: u64,
+    update: impl FnOnce(&mut T),
+) {
+    if let Some((mut value, _)) = read_cache_from::<T>(path, workspace, now) {
+        update(&mut value);
+        write_cache_to(path, workspace, &value, now);
+    }
+}
+
+/// The account known from [`Client::known_identity`], or from the cached
+/// directory before `auth.test` has answered.
+pub(super) fn cached_account() -> Option<Workspace> {
+    current_client()
+        .ok()
+        .and_then(|client| client.known_identity().cloned())
+        .or_else(|| cached_directory().map(|directory| directory.workspace.clone()))
+        .filter(|workspace| !workspace.team_id.is_empty() && !workspace.user_id.is_empty())
 }
 
 /// The file `name` in the Slack cache directory; none in unit tests.

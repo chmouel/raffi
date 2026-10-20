@@ -1676,13 +1676,100 @@ impl LauncherApp {
             Message::ClipboardActionDone(session, result) => {
                 self.handle_clipboard_action_done(session, result)
             }
-            Message::ClipboardRefresh => self.handle_clipboard_refresh(),
+            Message::ClipboardRefresh => self.handle_refresh(),
             Message::ClipboardToggleImages => self.handle_clipboard_toggle_images(),
             Message::ClipboardDelete => self.handle_clipboard_delete(),
             Message::ClipboardDeleteDone(session, result) => {
                 self.handle_clipboard_delete_done(session, result)
             }
         }
+    }
+
+    /// Reload the active view on `Ctrl+R`.
+    pub(super) fn handle_refresh(&mut self) -> Task<Message> {
+        if self.view.help_active || self.vault.prompt.is_some() {
+            return Task::none();
+        }
+        if self.clipboard.active {
+            return self.handle_clipboard_refresh();
+        }
+        if let Some(addon) = self.command_list.addon {
+            return match addon {
+                CommandListAddon::Slack => self.refresh_slack(),
+                CommandListAddon::Pass | CommandListAddon::Bitwarden => {
+                    let Some(vault) = self.vault_addon() else {
+                        return Task::none();
+                    };
+                    if self.vault.busy() {
+                        return Task::none();
+                    }
+                    self.command_list.begin_refresh();
+                    self.start_vault(
+                        Op {
+                            addon: vault,
+                            kind: OpKind::Load,
+                        },
+                        None,
+                    )
+                }
+                CommandListAddon::Media => self.load_media(true),
+                CommandListAddon::Audio => self.load_audio(true),
+                CommandListAddon::Kill => self.load_command_list(super::kill::load_processes, true),
+                CommandListAddon::BrowserTabs => {
+                    self.load_command_list(super::browser_tabs::load_tabs, true)
+                }
+                CommandListAddon::Bluetooth => self.load_bluetooth(true),
+                CommandListAddon::Windows => match (self.compositor)() {
+                    Some(compositor) if (self.program_exists)(compositor.program()) => {
+                        self.load_command_list(move || compositor.load_windows(), true)
+                    }
+                    _ => Task::none(),
+                },
+                CommandListAddon::System => {
+                    let query = self.command_list.query.clone();
+                    self.handle_command_list_query(CommandListAddon::System, query)
+                }
+                CommandListAddon::Terminal => Task::none(),
+            };
+        }
+        if self.file_browser.active {
+            self.file_browser.current_dir.clear();
+            self.file_browser.cached_preview = None;
+            self.file_browser.script_previews.clear();
+            let query = self.search_query.clone();
+            return self.handle_search_changed(query);
+        }
+        if self.text_snippets.active {
+            if let Some(index) = self.text_snippets.source_index {
+                let query = self
+                    .addons
+                    .text_snippets
+                    .get(index)
+                    .and_then(|config| {
+                        self.search_query
+                            .trim_start()
+                            .strip_prefix(config.keyword.as_str())
+                    })
+                    .unwrap_or(&self.search_query)
+                    .trim_start()
+                    .to_string();
+                self.text_snippets.file_cache.clear();
+                self.text_snippets.clipboard.data = Default::default();
+                let mut tasks = Vec::new();
+                self.handle_text_snippet_query(index, query, &mut tasks);
+                return Task::batch(tasks);
+            }
+        }
+        if let Some(index) = self.script_filter.config_index {
+            let query = self.script_filter.query.clone();
+            let mut tasks = Vec::new();
+            self.handle_script_filter_query(index, query, &mut tasks);
+            return Task::batch(tasks);
+        }
+        if self.main_view.active && !self.main_view.sources.is_empty() {
+            return self.reload_main_view();
+        }
+        Task::none()
     }
 
     pub(super) fn handle_search_changed(&mut self, query: String) -> Task<Message> {

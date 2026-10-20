@@ -21,6 +21,7 @@ choose. Raffi does not send messages.
 |------------|-----------------------------------------------------------|
 | Enter      | Open the conversation, person or message                  |
 | Ctrl+Enter | Open it in the other app (browser or desktop)             |
+| Ctrl+R     | Refresh the current view and preview                      |
 | Ctrl+P     | Show the preview pane                                     |
 
 Opening a person opens your direct conversation with them, or their
@@ -175,7 +176,8 @@ conversations of the organization at all.
 
 `slack unread` lists the conversations with unread messages, newest first,
 with your mentions there or the number of unread messages. Enter opens the
-conversation and Ctrl+Enter marks it read.
+conversation and marks it read; Ctrl+Enter marks it read without leaving
+Raffi.
 
 Muted conversations come after the others, drawn in the theme's muted
 colour with a Muted badge, and only fill the list when fewer than 30 other
@@ -213,7 +215,7 @@ at once, then replaces it when Slack answers again:
 
 - `directory.json`: conversations and people, refreshed in the background
   once older than `cache_minutes` (an hour by default), or right away
-  with the Reload conversations and people row.
+  with Ctrl+R or the Reload conversations and people row.
 - `live.json` and `unread.json`: your status, presence and snooze, and the
   conversations with unread messages, asked again every time the list
   opens.

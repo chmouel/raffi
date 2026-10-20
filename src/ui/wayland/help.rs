@@ -380,6 +380,11 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             "Toggle preview pane",
             "Shows or hides the right-hand preview",
         ),
+        shortcut(
+            "Ctrl+R",
+            "Refresh view",
+            "Reloads the current list, search, or directory",
+        ),
     ];
     let file_browser = &addons.file_browser;
     if file_browser.enabled {
@@ -422,11 +427,6 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         ]);
     }
     if addons.clipboard.is_enabled() {
-        entries.push(shortcut(
-            "Ctrl+R",
-            "Refresh clipboard history",
-            "Clipboard history: reload the list from the clipboard manager",
-        ));
         entries.push(shortcut(
             "Ctrl+I",
             "Show only images",

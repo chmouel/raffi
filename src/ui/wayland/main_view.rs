@@ -1323,6 +1323,29 @@ impl LauncherApp {
             .collect()
     }
 
+    /// Reload all shown sources of the main view on `Ctrl+R`.
+    pub(super) fn reload_main_view(&mut self) -> Task<Message> {
+        let mut tasks = Vec::new();
+        for source in 0..self.main_view.sources.len() {
+            if !self.main_view.shows(source) {
+                self.main_view.stale.insert(source);
+                continue;
+            }
+            self.main_view.stale.remove(&source);
+            match &mut self.main_view.sources[source] {
+                Source::List(_) | Source::Snippets { .. } => {
+                    tasks.push(self.load_main_view_source(source, false));
+                }
+                Source::ScriptFilter { searched, .. } => {
+                    let query = self.main_view.query.clone();
+                    searched.clear();
+                    tasks.push(self.run_main_view_script_filter(source, query));
+                }
+            }
+        }
+        Task::batch(tasks)
+    }
+
     /// Filter every source with `query`, the trimmed standard mode query.
     /// Sources load and script filters run only while they show.
     pub(super) fn refresh_main_view(&mut self, query: &str) -> Task<Message> {
