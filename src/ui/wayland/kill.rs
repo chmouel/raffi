@@ -258,6 +258,7 @@ fn process_item(process: &Process, keep_open: bool) -> CommandItem {
         badge: None,
         domains: Vec::new(),
         dimmed: false,
+        sort_priority: 0,
     }
 }
 

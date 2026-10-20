@@ -324,6 +324,7 @@ fn window_item(window: Window) -> CommandItem {
         badge: None,
         domains: Vec::new(),
         dimmed: false,
+        sort_priority: 0,
     }
 }
 

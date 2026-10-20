@@ -202,6 +202,7 @@ impl SystemEntry {
             badge: None,
             domains: Vec::new(),
             dimmed: false,
+            sort_priority: 0,
         }
     }
 }

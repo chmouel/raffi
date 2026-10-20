@@ -8682,6 +8682,7 @@ fn test_slack_status_fill_and_debounced_search() {
     let rows = super::slack::home_rows(
         &super::slack_api::Directory::default(),
         &super::slack::Live::default(),
+        None,
         crate::SlackOpenIn::Desktop,
         chrono::Local::now(),
     );
@@ -8923,6 +8924,29 @@ fn test_command_list_lists_dimmed_rows_last_until_a_filter_is_typed() {
     assert_eq!(out, [1, 2, 0], "muted last even when used most");
     filter_items_into(&items, "muted", &matcher, &usage, false, &mut out);
     assert_eq!(out, [0], "filtering still finds muted rows");
+}
+
+#[test]
+fn test_command_list_sort_priority_precedes_usage_and_keeps_priority_order() {
+    use super::command_list::{filter_items_into, CommandItem};
+    let item = |id: &str, sort_priority: u8| CommandItem {
+        sort_priority,
+        ..CommandItem::info(id, id.into(), "icon")
+    };
+    let items = [
+        item("unread-new", 1),
+        item("popular", 0),
+        item("actions", 2),
+        item("unread-old", 1),
+    ];
+    let matcher = fuzzy_matcher::skim::SkimMatcherV2::default();
+    let usage = std::collections::HashMap::from([
+        ("popular".to_string(), 100),
+        ("unread-old".to_string(), 50),
+    ]);
+    let mut out = Vec::new();
+    filter_items_into(&items, "", &matcher, &usage, false, &mut out);
+    assert_eq!(out, [2, 0, 3, 1]);
 }
 
 #[test]

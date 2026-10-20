@@ -348,6 +348,7 @@ pub(super) fn power_item(adapter: &Adapter, keep_open: bool) -> CommandItem {
         badge: None,
         domains: Vec::new(),
         dimmed: false,
+        sort_priority: 0,
     }
 }
 
@@ -390,6 +391,7 @@ pub(super) fn device_item(
             badge: None,
             domains: Vec::new(),
             dimmed: false,
+            sort_priority: 0,
         };
     };
     let battery = info.battery.map(|percent| format!("{percent}% battery"));
@@ -458,6 +460,7 @@ pub(super) fn device_item(
         badge: None,
         domains: Vec::new(),
         dimmed: false,
+        sort_priority: 0,
     }
 }
 

@@ -1422,14 +1422,25 @@ fn user_row(
     item
 }
 
-/// Actions, then channels and group conversations by name, then people.
+/// Actions, prioritized unread rows, then remaining conversations and people.
 pub(super) fn home_rows(
     directory: &Directory,
     live: &Live,
+    unread: Option<&[Unread]>,
     open_in: SlackOpenIn,
     now: DateTime<Local>,
 ) -> Vec<CommandItem> {
     let mut rows = action_rows(live, now);
+    for row in &mut rows {
+        row.sort_priority = 2;
+    }
+    let unread_by_channel: HashMap<&str, &Unread> = unread
+        .unwrap_or_default()
+        .iter()
+        .filter(|entry| !entry.muted)
+        .map(|entry| (entry.channel.as_str(), entry))
+        .collect();
+    let mut promoted = Vec::new();
     let mut conversations: Vec<&Conversation> = directory
         .conversations
         .iter()
@@ -1441,18 +1452,39 @@ pub(super) fn home_rows(
             conversation.name.to_lowercase(),
         )
     });
-    rows.extend(
-        conversations
-            .into_iter()
-            .map(|conversation| conversation_row(conversation, directory, open_in)),
-    );
+    let mut remaining_conversations = Vec::new();
+    for conversation in conversations {
+        let item = conversation_row(conversation, directory, open_in);
+        if let Some(unread) = unread_by_channel.get(conversation.id.as_str()) {
+            let mut item = item;
+            item.sort_priority = 1;
+            promoted.push((unread.latest.clone(), item.title.to_lowercase(), item));
+        } else {
+            remaining_conversations.push(item);
+        }
+    }
     let mut users: Vec<&User> = directory.users.iter().collect();
     users.sort_by_key(|user| user.label().to_lowercase());
-    rows.extend(
-        users
-            .into_iter()
-            .map(|user| user_row(user, directory, open_in, now)),
-    );
+    let mut remaining_users = Vec::new();
+    for user in users {
+        let item = user_row(user, directory, open_in, now);
+        let unread = directory
+            .direct_with(&user.id)
+            .and_then(|direct| unread_by_channel.get(direct.id.as_str()));
+        if let Some(unread) = unread {
+            let mut item = item;
+            item.sort_priority = 1;
+            promoted.push((unread.latest.clone(), item.title.to_lowercase(), item));
+        } else {
+            remaining_users.push(item);
+        }
+    }
+    promoted.sort_by(|(latest_a, label_a, _), (latest_b, label_b, _)| {
+        latest_b.cmp(latest_a).then_with(|| label_a.cmp(label_b))
+    });
+    rows.extend(promoted.into_iter().map(|(_, _, item)| item));
+    rows.extend(remaining_conversations);
+    rows.extend(remaining_users);
     rows
 }
 
@@ -1807,12 +1839,34 @@ pub(super) fn load_home(
     refresh: bool,
 ) -> Result<Vec<CommandItem>, String> {
     let (client, directory) = connect(&config, refresh)?;
-    let replies = fetch_live(&client);
-    // The directory may come from the cache, so this is the first call that
-    // tells whether the user has been logged out.
+    let (replies, counts, muted) = std::thread::scope(|scope| {
+        let counts =
+            scope.spawn(|| client.call("client.counts", &[("thread_counts_by_channel", "true")]));
+        let muted_state = scope.spawn(|| muted(&client, refresh));
+        let replies = fetch_live(&client);
+        let counts = counts
+            .join()
+            .unwrap_or_else(|_| Err("Slack unread counts lookup panicked".to_string()));
+        (replies, counts, muted_state.join().unwrap_or_default())
+    });
+    // The directory may come from the cache, so these calls also tell
+    // whether the user has been logged out.
     if let Some(error) = client.rejection() {
         return Err(error);
     }
+    let unread = match counts {
+        Ok(reply) => match muted {
+            Some(muted) => Some(parse_counts_unread(&reply, &muted)),
+            None => {
+                crate::debug_log!("slack: mute state unavailable; keeping the Home order");
+                None
+            }
+        },
+        Err(error) => {
+            crate::debug_log!("slack: client.counts failed; keeping the Home order: {error}");
+            None
+        }
+    };
     let answered = replies.0.is_some() || replies.1.is_some() || replies.2.is_some();
     let account = client.known_identity();
     let previous = account
@@ -1822,7 +1876,12 @@ pub(super) fn load_home(
     if let Some(account) = account.filter(|_| answered) {
         slack_api::write_cache(slack_api::LIVE_FILE, account, &live);
     }
-    Ok(home_list(&directory, &live, config.open_in))
+    Ok(home_list(
+        &directory,
+        &live,
+        unread.as_deref(),
+        config.open_in,
+    ))
 }
 
 /// The home rows from the cache, without asking Slack, to show until
@@ -1832,11 +1891,16 @@ pub(super) fn cached_home(config: &crate::SlackAddonConfig) -> Option<Vec<Comman
     let live = slack_api::read_cache(slack_api::LIVE_FILE, &directory.workspace)
         .map(|(live, _)| live)
         .unwrap_or_default();
-    Some(home_list(&directory, &live, config.open_in))
+    Some(home_list(&directory, &live, None, config.open_in))
 }
 
-fn home_list(directory: &Directory, live: &Live, open_in: SlackOpenIn) -> Vec<CommandItem> {
-    let mut rows = home_rows(directory, live, open_in, Local::now());
+fn home_list(
+    directory: &Directory,
+    live: &Live,
+    unread: Option<&[Unread]>,
+    open_in: SlackOpenIn,
+) -> Vec<CommandItem> {
+    let mut rows = home_rows(directory, live, unread, open_in, Local::now());
     rows.push(action_row(
         "reload",
         "Reload conversations and people",
@@ -2123,10 +2187,8 @@ fn sort_unread(unread: &mut Vec<Unread>) {
     unread.truncate(MAX_UNREAD);
 }
 
-/// Conversations `client.counts` reports with unread messages, unmuted
-/// then muted, newest first.
-pub(super) fn counts_unread(reply: &Value, muted: &HashSet<String>) -> Vec<Unread> {
-    let mut unread: Vec<Unread> = ["channels", "mpims", "ims"]
+fn parse_counts_unread(reply: &Value, muted: &HashSet<String>) -> Vec<Unread> {
+    ["channels", "mpims", "ims"]
         .into_iter()
         .filter_map(|key| reply[key].as_array())
         .flatten()
@@ -2142,7 +2204,13 @@ pub(super) fn counts_unread(reply: &Value, muted: &HashSet<String>) -> Vec<Unrea
                 muted: muted.contains(entry["id"].as_str()?),
             })
         })
-        .collect();
+        .collect()
+}
+
+/// Conversations `client.counts` reports with unread messages, unmuted
+/// then muted, newest first.
+pub(super) fn counts_unread(reply: &Value, muted: &HashSet<String>) -> Vec<Unread> {
+    let mut unread = parse_counts_unread(reply, muted);
     sort_unread(&mut unread);
     unread
 }
@@ -2322,20 +2390,20 @@ pub(super) fn unread_rows(
 /// The conversations the user muted, from the cache while it is fresh
 /// unless `refresh`, else from Slack, or none when Slack does not say.
 /// Blocking unless cached.
-fn muted(client: &std::sync::Arc<Client>, refresh: bool) -> HashSet<String> {
+fn muted(client: &std::sync::Arc<Client>, refresh: bool) -> Option<HashSet<String>> {
     if refresh {
-        return fetch_muted(client).unwrap_or_default();
+        return fetch_muted(client);
     }
     let cached = client
         .known_identity()
         .and_then(|account| slack_api::read_cache(slack_api::MUTED_FILE, account));
     let Some((muted, age)) = cached else {
-        return fetch_muted(client).unwrap_or_default();
+        return fetch_muted(client);
     };
     if age >= slack_api::cache_fresh() {
         refresh_muted_in_background(client.clone());
     }
-    muted
+    Some(muted)
 }
 
 fn refresh_muted_in_background(client: std::sync::Arc<Client>) {
@@ -2378,6 +2446,7 @@ pub(super) fn load_unread(
         let counts = client.call("client.counts", &[("thread_counts_by_channel", "true")]);
         (counts, muted.join().unwrap_or_default())
     });
+    let muted = muted.unwrap_or_default();
     let checked = match counts {
         Ok(reply) => Checked::complete(counts_unread(&reply, &muted)),
         Err(error) => {
@@ -3217,7 +3286,7 @@ mod tests {
             snoozed_until: Some(now().timestamp() + 600),
             away: Some(true),
         };
-        let rows = home_rows(&directory, &live, SlackOpenIn::Desktop, now());
+        let rows = home_rows(&directory, &live, None, SlackOpenIn::Desktop, now());
         let ids: Vec<&str> = rows.iter().map(|row| row.identity.as_str()).collect();
         assert!(ids.contains(&"slack:do:clear-status"));
         assert!(ids.contains(&"slack:do:active"));
@@ -3249,11 +3318,89 @@ mod tests {
             Some("https://app.slack.com/client/T1/D1")
         );
 
-        let rows = home_rows(&directory, &Live::default(), SlackOpenIn::Desktop, now());
+        let rows = home_rows(
+            &directory,
+            &Live::default(),
+            None,
+            SlackOpenIn::Desktop,
+            now(),
+        );
         let ids: Vec<&str> = rows.iter().map(|row| row.identity.as_str()).collect();
         assert!(!ids.contains(&"slack:do:clear-status"));
         assert!(!ids.contains(&"slack:do:resume"));
         assert!(ids.contains(&"slack:do:active") && ids.contains(&"slack:do:away"));
+    }
+
+    #[test]
+    fn test_home_rows_promote_unmuted_unread_channels_groups_and_direct_messages() {
+        let mut directory = directory();
+        directory = Directory::new(
+            directory.workspace.clone(),
+            directory.users.clone(),
+            [
+                directory.conversations.clone(),
+                vec![
+                    conversation("A1", ConversationKind::Channel, "alpha", None),
+                    conversation("M1", ConversationKind::Channel, "mute", None),
+                    conversation("G2", ConversationKind::Group, "group", None),
+                ],
+            ]
+            .concat(),
+            0,
+        );
+        let unread = [
+            Unread {
+                channel: "D1".to_string(),
+                latest: "9.0".to_string(),
+                ..Unread::default()
+            },
+            Unread {
+                channel: "G2".to_string(),
+                latest: "8.0".to_string(),
+                ..Unread::default()
+            },
+            Unread {
+                channel: "C1".to_string(),
+                latest: "7.0".to_string(),
+                ..Unread::default()
+            },
+            Unread {
+                channel: "M1".to_string(),
+                latest: "99.0".to_string(),
+                muted: true,
+                ..Unread::default()
+            },
+        ];
+        let rows = home_rows(
+            &directory,
+            &Live::default(),
+            Some(&unread),
+            SlackOpenIn::Desktop,
+            now(),
+        );
+        let ids: Vec<&str> = rows.iter().map(|row| row.identity.as_str()).collect();
+        let first_conversation = ids
+            .iter()
+            .position(|id| id.starts_with("slack:conv:") || id.starts_with("slack:user:"))
+            .unwrap();
+        assert_eq!(
+            &ids[first_conversation..],
+            [
+                "slack:user:U1",
+                "slack:conv:G2",
+                "slack:conv:C1",
+                "slack:conv:A1",
+                "slack:conv:M1",
+                "slack:conv:G1",
+                "slack:user:U2",
+            ]
+        );
+        assert!(rows[..first_conversation]
+            .iter()
+            .all(|row| row.sort_priority == 2));
+        assert!(rows[first_conversation..first_conversation + 3]
+            .iter()
+            .all(|row| row.sort_priority == 1));
     }
 
     #[test]

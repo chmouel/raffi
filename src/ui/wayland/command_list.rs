@@ -120,6 +120,8 @@ pub(super) struct CommandItem {
     /// Drawn in the theme's muted colour and listed last when nothing is
     /// typed, as for muted Slack conversations.
     pub dimmed: bool,
+    /// Nonzero groups sort before ordinary rows in the unfiltered list.
+    pub sort_priority: u8,
 }
 
 impl CommandItem {
@@ -147,6 +149,7 @@ impl CommandItem {
             badge: None,
             domains: Vec::new(),
             dimmed: false,
+            sort_priority: 0,
         }
     }
 }
@@ -498,14 +501,23 @@ pub(super) fn filter_items_into(
     let used = |item: &CommandItem| usage.get(&item.identity).copied().unwrap_or(0);
     if query.is_empty() {
         out.extend(0..items.len());
-        if !usage.is_empty() || items.iter().any(|item| item.dimmed) {
+        if !usage.is_empty()
+            || items
+                .iter()
+                .any(|item| item.dimmed || item.sort_priority > 0)
+        {
             // Rows without match text, such as errors, stay on top.
             out.sort_by_key(|&index| {
                 let item = &items[index];
                 (
                     !item.match_text.is_empty(),
+                    std::cmp::Reverse(item.sort_priority),
                     item.dimmed,
-                    std::cmp::Reverse(used(item)),
+                    std::cmp::Reverse(if item.sort_priority == 0 {
+                        used(item)
+                    } else {
+                        0
+                    }),
                 )
             });
         }

@@ -8,8 +8,10 @@ import { Aside } from '@astrojs/starlight/components';
 Type `slack ` (with the trailing space) to list your Slack channels, group
 conversations and the people of your workspace, under a few actions: unread
 messages, message search, status, presence and notification snooze. Words
-after the keyword filter the list. Conversations and people you open often
-come first.
+after the keyword filter the list. With no filter, unmuted unread channels,
+group conversations and direct-message people appear just after the action
+shortcuts, newest first. The remaining conversations and people keep their
+usual usage ordering.
 
 <Aside type="note">
 The Slack addon is only available in native mode, works with one workspace,
