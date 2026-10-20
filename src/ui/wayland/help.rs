@@ -92,7 +92,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         });
     }
 
-    if addons.clipboard.enabled {
+    if addons.clipboard.is_enabled() {
         let trigger = addons.clipboard.trigger();
         entries.push(HelpEntry {
             section: HelpSection::KeywordsAndActions,
@@ -421,7 +421,7 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             ),
         ]);
     }
-    if addons.clipboard.enabled {
+    if addons.clipboard.is_enabled() {
         entries.push(shortcut(
             "Ctrl+R",
             "Refresh clipboard history",
@@ -502,23 +502,35 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
     entries
 }
 
-/// List Ctrl+Tab after Tab, for a configured `general.main_view`.
+/// List Ctrl+Tab and the chip arrows after Tab, for a configured
+/// `general.main_view`.
 pub(super) fn add_main_view_shortcut(entries: &mut Vec<HelpEntry>) {
     let at = entries
         .iter()
         .position(|entry| entry.section == HelpSection::KeyboardShortcuts && entry.trigger == "Tab")
         .map_or(entries.len(), |index| index + 1);
-    entries.insert(
-        at,
-        HelpEntry {
-            section: HelpSection::KeyboardShortcuts,
-            trigger: "Ctrl+Tab".to_string(),
-            title: "Cycle main view sources".to_string(),
-            usage: "Lists one main_view source at a time, then all of them; Shift goes back"
-                .to_string(),
-            icon: None,
-            completion: None,
-        },
+    let row = |trigger: &str, title: &str, usage: &str| HelpEntry {
+        section: HelpSection::KeyboardShortcuts,
+        trigger: trigger.to_string(),
+        title: title.to_string(),
+        usage: usage.to_string(),
+        icon: None,
+        completion: None,
+    };
+    entries.splice(
+        at..at,
+        [
+            row(
+                "Ctrl+Tab",
+                "Cycle main view sources",
+                "Lists one main_view source at a time, then all of them; Shift goes back",
+            ),
+            row(
+                "Left/Right",
+                "Pick a plugin chip",
+                "On an empty query, moves along the main_view keyword chips; Enter arms one",
+            ),
+        ],
     );
 }
 

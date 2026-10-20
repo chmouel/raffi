@@ -499,9 +499,10 @@ pub enum ClipboardAction {
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct ClipboardAddonConfig {
-    /// Off by default; requires a running clipboard manager.
+    /// Unset turns it on when a CopyQ process is running at startup;
+    /// `true` or `false` overrides the detection.
     #[serde(default)]
-    pub enabled: bool,
+    pub enabled: Option<bool>,
     /// Keyword that opens the history (default: `clip`).
     #[serde(default)]
     pub trigger: Option<String>,
@@ -531,6 +532,10 @@ fn default_clipboard_secondary_action() -> ClipboardAction {
 }
 
 impl ClipboardAddonConfig {
+    pub fn is_enabled(&self) -> bool {
+        self.enabled.unwrap_or(false)
+    }
+
     pub fn trigger(&self) -> &str {
         self.trigger.as_deref().unwrap_or("clip")
     }
@@ -545,7 +550,7 @@ impl ClipboardAddonConfig {
 
     /// Whether either action needs the Hyprland paste target.
     pub fn uses_hypr_paste(&self) -> bool {
-        self.enabled
+        self.is_enabled()
             && (self.action == ClipboardAction::HyprPaste
                 || self.secondary_action == ClipboardAction::HyprPaste)
     }
@@ -554,7 +559,7 @@ impl ClipboardAddonConfig {
 impl Default for ClipboardAddonConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: None,
             trigger: None,
             image_trigger: None,
             min_chars: None,
@@ -1343,7 +1348,20 @@ pub struct GeneralConfig {
 /// Main view sources used when there is no config file. They need no setup,
 /// and each one hides itself when its tool or compositor is missing.
 #[cfg(feature = "wayland")]
-const FIRST_RUN_MAIN_VIEW: &[&str] = &["launchers", "windows", "browser_tabs", "system", "media"];
+const FIRST_RUN_MAIN_VIEW: &[&str] = &[
+    "launchers",
+    "windows",
+    "browser_tabs",
+    "system",
+    "media",
+    "audio",
+    "bluetooth",
+    "pass",
+    "clipboard",
+    "bitwarden",
+    "terminal",
+    "emoji",
+];
 
 /// General settings used when there is no config file at all.
 fn first_run_general() -> GeneralConfig {
@@ -4853,7 +4871,7 @@ mod tests {
         };
 
         let defaults = parse("shell:\n  binary: sh\n").unwrap().addons.clipboard;
-        assert!(!defaults.enabled);
+        assert_eq!(defaults.enabled, None);
         assert_eq!(defaults.trigger(), "clip");
         assert_eq!(defaults.image_trigger(), "clipimg");
         assert_eq!(defaults.min_chars(), 3);
@@ -4880,7 +4898,7 @@ shell:
         .unwrap()
         .addons
         .clipboard;
-        assert!(config.enabled);
+        assert!(config.is_enabled());
         assert_eq!(config.trigger(), "cb");
         assert_eq!(config.image_trigger(), "cbi");
         assert_eq!(config.min_chars(), 1);

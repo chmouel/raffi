@@ -508,6 +508,9 @@ fn is_user_input(message: &Message) -> bool {
         Message::SearchChanged(_)
             | Message::MoveUp
             | Message::MoveDown
+            | Message::ChipMove(_)
+            | Message::ChipClicked(_)
+            | Message::ChipScroll(_)
             | Message::SubmitRepeat
             | Message::ItemClicked(_)
             | Message::InlineSelected(_)
@@ -609,7 +612,7 @@ pub(super) fn route_query(query: &str, addons: &AddonsConfig) -> QueryMode {
         }
     }
 
-    if addons.clipboard.enabled {
+    if addons.clipboard.is_enabled() {
         if let Some(query) = extract_keyword_query(input, addons.clipboard.trigger()) {
             return QueryMode::Clipboard {
                 query,
@@ -815,7 +818,7 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
         }
     }
 
-    if addons.clipboard.enabled
+    if addons.clipboard.is_enabled()
         && (matches(addons.clipboard.trigger())
             || intent(&["clipboard", "copy", "paste", "copied"]))
     {
@@ -825,7 +828,7 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
             icon: Some(CLIPBOARD_ICON.to_string()),
         });
     }
-    if addons.clipboard.enabled && matches(addons.clipboard.image_trigger()) {
+    if addons.clipboard.is_enabled() && matches(addons.clipboard.image_trigger()) {
         suggestions.push(KeywordSuggestion {
             keyword: addons.clipboard.image_trigger().to_string(),
             subtitle: "Browse images in clipboard history".to_string(),
@@ -1167,6 +1170,8 @@ impl LauncherApp {
                 fallbacks,
                 main_view: Default::default(),
                 keyword_suggestions: Vec::new(),
+                keyword_chips: false,
+                chip_index: 0,
                 help_entries: Vec::new(),
                 help_filtered: Vec::new(),
                 help_saved_query: None,
@@ -1263,7 +1268,7 @@ impl LauncherApp {
                 index += 1;
             };
 
-            for _ in &self.keyword_suggestions {
+            for _ in 0..self.keyword_rows() {
                 consider(true);
             }
             if self.script_filter.loading {
@@ -1651,6 +1656,16 @@ impl LauncherApp {
             Message::KeywordSuggestionSelected(index) => {
                 self.handle_keyword_suggestion_selected(index)
             }
+            Message::ChipMove(backwards) => self.handle_chip_move(backwards),
+            Message::ChipScroll(backwards) => {
+                self.selected_index = 0;
+                self.handle_chip_move(backwards)
+            }
+            Message::ChipClicked(chip) => {
+                self.chip_index = chip;
+                self.selected_index = 0;
+                self.handle_keyword_suggestion_selected(0)
+            }
             Message::ClipboardPage(generation, result) => {
                 self.handle_clipboard_page(generation, result)
             }
@@ -1783,6 +1798,8 @@ impl LauncherApp {
             self.command_list.clear();
         }
         self.devtools.clear();
+        let chip = self.active_chip();
+        self.keyword_chips = false;
         self.keyword_suggestions = if matches!(qmode, QueryMode::Standard) && !focused {
             keyword_suggestions(&query, &self.addons)
         } else {
@@ -1796,7 +1813,7 @@ impl LauncherApp {
         tasks.push(self.refresh_main_view(main_view_query));
         self.drop_suggestions_listed_in_main_view(main_view_query);
         if main_view_query.is_empty() && self.keyword_suggestions.is_empty() {
-            self.keyword_suggestions = self.main_view_plugin_suggestions();
+            self.offer_main_view_plugins(chip);
         }
         match qmode {
             QueryMode::FileBrowser { expanded, filter } => {
@@ -1953,6 +1970,7 @@ impl LauncherApp {
         }
         self.ensure_help_entries();
         self.keyword_suggestions = help_suggestions(&self.help_entries, query);
+        self.keyword_chips = false;
         if !self.keyword_suggestions.is_empty() {
             crate::debug_log!(
                 "help: {} rows offered for an unmatched query",
@@ -2829,7 +2847,7 @@ impl LauncherApp {
         } else {
             0
         };
-        self.keyword_suggestions.len() + self.script_filter_offset() + snippets + emoji + clipboard
+        self.keyword_rows() + self.script_filter_offset() + snippets + emoji + clipboard
     }
 
     /// Run `action` on the entry at `row`, or the Lock or Sync row. Without
@@ -3166,10 +3184,10 @@ impl LauncherApp {
 
         let mut current_index = 0;
 
-        if index < self.keyword_suggestions.len() {
+        if index < self.keyword_rows() {
             return self.update(Message::KeywordSuggestionSelected(index));
         }
-        current_index += self.keyword_suggestions.len();
+        current_index += self.keyword_rows();
 
         if self.script_filter.loading {
             if index == current_index {
@@ -3532,9 +3550,7 @@ impl LauncherApp {
         {
             return None;
         }
-        let index = self
-            .selected_index
-            .checked_sub(self.keyword_suggestions.len())?;
+        let index = self.selected_index.checked_sub(self.keyword_rows())?;
         let item = self.script_filter.results.as_ref()?.items.get(index)?;
         let opted_out = item
             .preview
@@ -4048,7 +4064,7 @@ impl LauncherApp {
             return self.update(Message::HelpEntrySelected(self.selected_index));
         }
 
-        if self.selected_index < self.keyword_suggestions.len() {
+        if self.selected_index < self.keyword_rows() {
             return self.update(Message::KeywordSuggestionSelected(self.selected_index));
         }
 
@@ -4485,7 +4501,7 @@ impl LauncherApp {
         if self.view.help_active {
             return self.help_filtered.len();
         }
-        let mut offset = self.keyword_suggestions.len();
+        let mut offset = self.keyword_rows();
         if self.script_filter.loading {
             offset += 1;
         } else if let Some(result) = &self.script_filter.results {
@@ -4713,6 +4729,7 @@ impl LauncherApp {
         self.ensure_help_entries();
         self.filtered_configs.clear();
         self.keyword_suggestions.clear();
+        self.keyword_chips = false;
         self.inline_result = None;
         self.invalidate_inline_copy();
         self.script_filter.clear();
@@ -4772,8 +4789,50 @@ impl LauncherApp {
             .chain(move_cursor_to_end(input_id))
     }
 
+    /// Rows the keyword offers take: one for the chips row, else one each.
+    pub(super) fn keyword_rows(&self) -> usize {
+        if self.keyword_chips {
+            self.keyword_suggestions.len().min(1)
+        } else {
+            self.keyword_suggestions.len()
+        }
+    }
+
+    /// Keyword offered by list row `row`.
+    pub(super) fn keyword_at(&self, row: usize) -> Option<&KeywordSuggestion> {
+        if !self.keyword_chips {
+            self.keyword_suggestions.get(row)
+        } else if row == 0 {
+            self.keyword_suggestions.get(self.chip_index)
+        } else {
+            None
+        }
+    }
+
+    /// Keyword of the chip the chips row selects.
+    pub(super) fn active_chip(&self) -> Option<String> {
+        self.keyword_chips
+            .then(|| self.keyword_at(0))
+            .flatten()
+            .map(|suggestion| suggestion.keyword.clone())
+    }
+
+    fn handle_chip_move(&mut self, backwards: bool) -> Task<Message> {
+        let count = self.keyword_suggestions.len();
+        if !self.keyword_chips || self.selected_index != 0 || count < 2 {
+            return Task::none();
+        }
+        self.chip_index = if backwards {
+            (self.chip_index + count - 1) % count
+        } else {
+            (self.chip_index + 1) % count
+        };
+        self.view.preview_scrollable_id = super::state::ScrollableId::unique();
+        Task::none()
+    }
+
     fn handle_keyword_suggestion_selected(&mut self, index: usize) -> Task<Message> {
-        let Some(suggestion) = self.keyword_suggestions.get(index) else {
+        let Some(suggestion) = self.keyword_at(index) else {
             return Task::none();
         };
 

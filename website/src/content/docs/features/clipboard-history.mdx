@@ -14,7 +14,8 @@ with search, previews, and copy or paste of any past item.
 <Image src={clipboardScreenshot} alt="Clipboard history with a demo release checklist selected and its multiline text in the preview pane" width={800} />
 
 <Aside type="note">
-The clipboard browser is only available in native mode and is off by default.
+The clipboard browser is only available in native mode. It turns itself on
+when CopyQ is running as Raffi starts, unless you set `enabled` yourself.
 </Aside>
 
 ## Setup
@@ -23,7 +24,8 @@ Install CopyQ and keep it running. Raffi talks to it through the `copyq`
 command, so the binary must be on your `PATH`. Raffi never reads CopyQ's
 files directly, and it does not record anything itself.
 
-Then enable the addon:
+Raffi then enables the addon on its own. To keep it on even when CopyQ is not
+running yet, or to turn it off, set `enabled`:
 
 ```yaml
 addons:

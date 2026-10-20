@@ -144,7 +144,7 @@ impl LauncherApp {
 
     /// Display index of the first clipboard row.
     pub(super) fn clipboard_offset(&self) -> usize {
-        let mut offset = self.keyword_suggestions.len();
+        let mut offset = self.keyword_rows();
         if self.script_filter.loading {
             offset += 1;
         } else if let Some(result) = &self.script_filter.results {

@@ -586,6 +586,11 @@ pub(super) struct LauncherApp {
     /// Addon rows mixed into the standard results (`general.main_view`).
     pub main_view: super::main_view::MainViewState,
     pub keyword_suggestions: Vec<KeywordSuggestion>,
+    /// Whether `keyword_suggestions` shows as one row of chips, the main
+    /// view's empty-query offers.
+    pub keyword_chips: bool,
+    /// Chip that row selects, Left and Right move it.
+    pub chip_index: usize,
     pub help_entries: Vec<HelpEntry>,
     pub help_filtered: Vec<usize>,
     pub help_saved_query: Option<String>,

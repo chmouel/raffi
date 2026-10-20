@@ -45,6 +45,35 @@ pub(super) enum Entry {
     Snippets(usize),
     /// Script filter by config index.
     ScriptFilter(usize),
+    /// Addon only offered by its keyword on an empty query.
+    Keyword(KeywordAddon),
+}
+
+/// Addons a `main_view` entry can offer by keyword without mixing rows in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum KeywordAddon {
+    Clipboard,
+    Bitwarden,
+    Terminal,
+    Emoji,
+}
+
+impl KeywordAddon {
+    fn trigger(self, addons: &AddonsConfig) -> &str {
+        match self {
+            Self::Clipboard => addons.clipboard.trigger(),
+            Self::Bitwarden => addons.bitwarden.trigger(),
+            Self::Terminal => addons.terminal.trigger(),
+            Self::Emoji => addons.emoji.trigger.as_deref().unwrap_or("emoji"),
+        }
+    }
+}
+
+/// An empty-query keyword offer, in `main_view` order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Offer {
+    Source(usize),
+    Keyword(KeywordAddon),
 }
 
 /// Resolve `main_view` entries in order, warning about and skipping the ones
@@ -54,13 +83,15 @@ pub(super) fn resolve(entries: &[String], addons: &AddonsConfig) -> Vec<Entry> {
     for raw in entries {
         let name = raw.trim();
         let name = name.strip_prefix("addons.").unwrap_or(name);
-        let list = |enabled: bool, addon: CommandListAddon| {
+        let enabled = |enabled: bool, entry: Entry| {
             if enabled {
-                Ok(Entry::List(addon))
+                Ok(entry)
             } else {
                 Err(format!("main_view entry '{raw}' names a disabled addon"))
             }
         };
+        let list = |on: bool, addon: CommandListAddon| enabled(on, Entry::List(addon));
+        let keyword = |on: bool, addon: KeywordAddon| enabled(on, Entry::Keyword(addon));
         let entry = match name {
             "launchers" => Ok(Entry::Launchers),
             "system" => list(addons.system.enabled, CommandListAddon::System),
@@ -70,6 +101,10 @@ pub(super) fn resolve(entries: &[String], addons: &AddonsConfig) -> Vec<Entry> {
             "audio" => list(addons.audio.enabled, CommandListAddon::Audio),
             "bluetooth" => list(addons.bluetooth.enabled, CommandListAddon::Bluetooth),
             "pass" => list(addons.pass.enabled, CommandListAddon::Pass),
+            "clipboard" => keyword(addons.clipboard.is_enabled(), KeywordAddon::Clipboard),
+            "bitwarden" => keyword(addons.bitwarden.enabled, KeywordAddon::Bitwarden),
+            "terminal" => keyword(addons.terminal.enabled, KeywordAddon::Terminal),
+            "emoji" => keyword(addons.emoji.enabled, KeywordAddon::Emoji),
             _ => {
                 if let Some(source) = name.strip_prefix("text_snippets.") {
                     let source = source.trim_matches('"');
@@ -224,6 +259,8 @@ pub(super) struct MainViewState {
     /// Whether a launcher matching the query starts with it or has a word
     /// that does, which lists the launchers ahead of weaker groups.
     pub launchers_strong: bool,
+    /// What the empty query offers by keyword, in config order.
+    pub offers: Vec<Offer>,
     /// Whether the sources' rows are the recent picks rather than matches.
     recent_applied: bool,
 }
@@ -240,6 +277,10 @@ impl MainViewState {
                 Entry::Launchers => {
                     state.launchers_at = state.sources.len();
                     state.stops.push(Focus::Launchers);
+                    continue;
+                }
+                Entry::Keyword(addon) => {
+                    state.offers.push(Offer::Keyword(addon));
                     continue;
                 }
                 Entry::List(addon) => {
@@ -267,6 +308,7 @@ impl MainViewState {
                     results: None,
                 },
             };
+            state.offers.push(Offer::Source(state.sources.len()));
             state.stops.push(Focus::Source(state.sources.len()));
             state.sources.push(source);
         }
@@ -606,7 +648,7 @@ impl LauncherApp {
         self.main_view.names = entries
             .iter()
             .filter_map(|entry| match *entry {
-                Entry::Launchers => None,
+                Entry::Launchers | Entry::Keyword(_) => None,
                 Entry::List(addon) => Some(recent_list_name(addon).map(str::to_string)),
                 Entry::Snippets(index) => Some(
                     self.addons
@@ -622,6 +664,22 @@ impl LauncherApp {
                 ),
             })
             .collect();
+        let exists = self.program_exists;
+        self.main_view.offers.retain(|offer| match offer {
+            Offer::Source(_) | Offer::Keyword(KeywordAddon::Emoji | KeywordAddon::Clipboard) => {
+                true
+            }
+            Offer::Keyword(KeywordAddon::Bitwarden) => exists("rbw"),
+            Offer::Keyword(KeywordAddon::Terminal) => {
+                let env_terminal = std::env::var("TERMINAL").ok();
+                crate::terminal::resolve(
+                    self.addons.terminal.command.as_deref(),
+                    env_terminal.as_deref(),
+                    &exists,
+                )
+                .is_some()
+            }
+        });
         self.main_view.recent_path = crate::ui::get_recent_cache_path().ok();
         self.main_view.window_session =
             super::windows::Compositor::instance(|name| std::env::var(name).ok());
@@ -633,7 +691,7 @@ impl LauncherApp {
         let loads: Vec<_> = (0..self.main_view.sources.len())
             .map(|source| self.load_main_view_source(source, true))
             .collect();
-        self.keyword_suggestions = self.main_view_plugin_suggestions();
+        self.offer_main_view_plugins(None);
         // Sources found missing above kept the selection on the launchers.
         self.selected_index = 0;
         Task::batch(loads)
@@ -652,7 +710,14 @@ impl LauncherApp {
             return Vec::new();
         }
         let mut suggestions: Vec<KeywordSuggestion> = Vec::new();
-        for source in &main_view.sources {
+        for offer in &main_view.offers {
+            let source = match *offer {
+                Offer::Source(source) => &main_view.sources[source],
+                Offer::Keyword(addon) => {
+                    self.push_offer(&mut suggestions, addon.trigger(&self.addons));
+                    continue;
+                }
+            };
             let keyword = match source {
                 Source::List(list) if list.loading || !list.items.is_empty() => list
                     .addon
@@ -669,20 +734,38 @@ impl LauncherApp {
                     .get(*config_index)
                     .map(|config| config.keyword.as_str()),
             };
-            let Some(keyword) = keyword else {
-                continue;
-            };
-            if suggestions.iter().any(|known| known.keyword == keyword) {
-                continue;
-            }
-            if let Some(suggestion) = super::app::keyword_suggestions(keyword, &self.addons)
-                .into_iter()
-                .find(|suggestion| suggestion.keyword == keyword)
-            {
-                suggestions.push(suggestion);
+            if let Some(keyword) = keyword {
+                self.push_offer(&mut suggestions, keyword);
             }
         }
         suggestions
+    }
+
+    /// Offer the main view plugins as the chips row, keeping `chip` the
+    /// selected one while it is still offered.
+    pub(super) fn offer_main_view_plugins(&mut self, chip: Option<String>) {
+        self.keyword_suggestions = self.main_view_plugin_suggestions();
+        self.keyword_chips = true;
+        self.chip_index = chip
+            .and_then(|chip| {
+                self.keyword_suggestions
+                    .iter()
+                    .position(|suggestion| suggestion.keyword == chip)
+            })
+            .unwrap_or(self.chip_index)
+            .min(self.keyword_suggestions.len().saturating_sub(1));
+    }
+
+    fn push_offer(&self, suggestions: &mut Vec<KeywordSuggestion>, keyword: &str) {
+        if suggestions.iter().any(|known| known.keyword == keyword) {
+            return;
+        }
+        if let Some(suggestion) = super::app::keyword_suggestions(keyword, &self.addons)
+            .into_iter()
+            .find(|suggestion| suggestion.keyword == keyword)
+        {
+            suggestions.push(suggestion);
+        }
     }
 
     /// Keep `pick` as the newest recent pick, when its source is listed in
@@ -910,11 +993,11 @@ impl LauncherApp {
         }
         let before_total = self.total_items();
         let selected = self.selected_index;
-        let before_keywords = self.keyword_suggestions.len();
+        let before_keywords = self.keyword_rows();
         let selected_keyword = self
-            .keyword_suggestions
-            .get(selected)
+            .keyword_at(selected)
             .map(|suggestion| suggestion.keyword.clone());
+        let chip = self.active_chip();
         let launchers = self.launchers_start();
         let in_launchers = (launchers..launchers + self.filtered_configs.len()).contains(&selected);
         let before = self.main_view_spans();
@@ -931,13 +1014,14 @@ impl LauncherApp {
             });
         update(&mut self.main_view);
         if self.main_view.query.is_empty() {
-            self.keyword_suggestions = self.main_view_plugin_suggestions();
+            self.offer_main_view_plugins(chip);
         }
         if selected >= before_total {
             return;
         }
         let after = self.main_view_spans();
         self.selected_index = match within {
+            _ if selected < before_keywords && self.keyword_chips => 0,
             _ if selected < before_keywords => {
                 let keyword = selected_keyword.as_deref();
                 self.keyword_suggestions
@@ -964,7 +1048,7 @@ impl LauncherApp {
                     .filter(|((start, count), _)| start + count <= selected)
                     .map(|((_, old), (_, new))| *new as isize - *old as isize)
                     .sum();
-                let keywords = self.keyword_suggestions.len() as isize - before_keywords as isize;
+                let keywords = self.keyword_rows() as isize - before_keywords as isize;
                 selected.saturating_add_signed(moved + keywords)
             }
         };
@@ -1518,8 +1602,7 @@ impl LauncherApp {
                 else {
                     return Task::batch(tasks);
                 };
-                self.selected_index =
-                    self.keyword_suggestions.len() + self.script_filter_offset() + position;
+                self.selected_index = self.keyword_rows() + self.script_filter_offset() + position;
                 tasks.push(self.handle_text_snippet_selected(position));
                 Task::batch(tasks)
             }
@@ -1551,7 +1634,7 @@ impl LauncherApp {
                 self.script_filter.generation = self.script_filter.generation.wrapping_add(1);
                 self.script_filter.loading = false;
                 self.script_filter.results = Some(result);
-                self.selected_index = self.keyword_suggestions.len() + row;
+                self.selected_index = self.keyword_rows() + row;
                 self.handle_script_filter_selected(row)
             }
         }

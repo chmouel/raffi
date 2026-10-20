@@ -8,7 +8,7 @@ import keywordSuggestionScreenshot from '../../../assets/screenshots/keyword-sug
 import keywordHelpScreenshot from '../../../assets/screenshots/keyword-help.png';
 import emojiScreenshot from '../../../assets/screenshots/emoji-picker.png';
 
-The native UI includes several built-in addons that can be configured under the `addons` section of `raffi.yaml`. All addons except the clipboard history browser are enabled by default.
+The native UI includes several built-in addons that can be configured under the `addons` section of `raffi.yaml`. All addons except the clipboard history browser are enabled by default; that one turns itself on when CopyQ is running.
 
 ## Keywords
 
@@ -948,9 +948,9 @@ Browses the clipboard history stored by CopyQ. See
 
 ### Configuration
 
-**`addons.clipboard.enabled`** `boolean` (default: `false`)
+**`addons.clipboard.enabled`** `boolean` (default: unset)
 
-Turns the clipboard browser on. CopyQ must be installed and running.
+Turns the clipboard browser on or off. When unset, it is on if a CopyQ process is running as Raffi starts.
 
 **`addons.clipboard.trigger`** `string` (default: `clip`)
 

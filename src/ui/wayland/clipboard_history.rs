@@ -210,8 +210,23 @@ fn read_capped(path: &Path) -> Result<String, String> {
     fs::read_to_string(path).map_err(|error| format!("cannot read {display}: {error}"))
 }
 
+/// Turn the clipboard addon on when its setting is unset and CopyQ, the only
+/// backend it browses, is running.
+pub(super) fn resolve_clipboard_addon(
+    config: &mut crate::ClipboardAddonConfig,
+    cmdlines: impl FnOnce() -> Vec<Vec<String>>,
+) {
+    if config.enabled.is_none() {
+        config.enabled = Some(
+            cmdlines()
+                .iter()
+                .any(|args| matches!(parse_cmdline(args), Some(Backend::CopyQ))),
+        );
+    }
+}
+
 /// Command lines of the current user's processes.
-fn running_cmdlines() -> Vec<Vec<String>> {
+pub(super) fn running_cmdlines() -> Vec<Vec<String>> {
     let Ok(uid) = fs::metadata("/proc/self").map(|meta| meta.uid()) else {
         return Vec::new();
     };
@@ -460,6 +475,26 @@ mod tests {
             parse_cmdline(&["printf".into(), "cliphist store".into()]),
             None
         );
+    }
+
+    #[test]
+    fn test_resolve_clipboard_addon_follows_copyq_unless_set() {
+        let resolve = |enabled, running: Vec<Vec<String>>| {
+            let mut config = crate::ClipboardAddonConfig {
+                enabled,
+                ..Default::default()
+            };
+            resolve_clipboard_addon(&mut config, || running);
+            config.enabled
+        };
+        assert_eq!(resolve(None, vec![cmd("copyq --start-server")]), Some(true));
+        assert_eq!(
+            resolve(None, vec![cmd("wl-paste --watch cliphist store")]),
+            Some(false),
+            "the addon only browses CopyQ"
+        );
+        assert_eq!(resolve(Some(false), vec![cmd("copyq")]), Some(false));
+        assert_eq!(resolve(Some(true), Vec::new()), Some(true));
     }
 
     #[test]

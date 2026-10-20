@@ -588,7 +588,7 @@ fn test_question_mark_keyword_wins_over_help() {
 #[test]
 fn test_search_tips_follow_enabled_addons() {
     let mut addons = AddonsConfig::default();
-    addons.clipboard.enabled = true;
+    addons.clipboard.enabled = Some(true);
     let tips = search_tips(&help_entries(&addons), &addons, true);
     assert!(tips
         .iter()
@@ -597,7 +597,7 @@ fn test_search_tips_follow_enabled_addons() {
         .iter()
         .any(|tip| tip.contains("tip: clip for Clipboard history")));
 
-    addons.clipboard.enabled = false;
+    addons.clipboard.enabled = Some(false);
     addons.calculator.enabled = false;
     let tips = search_tips(&help_entries(&addons), &addons, false);
     assert!(!tips
@@ -3520,7 +3520,7 @@ fn test_fido_style_disabled_is_a_plain_delete() {
 
 fn clipboard_addons() -> AddonsConfig {
     let mut addons = AddonsConfig::default();
-    addons.clipboard.enabled = true;
+    addons.clipboard.enabled = Some(true);
     addons
 }
 
@@ -4490,7 +4490,7 @@ fn test_route_query_system_trigger() {
 #[test]
 fn test_default_triggers_do_not_shadow_each_other_or_web_searches() {
     let mut addons = AddonsConfig::default();
-    addons.clipboard.enabled = true;
+    addons.clipboard.enabled = Some(true);
     assert!(matches!(
         route_query("emoji x", &addons),
         QueryMode::Emoji { .. }
@@ -5114,7 +5114,7 @@ fn test_launcher_keyword_expands_once_and_wins_over_addon_keywords() {
 #[test]
 fn test_launcher_keyword_to_clipboard_stays_out_of_logs() {
     let mut addons = AddonsConfig::default();
-    addons.clipboard.enabled = true;
+    addons.clipboard.enabled = Some(true);
     let trigger = addons.clipboard.trigger().to_string();
     addons
         .launcher_keywords
@@ -7858,6 +7858,84 @@ fn test_main_view_offers_detected_plugins_before_apps() {
 }
 
 #[test]
+fn test_chip_window_keeps_active_chip_on_one_line() {
+    use super::view::chip_window;
+    let widths = [50.0; 9];
+    assert_eq!(chip_window(&widths, 1000.0, 4), 0..9, "everything fits");
+    // 3 chips + spacing + the "›" marker fit in 200, a 4th would not.
+    assert_eq!(chip_window(&widths, 200.0, 0), 0..3);
+    assert_eq!(chip_window(&widths, 200.0, 8), 6..9);
+    for active in 0..widths.len() {
+        let window = chip_window(&widths, 260.0, active);
+        assert!(window.contains(&active), "{active} hidden in {window:?}");
+        assert!(window.len() >= 2, "{active}: a neighbour stays in view");
+    }
+    assert_eq!(
+        chip_window(&[500.0, 50.0], 100.0, 0),
+        0..1,
+        "too wide still shows"
+    );
+    assert_eq!(chip_window(&[], 100.0, 0), 0..0);
+}
+
+#[test]
+fn test_main_view_offers_plugins_as_one_row_of_chips() {
+    let mut addons = AddonsConfig::default();
+    addons.clipboard.enabled = Some(true);
+    let mut app = main_view_app(&[], firefox_launcher(), addons);
+    app.program_exists = |program| program != "rbw";
+    let entries = [
+        "system",
+        "clipboard",
+        "bitwarden",
+        "emoji",
+        "terminal",
+        "launchers",
+    ]
+    .map(String::from);
+    let _ = app.configure_main_view(Some(&entries));
+    assert_eq!(
+        keyword_names(&app),
+        ["sys", "clip", "emoji", ">"],
+        "no rbw, no bitwarden chip"
+    );
+    let _ = app.update(Message::SearchChanged(String::new()));
+    assert_eq!(app.total_items(), 2, "the chips row, then the launcher");
+    assert_eq!(
+        app.main_view.stops,
+        [
+            super::main_view::Focus::Source(0),
+            super::main_view::Focus::Launchers
+        ],
+        "keyword-only entries are no Ctrl+Tab stop"
+    );
+
+    let _ = app.update(Message::ChipMove(false));
+    let _ = app.update(Message::Submit);
+    assert_eq!(app.search_query, "clip ", "Enter arms the active chip");
+
+    let _ = app.update(Message::SearchChanged(String::new()));
+    let _ = app.update(Message::ChipMove(true));
+    assert_eq!(app.chip_index, 3, "Left wraps to the last chip");
+    let _ = app.update(Message::MoveDown);
+    let _ = app.update(Message::ChipMove(false));
+    assert_eq!(app.chip_index, 3, "arrows only move chips on their row");
+    let _ = app.update(Message::ChipScroll(true));
+    assert_eq!(
+        (app.selected_index, app.chip_index),
+        (0, 2),
+        "a ‹ click selects the row and moves left"
+    );
+
+    let _ = app.update(Message::ChipClicked(2));
+    assert_eq!(app.search_query, "emoji ");
+
+    let _ = app.update(Message::SearchChanged("fire".into()));
+    assert!(!app.keyword_chips);
+    assert_eq!(app.total_items(), 1, "typed queries get no clipboard rows");
+}
+
+#[test]
 fn test_keyword_icon_falls_back_to_emoji() {
     let mut app = main_view_app(&[], Vec::new(), AddonsConfig::default());
     app.no_icons = false;
@@ -8217,8 +8295,8 @@ fn test_main_view_ctrl_tab_focuses_each_source_then_all() {
     assert_eq!(keyword_names(&app), ["tabs", "sys"], "detected plugins");
     assert_eq!(
         app.total_items(),
-        2 + 1,
-        "the plugins and launcher, tabs wait for a query"
+        1 + 1,
+        "the plugin chips and launcher, tabs wait for a query"
     );
     assert_eq!(app.main_view_focus_label(), "All");
 

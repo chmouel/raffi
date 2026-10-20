@@ -48,13 +48,16 @@ version: 1
 #     - addons.script_filters."Search Google"  # Switches to the script filter mode
 #     - addons.terminal                        # Runs the query in a terminal
 #   main_view:               # Mix addon results into the main list (native UI only); Ctrl+Tab shows one source at a time.
-#                            # An empty query lists each detected source's keyword (sys, tabs...) above the apps.
-#                            # With no config file at all, raffi uses launchers, windows, browser_tabs, system, media.
+#                            # An empty query shows one row of chips with each detected entry's keyword
+#                            # (sys, tabs, clip...) above the apps; Left/Right pick one, Enter arms it.
+#                            # With no config file at all, raffi uses launchers, windows, browser_tabs, system,
+#                            # media, audio, bluetooth, pass, clipboard, bitwarden, terminal, emoji.
 #     - launchers            # Keep launchers; once main_view is set they only show if listed
 #     - browser_tabs         # Typing "gmail" lists matching tabs, up to 5 per addon;
 #                            # with no query, your 5 latest addon picks are listed;
 #                            # groups with a title starting with the query come first
 #     - windows              # Also: system, media, audio, bluetooth, pass
+#     - clipboard            # Keyword chip only, no rows: also bitwarden, terminal, emoji
 #     - text_snippets."Emails"       # A snippet source, by name
 #     - script_filters."Bookmarks"   # A script filter, run when typing pauses
 #   theme_colors:            # Override individual colours (hex: #RGB, #RRGGBB, or #RRGGBBAA)
@@ -304,7 +307,8 @@ addons:
   #   file_manager: thunar
   #   preview_command: "~/.config/raffi/scripts/file-preview.py"
 
-  # Clipboard history browser (native UI only, off by default). Reads the
+  # Clipboard history browser (native UI only). On by itself when CopyQ is
+  # running at startup; set enabled to force it on or off. Reads the
   # history stored by CopyQ, which must be running. Type "clip " to browse,
   # or bind a key to `raffi -u native -i "clip "`. Enter copies the item with
   # all its formats (text, HTML, images, file lists); Ctrl+Enter pastes it

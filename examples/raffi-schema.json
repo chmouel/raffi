@@ -314,9 +314,12 @@
           "$ref": "#/$defs/ClipboardBackend"
         },
         "enabled": {
-          "description": "Off by default; requires a running clipboard manager.",
-          "type": "boolean",
-          "default": false
+          "description": "Unset turns it on when a CopyQ process is running at startup;\n`true` or `false` overrides the detection.",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
         },
         "image_trigger": {
           "description": "Keyword that opens the history showing only images (default: `clipimg`).",

@@ -316,6 +316,102 @@ fn item_button_style(
     }
 }
 
+/// Styling for a keyword chip. Only the chip Enter arms gets a pill, so the
+/// strip reads as one row with a single accent.
+fn chip_style(
+    t: ThemeColors,
+    is_active: bool,
+    row_selected: bool,
+) -> impl Fn(&iced::Theme, button::Status) -> button::Style {
+    move |_theme, status| {
+        let accent = |a: f32| iced::Color { a, ..t.accent };
+        let (background, border) = if is_active {
+            (
+                row_selected.then_some(iced::Background::Color(accent(0.16))),
+                iced::Border {
+                    color: accent(if row_selected { 0.7 } else { 0.35 }),
+                    width: 1.0,
+                    radius: 999.0.into(),
+                },
+            )
+        } else {
+            (
+                (status == button::Status::Hovered).then_some(iced::Background::Color(
+                    iced::Color {
+                        a: 0.12,
+                        ..t.accent_hover
+                    },
+                )),
+                iced::Border {
+                    radius: 999.0.into(),
+                    ..Default::default()
+                },
+            )
+        };
+        button::Style {
+            background,
+            text_color: t.text_main,
+            border,
+            ..Default::default()
+        }
+    }
+}
+
+const CHIP_SPACING: f32 = 4.0;
+const CHIP_PADDING_X: f32 = 10.0;
+const CHIP_ICON_SPACING: f32 = 6.0;
+const CHIP_MARKER_WIDTH: f32 = 20.0;
+/// Average glyph width in ems, on the wide side so a chip is never cut.
+const CHIP_GLYPH_EM: f32 = 0.66;
+
+/// Estimated width of a chip: iced has no cheap text measurement in `view`.
+fn chip_width(keyword: &str, icon_size: Option<f32>, font_size: f32) -> f32 {
+    let label = keyword.chars().count() as f32 * font_size * CHIP_GLYPH_EM;
+    let icon = icon_size.map_or(0.0, |size| size + CHIP_ICON_SPACING);
+    2.0 * CHIP_PADDING_X + icon + label
+}
+
+/// Width of the chips in `window`, with their spacing and edge markers.
+fn chips_width(widths: &[f32], window: std::ops::Range<usize>) -> f32 {
+    let chips: f32 = widths[window.clone()].iter().sum();
+    let markers = [window.start > 0, window.end < widths.len()]
+        .iter()
+        .filter(|cut| **cut)
+        .count() as f32;
+    chips
+        + CHIP_SPACING * window.len().saturating_sub(1) as f32
+        + markers * (CHIP_MARKER_WIDTH + CHIP_SPACING)
+}
+
+/// The chips that fit in `available`, around `active`. The window grows
+/// alternately right and left so both neighbours stay in view, and it keeps
+/// room for a "‹" / "›" marker on each side it cuts.
+pub(super) fn chip_window(widths: &[f32], available: f32, active: usize) -> std::ops::Range<usize> {
+    let count = widths.len();
+    if count == 0 {
+        return 0..0;
+    }
+    let active = active.min(count - 1);
+    let width = |start: usize, end: usize| chips_width(widths, start..end);
+    if width(0, count) <= available {
+        return 0..count;
+    }
+    let (mut start, mut end) = (active, active + 1);
+    loop {
+        let grow_right = end < count && width(start, end + 1) <= available;
+        if grow_right {
+            end += 1;
+        }
+        let grow_left = start > 0 && width(start - 1, end) <= available;
+        if grow_left {
+            start -= 1;
+        }
+        if !grow_right && !grow_left {
+            return start..end;
+        }
+    }
+}
+
 /// Styling for file browser rows. The rows are [`mouse_area`] widgets rather
 /// than buttons (pressing a row must arm a drag with the exact entry under
 /// the pointer), so this replicates the item button look from tracked
@@ -1365,6 +1461,132 @@ impl LauncherApp {
             .into()
     }
 
+    /// The plugins offered on an empty query, as a single row: icon and keyword
+    /// per chip, the active one in a pill, "‹" / "›" where chips are hidden.
+    fn chips_row(&self) -> Element<'_, Message> {
+        let t = self.view.theme;
+        let fs = self.view.font_sizes;
+        let row_selected = self.selected_index == 0;
+        let icon_size = (fs.item + 2.0).round();
+        let label_size = fs.subtitle + 1.0;
+        let icons: Vec<_> = self
+            .keyword_suggestions
+            .iter()
+            .map(|suggestion| {
+                suggestion
+                    .icon
+                    .as_deref()
+                    .and_then(|icon| self.keyword_icon(icon))
+            })
+            .collect();
+        let widths: Vec<f32> = self
+            .keyword_suggestions
+            .iter()
+            .zip(&icons)
+            .map(|(suggestion, icon)| {
+                chip_width(
+                    &suggestion.keyword,
+                    icon.as_ref().map(|_| icon_size),
+                    label_size,
+                )
+            })
+            .collect();
+        let active = self
+            .chip_index
+            .min(self.keyword_suggestions.len().saturating_sub(1));
+        let subtitle = (row_selected && self.resolve_selected_preview().is_none())
+            .then(|| self.keyword_suggestions[active].subtitle.clone());
+
+        let strip = iced::widget::responsive(move |size| {
+            let window = chip_window(&widths, size.width, active);
+            let marker = |glyph: &'static str, backwards: bool| {
+                button(
+                    container(text(glyph).size(fs.item).color(t.text_muted))
+                        .center_x(Length::Fixed(CHIP_MARKER_WIDTH)),
+                )
+                .on_press(Message::ChipScroll(backwards))
+                .padding(0)
+                .style(chip_style(t, false, row_selected))
+            };
+            let mut chips = Row::new()
+                .spacing(CHIP_SPACING)
+                .align_y(iced::Alignment::Center);
+            if window.start > 0 {
+                chips = chips.push(marker("‹", true));
+            }
+            for chip in window.clone() {
+                let suggestion = &self.keyword_suggestions[chip];
+                let is_active = chip == active;
+                let mut content = Row::new()
+                    .spacing(CHIP_ICON_SPACING)
+                    .align_y(iced::Alignment::Center);
+                match &icons[chip] {
+                    Some(SnippetIcon::File(path)) => {
+                        if let Some(icon) = icon_element(Path::new(path), icon_size) {
+                            content = content.push(icon);
+                        }
+                    }
+                    Some(SnippetIcon::Glyph(glyph)) => {
+                        content = content.push(
+                            container(text(glyph.clone()).size(fs.item))
+                                .center(Length::Fixed(icon_size)),
+                        );
+                    }
+                    None => {}
+                }
+                content = content.push(
+                    text(suggestion.keyword.clone())
+                        .size(label_size)
+                        .color(if is_active { t.accent } else { t.text_muted }),
+                );
+                chips = chips.push(
+                    button(content)
+                        .on_press(Message::ChipClicked(chip))
+                        .padding([4.0, CHIP_PADDING_X])
+                        .style(chip_style(t, is_active, row_selected)),
+                );
+            }
+            if window.end < widths.len() {
+                chips = chips.push(marker("›", false));
+            }
+            let mut line = Row::new()
+                .spacing(16)
+                .height(Length::Fill)
+                .align_y(iced::Alignment::Center)
+                .push(chips);
+            // What is left after the chips, in subtitle-sized characters.
+            let room = ((size.width - chips_width(&widths, window.clone()) - 16.0)
+                / (fs.subtitle * CHIP_GLYPH_EM))
+                .max(0.0) as usize;
+            let subtitle = subtitle.as_deref().and_then(|subtitle| {
+                if subtitle.chars().count() <= room {
+                    Some(subtitle.to_string())
+                } else if room >= 12 {
+                    let cut: String = subtitle.chars().take(room - 1).collect();
+                    Some(format!("{}…", cut.trim_end()))
+                } else {
+                    None
+                }
+            });
+            if let Some(subtitle) = subtitle {
+                line = line.push(
+                    text(subtitle)
+                        .size(fs.subtitle)
+                        .color(t.text_muted)
+                        .wrapping(iced::widget::text::Wrapping::None),
+                );
+            }
+            container(line).clip(true).into()
+        })
+        .height(Length::Fixed(40.0));
+
+        container(strip)
+            .padding(fs.item_padding)
+            .width(Length::Fill)
+            .style(item_row_style(t, row_selected, false, t.text_main))
+            .into()
+    }
+
     pub(super) fn view(&self) -> Element<'_, Message> {
         let t = self.view.theme;
         let fs = self.view.font_sizes;
@@ -1411,7 +1633,16 @@ impl LauncherApp {
 
         let mut special_item_idx = 0;
 
-        for suggestion in &self.keyword_suggestions {
+        if self.keyword_chips && !self.keyword_suggestions.is_empty() {
+            items_column = items_column.push(self.chips_row());
+            special_item_idx += 1;
+        }
+
+        for suggestion in self
+            .keyword_suggestions
+            .iter()
+            .filter(|_| !self.keyword_chips)
+        {
             let display_idx = special_item_idx;
             let is_selected = display_idx == self.selected_index;
             let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
@@ -2348,6 +2579,11 @@ impl LauncherApp {
             span(" keywords").size(fs.hint).color(t.text_muted),
         ];
 
+        if self.keyword_chips && self.keyword_suggestions.len() > 1 && self.selected_index == 0 {
+            hint_spans.push(sep.clone());
+            hint_spans.push(span("Left/Right").size(fs.hint).color(t.accent));
+            hint_spans.push(span(" plugins").size(fs.hint).color(t.text_muted));
+        }
         if self.main_view.active && !self.main_view.stops.is_empty() {
             hint_spans.push(sep.clone());
             hint_spans.push(span("Ctrl+Tab").size(fs.hint).color(t.accent));
@@ -2507,6 +2743,16 @@ impl LauncherApp {
                 key: keyboard::Key::Named(Named::ArrowUp),
                 ..
             }) => Some(Message::MoveUp),
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(Named::ArrowLeft),
+                modifiers,
+                ..
+            }) if modifiers.is_empty() => Some(Message::ChipMove(true)),
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(Named::ArrowRight),
+                modifiers,
+                ..
+            }) if modifiers.is_empty() => Some(Message::ChipMove(false)),
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Named(Named::Enter),
                 repeat,

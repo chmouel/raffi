@@ -543,6 +543,11 @@ pub(crate) enum Message {
     DevtoolsHashes(u64, Vec<super::devtools::DevRow>),
     FallbackSelected(usize),
     KeywordSuggestionSelected(usize),
+    /// Left or Right (backwards) over the keyword chips row.
+    ChipMove(bool),
+    ChipClicked(usize),
+    /// A click on the "‹" or "›" edge of the chips row (backwards).
+    ChipScroll(bool),
     /// A page of clipboard history for the scan with this generation.
     ClipboardPage(u64, std::result::Result<super::clipboard::Page, String>),
     /// Preview of the item with this id, for the given browser session.

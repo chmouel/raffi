@@ -451,7 +451,7 @@ impl LauncherApp {
         if self.view.help_active {
             return None;
         }
-        let mut current_index = self.keyword_suggestions.len();
+        let mut current_index = self.keyword_rows();
 
         if self.script_filter.loading || self.script_filter.help_message.is_some() {
             current_index += 1;
@@ -527,11 +527,10 @@ impl LauncherApp {
         let mut current_index = 0;
 
         // 1. Keyword suggestions
-        if index < self.keyword_suggestions.len() {
-            let suggestion = &self.keyword_suggestions[index];
+        if let Some(suggestion) = self.keyword_at(index) {
             return Some(self.build_keyword_suggestion_preview(suggestion));
         }
-        current_index += self.keyword_suggestions.len();
+        current_index += self.keyword_rows();
 
         // 2. Script Filter
         if self.script_filter.loading {

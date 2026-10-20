@@ -144,6 +144,10 @@ fn run_wayland_ui(
     let selected_item: SharedSelection = Arc::new(Mutex::new(None));
     let selected_item_clone = selected_item.clone();
     let mut addons = addons.clone();
+    clipboard_history::resolve_clipboard_addon(
+        &mut addons.clipboard,
+        clipboard_history::running_cmdlines,
+    );
     let mut hyprland =
         hyprland::default_to_hypr_paste(&mut addons.text_snippets, hyprland::in_session(), || {
             hyprland::Hyprland::capture(&settings.terminal_classes)
