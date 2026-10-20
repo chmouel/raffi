@@ -128,7 +128,8 @@ The docs cover the rest of the configuration:
 
 Issues and pull requests are welcome on GitHub.
 
-To run `cargo clippy` through pre-commit hooks before pushing:
+Install the hooks to check config schema snapshots before commits and run
+formatting, Clippy, and tests before pushes:
 
 ```sh
 pip install pre-commit

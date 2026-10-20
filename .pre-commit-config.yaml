@@ -1,14 +1,28 @@
-default_install_hook_types: ["pre-push"]
+default_install_hook_types: ["pre-commit", "pre-push"]
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
+        stages: [pre-push]
       - id: check-yaml
+        stages: [pre-push]
   - repo: https://codeberg.org/avery42/pre-commit-rust.git
     rev: v1.0.0
     hooks:
       - id: cargo-clippy
         args: ["--", "-Dwarnings"]
+        stages: [pre-push]
       - id: cargo-fmt
+        stages: [pre-push]
       - id: cargo-test
+        stages: [pre-push]
+  - repo: local
+    hooks:
+      - id: check-config-schemas
+        name: Check config schema snapshots
+        entry: cargo test --lib schema_is_up_to_date
+        language: system
+        files: ^(Cargo\.toml|Cargo\.lock|src/lib\.rs|examples/(?:raffi|launchers)-schema\.json)$
+        pass_filenames: false
+        stages: [pre-commit]
