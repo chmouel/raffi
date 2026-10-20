@@ -57,6 +57,17 @@ impl super::state::LauncherApp {
         }
         None
     }
+
+    /// Icon of a keyword or help row: the theme icon or glyph it names,
+    /// else an emoji standing in for a theme icon the theme lacks.
+    pub(super) fn keyword_icon(&self, icon: &str) -> Option<SnippetIcon> {
+        if self.no_icons {
+            return None;
+        }
+        self.resolve_icon_or_glyph(icon).or_else(|| {
+            super::app::fallback_emoji(icon).map(|glyph| SnippetIcon::Glyph(glyph.to_string()))
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]

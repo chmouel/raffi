@@ -47,7 +47,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             trigger: "~/".to_string(),
             title: "File browser".to_string(),
             usage: "~/ or /path/to/dir".to_string(),
-            icon: None,
+            icon: Some(super::app::FILE_BROWSER_ICON.to_string()),
             completion: Some("~/".to_string()),
         });
     }
@@ -58,7 +58,10 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             trigger: config.keyword.clone(),
             title: config.name.clone(),
             usage: format!("{} <query>", config.keyword),
-            icon: config.icon.clone(),
+            icon: config
+                .icon
+                .clone()
+                .or(Some(super::app::SEARCH_ICON.to_string())),
             completion: Some(format!("{} ", config.keyword)),
         });
     }
@@ -69,7 +72,10 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             trigger: config.keyword.clone(),
             title: config.name.clone(),
             usage: format!("{} <filter>", config.keyword),
-            icon: config.icon.clone(),
+            icon: config
+                .icon
+                .clone()
+                .or(Some(super::app::SNIPPET_ICON.to_string())),
             completion: Some(format!("{} ", config.keyword)),
         });
     }
@@ -81,7 +87,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             trigger: trigger.to_string(),
             title: "Emoji and icons".to_string(),
             usage: format!("{trigger} <name>"),
-            icon: None,
+            icon: Some(super::app::EMOJI_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
         });
     }
@@ -113,7 +119,10 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             trigger: config.keyword.clone(),
             title: config.name.clone(),
             usage: format!("{} <query>", config.keyword),
-            icon: config.icon.clone(),
+            icon: config
+                .icon
+                .clone()
+                .or(Some(super::app::SEARCH_ICON.to_string())),
             completion: Some(format!("{} ", config.keyword)),
         });
     }
@@ -272,7 +281,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             trigger: "math".to_string(),
             title: "Calculator".to_string(),
             usage: "2+2*3 or (10/4)^2".to_string(),
-            icon: None,
+            icon: Some(super::app::CALCULATOR_ICON.to_string()),
             completion: None,
         });
     }
@@ -284,7 +293,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             trigger: trigger.to_string(),
             title: "Currency converter".to_string(),
             usage: "100 usd to eur".to_string(),
-            icon: None,
+            icon: Some("💱".to_string()),
             completion: Some(format!("{trigger} ")),
         });
     }
@@ -295,7 +304,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             trigger: "units".to_string(),
             title: "Unit converter".to_string(),
             usage: "10 km to mi or 70f to c".to_string(),
-            icon: None,
+            icon: Some("📏".to_string()),
             completion: None,
         });
     }
@@ -306,7 +315,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             trigger: "color".to_string(),
             title: "Color converter".to_string(),
             usage: "#ff8800, rgb(255 136 0) or hsl(32 100% 50%)".to_string(),
-            icon: None,
+            icon: Some(super::app::COLOR_ICON.to_string()),
             completion: None,
         });
     }
@@ -317,7 +326,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             trigger: "time".to_string(),
             title: "World clock".to_string(),
             usage: "time tokyo or 15:00 paris to nyc".to_string(),
-            icon: None,
+            icon: Some(super::app::WORLD_CLOCK_ICON.to_string()),
             completion: None,
         });
     }
@@ -328,7 +337,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             trigger: "uuid/pw".to_string(),
             title: "UUID and password generator".to_string(),
             usage: "uuid, pw or pw 32".to_string(),
-            icon: None,
+            icon: Some("🎲".to_string()),
             completion: None,
         });
     }

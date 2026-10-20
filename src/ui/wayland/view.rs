@@ -915,17 +915,25 @@ impl LauncherApp {
                 previous_section = Some(entry.section);
             }
 
-            let icon_slot: Element<Message> = entry
+            let icon_slot: Element<Message> = match entry
                 .icon
-                .as_ref()
-                .and_then(|icon_name| self.icon_map.get(icon_name))
-                .and_then(|icon_path| icon_element(Path::new(icon_path), icon_size))
-                .unwrap_or_else(|| {
-                    container(Space::new())
-                        .width(Length::Fixed(icon_size))
-                        .height(Length::Fixed(icon_size))
-                        .into()
-                });
+                .as_deref()
+                .and_then(|icon| self.keyword_icon(icon))
+            {
+                Some(SnippetIcon::File(path)) => icon_element(Path::new(&path), icon_size),
+                Some(SnippetIcon::Glyph(glyph)) => Some(
+                    container(text(glyph).size(fs.item + 4.0))
+                        .center(Length::Fixed(icon_size))
+                        .into(),
+                ),
+                None => None,
+            }
+            .unwrap_or_else(|| {
+                container(Space::new())
+                    .width(Length::Fixed(icon_size))
+                    .height(Length::Fixed(icon_size))
+                    .into()
+            });
 
             let trigger_pill = container(
                 text(entry.trigger.clone())
@@ -1408,32 +1416,22 @@ impl LauncherApp {
             let is_selected = display_idx == self.selected_index;
             let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
 
-            if let Some(icon_name) = &suggestion.icon {
-                if let Some(icon_path_str) = self.icon_map.get(icon_name) {
-                    let icon_path = PathBuf::from(icon_path_str);
-                    if icon_path.exists() {
-                        let is_svg = icon_path
-                            .extension()
-                            .and_then(|ext| ext.to_str())
-                            .map(|ext| ext.eq_ignore_ascii_case("svg"))
-                            .unwrap_or(false);
-
-                        let icon_content: Element<Message> = if is_svg {
-                            svg(iced::widget::svg::Handle::from_path(&icon_path))
-                                .width(Length::Fixed(40.0))
-                                .height(Length::Fixed(40.0))
-                                .content_fit(iced::ContentFit::Contain)
-                                .into()
-                        } else {
-                            image(icon_path)
-                                .width(Length::Fixed(40.0))
-                                .height(Length::Fixed(40.0))
-                                .content_fit(iced::ContentFit::Contain)
-                                .into()
-                        };
-                        item_row = item_row.push(icon_content);
+            match suggestion
+                .icon
+                .as_deref()
+                .and_then(|icon| self.keyword_icon(icon))
+            {
+                Some(SnippetIcon::File(path)) => {
+                    if let Some(icon) = icon_element(Path::new(&path), 40.0) {
+                        item_row = item_row.push(icon);
                     }
                 }
+                Some(SnippetIcon::Glyph(glyph)) => {
+                    item_row = item_row.push(
+                        container(text(glyph).size(fs.item + 4.0)).center(Length::Fixed(40.0)),
+                    );
+                }
+                None => {}
             }
 
             item_row = item_row

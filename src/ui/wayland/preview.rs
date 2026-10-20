@@ -782,6 +782,13 @@ impl LauncherApp {
             .map(PreviewIcon::File)
     }
 
+    fn keyword_preview_icon(&self, icon_name: &str) -> Option<PreviewIcon> {
+        self.keyword_icon(icon_name).map(|icon| match icon {
+            SnippetIcon::File(path) => PreviewIcon::File(path),
+            SnippetIcon::Glyph(glyph) => PreviewIcon::Glyph(glyph),
+        })
+    }
+
     fn build_text_snippet_preview(&self, snippet_idx: usize, snippet: &TextSnippet) -> PreviewData {
         let expanded = self
             .text_snippets
@@ -1626,7 +1633,7 @@ impl LauncherApp {
         let icon = suggestion
             .icon
             .as_deref()
-            .and_then(|name| self.resolve_named_icon(name));
+            .and_then(|name| self.keyword_preview_icon(name));
 
         let (badge, mut metadata) = describe_addon_by_keyword(&suggestion.keyword, &self.addons);
         metadata.push((
@@ -1729,7 +1736,7 @@ impl LauncherApp {
         let icon = entry
             .icon
             .as_deref()
-            .and_then(|name| self.resolve_named_icon(name));
+            .and_then(|name| self.keyword_preview_icon(name));
 
         let (badge, mut metadata) = describe_addon_by_keyword(&entry.trigger, &self.addons);
         metadata.insert(0, ("Usage".to_string(), entry.usage.clone()));

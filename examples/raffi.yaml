@@ -48,6 +48,7 @@ version: 1
 #     - addons.script_filters."Search Google"  # Switches to the script filter mode
 #     - addons.terminal                        # Runs the query in a terminal
 #   main_view:               # Mix addon results into the main list (native UI only); Ctrl+Tab shows one source at a time.
+#                            # An empty query lists each detected source's keyword (sys, tabs...) above the apps.
 #                            # With no config file at all, raffi uses launchers, windows, browser_tabs, system, media.
 #     - launchers            # Keep launchers; once main_view is set they only show if listed
 #     - browser_tabs         # Typing "gmail" lists matching tabs, up to 5 per addon;

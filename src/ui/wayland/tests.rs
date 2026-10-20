@@ -7368,10 +7368,12 @@ fn test_main_view_without_launchers_lists_only_addon_rows() {
     );
     load_main_view_tabs(&mut app);
     assert!(app.filtered_configs.is_empty(), "launchers are not listed");
-    assert_eq!(app.total_items(), 0, "addon rows wait for a query");
+    assert_eq!(keyword_names(&app), ["tabs"], "only the plugin row");
+    assert_eq!(app.total_items(), 1, "addon rows wait for a query");
 
     let _ = app.update(Message::SearchChanged("mail".into()));
     assert!(app.filtered_configs.is_empty());
+    assert!(app.keyword_suggestions.is_empty());
     assert_eq!(app.total_items(), 1);
     assert_eq!(app.resolve_selected_preview().unwrap().title, "Mail");
 
@@ -7827,6 +7829,46 @@ fn test_main_view_audio_sets_volume_only_with_a_prefix() {
 }
 
 /// Titles of the main view rows in display order.
+fn keyword_names(app: &LauncherApp) -> Vec<&str> {
+    app.keyword_suggestions
+        .iter()
+        .map(|suggestion| suggestion.keyword.as_str())
+        .collect()
+}
+
+#[test]
+fn test_main_view_offers_detected_plugins_before_apps() {
+    let mut addons = AddonsConfig::default();
+    addons.media.enabled = true;
+    let mut app = main_view_app(&[], firefox_launcher(), addons);
+    app.program_exists = |program| program != "playerctl";
+    let entries = ["media", "system", "launchers"].map(String::from);
+    let _ = app.configure_main_view(Some(&entries));
+    assert_eq!(keyword_names(&app), ["sys"], "no playerctl, no media row");
+    assert_eq!(app.selected_index, 0, "the first plugin row");
+    let _ = app.update(Message::SearchChanged(String::new()));
+    assert_eq!(keyword_names(&app), ["sys"]);
+    assert_eq!(app.total_items(), 2, "the plugin row, then the launcher");
+
+    let _ = app.update(Message::Submit);
+    assert_eq!(app.search_query, "sys ", "Enter arms the keyword");
+
+    let _ = app.update(Message::SearchChanged("fire".into()));
+    assert!(app.keyword_suggestions.is_empty(), "a query lists matches");
+}
+
+#[test]
+fn test_keyword_icon_falls_back_to_emoji() {
+    let mut app = main_view_app(&[], Vec::new(), AddonsConfig::default());
+    app.no_icons = false;
+    app.icon_map.clear();
+    assert!(matches!(
+        app.keyword_icon(super::app::SYSTEM_ICON),
+        Some(super::snippets::SnippetIcon::Glyph(glyph)) if glyph == "🔌"
+    ));
+    assert!(app.keyword_icon("no-such-icon").is_none());
+}
+
 fn main_view_titles(app: &LauncherApp) -> Vec<String> {
     use super::main_view::{Block, Source};
     [Block::BeforeLaunchers, Block::AfterLaunchers]
@@ -8086,7 +8128,8 @@ fn test_main_view_selection_stays_when_recent_rows_move_to_another_source() {
             main_view_titles(&app).is_empty(),
             "loading windows hold the slots"
         );
-        assert_eq!(app.selected_index, 0, "the launcher");
+        assert_eq!(keyword_names(&app).len(), 2, "tabs and the loading windows");
+        app.selected_index = 2;
 
         let _ = app.update(Message::MainViewLoaded(1, generation, result));
         assert_eq!(
@@ -8094,7 +8137,8 @@ fn test_main_view_selection_stays_when_recent_rows_move_to_another_source() {
             ["Raffi"],
             "the tab takes a free slot"
         );
-        assert_eq!(app.selected_index, 1, "the launcher stays selected");
+        assert_eq!(keyword_names(&app), ["tabs"], "windows found none");
+        assert_eq!(app.selected_index, 2, "the launcher stays selected");
     }
 }
 
@@ -8135,6 +8179,8 @@ fn test_main_view_enter_on_a_recent_tab_switches_and_records_it() {
     let _ = app.update(Message::SearchChanged(String::new()));
     assert_eq!(main_view_titles(&app), ["Raffi", "Mail"]);
 
+    // Past the tabs plugin row and the first recent tab.
+    let _ = app.update(Message::MoveDown);
     let _ = app.update(Message::MoveDown);
     let _ = app.update(Message::Submit);
     assert!(matches!(
@@ -8168,11 +8214,17 @@ fn test_main_view_ctrl_tab_focuses_each_source_then_all() {
     let _ = app.configure_main_view(Some(&entries));
     load_main_view_tabs(&mut app);
     let _ = app.update(Message::SearchChanged(String::new()));
-    assert_eq!(app.total_items(), 1, "the launcher, tabs wait for a query");
+    assert_eq!(keyword_names(&app), ["tabs", "sys"], "detected plugins");
+    assert_eq!(
+        app.total_items(),
+        2 + 1,
+        "the plugins and launcher, tabs wait for a query"
+    );
     assert_eq!(app.main_view_focus_label(), "All");
 
     let _ = app.update(Message::MainViewCycle(false));
     assert_eq!(app.main_view_focus_label(), "Tabs");
+    assert!(app.keyword_suggestions.is_empty(), "no plugin rows");
     assert!(app.filtered_configs.is_empty(), "launchers are hidden");
     assert_eq!(app.total_items(), 2, "every tab, without a query");
 

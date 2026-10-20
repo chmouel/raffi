@@ -17,7 +17,9 @@ use super::snippets::{
     compute_previews, fetch_clipboard, filter_snippets, load_snippet_source, missing_clipboard,
     snippet_mru_key,
 };
-use super::state::{ClipboardData, ClipboardSnapshot, LauncherApp, ScriptFilterResult};
+use super::state::{
+    ClipboardData, ClipboardSnapshot, KeywordSuggestion, LauncherApp, ScriptFilterResult,
+};
 use super::support::{contains_words, mru_bounds, mru_sort_key};
 use super::types::Message;
 use crate::{AddonsConfig, TextSnippet};
@@ -631,7 +633,56 @@ impl LauncherApp {
         let loads: Vec<_> = (0..self.main_view.sources.len())
             .map(|source| self.load_main_view_source(source, true))
             .collect();
+        self.keyword_suggestions = self.main_view_plugin_suggestions();
+        // Sources found missing above kept the selection on the launchers.
+        self.selected_index = 0;
         Task::batch(loads)
+    }
+
+    /// Keyword rows for the main view sources that can list something
+    /// here, offered above the launchers while the query is empty. A
+    /// command list counts while it loads and stays once it found rows.
+    pub(super) fn main_view_plugin_suggestions(&self) -> Vec<KeywordSuggestion> {
+        let main_view = &self.main_view;
+        if self.view.help_active
+            || !main_view.active
+            || main_view.focus.is_some()
+            || !main_view.query.is_empty()
+        {
+            return Vec::new();
+        }
+        let mut suggestions: Vec<KeywordSuggestion> = Vec::new();
+        for source in &main_view.sources {
+            let keyword = match source {
+                Source::List(list) if list.loading || !list.items.is_empty() => list
+                    .addon
+                    .and_then(|addon| list_trigger(addon, &self.addons)),
+                Source::List(_) => None,
+                Source::Snippets { config_index, .. } => self
+                    .addons
+                    .text_snippets
+                    .get(*config_index)
+                    .map(|config| config.keyword.as_str()),
+                Source::ScriptFilter { config_index, .. } => self
+                    .addons
+                    .script_filters
+                    .get(*config_index)
+                    .map(|config| config.keyword.as_str()),
+            };
+            let Some(keyword) = keyword else {
+                continue;
+            };
+            if suggestions.iter().any(|known| known.keyword == keyword) {
+                continue;
+            }
+            if let Some(suggestion) = super::app::keyword_suggestions(keyword, &self.addons)
+                .into_iter()
+                .find(|suggestion| suggestion.keyword == keyword)
+            {
+                suggestions.push(suggestion);
+            }
+        }
+        suggestions
     }
 
     /// Keep `pick` as the newest recent pick, when its source is listed in
@@ -859,6 +910,11 @@ impl LauncherApp {
         }
         let before_total = self.total_items();
         let selected = self.selected_index;
+        let before_keywords = self.keyword_suggestions.len();
+        let selected_keyword = self
+            .keyword_suggestions
+            .get(selected)
+            .map(|suggestion| suggestion.keyword.clone());
         let launchers = self.launchers_start();
         let in_launchers = (launchers..launchers + self.filtered_configs.len()).contains(&selected);
         let before = self.main_view_spans();
@@ -874,11 +930,21 @@ impl LauncherApp {
                 (source, row, identity)
             });
         update(&mut self.main_view);
+        if self.main_view.query.is_empty() {
+            self.keyword_suggestions = self.main_view_plugin_suggestions();
+        }
         if selected >= before_total {
             return;
         }
         let after = self.main_view_spans();
         self.selected_index = match within {
+            _ if selected < before_keywords => {
+                let keyword = selected_keyword.as_deref();
+                self.keyword_suggestions
+                    .iter()
+                    .position(|suggestion| Some(suggestion.keyword.as_str()) == keyword)
+                    .unwrap_or(selected)
+            }
             Some((source, row, identity)) => {
                 let (start, count) = after[source];
                 let found = identity
@@ -898,7 +964,8 @@ impl LauncherApp {
                     .filter(|((start, count), _)| start + count <= selected)
                     .map(|((_, old), (_, new))| *new as isize - *old as isize)
                     .sum();
-                selected.saturating_add_signed(moved)
+                let keywords = self.keyword_suggestions.len() as isize - before_keywords as isize;
+                selected.saturating_add_signed(moved + keywords)
             }
         };
         self.selected_index = self

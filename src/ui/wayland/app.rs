@@ -462,6 +462,43 @@ pub(super) const BLUETOOTH_ICON: &str = "bluetooth-active";
 pub(super) const PASS_ICON: &str = "dialog-password";
 pub(super) const BITWARDEN_ICON: &str = "bitwarden";
 pub(super) const DEVTOOLS_ICON: &str = "utilities-terminal";
+pub(super) const FILE_BROWSER_ICON: &str = "folder";
+pub(super) const EMOJI_ICON: &str = "face-smile";
+pub(super) const CALCULATOR_ICON: &str = "accessories-calculator";
+pub(super) const COLOR_ICON: &str = "preferences-desktop-color";
+pub(super) const WORLD_CLOCK_ICON: &str = "preferences-system-time";
+/// Shown for script filters and web searches configured without an icon.
+pub(super) const SEARCH_ICON: &str = "system-search";
+/// Shown for text snippets configured without an icon.
+pub(super) const SNIPPET_ICON: &str = "accessories-text-editor";
+
+/// Emoji shown in place of a keyword row's theme icon when the icon theme
+/// lacks it.
+pub(super) fn fallback_emoji(icon: &str) -> Option<&'static str> {
+    Some(match icon {
+        CLIPBOARD_ICON => "📋",
+        CLIPBOARD_IMAGES_ICON => "🖼️",
+        SYSTEM_ICON => "🔌",
+        WINDOWS_ICON => "🪟",
+        BROWSER_TABS_ICON => "🌐",
+        MEDIA_ICON => "🎵",
+        AUDIO_ICON => "🔊",
+        KILL_ICON => "💀",
+        BLUETOOTH_ICON => "🎧",
+        PASS_ICON => "🔑",
+        BITWARDEN_ICON => "🛡️",
+        super::slack::SLACK_ICON => "💬",
+        DEVTOOLS_ICON => "💻",
+        FILE_BROWSER_ICON => "📁",
+        EMOJI_ICON => "😀",
+        CALCULATOR_ICON => "🧮",
+        COLOR_ICON => "🎨",
+        WORLD_CLOCK_ICON => "🕒",
+        SEARCH_ICON => "🔍",
+        SNIPPET_ICON => "📝",
+        _ => return None,
+    })
+}
 
 /// Whether `message` comes from the user acting on the list or the query,
 /// which the password prompt must not let through.
@@ -752,7 +789,7 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
             suggestions.push(KeywordSuggestion {
                 keyword: config.keyword.clone(),
                 subtitle: format!("Search {}", config.name),
-                icon: config.icon.clone(),
+                icon: config.icon.clone().or(Some(SEARCH_ICON.to_string())),
             });
         }
     }
@@ -762,7 +799,7 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
             suggestions.push(KeywordSuggestion {
                 keyword: config.keyword.clone(),
                 subtitle: format!("Browse {}", config.name),
-                icon: config.icon.clone(),
+                icon: config.icon.clone().or(Some(SNIPPET_ICON.to_string())),
             });
         }
     }
@@ -773,7 +810,7 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
             suggestions.push(KeywordSuggestion {
                 keyword: trigger.to_string(),
                 subtitle: "Browse emoji and icons".to_string(),
-                icon: None,
+                icon: Some(EMOJI_ICON.to_string()),
             });
         }
     }
@@ -801,7 +838,7 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
             suggestions.push(KeywordSuggestion {
                 keyword: config.keyword.clone(),
                 subtitle: format!("Search {}", config.name),
-                icon: config.icon.clone(),
+                icon: config.icon.clone().or(Some(SEARCH_ICON.to_string())),
             });
         }
     }
@@ -810,7 +847,7 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
         suggestions.push(KeywordSuggestion {
             keyword: "~/".to_string(),
             subtitle: "Browse files, or type a path such as /etc/".to_string(),
-            icon: None,
+            icon: Some(FILE_BROWSER_ICON.to_string()),
         });
     }
 
@@ -1758,6 +1795,9 @@ impl LauncherApp {
         };
         tasks.push(self.refresh_main_view(main_view_query));
         self.drop_suggestions_listed_in_main_view(main_view_query);
+        if main_view_query.is_empty() && self.keyword_suggestions.is_empty() {
+            self.keyword_suggestions = self.main_view_plugin_suggestions();
+        }
         match qmode {
             QueryMode::FileBrowser { expanded, filter } => {
                 self.handle_file_browser_query(&expanded, &filter);
