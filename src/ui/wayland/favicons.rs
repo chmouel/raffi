@@ -79,11 +79,7 @@ pub(super) enum Cached {
 }
 
 pub(super) fn cached(dir: &Path, host: &str) -> Cached {
-    if let Some(path) = EXTENSIONS
-        .iter()
-        .map(|extension| dir.join(format!("{host}.{extension}")))
-        .find(|path| path.is_file())
-    {
+    if let Some(path) = newest(dir, host) {
         return Cached::Icon(path);
     }
     let recent_miss = fs::metadata(dir.join(format!("{host}.none")))
@@ -98,6 +94,21 @@ pub(super) fn cached(dir: &Path, host: &str) -> Cached {
     } else {
         Cached::Unknown
     }
+}
+
+/// The most recently stored image for `stem`. [`store`] keeps copies in
+/// other formats, since a row may still be showing one of them.
+pub(super) fn newest(dir: &Path, stem: &str) -> Option<PathBuf> {
+    EXTENSIONS
+        .iter()
+        .enumerate()
+        .filter_map(|(order, extension)| {
+            let path = dir.join(format!("{stem}.{extension}"));
+            let meta = fs::metadata(&path).ok().filter(|meta| meta.is_file())?;
+            Some((meta.modified().ok(), std::cmp::Reverse(order), path))
+        })
+        .max()
+        .map(|(_, _, path)| path)
 }
 
 /// The file extension for image `data`, or None for what rows cannot show.
@@ -129,9 +140,17 @@ pub(super) fn store(dir: &Path, host: &str, data: &[u8]) -> Option<PathBuf> {
     }
     fs::create_dir_all(dir).ok()?;
     let path = dir.join(format!("{host}.{extension}"));
-    let temp = dir.join(format!(".{host}.{}.tmp", std::process::id()));
-    let written = fs::write(&temp, data).and_then(|()| fs::rename(&temp, &path));
-    if written.is_err() {
+    static TEMPS: AtomicUsize = AtomicUsize::new(0);
+    let temp = dir.join(format!(
+        ".{host}.{}.{}.tmp",
+        std::process::id(),
+        TEMPS.fetch_add(1, Ordering::Relaxed)
+    ));
+    if fs::write(&temp, data).is_err() {
+        let _ = fs::remove_file(&temp);
+        return None;
+    }
+    if fs::rename(&temp, &path).is_err() {
         let _ = fs::remove_file(&temp);
         return None;
     }
@@ -141,7 +160,7 @@ pub(super) fn store(dir: &Path, host: &str, data: &[u8]) -> Option<PathBuf> {
 
 /// Whether the raster image in `data` declares at most `side` pixels each
 /// way, read from its header without decoding it.
-fn fits(data: &[u8], side: u32) -> bool {
+pub(super) fn fits(data: &[u8], side: u32) -> bool {
     image::ImageReader::new(std::io::Cursor::new(data))
         .with_guessed_format()
         .ok()
@@ -388,6 +407,32 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("raffi-favicons-{name}-{unique}"));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn test_store_in_another_format_keeps_shown_copies_and_reads_the_newest() {
+        const GIF: &[u8] = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;";
+        let dir = temp_dir("formats");
+        for _ in 0..50 {
+            let (png, gif) = std::thread::scope(|scope| {
+                let png = scope.spawn(|| store(&dir, "h", PNG).unwrap());
+                let gif = scope.spawn(|| store(&dir, "h", GIF).unwrap());
+                (png.join().unwrap(), gif.join().unwrap())
+            });
+            assert!(png.is_file() && gif.is_file());
+        }
+        let png = dir.join("h.png");
+        let old = SystemTime::now() - Duration::from_secs(60);
+        fs::File::options()
+            .write(true)
+            .open(&png)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        assert_eq!(cached(&dir, "h"), Cached::Icon(dir.join("h.gif")));
+        let png = store(&dir, "h", PNG).unwrap();
+        assert_eq!(cached(&dir, "h"), Cached::Icon(png));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     fn png(width: u8) -> Vec<u8> {

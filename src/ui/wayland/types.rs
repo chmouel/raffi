@@ -523,6 +523,13 @@ pub(crate) enum Message {
     /// session, for this preview request; None when the row was left before
     /// it loaded.
     SlackPreviewLoaded(u64, String, u64, Option<super::slack::Preview>),
+    /// The picture batch with this request in this list session is due.
+    SlackImagesDue(u64, u64),
+    /// The pictures of a batch: list session, account epoch, request, the
+    /// keys asked for, and what was downloaded.
+    SlackImagesLoaded(u64, u64, u64, Vec<String>, super::slack::ImagesOutcome),
+    /// The Slack list was scrolled to this relative offset.
+    SlackListScrolled(f32),
     /// Rows of the main view command list source at this index, from its
     /// load of this generation.
     MainViewLoaded(

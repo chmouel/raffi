@@ -21,6 +21,15 @@ use super::types::Message;
 /// search per key.
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(350);
 const MIN_SEARCH_CHARS: usize = 2;
+/// Wait for the rows in view to settle before downloading their pictures.
+const IMAGES_SETTLE: Duration = Duration::from_millis(150);
+/// Rows around the scroll position and the selection whose pictures are
+/// downloaded.
+const IMAGE_WINDOW: usize = 20;
+/// Rows around the scroll position and the selection whose icons are
+/// drawn; iced decodes every image it lays out, so farther rows get a
+/// blank of the same size.
+pub(super) const ICON_WINDOW: usize = 40;
 
 #[derive(Debug, Default)]
 pub(super) struct SlackState {
@@ -37,6 +46,18 @@ pub(super) struct SlackState {
     /// The last preview request, and the first one of the current epoch.
     pub preview_request: u64,
     first_request: u64,
+    /// Pictures by [`slack::image_key`], None until read from disk for
+    /// this session.
+    images: Option<HashMap<String, String>>,
+    /// Pictures asked for this session, downloaded or not.
+    pub images_tried: HashSet<String>,
+    /// The last picture batch, and the one being waited for.
+    pub images_request: u64,
+    pub images_inflight: Option<u64>,
+    /// Set when Slack was not connected for a batch, until rows load again.
+    pub images_blocked: bool,
+    /// How far the list is scrolled, from 0 at the top to 1 at the bottom.
+    pub scroll: f32,
 }
 
 impl LauncherApp {
@@ -47,6 +68,8 @@ impl LauncherApp {
             self.slack.session = self.command_list.session;
             self.slack.view = None;
             self.slack.stale_previews.clear();
+            self.slack.scroll = 0.0;
+            self.reset_slack_images();
         }
         if !self.slack.usage_loaded {
             self.slack.usage_loaded = true;
@@ -326,6 +349,7 @@ impl LauncherApp {
         self.slack.epoch = epoch;
         self.slack.first_request = self.slack.preview_request + 1;
         self.slack.stale_previews.clear();
+        self.reset_slack_images();
         if self.command_list.addon == Some(CommandListAddon::Slack) {
             self.command_list.previews.clear();
             self.command_list.preview_inflight = None;
@@ -333,16 +357,178 @@ impl LauncherApp {
     }
 
     fn show_slack_preview(&mut self, identity: String, (bodies, avatar): slack::Preview) {
-        let list = &mut self.command_list;
-        if let Some(avatar) = avatar {
-            for item in list
-                .items
-                .iter_mut()
-                .filter(|item| item.identity == identity)
-            {
-                item.icon = Some(avatar.clone());
+        if let (Some(avatar), Some(user)) = (avatar, identity.strip_prefix("slack:user:")) {
+            self.add_slack_images(vec![(user.to_string(), avatar)]);
+        }
+        self.command_list.previews.insert(identity, bodies);
+    }
+
+    /// Forget the pictures of the last session or account, and the batch
+    /// downloading them.
+    fn reset_slack_images(&mut self) {
+        self.slack.images = None;
+        self.slack.images_tried.clear();
+        self.slack.images_inflight = None;
+        self.slack.images_request += 1;
+        self.slack.images_blocked = false;
+        slack::cancel_image_downloads();
+    }
+
+    fn slack_images(&mut self) -> &HashMap<String, String> {
+        self.slack.images.get_or_insert_with(slack::cached_images)
+    }
+
+    /// Show the known pictures on Slack rows about to be listed.
+    pub(super) fn apply_slack_images(&mut self, items: &mut [CommandItem]) {
+        self.slack.images_blocked = false;
+        let directory = super::slack_api::cached_directory();
+        slack::apply_images(items, directory.as_deref(), self.slack_images());
+    }
+
+    fn add_slack_images(&mut self, found: Vec<(String, String)>) {
+        if found.is_empty() {
+            return;
+        }
+        self.slack_images();
+        let images = self.slack.images.get_or_insert_with(HashMap::new);
+        images.extend(found);
+        let directory = super::slack_api::cached_directory();
+        slack::apply_images(&mut self.command_list.items, directory.as_deref(), images);
+    }
+
+    /// Whether list row `row` is within `margin` rows of the scroll
+    /// position or the selection. With `relative` scrolled, the first row
+    /// drawn is `relative * (count - shown)`, so any margin of at least
+    /// `shown` rows around `relative * count` covers every row drawn.
+    pub(super) fn slack_row_near(&self, row: usize, margin: usize) -> bool {
+        let count = self.command_list.row_count();
+        let scrolled = (self.slack.scroll.clamp(0.0, 1.0) * count as f32) as usize;
+        let selected = self
+            .selected_index
+            .saturating_sub(self.command_list_offset());
+        row.abs_diff(scrolled) < margin || row.abs_diff(selected) < margin
+    }
+
+    /// The identities of the rows around the scroll position and the
+    /// selection.
+    fn slack_rows_in_view(&self) -> Vec<&str> {
+        (0..self.command_list.row_count())
+            .filter(|row| self.slack_row_near(*row, IMAGE_WINDOW))
+            .filter_map(|row| self.command_list.item(row))
+            .map(|item| item.identity.as_str())
+            .collect()
+    }
+
+    /// Pictures the rows in view lack, with the account they are for.
+    fn slack_image_wants(&mut self) -> Option<(slack::ImageWants, super::slack_api::Workspace)> {
+        let directory = super::slack_api::cached_directory()?;
+        self.slack_images();
+        let images = self.slack.images.as_ref()?;
+        let wants = slack::image_wants(
+            self.slack_rows_in_view(),
+            &directory,
+            images,
+            &self.slack.images_tried,
+        );
+        (!wants.is_empty()).then(|| (wants, directory.workspace.clone()))
+    }
+
+    /// Start downloading the pictures the rows in view lack, one batch at
+    /// a time, once the rows have settled.
+    pub(super) fn ensure_slack_images(&mut self) -> Task<Message> {
+        if self.command_list.addon != Some(CommandListAddon::Slack) {
+            // Left Slack: stop downloading for rows no longer shown.
+            if self.slack.images_inflight.is_some() {
+                self.reset_slack_images();
+            }
+            return Task::none();
+        }
+        if self.slack.images_inflight.is_some()
+            || self.slack.images_blocked
+            || self.slack.view.is_none()
+        {
+            return Task::none();
+        }
+        if self.slack_image_wants().is_none() {
+            return Task::none();
+        }
+        self.slack.images_request += 1;
+        let request = self.slack.images_request;
+        self.slack.images_inflight = Some(request);
+        let session = self.command_list.session;
+        Task::perform(
+            async move {
+                let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                std::thread::spawn(move || {
+                    std::thread::sleep(IMAGES_SETTLE);
+                    let _ = sender.send(());
+                });
+                let _ = receiver.await;
+            },
+            move |()| Message::SlackImagesDue(session, request),
+        )
+    }
+
+    pub(super) fn handle_slack_images_due(&mut self, session: u64, request: u64) -> Task<Message> {
+        if self.slack.images_inflight != Some(request) {
+            return Task::none();
+        }
+        let wanted = (self.command_list.addon == Some(CommandListAddon::Slack)
+            && self.command_list.session == session)
+            .then(|| self.slack_image_wants())
+            .flatten();
+        let Some((wants, account)) = wanted else {
+            self.slack.images_inflight = None;
+            return Task::none();
+        };
+        let epoch = self.slack.epoch;
+        let generation = slack::image_generation();
+        let mut keys: Vec<String> = wants.users.iter().map(|(id, _)| id.clone()).collect();
+        keys.extend(wants.team.clone());
+        Task::perform(
+            async move {
+                let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                std::thread::spawn(move || {
+                    let _ = sender.send(slack::fetch_images(wants, &account, generation));
+                });
+                receiver
+                    .await
+                    .unwrap_or(slack::ImagesOutcome::Attempted(Vec::new()))
+            },
+            move |outcome| {
+                Message::SlackImagesLoaded(session, epoch, request, keys.clone(), outcome)
+            },
+        )
+    }
+
+    pub(super) fn handle_slack_images_loaded(
+        &mut self,
+        session: u64,
+        epoch: u64,
+        request: u64,
+        keys: Vec<String>,
+        outcome: slack::ImagesOutcome,
+    ) -> Task<Message> {
+        self.sync_slack_account();
+        // Only the batch in flight releases the mark, so one dropped by a
+        // session or account change cannot release its successor's.
+        if self.slack.images_inflight != Some(request) {
+            return Task::none();
+        }
+        self.slack.images_inflight = None;
+        if self.command_list.addon != Some(CommandListAddon::Slack)
+            || self.command_list.session != session
+            || self.slack.epoch != epoch
+        {
+            return Task::none();
+        }
+        match outcome {
+            slack::ImagesOutcome::Skipped => self.slack.images_blocked = true,
+            slack::ImagesOutcome::Attempted(found) => {
+                self.slack.images_tried.extend(keys);
+                self.add_slack_images(found);
             }
         }
-        list.previews.insert(identity, bodies);
+        Task::none()
     }
 }

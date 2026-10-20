@@ -28,6 +28,7 @@ const PREVIEW_MESSAGES: usize = 12;
 const MAX_MESSAGE_CHARS: usize = 600;
 const MAX_TITLE_CHARS: usize = 120;
 const MAX_AVATAR_BYTES: u64 = 512 * 1024;
+const MAX_IMAGE_SIDE: u32 = 256;
 /// Wait before loading a preview, so moving quickly through the rows does
 /// not send one request per row.
 const PREVIEW_SETTLE: std::time::Duration = std::time::Duration::from_millis(150);
@@ -950,13 +951,14 @@ fn user_row(
     user: &User,
     directory: &Directory,
     open_in: SlackOpenIn,
-    avatar: Option<&String>,
     now: DateTime<Local>,
 ) -> CommandItem {
     let workspace = &directory.workspace;
-    let mut icons: Vec<&str> = avatar.map(String::as_str).into_iter().collect();
-    icons.extend(USER_ICONS);
-    let mut item = row(&format!("slack:user:{}", user.id), user.label(), &icons);
+    let mut item = row(
+        &format!("slack:user:{}", user.id),
+        user.label(),
+        &USER_ICONS,
+    );
     let status = describe_status(&user.status_emoji, &user.status_text, 0, now);
     item.subtitle = [
         format!("@{}", user.name),
@@ -1003,7 +1005,6 @@ pub(super) fn home_rows(
     directory: &Directory,
     live: &Live,
     open_in: SlackOpenIn,
-    avatars: &HashMap<String, String>,
     now: DateTime<Local>,
 ) -> Vec<CommandItem> {
     let mut rows = action_rows(live, now);
@@ -1028,7 +1029,7 @@ pub(super) fn home_rows(
     rows.extend(
         users
             .into_iter()
-            .map(|user| user_row(user, directory, open_in, avatars.get(&user.id), now)),
+            .map(|user| user_row(user, directory, open_in, now)),
     );
     rows
 }
@@ -1039,19 +1040,59 @@ fn avatar_dir() -> Option<PathBuf> {
         .map(|dir| dir.join("avatars"))
 }
 
-/// The downloaded avatars by user id.
+/// The downloaded avatars by user id, and the workspace icon by team id.
 pub(super) fn cached_avatars(dir: &Path) -> HashMap<String, String> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return HashMap::new();
     };
-    entries
+    let ids: std::collections::HashSet<String> = entries
         .flatten()
         .filter_map(|entry| {
             let path = entry.path();
-            let id = path.file_stem()?.to_str()?.to_string();
+            let name = path.file_name()?.to_str()?;
+            // Downloads being written, and markers for icons Slack lacks.
+            if name.starts_with('.') || name.ends_with(".none") {
+                return None;
+            }
+            Some(path.file_stem()?.to_str()?.to_string())
+        })
+        .collect();
+    ids.into_iter()
+        .filter_map(|id| {
+            let path = super::favicons::newest(dir, &id)?;
             Some((id, path.to_str()?.to_string()))
         })
         .collect()
+}
+
+/// The pictures on disk, for [`apply_images`].
+pub(super) fn cached_images() -> HashMap<String, String> {
+    avatar_dir()
+        .map(|dir| cached_avatars(&dir))
+        .unwrap_or_default()
+}
+
+fn image_agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(10)))
+        .https_only(true)
+        .build()
+        .into()
+}
+
+/// Download the picture at `url` as `<id>.<ext>` in `dir`. Blocking.
+fn download_image(agent: &ureq::Agent, dir: &Path, id: &str, url: &str) -> Option<String> {
+    if !url.starts_with("https://") {
+        return None;
+    }
+    let data = super::favicons::download(agent, url, MAX_AVATAR_BYTES)?;
+    // Slack serves 192px avatars and 132px workspace icons; anything much
+    // larger costs memory on every row that shows it.
+    if !super::favicons::fits(&data, MAX_IMAGE_SIDE) {
+        return None;
+    }
+    let path = super::favicons::store(dir, id, &data)?;
+    path.to_str().map(str::to_string)
 }
 
 /// The user's avatar, downloaded once. Blocking.
@@ -1060,19 +1101,251 @@ fn fetch_avatar(user: &User) -> Option<String> {
     if let Some(path) = cached_avatars(&dir).remove(&user.id) {
         return Some(path);
     }
-    if !user.avatar.starts_with("https://") {
-        return None;
+    download_image(&image_agent(), &dir, &user.id, &user.avatar)
+}
+
+/// The key of the picture `identity` shows: a user id for a person or a
+/// direct conversation, the team id for a channel. Group conversations
+/// have none.
+pub(super) fn image_key(identity: &str, directory: Option<&Directory>) -> Option<String> {
+    let parts: Vec<&str> = identity.split(':').collect();
+    let channel = match parts.as_slice() {
+        ["slack", "user", user] => return Some(user.to_string()),
+        ["slack", "conv" | "unread" | "msg", channel, ..] => *channel,
+        _ => return None,
+    };
+    let directory = directory?;
+    let team = || Some(directory.workspace.team_id.clone()).filter(|team| !team.is_empty());
+    let Some(conversation) = directory.conversation(channel) else {
+        return is_search_channel(channel).then(team).flatten();
+    };
+    match conversation.kind {
+        ConversationKind::Channel | ConversationKind::Private => team(),
+        // A direct message hit shows its author, not this picture.
+        ConversationKind::Direct if parts[1] != "msg" => conversation.user.clone(),
+        _ => None,
     }
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(std::time::Duration::from_secs(10)))
-        .build()
-        .into();
-    let data = super::favicons::download(&agent, &user.avatar, MAX_AVATAR_BYTES)?;
-    let extension = super::favicons::extension(&data)?;
-    std::fs::create_dir_all(&dir).ok()?;
-    let path = dir.join(format!("{}.{extension}", user.id));
-    std::fs::write(&path, data).ok()?;
-    path.to_str().map(str::to_string)
+}
+
+/// Show the known picture of each row in `items`, over its theme icon.
+pub(super) fn apply_images(
+    items: &mut [CommandItem],
+    directory: Option<&Directory>,
+    images: &HashMap<String, String>,
+) {
+    if images.is_empty() {
+        return;
+    }
+    for item in items {
+        if let Some(path) = image_key(&item.identity, directory).and_then(|key| images.get(&key)) {
+            item.icon = Some(path.clone());
+        }
+    }
+}
+
+/// Avatars downloaded at most per batch.
+pub(super) const MAX_IMAGE_BATCH: usize = 30;
+/// How long a workspace icon, or the lack of one, is trusted.
+const WORKSPACE_ICON_TTL: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
+
+/// Pictures to download for rows in view.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(super) struct ImageWants {
+    /// User ids and avatar URLs.
+    pub users: Vec<(String, String)>,
+    /// The team id, when a channel row is in view.
+    pub team: Option<String>,
+}
+
+impl ImageWants {
+    pub fn is_empty(&self) -> bool {
+        self.users.is_empty() && self.team.is_none()
+    }
+}
+
+/// The pictures the rows `identities` lack, not tried already. The
+/// workspace icon is wanted even when on disk, since it may be due for a
+/// refresh: [`fetch_images`] decides.
+pub(super) fn image_wants<'a>(
+    identities: impl IntoIterator<Item = &'a str>,
+    directory: &Directory,
+    images: &HashMap<String, String>,
+    tried: &HashSet<String>,
+) -> ImageWants {
+    let mut wants = ImageWants::default();
+    let mut seen: HashSet<String> = HashSet::new();
+    let team = &directory.workspace.team_id;
+    for identity in identities {
+        let Some(key) = image_key(identity, Some(directory)) else {
+            continue;
+        };
+        if tried.contains(&key) || !seen.insert(key.clone()) {
+            continue;
+        }
+        if key == *team {
+            wants.team = Some(key);
+            continue;
+        }
+        if wants.users.len() >= MAX_IMAGE_BATCH || images.contains_key(&key) {
+            continue;
+        }
+        if let Some(user) = directory
+            .user(&key)
+            .filter(|user| user.avatar.starts_with("https://"))
+        {
+            wants.users.push((key, user.avatar.clone()));
+        }
+    }
+    wants
+}
+
+/// What [`fetch_images`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum ImagesOutcome {
+    /// Slack is not connected yet, or to another account than the rows
+    /// belong to, so nothing was tried.
+    Skipped,
+    /// The pictures downloaded, by key, out of all those asked for.
+    Attempted(Vec<(String, String)>),
+}
+
+/// Channels search found outside the directory, such as ones not joined,
+/// so their hits still show the workspace icon.
+static SEARCH_CHANNELS: std::sync::LazyLock<std::sync::Mutex<HashSet<String>>> =
+    std::sync::LazyLock::new(Default::default);
+
+fn note_search_channel(channel: &Value) {
+    // Hits carry is_private and is_mpim but not always is_channel, so a
+    // channel is whatever is neither a direct nor a group conversation.
+    let flag = |name: &str| channel[name].as_bool().unwrap_or(false);
+    let Some(id) = channel["id"].as_str() else {
+        return;
+    };
+    let name = channel["name"].as_str().unwrap_or_default();
+    let is_channel = (id.starts_with('C') || id.starts_with('G'))
+        && !flag("is_mpim")
+        && !flag("is_im")
+        && !name.starts_with("mpdm-");
+    if is_channel {
+        if let Ok(mut channels) = SEARCH_CHANNELS.lock() {
+            channels.insert(id.to_string());
+        }
+    }
+}
+
+fn is_search_channel(channel: &str) -> bool {
+    SEARCH_CHANNELS
+        .lock()
+        .is_ok_and(|channels| channels.contains(channel))
+}
+
+/// Bumped to stop the batch downloading for rows no longer listed.
+static IMAGE_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Held by the batch downloading, so batches never overlap.
+static IMAGE_BATCH: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+pub(super) fn image_generation() -> u64 {
+    IMAGE_GENERATION.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Stop the batch downloading before its next picture.
+pub(super) fn cancel_image_downloads() {
+    IMAGE_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Download `wants` for the rows of `account`, four at a time, unless
+/// [`cancel_image_downloads`] moved past `generation`. Blocking.
+pub(super) fn fetch_images(
+    wants: ImageWants,
+    account: &Workspace,
+    generation: u64,
+) -> ImagesOutcome {
+    let _batch = IMAGE_BATCH.lock();
+    let current = || image_generation() == generation;
+    if !current() {
+        return ImagesOutcome::Attempted(Vec::new());
+    }
+    let Some(dir) = avatar_dir() else {
+        return ImagesOutcome::Attempted(Vec::new());
+    };
+    // Pictures are only stored for the account the rows belong to.
+    let client = slack_api::current_client().ok();
+    let Some(client) = client.filter(|client| {
+        client
+            .known_identity()
+            .is_some_and(|known| known.same_account(account))
+    }) else {
+        return ImagesOutcome::Skipped;
+    };
+    let agent = image_agent();
+    let queue = std::sync::Mutex::new(wants.users.into_iter());
+    let found = std::sync::Mutex::new(Vec::new());
+    std::thread::scope(|scope| {
+        // Three for avatars, the fourth for the workspace icon.
+        for _ in 0..3 {
+            scope.spawn(|| loop {
+                if !current() {
+                    break;
+                }
+                let next = queue.lock().ok().and_then(|mut queue| queue.next());
+                let Some((id, url)) = next else {
+                    break;
+                };
+                if let Some(path) = download_image(&agent, &dir, &id, &url) {
+                    if let Ok(mut found) = found.lock() {
+                        found.push((id, path));
+                    }
+                }
+            });
+        }
+        if let Some(team) = wants.team.as_ref().filter(|_| current()) {
+            if let Some(path) = fetch_workspace_icon(&client, &agent, &dir, team, account) {
+                if let Ok(mut found) = found.lock() {
+                    found.push((team.clone(), path));
+                }
+            }
+        }
+    });
+    ImagesOutcome::Attempted(found.into_inner().unwrap_or_default())
+}
+
+/// The workspace icon, asked again once a week. A failed refresh keeps the
+/// icon there is; with none, Slack is not asked again for a week.
+fn fetch_workspace_icon(
+    client: &Client,
+    agent: &ureq::Agent,
+    dir: &Path,
+    team: &str,
+    account: &Workspace,
+) -> Option<String> {
+    let current = workspace_icon_due(dir, team)?;
+    let url = slack_api::workspace_icon(client, account).unwrap_or_else(|error| {
+        crate::debug_log!("slack: no workspace icon: {error}");
+        None
+    });
+    let stored = url.and_then(|url| download_image(agent, dir, team, &url));
+    if stored.is_none() && current.is_none() {
+        super::favicons::mark_miss(dir, team);
+    }
+    stored
+}
+
+/// None when the workspace icon on disk, or the lack of one, is recent
+/// enough; otherwise the icon there is, if any.
+fn workspace_icon_due(dir: &Path, team: &str) -> Option<Option<std::path::PathBuf>> {
+    let current = match super::favicons::cached(dir, team) {
+        super::favicons::Cached::Icon(path) => Some(path),
+        super::favicons::Cached::Miss => return None,
+        super::favicons::Cached::Unknown => None,
+    };
+    let fresh = current.as_ref().is_some_and(|path| {
+        std::fs::metadata(path)
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age < WORKSPACE_ICON_TTL)
+    });
+    (!fresh).then_some(current)
 }
 
 /// The client and directory, refreshing a directory past its freshness in
@@ -1141,10 +1414,7 @@ pub(super) fn cached_home(config: &crate::SlackAddonConfig) -> Option<Vec<Comman
 }
 
 fn home_list(directory: &Directory, live: &Live, open_in: SlackOpenIn) -> Vec<CommandItem> {
-    let avatars = avatar_dir()
-        .map(|dir| cached_avatars(&dir))
-        .unwrap_or_default();
-    let mut rows = home_rows(directory, live, open_in, &avatars, Local::now());
+    let mut rows = home_rows(directory, live, open_in, Local::now());
     rows.push(action_row(
         "reload",
         "Reload conversations and people",
@@ -1228,6 +1498,9 @@ pub(super) fn search_rows(
         .filter_map(|hit| {
             let channel = hit["channel"]["id"].as_str()?;
             let ts = hit["ts"].as_str()?;
+            if directory.conversation(channel).is_none() {
+                note_search_channel(&hit["channel"]);
+            }
             let permalink = hit["permalink"].as_str().unwrap_or_default();
             let thread = permalink_thread(permalink).filter(|thread| *thread != ts);
             let mut identity = format!("slack:msg:{channel}:{ts}");
@@ -1364,13 +1637,10 @@ pub(super) fn load_people(
             .cloned()
             .collect()
     };
-    let avatars = avatar_dir()
-        .map(|dir| cached_avatars(&dir))
-        .unwrap_or_default();
     let now = Local::now();
     let mut rows: Vec<CommandItem> = found
         .iter()
-        .map(|user| user_row(user, &directory, config.open_in, avatars.get(&user.id), now))
+        .map(|user| user_row(user, &directory, config.open_in, now))
         .collect();
     if rows.is_empty() {
         rows.push(row(
@@ -2277,13 +2547,7 @@ mod tests {
             snoozed_until: Some(now().timestamp() + 600),
             away: Some(true),
         };
-        let rows = home_rows(
-            &directory,
-            &live,
-            SlackOpenIn::Desktop,
-            &HashMap::new(),
-            now(),
-        );
+        let rows = home_rows(&directory, &live, SlackOpenIn::Desktop, now());
         let ids: Vec<&str> = rows.iter().map(|row| row.identity.as_str()).collect();
         assert!(ids.contains(&"slack:do:clear-status"));
         assert!(ids.contains(&"slack:do:active"));
@@ -2315,17 +2579,181 @@ mod tests {
             Some("https://app.slack.com/client/T1/D1")
         );
 
-        let rows = home_rows(
-            &directory,
-            &Live::default(),
-            SlackOpenIn::Desktop,
-            &HashMap::new(),
-            now(),
-        );
+        let rows = home_rows(&directory, &Live::default(), SlackOpenIn::Desktop, now());
         let ids: Vec<&str> = rows.iter().map(|row| row.identity.as_str()).collect();
         assert!(!ids.contains(&"slack:do:clear-status"));
         assert!(!ids.contains(&"slack:do:resume"));
         assert!(ids.contains(&"slack:do:active") && ids.contains(&"slack:do:away"));
+    }
+
+    #[test]
+    fn test_apply_images_shows_avatars_and_the_workspace_icon() {
+        let mut directory = directory();
+        directory = Directory::new(
+            directory.workspace.clone(),
+            directory.users.clone(),
+            [
+                directory.conversations.clone(),
+                vec![conversation("M1", ConversationKind::Group, "mpdm", None)],
+            ]
+            .concat(),
+            0,
+        );
+        let ids = [
+            "slack:user:U1",
+            "slack:unread:D1:1.0",
+            "slack:conv:C1",
+            "slack:unread:G1:1.0",
+            "slack:msg:C1:1.0",
+            "slack:msg:D1:1.0",
+            "slack:conv:M1",
+            "slack:user:U2",
+        ];
+        let mut items: Vec<CommandItem> = ids.iter().map(|id| row(id, *id, &USER_ICONS)).collect();
+        let images: HashMap<String, String> = [("U1", "/a/U1.png"), ("T1", "/a/T1.png")]
+            .into_iter()
+            .map(|(key, path)| (key.to_string(), path.to_string()))
+            .collect();
+        apply_images(&mut items, Some(&directory), &images);
+        let icons: Vec<Option<&str>> = items.iter().map(|item| item.icon.as_deref()).collect();
+        assert_eq!(
+            icons,
+            [
+                Some("/a/U1.png"),
+                Some("/a/U1.png"),
+                Some("/a/T1.png"),
+                Some("/a/T1.png"),
+                Some("/a/T1.png"),
+                None,
+                None,
+                None
+            ]
+        );
+        assert_eq!(
+            items[0].icon_names, USER_ICONS,
+            "theme icons stay as fallbacks"
+        );
+
+        // Without the directory, only people are known.
+        let mut items = vec![
+            row("slack:user:U1", "a", &USER_ICONS),
+            row("slack:conv:C1", "b", &USER_ICONS),
+        ];
+        apply_images(&mut items, None, &images);
+        assert_eq!(items[0].icon.as_deref(), Some("/a/U1.png"));
+        assert_eq!(items[1].icon, None);
+    }
+
+    #[test]
+    fn test_image_wants_skips_known_and_tried_and_caps_the_batch() {
+        let mut users: Vec<User> = (0..40)
+            .map(|n| User {
+                avatar: format!("https://a/{n}.png"),
+                ..user(&format!("U{n:02}"), "x", "")
+            })
+            .collect();
+        users.push(User {
+            avatar: "http://insecure/x.png".to_string(),
+            ..user("UH", "h", "")
+        });
+        let base = directory();
+        let directory = Directory::new(base.workspace, users, base.conversations, 0);
+        let mut identities: Vec<String> = (0..40).map(|n| format!("slack:user:U{n:02}")).collect();
+        identities.push("slack:user:U00".to_string());
+        identities.push("slack:user:UH".to_string());
+        identities.push("slack:conv:C1".to_string());
+        identities.push("slack:unread:G1:1.0".to_string());
+        let images: HashMap<String, String> = [
+            ("U00".to_string(), "/a/U00.png".to_string()),
+            ("T1".to_string(), "/a/T1.png".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let tried: HashSet<String> = ["U01".to_string()].into_iter().collect();
+        let wants = image_wants(
+            identities.iter().map(String::as_str),
+            &directory,
+            &images,
+            &tried,
+        );
+        assert_eq!(wants.users.len(), MAX_IMAGE_BATCH);
+        assert_eq!(
+            wants.users[0],
+            ("U02".to_string(), "https://a/2.png".to_string())
+        );
+        assert!(!wants
+            .users
+            .iter()
+            .any(|(id, _)| id == "UH" || id == "U00" || id == "U01"));
+        // Asked even when on disk, since it may be due for a refresh.
+        assert_eq!(wants.team.as_deref(), Some("T1"));
+
+        let tried: HashSet<String> = ["T1".to_string()].into_iter().collect();
+        let wants = image_wants(["slack:unread:C1:1.0"], &directory, &images, &tried);
+        assert!(wants.is_empty());
+    }
+
+    #[test]
+    fn test_cached_avatars_skips_downloads_in_progress_and_misses() {
+        let dir = std::env::temp_dir().join(format!("raffi-slack-avatars-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["U1.png", "U1.jpg", ".U2.1.0.tmp", "T1.none"] {
+            std::fs::write(dir.join(name), "").unwrap();
+        }
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+        std::fs::File::options()
+            .write(true)
+            .open(dir.join("U1.png"))
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        let found = cached_avatars(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        let newest = dir.join("U1.jpg").to_str().unwrap().to_string();
+        assert_eq!(found, HashMap::from([("U1".to_string(), newest)]));
+    }
+
+    #[test]
+    fn test_workspace_icon_is_due_weekly_and_not_after_a_miss() {
+        let dir = std::env::temp_dir().join(format!("raffi-slack-team-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(workspace_icon_due(&dir, "T1"), Some(None));
+        super::super::favicons::mark_miss(&dir, "T1");
+        assert_eq!(workspace_icon_due(&dir, "T1"), None);
+        let icon = dir.join("T1.png");
+        std::fs::write(&icon, "").unwrap();
+        assert_eq!(workspace_icon_due(&dir, "T1"), None);
+        let old = std::time::SystemTime::now() - WORKSPACE_ICON_TTL * 2;
+        std::fs::File::options()
+            .write(true)
+            .open(&icon)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        let due = workspace_icon_due(&dir, "T1");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(due, Some(Some(icon)));
+    }
+
+    #[test]
+    fn test_search_hits_outside_the_directory_show_the_workspace_icon() {
+        let reply = json!({"messages": {"matches": [
+            {"channel": {"id": "CSEARCH1", "name": "ops", "is_private": false, "is_mpim": false},
+             "ts": "1.0", "text": "a"},
+            {"channel": {"id": "GSEARCH2", "name": "mpdm-a--b-1", "is_private": true, "is_mpim": true},
+             "ts": "2.0", "text": "b"},
+            {"channel": {"id": "DSEARCH3", "name": "U2", "is_private": true},
+             "ts": "3.0", "text": "c"},
+        ]}});
+        let directory = directory();
+        let mut rows = search_rows(&reply, &directory, SlackOpenIn::Desktop, now());
+        let images = HashMap::from([("T1".to_string(), "/team.png".to_string())]);
+        apply_images(&mut rows, Some(&directory), &images);
+        assert_eq!(rows[0].icon.as_deref(), Some("/team.png"));
+        assert_eq!(rows[1].icon, None);
+        assert_eq!(rows[2].icon, None);
     }
 
     #[test]

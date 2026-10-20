@@ -71,6 +71,7 @@ browser session token instead.
          - mpim:read
          - mpim:write
          - search:read
+         - team:read
          - users.profile:read
          - users.profile:write
          - users:read
@@ -208,6 +209,15 @@ With the preview pane open (Ctrl+P), the selected row shows:
 Previews load after a short pause on a row. Errors, such as a missing
 scope, show in the pane.
 
+## Pictures
+
+People and direct messages show the person's avatar, and channels show
+the workspace icon, since Slack has no picture per channel. Group
+conversations keep the generic icon. Pictures are downloaded in the
+background for the rows in view, up to 30 at a time, and kept on disk.
+The workspace icon needs the `team:read` scope and is asked again once a
+week; without it, channels keep the generic icon.
+
 ## Caching and privacy
 
 Raffi keeps what Slack last answered in `~/.cache/raffi/slack/` and shows it
@@ -223,7 +233,7 @@ at once, then replaces it when Slack answers again:
   `cache_minutes`.
 - `previews/`: the text of the last 500 previews, so a preview you saw
   before shows without waiting while Slack is asked for the current one.
-- `avatars/`: profile pictures.
+- `avatars/`: profile pictures and the workspace icon.
 
 Searches are kept in memory for `cache_minutes` while Raffi runs, so
 typing back to an earlier query shows its results without asking again.

@@ -8550,6 +8550,126 @@ fn test_slack_load_without_token_command_explains_setup() {
 }
 
 #[test]
+fn test_slack_rows_near_follow_the_scroll_and_the_selection() {
+    let mut addons = AddonsConfig::default();
+    addons.slack.enabled = true;
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+    let _ = app.update(Message::SearchChanged("slack ".into()));
+    let rows: Vec<_> = (0..200)
+        .map(|n| {
+            let id = format!("slack:user:U{n}");
+            super::command_list::CommandItem::info(&id, id.clone(), "icon")
+        })
+        .collect();
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(rows)));
+    let selected = app.selected_index - app.command_list_offset();
+    let _ = app.update(Message::SlackListScrolled(0.5));
+    // Halfway down, the 20 rows shown start at row 90.
+    assert!((90..110).all(|row| app.slack_row_near(row, 20)));
+    assert!(app.slack_row_near(selected, 20));
+    assert!(!app.slack_row_near(150, 20));
+    // Leaving Slack stops the batch downloading for it.
+    app.slack.images_inflight = Some(app.slack.images_request);
+    let before = super::slack::image_generation();
+    let _ = app.update(Message::SearchChanged("".into()));
+    assert_ne!(super::slack::image_generation(), before);
+    assert_eq!(app.slack.images_inflight, None);
+}
+
+#[test]
+fn test_slack_images_apply_once_their_batch_lands_and_survive_reloads() {
+    use super::slack::ImagesOutcome;
+    let mut addons = AddonsConfig::default();
+    addons.slack.enabled = true;
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+    let _ = app.update(Message::SearchChanged("slack ".into()));
+    let rows = || {
+        ["slack:user:U1", "slack:user:U2"]
+            .map(|id| super::command_list::CommandItem::info(id, id.into(), "icon"))
+            .to_vec()
+    };
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(rows())));
+    let session = app.command_list.session;
+    let epoch = app.slack.epoch;
+    let icon = |app: &LauncherApp, id: &str| {
+        let row = app.command_list.position(id).unwrap();
+        app.command_list.item(row).unwrap().icon.clone()
+    };
+    let found = |id: &str| ImagesOutcome::Attempted(vec![(id.into(), format!("/a/{id}.png"))]);
+
+    // A batch dropped by a newer one neither shows nor releases it.
+    app.slack.images_inflight = Some(5);
+    let _ = app.update(Message::SlackImagesLoaded(
+        session,
+        epoch,
+        4,
+        vec!["U1".into()],
+        found("U1"),
+    ));
+    assert_eq!(icon(&app, "slack:user:U1"), None);
+    assert_eq!(app.slack.images_inflight, Some(5));
+    let _ = app.update(Message::SlackImagesLoaded(
+        session,
+        epoch,
+        5,
+        vec!["U1".into(), "U9".into()],
+        found("U1"),
+    ));
+    assert_eq!(icon(&app, "slack:user:U1").as_deref(), Some("/a/U1.png"));
+    assert_eq!(app.slack.images_inflight, None);
+    assert!(
+        app.slack.images_tried.contains("U9"),
+        "failures are not retried"
+    );
+
+    // A preview's avatar is kept too, and both survive the rows reloading.
+    let request = app.slack.preview_request;
+    let _ = app.update(Message::SlackPreviewLoaded(
+        session,
+        "slack:user:U2".into(),
+        request,
+        Some((Vec::new(), Some("/a/U2.png".into()))),
+    ));
+    app.set_command_list_items(rows());
+    assert_eq!(icon(&app, "slack:user:U1").as_deref(), Some("/a/U1.png"));
+    assert_eq!(icon(&app, "slack:user:U2").as_deref(), Some("/a/U2.png"));
+
+    // Not connected yet: nothing counts as tried, and rows loading again
+    // lets the next batch try.
+    app.slack.images_inflight = Some(6);
+    let _ = app.update(Message::SlackImagesLoaded(
+        session,
+        epoch,
+        6,
+        vec!["U3".into()],
+        ImagesOutcome::Skipped,
+    ));
+    assert!(app.slack.images_blocked);
+    assert!(!app.slack.images_tried.contains("U3"));
+    app.set_command_list_items(rows());
+    assert!(!app.slack.images_blocked);
+
+    // Another account drops the batch in flight and the pictures shown.
+    app.slack.images_inflight = Some(7);
+    app.sync_slack_account_to(epoch + 1);
+    assert_eq!(app.slack.images_inflight, None);
+    assert!(app.slack.images_tried.is_empty());
+    let _ = app.update(Message::SlackImagesLoaded(
+        session,
+        epoch,
+        7,
+        vec!["U2".into()],
+        found("U2"),
+    ));
+    app.set_command_list_items(rows());
+    assert_eq!(icon(&app, "slack:user:U1"), None);
+}
+
+#[test]
 fn test_slack_status_fill_and_debounced_search() {
     let mut addons = AddonsConfig::default();
     addons.slack.enabled = true;
@@ -8563,7 +8683,6 @@ fn test_slack_status_fill_and_debounced_search() {
         &super::slack_api::Directory::default(),
         &super::slack::Live::default(),
         crate::SlackOpenIn::Desktop,
-        &std::collections::HashMap::new(),
         chrono::Local::now(),
     );
     let generation = app.command_list.generation;

@@ -1209,7 +1209,15 @@ impl LauncherApp {
         let preview = self.ensure_clipboard_preview();
         let file_preview = self.ensure_file_browser_preview();
         let tab_preview = self.ensure_tab_preview();
-        Task::batch([task, select_1, preview, file_preview, tab_preview])
+        let slack_images = self.ensure_slack_images();
+        Task::batch([
+            task,
+            select_1,
+            preview,
+            file_preview,
+            tab_preview,
+            slack_images,
+        ])
     }
 
     fn maybe_auto_select_1(&mut self) -> Task<Message> {
@@ -1649,6 +1657,16 @@ impl LauncherApp {
             Message::SlackSearchDue(session, terms) => self.handle_slack_search_due(session, terms),
             Message::SlackPreviewLoaded(session, identity, request, preview) => {
                 self.handle_slack_preview_loaded(session, identity, request, preview)
+            }
+            Message::SlackImagesDue(session, request) => {
+                self.handle_slack_images_due(session, request)
+            }
+            Message::SlackImagesLoaded(session, epoch, request, keys, outcome) => {
+                self.handle_slack_images_loaded(session, epoch, request, keys, outcome)
+            }
+            Message::SlackListScrolled(offset) => {
+                self.slack.scroll = offset;
+                Task::none()
             }
             Message::FaviconsFetched(session, fetched) if session & MAIN_VIEW_SESSION != 0 => {
                 self.handle_main_view_favicons(session, fetched)
@@ -3319,6 +3337,9 @@ impl LauncherApp {
                 .icon_names
                 .iter()
                 .find_map(|name| self.resolve_icon_name(name));
+        }
+        if self.command_list.addon == Some(CommandListAddon::Slack) {
+            self.apply_slack_images(&mut items);
         }
         self.command_list.set_items(items);
     }

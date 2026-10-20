@@ -498,6 +498,32 @@ fn auth_test(client: &Client) -> Result<Workspace, String> {
     })
 }
 
+/// The URL of the icon of `account`'s workspace, None when it has the
+/// default one. Fails when Slack answers for another team.
+pub(super) fn workspace_icon(
+    client: &Client,
+    account: &Workspace,
+) -> Result<Option<String>, String> {
+    let reply = client.call("team.info", &[])?;
+    let team = &reply["team"];
+    let ids = [&team["id"], &team["enterprise_id"]];
+    if !ids
+        .iter()
+        .any(|id| id.as_str() == Some(account.team_id.as_str()))
+    {
+        return Err("team.info answered for another team".to_string());
+    }
+    let icon = &team["icon"];
+    if icon["image_default"].as_bool() == Some(true) {
+        return Ok(None);
+    }
+    Ok(["image_132", "image_88", "image_68"]
+        .iter()
+        .filter_map(|size| icon[size].as_str())
+        .find(|url| url.starts_with("https://"))
+        .map(str::to_string))
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(super) struct User {
     pub id: String,
@@ -1303,6 +1329,46 @@ pub(super) mod tests {
             .call("x.y", &[])
             .unwrap_err()
             .contains("try again in 600s"));
+    }
+
+    #[test]
+    fn test_workspace_icon_checks_the_team() {
+        let account = Workspace {
+            team_id: "T1".to_string(),
+            ..Workspace::default()
+        };
+        let fake = FakeHttp::with(vec![
+            ok(
+                serde_json::json!({"ok": true, "team": {"id": "T1", "icon": {
+                "image_68": "https://a/68.png", "image_132": "https://a/132.png"}}}),
+            ),
+            ok(
+                serde_json::json!({"ok": true, "team": {"id": "T1", "icon": {
+                "image_default": true, "image_132": "https://a/default.png"}}}),
+            ),
+            ok(
+                serde_json::json!({"ok": true, "team": {"id": "T2", "icon": {
+                "image_132": "https://a/other.png"}}}),
+            ),
+            ok(
+                serde_json::json!({"ok": true, "team": {"id": "T9", "enterprise_id": "T1",
+                "icon": {"image_88": "https://a/88.png"}}}),
+            ),
+            ok(serde_json::json!({"ok": false, "error": "missing_scope", "needed": "team:read"})),
+        ]);
+        let client = Client::fake(Box::new(fake.clone()));
+        assert_eq!(
+            workspace_icon(&client, &account),
+            Ok(Some("https://a/132.png".to_string()))
+        );
+        assert_eq!(workspace_icon(&client, &account), Ok(None));
+        assert!(workspace_icon(&client, &account).is_err(), "another team");
+        assert_eq!(
+            workspace_icon(&client, &account),
+            Ok(Some("https://a/88.png".to_string()))
+        );
+        assert!(workspace_icon(&client, &account).is_err());
+        assert_eq!(fake.methods(), ["team.info"; 5]);
     }
 
     #[test]

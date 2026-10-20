@@ -687,12 +687,17 @@ impl LauncherApp {
             .width(Length::Fill)
             .height(Length::Shrink);
 
-        let items_scroll = scrollable(items_container)
+        let mut items_scroll = scrollable(items_container)
             .id(self.view.scrollable_id.clone())
             .direction(slim_scrollbar())
             .style(scrollable_style(t))
             .height(Length::Fill)
             .width(Length::Fill);
+        // Slack downloads the pictures of the rows scrolled into view.
+        if self.command_list.addon == Some(super::command_list::CommandListAddon::Slack) {
+            items_scroll = items_scroll
+                .on_scroll(|viewport| Message::SlackListScrolled(viewport.relative_offset().y));
+        }
 
         let footer_divider = container(Space::new())
             .width(Length::Fill)
@@ -1994,7 +1999,16 @@ impl LauncherApp {
                     ..color
                 };
                 let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
-                if let Some(icon) = item.icon.as_deref().and_then(|path| {
+                let far = self.command_list.addon
+                    == Some(super::command_list::CommandListAddon::Slack)
+                    && !self.slack_row_near(row, super::slack_mode::ICON_WINDOW);
+                if far && item.icon.is_some() {
+                    item_row = item_row.push(
+                        iced::widget::Space::new()
+                            .width(Length::Fixed(40.0))
+                            .height(Length::Fixed(40.0)),
+                    );
+                } else if let Some(icon) = item.icon.as_deref().and_then(|path| {
                     let opacity = if item.dimmed { DIMMED_OPACITY } else { 1.0 };
                     faded_icon_element(Path::new(path), 40.0, opacity)
                 }) {
