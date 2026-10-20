@@ -721,7 +721,7 @@
           "default": null
         },
         "opacity": {
-          "description": "Opacity of the native UI backgrounds, from 0.0 (see-through) to 1.0\n(the theme as designed). Text and icons stay opaque. Default: 0.85.",
+          "description": "Opacity of the native UI backgrounds, from 0.0 (see-through) to 1.0\n(the theme as designed). Text and icons stay opaque. Default: 0.95.",
           "type": [
             "number",
             "null"

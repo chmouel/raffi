@@ -85,29 +85,58 @@ fn configure_preview_visibility(view: &mut state::ViewState, show_preview: Optio
 /// Set when Raffi exported `ICED_BACKEND` itself and must take it back.
 static RENDERER_OVERRIDE: AtomicBool = AtomicBool::new(false);
 
+/// Mesa driconf option, also read from the environment. iced takes the first
+/// non-sRGB surface format, which Mesa lists as a 10-bit one with a 2-bit
+/// alpha channel: opacity then snaps to 0, 1/3, 2/3 or 1. This puts 8-bit
+/// BGRA first instead. Other Vulkan drivers ignore it.
+const MESA_BGRA8_FIRST: &str = "vk_wsi_force_bgra8_unorm_first";
+
+/// Set when Raffi exported `MESA_BGRA8_FIRST` itself and must take it back.
+static FORMAT_OVERRIDE: AtomicBool = AtomicBool::new(false);
+
+/// Set when Raffi exported `MESA_DEBUG=silent`, which stops Mesa printing an
+/// "overridden by environment" notice for `MESA_BGRA8_FIRST` on stderr.
+static MESA_SILENT_OVERRIDE: AtomicBool = AtomicBool::new(false);
+
 /// iced reads its renderer only from `ICED_BACKEND`. Must run before any
 /// thread starts, since setting the environment is not thread safe.
 /// Returns whether the GPU renderer is used: the software one presents
 /// opaque buffers on Wayland, so the window cannot be translucent with it.
 fn select_renderer(renderer: crate::Renderer) -> bool {
-    if let Some(backend) = std::env::var_os("ICED_BACKEND") {
-        return !backend.to_string_lossy().starts_with("tiny-skia");
+    let gpu = match std::env::var_os("ICED_BACKEND") {
+        Some(backend) => !backend.to_string_lossy().starts_with("tiny-skia"),
+        None if renderer == crate::Renderer::Gpu => true,
+        None => {
+            std::env::set_var("ICED_BACKEND", "tiny-skia");
+            RENDERER_OVERRIDE.store(true, Ordering::SeqCst);
+            false
+        }
+    };
+    if gpu && std::env::var_os(MESA_BGRA8_FIRST).is_none() {
+        std::env::set_var(MESA_BGRA8_FIRST, "true");
+        FORMAT_OVERRIDE.store(true, Ordering::SeqCst);
+        if std::env::var_os("MESA_DEBUG").is_none() {
+            std::env::set_var("MESA_DEBUG", "silent");
+            MESA_SILENT_OVERRIDE.store(true, Ordering::SeqCst);
+        }
     }
-    if renderer == crate::Renderer::Gpu {
-        return true;
-    }
-    std::env::set_var("ICED_BACKEND", "tiny-skia");
-    RENDERER_OVERRIDE.store(true, Ordering::SeqCst);
-    false
+    gpu
 }
 
-/// Drop Raffi's `ICED_BACKEND` once the window exists, so programs launched
-/// from Raffi do not inherit it. Threads are running by then, but Rust's own
-/// environment readers and `Command` spawns take the same lock, and Raffi's
-/// own background threads (font scan, thumbnails) do not call C `getenv`.
+/// Drop the variables Raffi exported for iced once the window exists, so
+/// programs launched from Raffi do not inherit them. Threads are running by
+/// then, but Rust's own environment readers and `Command` spawns take the
+/// same lock, and Raffi's own background threads (font scan, thumbnails) do
+/// not call C `getenv`.
 pub(super) fn release_renderer_override() {
     if RENDERER_OVERRIDE.swap(false, Ordering::SeqCst) {
         std::env::remove_var("ICED_BACKEND");
+    }
+    if FORMAT_OVERRIDE.swap(false, Ordering::SeqCst) {
+        std::env::remove_var(MESA_BGRA8_FIRST);
+    }
+    if MESA_SILENT_OVERRIDE.swap(false, Ordering::SeqCst) {
+        std::env::remove_var("MESA_DEBUG");
     }
 }
 

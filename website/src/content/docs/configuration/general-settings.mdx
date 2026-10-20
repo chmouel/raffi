@@ -50,7 +50,7 @@ Color theme for the native interface. Valid options:
   Equivalent to `-t` or `--theme` flag. Only applies to native UI.
 
 
-**`opacity`** `number` (default: `0.85`)
+**`opacity`** `number` (default: `0.95`)
 
 Opacity of the native UI backgrounds, from `0.0` (see-through) to `1.0` (the theme as designed). Text and icons stay opaque. Set `1` for a solid window. Transparency needs the GPU renderer, which `renderer: auto` picks when `opacity` is below `1`.
 
@@ -367,7 +367,7 @@ Large or SVG launcher icons are converted to small PNG copies in
 `~/.cache/raffi/icon-thumbnails` on first use, so later launches skip decoding
 them. `raffi --refresh-cache` clears these copies along with the icon cache.
 
-The translucent default (`opacity: 0.85`) uses the GPU renderer. For the
+The translucent default (`opacity: 0.95`) uses the GPU renderer. For the
 fastest start, set `opacity: 1` or `renderer: cpu` to use the software
 renderer with an opaque window.
 

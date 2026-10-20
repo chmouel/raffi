@@ -1314,7 +1314,7 @@ pub struct GeneralConfig {
     #[serde(default)]
     pub theme_colors: Option<ThemeColorsConfig>,
     /// Opacity of the native UI backgrounds, from 0.0 (see-through) to 1.0
-    /// (the theme as designed). Text and icons stay opaque. Default: 0.85.
+    /// (the theme as designed). Text and icons stay opaque. Default: 0.95.
     #[serde(default)]
     #[schemars(range(min = 0.0, max = 1.0))]
     pub opacity: Option<f32>,
@@ -1568,7 +1568,7 @@ pub struct Args {
     )]
     pub theme: Option<String>,
     #[options(
-        help = "native UI background opacity, 0.0 to 1.0 (default: 0.85)",
+        help = "native UI background opacity, 0.0 to 1.0 (default: 0.95)",
         no_short,
         meta = "OPACITY"
     )]
@@ -1609,7 +1609,7 @@ fn resolve_window_dimensions(general: &GeneralConfig) -> (f32, f32) {
     )
 }
 
-const DEFAULT_OPACITY: f32 = 0.85;
+const DEFAULT_OPACITY: f32 = 0.95;
 
 /// Background opacity for the native UI: `--opacity` wins over `general.opacity`.
 fn resolve_opacity(args: &Args, general: &GeneralConfig) -> f32 {

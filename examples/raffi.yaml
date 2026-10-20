@@ -16,7 +16,7 @@ version: 1
 #   theme: dark              # Built-in theme: dark (default), light, catppuccin, catppuccin-latte,
 #                            # tokyo-night, nord, gruvbox, dracula, rose-pine, or kanagawa.
 #                            # Also sets the ANSI palette used in previews
-#   opacity: 0.85            # Background opacity, 0.0 (see-through) to 1.0 (solid); --opacity overrides
+#   opacity: 0.95            # Background opacity, 0.0 (see-through) to 1.0 (solid); --opacity overrides
 #   blur: true               # Ask the compositor to blur behind the window (KDE; see docs for others)
 #   font_size: 20            # Base font size in px (default: 20). Other sizes and paddings
 #                            # scale proportionally (input=24, items=20, subtitles=14, hints=12)
