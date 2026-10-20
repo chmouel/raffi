@@ -463,23 +463,27 @@ impl CommandListState {
 /// Run a command action while Raffi stays open. Blocking: run it off the UI
 /// thread.
 pub(super) fn run_kept_open(action: &DeferredAction) -> Result<(), String> {
-    let argv = match action {
-        DeferredAction::Command(argv) => argv,
-        DeferredAction::Signal(target) => return super::kill::send_signal(target),
-        DeferredAction::Bluetooth(args) => return super::bluetooth::run_action(args),
-        DeferredAction::BrowserTab(action) => return super::browser_tabs::run(action),
-        DeferredAction::Slack(action) => return super::slack::run_action(action),
-        DeferredAction::BrowserHostSetup { force } => {
-            return crate::browser_host::install_current(*force).map(|_| ())
+    match action {
+        DeferredAction::Command(argv) => {
+            let (program, args) = argv.split_first().ok_or("no command to run")?;
+            let mut command = Command::new(program);
+            command.args(args);
+            run_bounded(command, KEPT_OPEN_TIMEOUT, 64 * 1024)
+                .map(|_| ())
+                .map_err(|error| format!("{program}: {error}"))
         }
-        _ => return Err("this action only runs after Raffi closes".to_string()),
-    };
-    let (program, args) = argv.split_first().ok_or("no command to run")?;
-    let mut command = Command::new(program);
-    command.args(args);
-    run_bounded(command, KEPT_OPEN_TIMEOUT, 64 * 1024)
-        .map(|_| ())
-        .map_err(|error| format!("{program}: {error}"))
+        DeferredAction::CommandBatch(_)
+        | DeferredAction::Hypr(_)
+        | DeferredAction::TerminalTab { .. } => action.run(),
+        DeferredAction::Signal(target) => super::kill::send_signal(target),
+        DeferredAction::Bluetooth(args) => super::bluetooth::run_action(args),
+        DeferredAction::BrowserTab(action) => super::browser_tabs::run(action),
+        DeferredAction::Slack(action) => super::slack::run_action(action),
+        DeferredAction::BrowserHostSetup { force } => {
+            crate::browser_host::install_current(*force).map(|_| ())
+        }
+        _ => Err("this action only runs after Raffi closes".to_string()),
+    }
 }
 
 pub(super) fn filter_items_into(

@@ -85,6 +85,12 @@ Controls the Alfred-style right-hand preview and details pane in the native UI.
 
   Addon results (text snippets, file browser, script filters, emoji, calculator, currency, web searches) always show a preview. Plain launcher entries only show one when this is `true`, or when the entry itself sets `show_preview: true`. Press **Ctrl+P** to toggle the pane at runtime; when nothing is shown for a launcher, the first press turns launcher previews on.
 
+**`close_on_action`** `boolean` (default: `true`)
+
+Whether Raffi closes its window after executing an action in the native UI.
+
+  Set `close_on_action: false` (or pass `--keep-open` / `-o general.close_on_action=false`) to keep Raffi open with your current search query and selection after launching an app, copying an inline result, or running an addon action. Individual launcher entries and addons can override this with their own `close_on_action: true | false` setting (`media`, `audio`, `bluetooth`, and `kill` stay open by default unless set to `true`). Actions that must type or paste into the previously focused window (`insert`, `hypr_paste`, password typing) or end the desktop session still close Raffi first.
+
 **`show_tips`** `boolean` (default: `true`)
 
 Shows a tip in the empty search box of the native UI, such as `Type to search... (tip: clip for Clipboard history)`, picked from your enabled addons and changed on each launch. Set it to `false` to keep the plain `Type to search...`.
@@ -416,8 +422,7 @@ general:
 
 ## Command-Line Override
 
-The following general settings can be overridden with command-line flags.
-`window_width`, `window_height`, `blur`, `clipboard_history`, and `terminal_classes` have no flag and can only be set in the configuration file.
+Dedicated flags exist for common settings, and any setting in `raffi.yaml` or `launchers.yaml` can be overridden from the command line with `-o KEY=VALUE` (`--option KEY=VALUE`).
 
 ```bash
 # Override UI type
@@ -429,9 +434,9 @@ raffi --theme light
 # Override background opacity
 raffi --opacity 0.7
 
-# Disable icons
-raffi --no-icons
+# Keep the window open after actions
+raffi --keep-open
 
-# Set custom script shell
-raffi --default-script-shell /bin/zsh
+# Override any config setting via -o / --option
+raffi -o general.window_width=1000 -o addons.emoji.close_on_action=false
 ```

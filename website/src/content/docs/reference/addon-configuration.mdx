@@ -10,6 +10,8 @@ import emojiScreenshot from '../../../assets/screenshots/emoji-picker.png';
 
 The native UI includes several built-in addons that can be configured under the `addons` section of `raffi.yaml`. All addons except the clipboard history browser are enabled by default; that one turns itself on when CopyQ is running.
 
+Every addon (including individual entries in `script_filters`, `web_searches`, and `text_snippets`) also accepts **`close_on_action`** (`boolean`) to control whether Raffi closes after running an action in that addon, overriding `general.close_on_action`. Addons default to `true` (closing Raffi), except `media`, `audio`, `bluetooth`, and `kill`, which default to `false` so you can run several actions in a row. Actions that type or paste into the previously focused window (`insert`, `hypr_paste`, password typing) always close Raffi first.
+
 ## Keywords
 
 Script filters, web searches, text snippets, the emoji picker, the clipboard

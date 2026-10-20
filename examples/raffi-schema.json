@@ -151,9 +151,12 @@
       "type": "object",
       "properties": {
         "close_on_action": {
-          "description": "Close Raffi after an action instead of staying open and refreshing\nthe list (default: false).",
-          "type": "boolean",
-          "default": false
+          "description": "Close Raffi after an action instead of staying open and refreshing\nthe list (default: `general.close_on_action`, else false).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
         },
         "enabled": {
           "type": "boolean",
@@ -204,6 +207,14 @@
           "default": null,
           "minimum": 0
         },
+        "close_on_action": {
+          "description": "Close Raffi after copying a secret (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
         "enabled": {
           "type": "boolean",
           "default": true
@@ -234,9 +245,12 @@
       "type": "object",
       "properties": {
         "close_on_action": {
-          "description": "Close Raffi after an action instead of staying open and refreshing\nthe list (default: false).",
-          "type": "boolean",
-          "default": false
+          "description": "Close Raffi after an action instead of staying open and refreshing\nthe list (default: `general.close_on_action`, else false).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
         },
         "enabled": {
           "type": "boolean",
@@ -257,6 +271,14 @@
       "description": "Configuration for the browser tabs addon, fed by the Vicinae browser\nextension (native UI only)",
       "type": "object",
       "properties": {
+        "close_on_action": {
+          "description": "Close Raffi after switching to a tab (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
         "enabled": {
           "type": "boolean",
           "default": true
@@ -280,6 +302,14 @@
       "description": "Configuration for the calculator addon",
       "type": "object",
       "properties": {
+        "close_on_action": {
+          "description": "Close Raffi after copying a calculation result (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
         "enabled": {
           "type": "boolean",
           "default": true
@@ -312,6 +342,14 @@
         },
         "backend": {
           "$ref": "#/$defs/ClipboardBackend"
+        },
+        "close_on_action": {
+          "description": "Close Raffi after copying a clipboard entry (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
         },
         "enabled": {
           "description": "Unset turns it on when a CopyQ process is running at startup;\n`true` or `false` overrides the detection.",
@@ -398,6 +436,14 @@
       "description": "Configuration for the inline color converter addon",
       "type": "object",
       "properties": {
+        "close_on_action": {
+          "description": "Close Raffi after copying a color value (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
         "enabled": {
           "type": "boolean",
           "default": true
@@ -409,6 +455,14 @@
       "description": "Configuration for the currency addon",
       "type": "object",
       "properties": {
+        "close_on_action": {
+          "description": "Close Raffi after copying a conversion result (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
         "currencies": {
           "type": [
             "array",
@@ -444,6 +498,14 @@
       "description": "Configuration for the developer tools addon: the `dev` transform list\nand the inline `uuid` and `pw` generators (native UI only)",
       "type": "object",
       "properties": {
+        "close_on_action": {
+          "description": "Close Raffi after copying a generated or transformed value (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
         "enabled": {
           "type": "boolean",
           "default": true
@@ -477,6 +539,14 @@
         "action": {
           "type": [
             "string",
+            "null"
+          ],
+          "default": null
+        },
+        "close_on_action": {
+          "description": "Close Raffi after executing an emoji action (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
             "null"
           ],
           "default": null
@@ -540,6 +610,14 @@
           "description": "Action on Enter for files: `open` (xdg-open), `copy`, `insert`, or a\nshell command where `{value}` is the full path. Defaults to `open`.",
           "type": [
             "string",
+            "null"
+          ],
+          "default": null
+        },
+        "close_on_action": {
+          "description": "Close Raffi after executing a file browser action (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
             "null"
           ],
           "default": null
@@ -659,6 +737,14 @@
         "clipboard_history": {
           "description": "Clipboard manager for `{clipboard:N}` snippet placeholders",
           "$ref": "#/$defs/ClipboardHistory"
+        },
+        "close_on_action": {
+          "description": "Close Raffi after executing an action (native UI only, default: true).\nAddon and launcher `close_on_action` settings override this.",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
         },
         "default_script_shell": {
           "type": [
@@ -821,6 +907,14 @@
       "description": "Configuration for the kill process addon (native UI only)",
       "type": "object",
       "properties": {
+        "close_on_action": {
+          "description": "Close Raffi after sending a signal instead of staying open and refreshing\nthe list (default: `general.close_on_action`, else false).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
         "enabled": {
           "type": "boolean",
           "default": true
@@ -861,9 +955,12 @@
       "type": "object",
       "properties": {
         "close_on_action": {
-          "description": "Close Raffi after an action instead of staying open and refreshing\nthe list (default: false).",
-          "type": "boolean",
-          "default": false
+          "description": "Close Raffi after an action instead of staying open and refreshing\nthe list (default: `general.close_on_action`, else false).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
         },
         "enabled": {
           "type": "boolean",
@@ -893,6 +990,14 @@
           "format": "uint64",
           "default": null,
           "minimum": 0
+        },
+        "close_on_action": {
+          "description": "Close Raffi after copying a secret (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
         },
         "enabled": {
           "type": "boolean",
@@ -1084,6 +1189,13 @@
             "null"
           ]
         },
+        "close_on_action": {
+          "description": "Close Raffi after launching this entry (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "description": {
           "type": [
             "string",
@@ -1189,6 +1301,14 @@
             "type": "string"
           }
         },
+        "close_on_action": {
+          "description": "Close Raffi after executing an action on a result (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
         "command": {
           "type": "string"
         },
@@ -1253,6 +1373,14 @@
           "format": "uint64",
           "default": null,
           "minimum": 0
+        },
+        "close_on_action": {
+          "description": "Close Raffi after opening a conversation or message (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
         },
         "cookie_command": {
           "description": "Shell command printing the value of the `d` cookie, needed with a\nsession (`xoxc-`) token.",
@@ -1337,6 +1465,14 @@
       "description": "Configuration for the system commands addon (native UI only)",
       "type": "object",
       "properties": {
+        "close_on_action": {
+          "description": "Close Raffi after running a system command (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
         "commands": {
           "$ref": "#/$defs/SystemCommandsConfig"
         },
@@ -1451,6 +1587,14 @@
       "description": "Configuration for the run in terminal addon (native UI only)",
       "type": "object",
       "properties": {
+        "close_on_action": {
+          "description": "Close Raffi after running a command in the terminal (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
         "command": {
           "description": "Terminal command line the command to run is appended to, such as\n`[alacritty, -e]`. Found automatically when unset: xdg-terminal-exec,\nthen `$TERMINAL`, then the first known terminal installed.",
           "type": [
@@ -1559,6 +1703,14 @@
           "items": {
             "type": "string"
           }
+        },
+        "close_on_action": {
+          "description": "Close Raffi after executing a snippet action (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
         },
         "command": {
           "type": [
@@ -1686,6 +1838,14 @@
       "description": "Configuration for the inline unit converter addon",
       "type": "object",
       "properties": {
+        "close_on_action": {
+          "description": "Close Raffi after copying a converted value (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
         "enabled": {
           "type": "boolean",
           "default": true
@@ -1697,6 +1857,14 @@
       "description": "Configuration for a web search addon",
       "type": "object",
       "properties": {
+        "close_on_action": {
+          "description": "Close Raffi after opening a web search URL (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
         "icon": {
           "type": [
             "string",
@@ -1724,6 +1892,14 @@
       "description": "Configuration for the window switcher addon for Hyprland, niri and sway\n(native UI only)",
       "type": "object",
       "properties": {
+        "close_on_action": {
+          "description": "Close Raffi after focusing or moving a window (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
         "enabled": {
           "type": "boolean",
           "default": true
@@ -1743,6 +1919,14 @@
       "description": "Configuration for the inline world clock addon",
       "type": "object",
       "properties": {
+        "close_on_action": {
+          "description": "Close Raffi after copying a time value (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
         "enabled": {
           "type": "boolean",
           "default": true

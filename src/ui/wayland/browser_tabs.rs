@@ -43,7 +43,10 @@ pub(super) fn tab_target(item: &CommandItem) -> Option<&TabAction> {
 
 /// The tabs of every connected browser, or the steps to connect one.
 /// Blocking: run it off the UI thread.
-pub(super) fn load_tabs() -> Result<Vec<CommandItem>, String> {
+pub(super) fn load_tabs(
+    focus_keep_open: bool,
+    close_keep_open: bool,
+) -> Result<Vec<CommandItem>, String> {
     let dir = browser_host::socket_dir()
         .map_err(|error| format!("Cannot use the browser socket directory: {error}"))?;
     let browsers = browser_host::list_browsers(&dir);
@@ -60,7 +63,7 @@ pub(super) fn load_tabs() -> Result<Vec<CommandItem>, String> {
         return Ok(setup_items(&setup, &installed));
     }
     let icons = super::favicons::lookup(&browsers);
-    tab_items(&browsers, &icons)
+    tab_items_with(&browsers, &icons, focus_keep_open, close_keep_open)
 }
 
 /// Rows that connect the browsers to Raffi: write the manifests, get the
@@ -220,9 +223,19 @@ fn setup_row(
 
 /// Playing tabs first, then the most recently used. `icons` holds the site
 /// icons by [`super::favicons::host_key`].
+#[allow(dead_code)]
 pub(super) fn tab_items(
     browsers: &[(PathBuf, Listing)],
     icons: &HashMap<String, PathBuf>,
+) -> Result<Vec<CommandItem>, String> {
+    tab_items_with(browsers, icons, false, true)
+}
+
+pub(super) fn tab_items_with(
+    browsers: &[(PathBuf, Listing)],
+    icons: &HashMap<String, PathBuf>,
+    focus_keep_open: bool,
+    close_keep_open: bool,
 ) -> Result<Vec<CommandItem>, String> {
     if browsers.is_empty() {
         return Err(NO_BROWSER.to_string());
@@ -250,7 +263,16 @@ pub(super) fn tab_items(
     });
     Ok(tabs
         .into_iter()
-        .map(|(socket, listing, tab)| tab_item(socket, listing, tab, icons))
+        .map(|(socket, listing, tab)| {
+            tab_item(
+                socket,
+                listing,
+                tab,
+                icons,
+                focus_keep_open,
+                close_keep_open,
+            )
+        })
         .collect())
 }
 
@@ -259,6 +281,8 @@ fn tab_item(
     listing: &Listing,
     tab: &Tab,
     icons: &HashMap<String, PathBuf>,
+    focus_keep_open: bool,
+    close_keep_open: bool,
 ) -> CommandItem {
     let browser = &listing.browser;
     let title = if tab.title.is_empty() {
@@ -314,8 +338,12 @@ fn tab_item(
         icon: None,
         identity: format!("{host_id}:{}", tab.id),
         unavailable: None,
-        primary: Some(action(TabOperation::Focus, false, None)),
-        secondary: Some(action(TabOperation::Close, true, Some("Closing..."))),
+        primary: Some(action(TabOperation::Focus, focus_keep_open, None)),
+        secondary: Some(action(
+            TabOperation::Close,
+            close_keep_open,
+            Some("Closing..."),
+        )),
         details: vec![
             ("URL".to_string(), tab.url.clone()),
             ("Browser".to_string(), browser.name.clone()),

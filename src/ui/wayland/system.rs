@@ -164,12 +164,19 @@ pub(super) fn system_entries(
 }
 
 impl SystemEntry {
-    pub fn to_item(&self) -> CommandItem {
+    pub fn to_item_with(&self, keep_open: bool) -> CommandItem {
         let enter = if self.needs_confirmation() {
             format!("Press twice to {}", self.verb)
         } else {
             format!("{} the session", self.title)
         };
+        let can_keep_open = matches!(
+            self.id,
+            SystemCommand::Lock | SystemCommand::Suspend | SystemCommand::Hibernate
+        ) && matches!(
+            &self.action,
+            DeferredAction::Command(_) | DeferredAction::CommandBatch(_) | DeferredAction::Hypr(_)
+        );
         CommandItem {
             title: self.title.to_string(),
             subtitle: self.command_line(),
@@ -184,7 +191,7 @@ impl SystemEntry {
             primary: Some(CommandAction {
                 action: self.action.clone(),
                 confirm: self.needs_confirmation().then(|| self.verb.to_string()),
-                keep_open: false,
+                keep_open: keep_open && can_keep_open,
                 progress: None,
             }),
             secondary: None,

@@ -59,7 +59,7 @@ impl Compositor {
 
     /// List the windows, most recently focused first. Blocking: run it off
     /// the UI thread.
-    pub fn load_windows(self) -> Result<Vec<CommandItem>, String> {
+    pub fn load_windows(self, keep_open: bool) -> Result<Vec<CommandItem>, String> {
         let program = self.program();
         let run = |args: &[&str]| {
             let mut command = Command::new(program);
@@ -67,23 +67,34 @@ impl Compositor {
             run_bounded(command, TIMEOUT, MAX_OUTPUT).map_err(|error| format!("{program}: {error}"))
         };
         let own_pid = std::process::id();
-        match self {
+        let mut items = match self {
             Self::Hyprland => hyprland_items(
                 &run(&["clients", "-j"])?,
                 &run(&["monitors", "-j"])?,
                 own_pid,
-            ),
+            )?,
             Self::Niri => niri_items(
                 &run(&["msg", "--json", "windows"])?,
                 &run(&["msg", "--json", "workspaces"])?,
                 own_pid,
-            ),
+            )?,
             Self::Sway => sway_items(
                 &run(&["-t", "get_tree", "-r"])?,
                 &run(&["-t", "get_workspaces", "-r"])?,
                 own_pid,
-            ),
+            )?,
+        };
+        if keep_open {
+            for item in &mut items {
+                if let Some(primary) = &mut item.primary {
+                    primary.keep_open = true;
+                }
+                if let Some(secondary) = &mut item.secondary {
+                    secondary.keep_open = true;
+                }
+            }
         }
+        Ok(items)
     }
 }
 
@@ -1297,16 +1308,16 @@ mod tests {
     #[ignore]
     fn live_niri_actions() {
         let id = std::env::var("RAFFI_NIRI_TEST_ID").unwrap();
-        let items = Compositor::Niri.load_windows().unwrap();
+        let items = Compositor::Niri.load_windows(false).unwrap();
         let item = items.iter().find(|item| item.identity == id).unwrap();
         let run = |action: &CommandAction| {
             super::super::actions::run_deferred(&std::sync::Mutex::new(Some(action.action.clone())))
         };
         run(item.secondary.as_ref().unwrap()).unwrap();
-        let items = Compositor::Niri.load_windows().unwrap();
+        let items = Compositor::Niri.load_windows(false).unwrap();
         assert_eq!(items[0].identity, id, "the moved window has the focus");
         run(items[1].primary.as_ref().unwrap()).unwrap();
-        let items = Compositor::Niri.load_windows().unwrap();
+        let items = Compositor::Niri.load_windows(false).unwrap();
         assert_ne!(items[0].identity, id, "the other window has the focus");
     }
 
@@ -1543,16 +1554,16 @@ mod tests {
     #[ignore]
     fn live_sway_actions() {
         let id = std::env::var("RAFFI_SWAY_TEST_ID").unwrap();
-        let items = Compositor::Sway.load_windows().unwrap();
+        let items = Compositor::Sway.load_windows(false).unwrap();
         let item = items.iter().find(|item| item.identity == id).unwrap();
         let run = |action: &CommandAction| {
             super::super::actions::run_deferred(&std::sync::Mutex::new(Some(action.action.clone())))
         };
         run(item.secondary.as_ref().unwrap()).unwrap();
-        let items = Compositor::Sway.load_windows().unwrap();
+        let items = Compositor::Sway.load_windows(false).unwrap();
         assert_eq!(items[0].identity, id, "the moved window has the focus");
         run(items[1].primary.as_ref().unwrap()).unwrap();
-        let items = Compositor::Sway.load_windows().unwrap();
+        let items = Compositor::Sway.load_windows(false).unwrap();
         assert_ne!(items[0].identity, id, "the other window has the focus");
     }
 }

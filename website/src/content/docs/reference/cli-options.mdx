@@ -31,6 +31,28 @@ Path to the YAML configuration file. Launcher entries are read from `launchers.y
   ```
 
 
+**`-o, --option`** `KEY=VALUE` (repeatable)
+
+Override any YAML configuration setting from the command line.
+
+  Keys use dot-separated paths matching `raffi.yaml` (such as `general.theme=nord`, `addons.emoji.close_on_action=false`, or `launchers.firefox.close_on_action=false`). Sequence entries under `addons.script_filters`, `addons.web_searches`, and `addons.text_snippets` can be addressed by numeric index, `name`, or `keyword`. Values are parsed as YAML booleans, numbers, lists, or strings, and validated against the configuration schema.
+
+  ```bash
+  raffi -o general.close_on_action=false
+  raffi -o addons.emoji.close_on_action=false -o general.theme=nord
+  raffi -o 'addons.script_filters.Timezones.close_on_action=false'
+  ```
+
+
+**`--keep-open`** `boolean` (default: `false`)
+
+Keep the Raffi window open after executing an action (shorthand for `-o general.close_on_action=false`). Individual addons or launchers can still override this via `-o addons.<name>.close_on_action=true`. Native UI only.
+
+  ```bash
+  raffi --keep-open
+  ```
+
+
 **`--check-config`** `boolean` (default: `false`)
 
 Validate the configuration file and `launchers.yaml` next to it against the JSON Schema and exit without launching anything.

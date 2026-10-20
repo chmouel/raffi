@@ -46,6 +46,8 @@ pub struct RaffiConfig {
     /// while the input keeps showing `linoux torvalds`. Requires `alias`; no
     /// whitespace.
     pub keyword: Option<String>,
+    /// Close Raffi after launching this entry (default: `general.close_on_action`, else true).
+    pub close_on_action: Option<bool>,
 }
 
 /// A launcher `keyword` and the `alias` text it expands to.
@@ -93,6 +95,9 @@ pub struct CurrencyAddonConfig {
     pub default_currency: Option<String>,
     #[serde(default)]
     pub trigger: Option<String>,
+    /// Close Raffi after copying a conversion result (default: `general.close_on_action`, else true).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
 }
 
 impl Default for CurrencyAddonConfig {
@@ -102,6 +107,7 @@ impl Default for CurrencyAddonConfig {
             currencies: None,
             default_currency: None,
             trigger: None,
+            close_on_action: None,
         }
     }
 }
@@ -112,11 +118,17 @@ impl Default for CurrencyAddonConfig {
 pub struct CalculatorAddonConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Close Raffi after copying a calculation result (default: `general.close_on_action`, else true).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
 }
 
 impl Default for CalculatorAddonConfig {
     fn default() -> Self {
-        Self { enabled: true }
+        Self {
+            enabled: true,
+            close_on_action: None,
+        }
     }
 }
 
@@ -126,11 +138,17 @@ impl Default for CalculatorAddonConfig {
 pub struct UnitsAddonConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Close Raffi after copying a converted value (default: `general.close_on_action`, else true).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
 }
 
 impl Default for UnitsAddonConfig {
     fn default() -> Self {
-        Self { enabled: true }
+        Self {
+            enabled: true,
+            close_on_action: None,
+        }
     }
 }
 
@@ -140,11 +158,17 @@ impl Default for UnitsAddonConfig {
 pub struct ColorAddonConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Close Raffi after copying a color value (default: `general.close_on_action`, else true).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
 }
 
 impl Default for ColorAddonConfig {
     fn default() -> Self {
-        Self { enabled: true }
+        Self {
+            enabled: true,
+            close_on_action: None,
+        }
     }
 }
 
@@ -163,6 +187,9 @@ pub struct DevtoolsAddonConfig {
     #[serde(default)]
     #[schemars(range(min = 8, max = 128))]
     pub password_length: Option<usize>,
+    /// Close Raffi after copying a generated or transformed value (default: `general.close_on_action`, else true).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
 }
 
 impl DevtoolsAddonConfig {
@@ -181,6 +208,7 @@ impl Default for DevtoolsAddonConfig {
             enabled: true,
             trigger: None,
             password_length: None,
+            close_on_action: None,
         }
     }
 }
@@ -191,11 +219,17 @@ impl Default for DevtoolsAddonConfig {
 pub struct WorldClockAddonConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Close Raffi after copying a time value (default: `general.close_on_action`, else true).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
 }
 
 impl Default for WorldClockAddonConfig {
     fn default() -> Self {
-        Self { enabled: true }
+        Self {
+            enabled: true,
+            close_on_action: None,
+        }
     }
 }
 
@@ -246,6 +280,9 @@ pub struct FileBrowserAddonConfig {
     /// non-zero exit keeps the built-in preview. Killed after 3 seconds.
     #[serde(default)]
     pub preview_command: Option<String>,
+    /// Close Raffi after executing a file browser action (default: `general.close_on_action`, else true).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
 }
 
 /// Order of file browser entries
@@ -354,6 +391,7 @@ impl Default for FileBrowserAddonConfig {
             sort_reverse: false,
             show: FileBrowserShow::default(),
             preview_command: None,
+            close_on_action: None,
         }
     }
 }
@@ -387,6 +425,9 @@ pub struct EmojiAddonConfig {
     pub secondary_action: Option<String>,
     #[serde(default)]
     pub data_files: Option<Vec<String>>,
+    /// Close Raffi after executing an emoji action (default: `general.close_on_action`, else true).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
 }
 
 impl Default for EmojiAddonConfig {
@@ -397,12 +438,13 @@ impl Default for EmojiAddonConfig {
             action: None,
             secondary_action: None,
             data_files: None,
+            close_on_action: None,
         }
     }
 }
 
 /// Configuration for a script filter addon
-#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
 pub struct ScriptFilterConfig {
     pub name: String,
@@ -419,16 +461,22 @@ pub struct ScriptFilterConfig {
     /// Re-run the command with `RAFFI_PREVIEW=1` for the selected item and show
     /// the preview object it prints (default: true).
     pub dynamic_preview: Option<bool>,
+    /// Close Raffi after executing an action on a result (default: `general.close_on_action`, else true).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
 }
 
 /// Configuration for a web search addon
-#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
 pub struct WebSearchConfig {
     pub name: String,
     pub keyword: String,
     pub url: String,
     pub icon: Option<String>,
+    /// Close Raffi after opening a web search URL (default: `general.close_on_action`, else true).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
 }
 
 /// A single text snippet entry
@@ -446,7 +494,7 @@ pub struct TextSnippet {
 }
 
 /// Configuration for a text snippet source
-#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
 pub struct TextSnippetSourceConfig {
     pub name: String,
@@ -473,6 +521,9 @@ pub struct TextSnippetSourceConfig {
     /// Best-effort restoration of plain text after the `hypr_paste` action.
     #[serde(default)]
     pub restore_clipboard: bool,
+    /// Close Raffi after executing a snippet action (default: `general.close_on_action`, else true).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
 }
 
 /// Clipboard manager that stores the history browsed by the clipboard addon
@@ -521,6 +572,9 @@ pub struct ClipboardAddonConfig {
     /// Action on Ctrl+Enter (default: `hypr_paste`).
     #[serde(default = "default_clipboard_secondary_action")]
     pub secondary_action: ClipboardAction,
+    /// Close Raffi after copying a clipboard entry (default: `general.close_on_action`, else true).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
 }
 
 fn default_clipboard_action() -> ClipboardAction {
@@ -566,6 +620,7 @@ impl Default for ClipboardAddonConfig {
             backend: ClipboardBackend::default(),
             action: default_clipboard_action(),
             secondary_action: default_clipboard_secondary_action(),
+            close_on_action: None,
         }
     }
 }
@@ -638,6 +693,9 @@ pub struct SystemAddonConfig {
     /// Entries left out of the list.
     #[serde(default)]
     pub hide: Vec<SystemCommand>,
+    /// Close Raffi after running a system command (default: `general.close_on_action`, else true).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
 }
 
 impl SystemAddonConfig {
@@ -653,6 +711,7 @@ impl Default for SystemAddonConfig {
             trigger: None,
             commands: SystemCommandsConfig::default(),
             hide: Vec::new(),
+            close_on_action: None,
         }
     }
 }
@@ -667,6 +726,9 @@ pub struct WindowsAddonConfig {
     /// Keyword that opens the window list (default: `win`).
     #[serde(default)]
     pub trigger: Option<String>,
+    /// Close Raffi after focusing or moving a window (default: `general.close_on_action`, else true).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
 }
 
 impl WindowsAddonConfig {
@@ -680,6 +742,7 @@ impl Default for WindowsAddonConfig {
         Self {
             enabled: true,
             trigger: None,
+            close_on_action: None,
         }
     }
 }
@@ -700,6 +763,9 @@ pub struct BrowserTabsAddonConfig {
     /// fetching the selected page for its preview.
     #[serde(default)]
     pub favicon_service: FaviconService,
+    /// Close Raffi after switching to a tab (default: `general.close_on_action`, else true).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
 }
 
 /// Service asked for the favicons of sites the browsers have none for
@@ -727,6 +793,7 @@ impl Default for BrowserTabsAddonConfig {
             enabled: true,
             trigger: None,
             favicon_service: FaviconService::default(),
+            close_on_action: None,
         }
     }
 }
@@ -741,14 +808,18 @@ pub struct MediaAddonConfig {
     #[serde(default)]
     pub trigger: Option<String>,
     /// Close Raffi after an action instead of staying open and refreshing
-    /// the list (default: false).
+    /// the list (default: `general.close_on_action`, else false).
     #[serde(default)]
-    pub close_on_action: bool,
+    pub close_on_action: Option<bool>,
 }
 
 impl MediaAddonConfig {
     pub fn trigger(&self) -> &str {
         self.trigger.as_deref().unwrap_or("media")
+    }
+
+    pub fn close_on_action(&self, general: Option<bool>) -> bool {
+        self.close_on_action.or(general).unwrap_or(false)
     }
 }
 
@@ -757,7 +828,7 @@ impl Default for MediaAddonConfig {
         Self {
             enabled: true,
             trigger: None,
-            close_on_action: false,
+            close_on_action: None,
         }
     }
 }
@@ -772,9 +843,9 @@ pub struct AudioAddonConfig {
     #[serde(default)]
     pub trigger: Option<String>,
     /// Close Raffi after an action instead of staying open and refreshing
-    /// the list (default: false).
+    /// the list (default: `general.close_on_action`, else false).
     #[serde(default)]
-    pub close_on_action: bool,
+    pub close_on_action: Option<bool>,
     /// Percent the Volume up and Volume down rows change the output volume
     /// by (default: 5).
     #[serde(default)]
@@ -787,6 +858,10 @@ pub struct AudioAddonConfig {
 impl AudioAddonConfig {
     pub fn trigger(&self) -> &str {
         self.trigger.as_deref().unwrap_or("audio")
+    }
+
+    pub fn close_on_action(&self, general: Option<bool>) -> bool {
+        self.close_on_action.or(general).unwrap_or(false)
     }
 
     pub fn volume_step(&self) -> u32 {
@@ -803,7 +878,7 @@ impl Default for AudioAddonConfig {
         Self {
             enabled: true,
             trigger: None,
-            close_on_action: false,
+            close_on_action: None,
             volume_step: None,
             max_volume: None,
         }
@@ -860,6 +935,9 @@ pub struct TerminalAddonConfig {
     /// Read from kitty.conf when unset.
     #[serde(default)]
     pub kitty_socket: Option<String>,
+    /// Close Raffi after running a command in the terminal (default: `general.close_on_action`, else true).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
 }
 
 /// Where the terminal addon opens typed commands
@@ -888,6 +966,7 @@ impl Default for TerminalAddonConfig {
             hold: true,
             open_in: TerminalOpenIn::default(),
             kitty_socket: None,
+            close_on_action: None,
         }
     }
 }
@@ -901,11 +980,19 @@ pub struct KillAddonConfig {
     /// Keyword that opens the process list (default: `kill`).
     #[serde(default)]
     pub trigger: Option<String>,
+    /// Close Raffi after sending a signal instead of staying open and refreshing
+    /// the list (default: `general.close_on_action`, else false).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
 }
 
 impl KillAddonConfig {
     pub fn trigger(&self) -> &str {
         self.trigger.as_deref().unwrap_or("kill")
+    }
+
+    pub fn close_on_action(&self, general: Option<bool>) -> bool {
+        self.close_on_action.or(general).unwrap_or(false)
     }
 }
 
@@ -914,6 +1001,7 @@ impl Default for KillAddonConfig {
         Self {
             enabled: true,
             trigger: None,
+            close_on_action: None,
         }
     }
 }
@@ -928,14 +1016,18 @@ pub struct BluetoothAddonConfig {
     #[serde(default)]
     pub trigger: Option<String>,
     /// Close Raffi after an action instead of staying open and refreshing
-    /// the list (default: false).
+    /// the list (default: `general.close_on_action`, else false).
     #[serde(default)]
-    pub close_on_action: bool,
+    pub close_on_action: Option<bool>,
 }
 
 impl BluetoothAddonConfig {
     pub fn trigger(&self) -> &str {
         self.trigger.as_deref().unwrap_or("bt")
+    }
+
+    pub fn close_on_action(&self, general: Option<bool>) -> bool {
+        self.close_on_action.or(general).unwrap_or(false)
     }
 }
 
@@ -944,7 +1036,7 @@ impl Default for BluetoothAddonConfig {
         Self {
             enabled: true,
             trigger: None,
-            close_on_action: false,
+            close_on_action: None,
         }
     }
 }
@@ -989,6 +1081,9 @@ pub struct PassAddonConfig {
     /// Milliseconds to wait after Raffi closes before typing (default: 200).
     #[serde(default)]
     pub type_delay_ms: Option<u64>,
+    /// Close Raffi after copying a secret (default: `general.close_on_action`, else true).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
 }
 
 impl PassAddonConfig {
@@ -1021,6 +1116,7 @@ impl Default for PassAddonConfig {
             username_fields: None,
             clipboard_timeout: None,
             type_delay_ms: None,
+            close_on_action: None,
         }
     }
 }
@@ -1041,6 +1137,9 @@ pub struct BitwardenAddonConfig {
     /// Milliseconds to wait after Raffi closes before typing (default: 200).
     #[serde(default)]
     pub type_delay_ms: Option<u64>,
+    /// Close Raffi after copying a secret (default: `general.close_on_action`, else true).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
 }
 
 impl BitwardenAddonConfig {
@@ -1064,6 +1163,7 @@ impl Default for BitwardenAddonConfig {
             trigger: None,
             clipboard_timeout: None,
             type_delay_ms: None,
+            close_on_action: None,
         }
     }
 }
@@ -1113,6 +1213,9 @@ pub struct SlackAddonConfig {
     /// fresh ones load.
     #[serde(default)]
     pub cache_minutes: Option<u64>,
+    /// Close Raffi after opening a conversation or message (default: `general.close_on_action`, else true).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
 }
 
 impl SlackAddonConfig {
@@ -1383,6 +1486,10 @@ pub struct GeneralConfig {
     /// `clip for Clipboard history` (native UI only, default: true).
     #[serde(default)]
     pub show_tips: Option<bool>,
+    /// Close Raffi after executing an action (native UI only, default: true).
+    /// Addon and launcher `close_on_action` settings override this.
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
     /// Appearance of the right-hand preview pane (font, size, colours, width)
     #[serde(default)]
     pub preview: PreviewConfig,
@@ -1421,6 +1528,7 @@ fn first_run_general() -> GeneralConfig {
 }
 
 /// Complete parsed configuration
+#[derive(Debug)]
 pub struct ParsedConfig {
     pub general: GeneralConfig,
     pub addons: AddonsConfig,
@@ -1585,6 +1693,18 @@ pub struct Args {
         meta = "OPACITY"
     )]
     pub opacity: Option<f32>,
+    #[options(
+        help = "keep the window open after executing an action (shorthand for -o general.close_on_action=false)",
+        no_short
+    )]
+    pub keep_open: bool,
+    #[options(
+        help = "override a configuration setting (repeatable, e.g. -o general.close_on_action=false)",
+        short = "o",
+        long = "option",
+        meta = "KEY=VALUE"
+    )]
+    pub options: Vec<String>,
     #[options(
         help = "write both JSON Schemas beside the config file and exit",
         no_short
@@ -2110,6 +2230,347 @@ pub fn check_config(filename: &str) -> Result<Vec<ConfigProblem>> {
     Ok(problems)
 }
 
+/// Split a dot-separated CLI override key into path segments, respecting
+/// quoted or bracketed segments such as `addons.script_filters."My Filter".close_on_action`
+/// or `addons.script_filters[My Filter].close_on_action`.
+fn parse_override_path(key: &str) -> Result<Vec<String>> {
+    let key = key.trim();
+    if key.is_empty() {
+        anyhow::bail!("empty configuration key");
+    }
+    let mut segments = Vec::new();
+    let mut current = String::new();
+    let mut chars = key.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' | '\'' => {
+                let quote = c;
+                let mut closed = false;
+                for next in chars.by_ref() {
+                    if next == quote {
+                        closed = true;
+                        break;
+                    }
+                    current.push(next);
+                }
+                if !closed {
+                    anyhow::bail!("unterminated quote in configuration key '{key}'");
+                }
+            }
+            '[' => {
+                if !current.is_empty() {
+                    segments.push(std::mem::take(&mut current));
+                }
+                let mut bracket = String::new();
+                let mut closed = false;
+                for next in chars.by_ref() {
+                    if next == ']' {
+                        closed = true;
+                        break;
+                    }
+                    bracket.push(next);
+                }
+                if !closed {
+                    anyhow::bail!("unterminated '[' in configuration key '{key}'");
+                }
+                let trimmed = bracket
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .to_string();
+                if trimmed.is_empty() {
+                    anyhow::bail!("empty '[]' in configuration key '{key}'");
+                }
+                segments.push(trimmed);
+                if chars.peek() == Some(&'.') {
+                    chars.next();
+                }
+            }
+            '.' => {
+                if current.is_empty() {
+                    anyhow::bail!("empty segment in configuration key '{key}'");
+                }
+                segments.push(std::mem::take(&mut current));
+            }
+            _ => current.push(c),
+        }
+    }
+    if !current.is_empty() {
+        segments.push(current);
+    }
+    if segments.is_empty() {
+        anyhow::bail!("empty configuration key");
+    }
+    Ok(segments)
+}
+
+/// Set a single `KEY=VALUE` override in `raw`.
+fn set_yaml_override(raw: &mut Value, spec: &str) -> Result<()> {
+    let (key, val_str) = spec
+        .split_once('=')
+        .ok_or_else(|| anyhow::anyhow!("invalid option '{spec}': expected KEY=VALUE"))?;
+    let segments = parse_override_path(key)?;
+    let parsed_val: Value = serde_yaml::from_str(val_str)
+        .with_context(|| format!("invalid YAML value in option '{spec}'"))?;
+
+    if !raw.is_mapping() {
+        let mut root = serde_yaml::Mapping::new();
+        root.insert(Value::String("version".to_string()), Value::from(1u64));
+        *raw = Value::Mapping(root);
+    }
+    if let Some(root) = raw.as_mapping_mut() {
+        root.entry(Value::String("version".to_string()))
+            .or_insert_with(|| Value::from(1u64));
+    }
+
+    let mut cursor = raw;
+    for (i, segment) in segments.iter().enumerate() {
+        let is_last = i + 1 == segments.len();
+        if is_last {
+            match cursor {
+                Value::Mapping(map) => {
+                    map.insert(Value::String(segment.clone()), parsed_val);
+                    return Ok(());
+                }
+                Value::Sequence(seq) => {
+                    if let Ok(index) = segment.parse::<usize>() {
+                        let len = seq.len();
+                        let slot = seq.get_mut(index).ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "index {index} out of bounds in option '{spec}' (len {len})"
+                            )
+                        })?;
+                        *slot = parsed_val;
+                        return Ok(());
+                    }
+                    anyhow::bail!(
+                        "cannot set field '{segment}' directly on a list in option '{spec}'"
+                    );
+                }
+                _ => {
+                    anyhow::bail!(
+                        "cannot traverse non-mapping at '{}' in option '{spec}'",
+                        segments[..=i].join(".")
+                    );
+                }
+            }
+        }
+
+        match cursor {
+            Value::Mapping(map) => {
+                let k = Value::String(segment.clone());
+                if !map.contains_key(&k) || map.get(&k).is_some_and(Value::is_null) {
+                    map.insert(k.clone(), Value::Mapping(serde_yaml::Mapping::new()));
+                }
+                cursor = map.get_mut(&k).expect("inserted above");
+            }
+            Value::Sequence(seq) => {
+                let pos = if let Ok(index) = segment.parse::<usize>() {
+                    (index < seq.len()).then_some(index)
+                } else {
+                    seq.iter().position(|item| {
+                        item.as_mapping().is_some_and(|m| {
+                            m.get(Value::String("name".to_string()))
+                                .and_then(Value::as_str)
+                                == Some(segment.as_str())
+                                || m.get(Value::String("keyword".to_string()))
+                                    .and_then(Value::as_str)
+                                    == Some(segment.as_str())
+                        })
+                    })
+                };
+                let index = pos.ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "no entry matching '{segment}' at '{}' in option '{spec}'",
+                        segments[..i].join(".")
+                    )
+                })?;
+                cursor = &mut seq[index];
+            }
+            _ => {
+                anyhow::bail!(
+                    "cannot traverse non-mapping at '{}' in option '{spec}'",
+                    segments[..=i].join(".")
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Validate a YAML value recursively against `schema` when the `jsonschema`
+/// crate (`config-validation` feature) is disabled.
+#[cfg(not(feature = "config-validation"))]
+fn validate_yaml_against_schema(
+    node: &serde_json::Value,
+    root: &serde_json::Value,
+    val: &Value,
+    path: &str,
+) -> Result<()> {
+    fn deref<'a>(
+        node: &'a serde_json::Value,
+        root: &'a serde_json::Value,
+    ) -> &'a serde_json::Value {
+        if let Some(r) = node.get("$ref").and_then(serde_json::Value::as_str) {
+            if let Some(name) = r.strip_prefix("#/$defs/") {
+                if let Some(def) = root.get("$defs").and_then(|d| d.get(name)) {
+                    return def;
+                }
+            }
+        }
+        node
+    }
+
+    let node = deref(node, root);
+    if let Some(any_of) = node.get("anyOf").and_then(serde_json::Value::as_array) {
+        let mut last_err = None;
+        for branch in any_of {
+            match validate_yaml_against_schema(branch, root, val, path) {
+                Ok(()) => return Ok(()),
+                Err(e) => last_err = Some(e),
+            }
+        }
+        if let Some(err) = last_err {
+            return Err(err);
+        }
+    }
+    if let Some(one_of) = node.get("oneOf").and_then(serde_json::Value::as_array) {
+        let mut last_err = None;
+        for branch in one_of {
+            match validate_yaml_against_schema(branch, root, val, path) {
+                Ok(()) => return Ok(()),
+                Err(e) => last_err = Some(e),
+            }
+        }
+        if let Some(err) = last_err {
+            return Err(err);
+        }
+    }
+
+    let matches_type = |expected: &str| match expected {
+        "null" => val.is_null(),
+        "boolean" => val.is_bool(),
+        "integer" => val.as_i64().is_some() || val.as_u64().is_some(),
+        "number" => val.is_number(),
+        "string" => val.is_string(),
+        "array" => val.is_sequence(),
+        "object" => val.is_mapping(),
+        _ => true,
+    };
+    if let Some(ty) = node.get("type") {
+        let ok = if let Some(s) = ty.as_str() {
+            matches_type(s)
+        } else if let Some(arr) = ty.as_array() {
+            arr.iter()
+                .filter_map(serde_json::Value::as_str)
+                .any(matches_type)
+        } else {
+            true
+        };
+        if !ok {
+            anyhow::bail!("invalid CLI configuration override at '{path}': unexpected value type");
+        }
+    }
+
+    if let Some(enum_vals) = node.get("enum").and_then(serde_json::Value::as_array) {
+        let json_val = serde_json::to_value(val).unwrap_or(serde_json::Value::Null);
+        if !enum_vals.contains(&json_val) {
+            anyhow::bail!("invalid CLI configuration override at '{path}': value not in enum");
+        }
+    }
+
+    if let Some(n) = val.as_f64() {
+        if let Some(min) = node.get("minimum").and_then(serde_json::Value::as_f64) {
+            if n < min {
+                anyhow::bail!(
+                    "invalid CLI configuration override at '{path}': {n} is less than minimum {min}"
+                );
+            }
+        }
+        if let Some(max) = node.get("maximum").and_then(serde_json::Value::as_f64) {
+            if n > max {
+                anyhow::bail!(
+                    "invalid CLI configuration override at '{path}': {n} exceeds maximum {max}"
+                );
+            }
+        }
+    }
+
+    if let Some(seq) = val.as_sequence() {
+        if let Some(items_schema) = node.get("items") {
+            for (idx, item) in seq.iter().enumerate() {
+                let child_path = format!("{path}/{idx}");
+                validate_yaml_against_schema(items_schema, root, item, &child_path)?;
+            }
+        }
+    }
+
+    if let Some(map) = val.as_mapping() {
+        let props = node
+            .get("properties")
+            .and_then(serde_json::Value::as_object);
+        let add = node.get("additionalProperties");
+        if let Some(req) = node.get("required").and_then(serde_json::Value::as_array) {
+            for r in req.iter().filter_map(serde_json::Value::as_str) {
+                if !map.contains_key(Value::String(r.to_string())) {
+                    anyhow::bail!(
+                        "invalid CLI configuration override at '{path}': missing required key '{r}'"
+                    );
+                }
+            }
+        }
+        for (k, v) in map {
+            let Some(k_str) = k.as_str() else {
+                continue;
+            };
+            let child_path = format!("{path}/{k_str}");
+            if let Some(prop_schema) = props.and_then(|p| p.get(k_str)) {
+                validate_yaml_against_schema(prop_schema, root, v, &child_path)?;
+            } else if let Some(add_schema) = add {
+                if add_schema.is_object() {
+                    validate_yaml_against_schema(add_schema, root, v, &child_path)?;
+                } else if add_schema.as_bool() == Some(false) {
+                    anyhow::bail!(
+                        "invalid CLI configuration override at '{child_path}': unknown key '{k_str}'"
+                    );
+                }
+            } else if props.is_some() {
+                anyhow::bail!(
+                    "invalid CLI configuration override at '{child_path}': unknown key '{k_str}'"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Apply `--keep-open` and `-o` / `--option` overrides to a v1-shaped `raw`
+/// config value, then validate the result against the config schema.
+fn apply_cli_overrides(raw: &mut Value, args: &Args) -> Result<()> {
+    if !args.keep_open && args.options.is_empty() {
+        return Ok(());
+    }
+    if args.keep_open {
+        set_yaml_override(raw, "general.close_on_action=false")?;
+    }
+    for spec in &args.options {
+        set_yaml_override(raw, spec)?;
+    }
+    let problems = validate_config_value(raw);
+    if let Some(first) = problems.first() {
+        anyhow::bail!("invalid CLI configuration override: {first}");
+    }
+    #[cfg(not(feature = "config-validation"))]
+    {
+        let schema = serde_json::to_value(schemars::schema_for!(ConfigSchema))
+            .context("cannot serialize the built-in schema")?;
+        validate_yaml_against_schema(&schema, &schema, raw, "")?;
+        serde_yaml::from_value::<Config>(raw.clone())
+            .context("invalid CLI configuration override")?;
+    }
+    Ok(())
+}
+
 /// Read the configuration file and return a ParsedConfig.
 pub fn read_config(filename: &str, args: &Args) -> Result<ParsedConfig> {
     let contents =
@@ -2124,11 +2585,21 @@ pub fn read_config(filename: &str, args: &Args) -> Result<ParsedConfig> {
         report_config_warnings(&raw, &contents, false, filename);
     }
 
-    let mut config: Config = serde_yaml::from_value(raw).context("cannot parse config")?;
     let launchers_path = launchers_file_for(filename);
     if launchers_path.exists() {
-        if config.launchers.is_empty() {
-            config.launchers = read_launchers_file(&launchers_path)?;
+        let has_inline_launchers = raw
+            .as_mapping()
+            .and_then(|m| m.get(Value::String("launchers".to_string())))
+            .and_then(Value::as_mapping)
+            .is_some_and(|m| !m.is_empty());
+        if !has_inline_launchers {
+            let launchers = read_launchers_file(&launchers_path)?;
+            if let Some(m) = raw.as_mapping_mut() {
+                m.insert(
+                    Value::String("launchers".to_string()),
+                    Value::Mapping(launchers),
+                );
+            }
         } else {
             eprintln!(
                 "raffi: ignoring {} because {filename} already defines launchers",
@@ -2136,6 +2607,9 @@ pub fn read_config(filename: &str, args: &Args) -> Result<ParsedConfig> {
             );
         }
     }
+
+    apply_cli_overrides(&mut raw, args)?;
+    let config: Config = serde_yaml::from_value(raw).context("cannot parse config")?;
 
     process_config(config, args)
 }
@@ -2213,6 +2687,7 @@ pub fn read_config_from_reader<R: Read>(reader: R, args: &Args) -> Result<Parsed
     // For reader-based configs, do an in-memory migration (no file write)
     let v0 = migrate_config_v0_in_memory(&mut raw);
     report_config_warnings(&raw, &contents, v0, "config");
+    apply_cli_overrides(&mut raw, args)?;
 
     let config: Config = serde_yaml::from_value(raw).context("cannot parse config")?;
     process_config(config, args)
@@ -3144,12 +3619,20 @@ fn format_print_only_command(mc: &RaffiConfig, interpreter: &str) -> Result<Stri
     Ok(parts.join(" "))
 }
 
-/// Execute the chosen command or script.
-pub fn execute_chosen_command(mc: &RaffiConfig, args: &Args, interpreter: &str) -> Result<()> {
-    if args.print_only {
-        println!("{}", format_print_only_command(mc, interpreter)?);
-        return Ok(());
-    }
+/// Spawn `command` and reap the child in a background thread so it never
+/// lingers as a zombie when Raffi stays open.
+fn spawn_and_reap(mut command: Command) -> std::io::Result<()> {
+    let mut child = command.spawn()?;
+    let _ = std::thread::Builder::new()
+        .name("raffi-reaper".to_string())
+        .spawn(move || {
+            let _ = child.wait();
+        });
+    Ok(())
+}
+
+/// Spawn a launcher entry's binary or script in the background.
+pub(crate) fn spawn_launcher_command(mc: &RaffiConfig, interpreter: &str) -> Result<()> {
     if let Some(script) = &mc.script {
         let mut command = Command::new(interpreter);
         command.arg("-c").arg(script);
@@ -3157,14 +3640,22 @@ pub fn execute_chosen_command(mc: &RaffiConfig, args: &Args, interpreter: &str) 
             command.arg(interpreter);
             command.args(args);
         }
-        command.spawn().context("cannot launch script")?;
+        spawn_and_reap(command).context("cannot launch script")?;
     } else {
-        Command::new(mc.binary.as_deref().context("Binary not found")?)
-            .args(mc.args.as_deref().unwrap_or(&[]))
-            .spawn()
-            .context("cannot launch command")?;
+        let mut command = Command::new(mc.binary.as_deref().context("Binary not found")?);
+        command.args(mc.args.as_deref().unwrap_or(&[]));
+        spawn_and_reap(command).context("cannot launch command")?;
     }
     Ok(())
+}
+
+/// Execute the chosen command or script.
+pub fn execute_chosen_command(mc: &RaffiConfig, args: &Args, interpreter: &str) -> Result<()> {
+    if args.print_only {
+        println!("{}", format_print_only_command(mc, interpreter)?);
+        return Ok(());
+    }
+    spawn_launcher_command(mc, interpreter)
 }
 
 /// Percent-encode a query string for use in URLs.
@@ -3189,10 +3680,9 @@ pub fn url_encode_query(query: &str) -> String {
 pub fn execute_web_search_url(url_template: &str, query: &str) -> Result<()> {
     let encoded = url_encode_query(query);
     let url = url_template.replace("{query}", &encoded);
-    Command::new("xdg-open")
-        .arg(&url)
-        .spawn()
-        .context("cannot open web search URL")?;
+    let mut command = Command::new("xdg-open");
+    command.arg(&url);
+    spawn_and_reap(command).context("cannot open web search URL")?;
     Ok(())
 }
 
@@ -3301,17 +3791,29 @@ pub fn run(args: Args) -> Result<()> {
     let mut parsed_config = if config_exists {
         read_config(configfile, &args).context("Failed to read config")?
     } else if launchers_path.exists() {
-        let config = Config {
-            launchers: read_launchers_file(&launchers_path)?,
-            ..Config::default()
-        };
+        let mut root = serde_yaml::Mapping::new();
+        root.insert(Value::String("version".to_string()), Value::from(1u64));
+        root.insert(
+            Value::String("launchers".to_string()),
+            Value::Mapping(read_launchers_file(&launchers_path)?),
+        );
+        let mut raw = Value::Mapping(root);
+        apply_cli_overrides(&mut raw, &args)?;
+        let config: Config = serde_yaml::from_value(raw).context("cannot parse config")?;
         process_config(config, &args)?
     } else {
-        ParsedConfig {
-            general: first_run_general(),
-            addons: AddonsConfig::default(),
-            entries: Vec::new(),
+        let mut raw = Value::Mapping(serde_yaml::Mapping::new());
+        apply_cli_overrides(&mut raw, &args)?;
+        let has_main_view_override = raw
+            .as_mapping()
+            .and_then(|m| m.get(Value::String("general".to_string())))
+            .and_then(Value::as_mapping)
+            .is_some_and(|g| g.contains_key(Value::String("main_view".to_string())));
+        let mut config: Config = serde_yaml::from_value(raw).context("cannot parse config")?;
+        if !has_main_view_override {
+            config.general.main_view = first_run_general().main_view;
         }
+        process_config(config, &args)?
     };
     debug_log!("config: loaded {} entries", parsed_config.entries.len());
 
@@ -3429,6 +3931,8 @@ pub fn run(args: Args) -> Result<()> {
         terminal_classes: general.terminal_classes.clone(),
         show_preview: general.show_preview,
         show_tips: general.show_tips.unwrap_or(true),
+        close_on_action: general.close_on_action,
+        print_only: args.print_only,
         preview: general.preview.clone(),
         default_script_shell: default_script_shell.clone(),
     };
@@ -3776,6 +4280,8 @@ mod tests {
             install_browser_host: false,
             uninstall_browser_host: false,
             force: false,
+            keep_open: false,
+            options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.entries.len(), 2);
@@ -3857,6 +4363,8 @@ mod tests {
             install_browser_host: false,
             uninstall_browser_host: false,
             force: false,
+            keep_open: false,
+            options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -3912,6 +4420,7 @@ mod tests {
             show_preview: None,
             alias: None,
             keyword: None,
+            close_on_action: None,
         };
         let args = Args {
             help: false,
@@ -3933,6 +4442,8 @@ mod tests {
             install_browser_host: false,
             uninstall_browser_host: false,
             force: false,
+            keep_open: false,
+            options: Vec::new(),
         };
         let env_provider = MockEnvProvider {
             vars: {
@@ -4073,6 +4584,8 @@ mod tests {
             install_browser_host: false,
             uninstall_browser_host: false,
             force: false,
+            keep_open: false,
+            options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -4161,6 +4674,8 @@ mod tests {
             install_browser_host: false,
             uninstall_browser_host: false,
             force: false,
+            keep_open: false,
+            options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -4360,6 +4875,8 @@ mod tests {
             install_browser_host: false,
             uninstall_browser_host: false,
             force: false,
+            keep_open: false,
+            options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -4400,6 +4917,8 @@ mod tests {
             install_browser_host: false,
             uninstall_browser_host: false,
             force: false,
+            keep_open: false,
+            options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -4459,6 +4978,8 @@ mod tests {
             install_browser_host: false,
             uninstall_browser_host: false,
             force: false,
+            keep_open: false,
+            options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -4501,6 +5022,8 @@ mod tests {
             install_browser_host: false,
             uninstall_browser_host: false,
             force: false,
+            keep_open: false,
+            options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.general.font_size, Some(16.0));
@@ -4539,6 +5062,8 @@ mod tests {
             install_browser_host: false,
             uninstall_browser_host: false,
             force: false,
+            keep_open: false,
+            options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.general.theme, Some("light".to_string()));
@@ -4701,6 +5226,8 @@ mod tests {
             install_browser_host: false,
             uninstall_browser_host: false,
             force: false,
+            keep_open: false,
+            options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -4768,6 +5295,8 @@ mod tests {
             install_browser_host: false,
             uninstall_browser_host: false,
             force: false,
+            keep_open: false,
+            options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -4849,6 +5378,8 @@ mod tests {
             install_browser_host: false,
             uninstall_browser_host: false,
             force: false,
+            keep_open: false,
+            options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -4895,6 +5426,8 @@ mod tests {
             install_browser_host: false,
             uninstall_browser_host: false,
             force: false,
+            keep_open: false,
+            options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert!(parsed_config.addons.text_snippets.is_empty());
@@ -4937,6 +5470,8 @@ mod tests {
             install_browser_host: false,
             uninstall_browser_host: false,
             force: false,
+            keep_open: false,
+            options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -4982,6 +5517,8 @@ mod tests {
                 install_browser_host: false,
                 uninstall_browser_host: false,
                 force: false,
+                keep_open: false,
+                options: Vec::new(),
             };
             read_config_from_reader(Cursor::new(yaml), &args)
         };
@@ -5056,13 +5593,13 @@ shell:
         let defaults = AddonsConfig::default().bluetooth;
         assert!(defaults.enabled);
         assert_eq!(defaults.trigger(), "bt");
-        assert!(!defaults.close_on_action);
+        assert!(!defaults.close_on_action(None));
 
         let config: BluetoothAddonConfig =
             serde_yaml::from_str("enabled: false\ntrigger: blue\nclose_on_action: true\n").unwrap();
         assert!(!config.enabled);
         assert_eq!(config.trigger(), "blue");
-        assert!(config.close_on_action);
+        assert!(config.close_on_action(None));
     }
 
     #[test]
@@ -5107,12 +5644,12 @@ shell:
         let defaults = AddonsConfig::default().audio;
         assert!(defaults.enabled);
         assert_eq!(defaults.trigger(), "audio");
-        assert!(!defaults.close_on_action);
+        assert!(!defaults.close_on_action(None));
 
         let config: AudioAddonConfig =
             serde_yaml::from_str("trigger: snd\nclose_on_action: true\n").unwrap();
         assert_eq!(config.trigger(), "snd");
-        assert!(config.close_on_action);
+        assert!(config.close_on_action(None));
     }
 
     #[test]
@@ -5120,12 +5657,12 @@ shell:
         let defaults = AddonsConfig::default().media;
         assert!(defaults.enabled);
         assert_eq!(defaults.trigger(), "media");
-        assert!(!defaults.close_on_action);
+        assert!(!defaults.close_on_action(None));
 
         let config: MediaAddonConfig =
             serde_yaml::from_str("trigger: mu\nclose_on_action: true\n").unwrap();
         assert_eq!(config.trigger(), "mu");
-        assert!(config.close_on_action);
+        assert!(config.close_on_action(None));
     }
 
     #[test]
@@ -5178,6 +5715,8 @@ shell:
             install_browser_host: false,
             uninstall_browser_host: false,
             force: false,
+            keep_open: false,
+            options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -5226,6 +5765,8 @@ shell:
             install_browser_host: false,
             uninstall_browser_host: false,
             force: false,
+            keep_open: false,
+            options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -5273,6 +5814,8 @@ shell:
             install_browser_host: false,
             uninstall_browser_host: false,
             force: false,
+            keep_open: false,
+            options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -5946,5 +6489,98 @@ launchers:
         write_schema_if_changed(&path, &generate_schema()).unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), generate_schema());
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_cli_overrides_and_keep_open() {
+        let yaml_config = r#"
+version: 1
+general:
+  theme: dark
+addons:
+  script_filters:
+    - name: Timezones
+      keyword: tz
+      command: echo
+  web_searches:
+    - name: Google
+      keyword: g
+      url: "https://google.com?q={query}"
+launchers:
+  shell:
+    binary: sh
+    description: "Shell"
+"#;
+        let args = Args {
+            keep_open: true,
+            options: vec![
+                "general.theme=nord".into(),
+                "addons.emoji.close_on_action=true".into(),
+                "addons.script_filters.Timezones.close_on_action=false".into(),
+                "addons.web_searches.g.close_on_action=true".into(),
+                "launchers.shell.close_on_action=true".into(),
+            ],
+            ..Args::default()
+        };
+        let parsed = read_config_from_reader(Cursor::new(yaml_config), &args).unwrap();
+        assert_eq!(parsed.general.close_on_action, Some(false));
+        assert_eq!(parsed.general.theme.as_deref(), Some("nord"));
+        assert_eq!(parsed.addons.emoji.close_on_action, Some(true));
+        assert_eq!(parsed.addons.script_filters[0].close_on_action, Some(false));
+        assert_eq!(parsed.addons.web_searches[0].close_on_action, Some(true));
+        assert_eq!(parsed.entries[0].close_on_action, Some(true));
+    }
+
+    #[test]
+    fn test_cli_override_rejects_invalid_keys_and_values() {
+        let yaml_config = "version: 1\nlaunchers:\n  shell:\n    binary: sh\n";
+        let bad_key = Args {
+            options: vec!["general.nonexistent=true".into()],
+            ..Args::default()
+        };
+        let err = read_config_from_reader(Cursor::new(yaml_config), &bad_key).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("nonexistent"), "{msg}");
+
+        let bad_launcher_key = Args {
+            options: vec!["launchers.shell.nonexistent=true".into()],
+            ..Args::default()
+        };
+        let err = read_config_from_reader(Cursor::new(yaml_config), &bad_launcher_key).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("nonexistent"), "{msg}");
+
+        let bad_type = Args {
+            options: vec!["general.close_on_action=not-a-bool".into()],
+            ..Args::default()
+        };
+        let err = read_config_from_reader(Cursor::new(yaml_config), &bad_type).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("close_on_action") || msg.contains("not-a-bool"),
+            "{msg}"
+        );
+
+        let missing_eq = Args {
+            options: vec!["general.close_on_action".into()],
+            ..Args::default()
+        };
+        assert!(read_config_from_reader(Cursor::new(yaml_config), &missing_eq).is_err());
+
+        for bad_spec in [
+            "addons.emoji={nonexistent: true}",
+            "launchers.shell=42",
+            "launchers.shell={binary: sh, nonexistent: true}",
+            "addons.devtools.password_length=1",
+        ] {
+            let bad = Args {
+                options: vec![bad_spec.into()],
+                ..Args::default()
+            };
+            assert!(
+                read_config_from_reader(Cursor::new(yaml_config), &bad).is_err(),
+                "expected error for {bad_spec}"
+            );
+        }
     }
 }

@@ -1176,6 +1176,8 @@ impl LauncherApp {
                 help_filtered: Vec::new(),
                 help_saved_query: None,
                 drag: None,
+                close_on_action: None,
+                print_only: false,
             },
             if initial_query.is_empty() {
                 focus(search_input_id).chain(fetch_wayland_handles())
@@ -1185,6 +1187,19 @@ impl LauncherApp {
                     .chain(fetch_wayland_handles())
             },
         )
+    }
+
+    pub(super) fn should_close(&self, addon_close: Option<bool>) -> bool {
+        addon_close.or(self.close_on_action).unwrap_or(true)
+    }
+
+    pub(super) fn finish_or_keep_open(&mut self, addon_close: Option<bool>) -> Task<Message> {
+        self.save_query_to_history();
+        if self.should_close(addon_close) {
+            iced::exit()
+        } else {
+            Task::none()
+        }
     }
 
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
@@ -1643,7 +1658,13 @@ impl LauncherApp {
                     && self.command_list.addon == Some(CommandListAddon::BrowserTabs)
                     && self.command_list.session == session
                 {
-                    self.load_command_list(super::browser_tabs::load_tabs, true)
+                    let focus_keep_open =
+                        !self.should_close(self.addons.browser_tabs.close_on_action);
+                    let close_keep_open = self.addons.browser_tabs.close_on_action != Some(true);
+                    self.load_command_list(
+                        move || super::browser_tabs::load_tabs(focus_keep_open, close_keep_open),
+                        true,
+                    )
                 } else {
                     Task::none()
                 }
@@ -1714,14 +1735,24 @@ impl LauncherApp {
                 }
                 CommandListAddon::Media => self.load_media(true),
                 CommandListAddon::Audio => self.load_audio(true),
-                CommandListAddon::Kill => self.load_command_list(super::kill::load_processes, true),
+                CommandListAddon::Kill => {
+                    let keep_open = !self.addons.kill.close_on_action(self.close_on_action);
+                    self.load_command_list(move || super::kill::load_processes(keep_open), true)
+                }
                 CommandListAddon::BrowserTabs => {
-                    self.load_command_list(super::browser_tabs::load_tabs, true)
+                    let focus_keep_open =
+                        !self.should_close(self.addons.browser_tabs.close_on_action);
+                    let close_keep_open = self.addons.browser_tabs.close_on_action != Some(true);
+                    self.load_command_list(
+                        move || super::browser_tabs::load_tabs(focus_keep_open, close_keep_open),
+                        true,
+                    )
                 }
                 CommandListAddon::Bluetooth => self.load_bluetooth(true),
                 CommandListAddon::Windows => match (self.compositor)() {
                     Some(compositor) if (self.program_exists)(compositor.program()) => {
-                        self.load_command_list(move || compositor.load_windows(), true)
+                        let keep_open = !self.should_close(self.addons.windows.close_on_action);
+                        self.load_command_list(move || compositor.load_windows(keep_open), true)
                     }
                     _ => Task::none(),
                 },
@@ -2508,6 +2539,7 @@ impl LauncherApp {
         match addon {
             CommandListAddon::System => {
                 let session_id = std::env::var("XDG_SESSION_ID").ok();
+                let keep_open = !self.should_close(self.addons.system.close_on_action);
                 let items = system_entries(
                     &self.addons.system,
                     (self.compositor)(),
@@ -2515,7 +2547,7 @@ impl LauncherApp {
                     self.program_exists,
                 )
                 .iter()
-                .map(|entry| entry.to_item())
+                .map(|entry| entry.to_item_with(keep_open))
                 .collect();
                 self.set_command_list_items(items);
                 Task::none()
@@ -2532,11 +2564,17 @@ impl LauncherApp {
                         .set_notice(format!("{} not found", compositor.program()));
                     return Task::none();
                 }
-                self.load_command_list(move || compositor.load_windows(), false)
+                let keep_open = !self.should_close(self.addons.windows.close_on_action);
+                self.load_command_list(move || compositor.load_windows(keep_open), false)
             }
             CommandListAddon::BrowserTabs if !entered => Task::none(),
             CommandListAddon::BrowserTabs => {
-                let load = self.load_command_list(super::browser_tabs::load_tabs, false);
+                let focus_keep_open = !self.should_close(self.addons.browser_tabs.close_on_action);
+                let close_keep_open = self.addons.browser_tabs.close_on_action != Some(true);
+                let load = self.load_command_list(
+                    move || super::browser_tabs::load_tabs(focus_keep_open, close_keep_open),
+                    false,
+                );
                 let session = self.command_list.session;
                 let service = self.addons.browser_tabs.favicon_service;
                 load.chain(Task::perform(
@@ -2573,7 +2611,8 @@ impl LauncherApp {
                     self.command_list.set_notice("kill not found".to_string());
                     return Task::none();
                 }
-                self.load_command_list(super::kill::load_processes, false)
+                let keep_open = !self.addons.kill.close_on_action(self.close_on_action);
+                self.load_command_list(move || super::kill::load_processes(keep_open), false)
             }
             CommandListAddon::Bluetooth if !entered => Task::none(),
             CommandListAddon::Bluetooth => {
@@ -2600,9 +2639,16 @@ impl LauncherApp {
                 let hold = self.addons.terminal.hold;
                 let tab = self.terminal_tab_target(&prefix);
                 let icon = self.resolve_icon_name(super::terminal::TERMINAL_ICON);
+                let keep_open = !self.should_close(self.addons.terminal.close_on_action);
                 self.command_list.query_row = Some(std::sync::Arc::new(move |query: &str| {
-                    let mut item =
-                        super::terminal::run_item(query, &prefix, &shell, hold, tab.as_ref());
+                    let mut item = super::terminal::run_item_with(
+                        query,
+                        &prefix,
+                        &shell,
+                        hold,
+                        tab.as_ref(),
+                        keep_open,
+                    );
                     item.icon = icon.clone();
                     Some(item)
                 }));
@@ -2832,8 +2878,16 @@ impl LauncherApp {
         // Uncover the rows so the rows added below keep the selection.
         self.sync_vault();
         let ready = matches!(report.outcome, Outcome::Ready(_));
+        let addon_close = match op.addon {
+            VaultAddon::Pass => self.addons.pass.close_on_action,
+            VaultAddon::Bitwarden => self.addons.bitwarden.close_on_action,
+        };
+        let should_close = match &report.outcome {
+            Outcome::Ready(job) => !job.can_run_kept_open() || self.should_close(addon_close),
+            _ => true,
+        };
         if let Some(notice) = &report.notice {
-            if ready {
+            if ready && should_close {
                 super::hyprland::notify(notice);
             } else {
                 self.set_command_list_front(super::command_list::CommandItem::info(
@@ -2856,7 +2910,6 @@ impl LauncherApp {
                 self.search_vault_notes()
             }
             Outcome::Ready(job) => {
-                crate::debug_log!("vault: running {} after close", op.log_name());
                 self.save_query_to_history();
                 if let Some(identity) = op.identity() {
                     record_mru_use(&mut self.vault.usage, identity.clone());
@@ -2865,12 +2918,56 @@ impl LauncherApp {
                         self.record_recent(RecentPick::new("pass".to_string(), identity));
                     }
                 }
+                if !should_close {
+                    crate::debug_log!("vault: running {} while open", op.log_name());
+                    let entry = match &op.kind {
+                        OpKind::Entry(_, name) | OpKind::Copy(name) => name.clone(),
+                        _ => String::new(),
+                    };
+                    let copy_op = Op {
+                        addon: op.addon,
+                        kind: OpKind::Copy(entry),
+                    };
+                    self.vault.stop_search();
+                    let (generation, cancel) = self.vault.begin(copy_op);
+                    self.sync_vault();
+                    return Task::perform(
+                        async move {
+                            let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                            std::thread::spawn(move || {
+                                let runner = SystemRunner { cancel };
+                                let outcome = match job.run_with(&runner) {
+                                    Ok(()) => Outcome::Done,
+                                    Err(error) => Outcome::Failed(error),
+                                };
+                                let _ = sender.send(Report {
+                                    outcome,
+                                    notice: None,
+                                });
+                            });
+                            receiver.await.unwrap_or_else(|_| {
+                                Report::failed(SecretError::Tool(
+                                    "stopped unexpectedly".to_string(),
+                                ))
+                            })
+                        },
+                        move |report| Message::VaultDone(generation, report),
+                    );
+                }
+                crate::debug_log!("vault: running {} after close", op.log_name());
                 if let Ok(mut slot) = self.deferred_action.lock() {
                     *slot = Some(super::actions::DeferredAction::Secret(job));
                 }
                 iced::exit()
             }
-            Outcome::Done if op.kind == OpKind::Lock => iced::exit(),
+            Outcome::Done if matches!(op.kind, OpKind::Copy(_)) => Task::none(),
+            Outcome::Done if op.kind == OpKind::Lock => {
+                if self.should_close(addon_close) {
+                    iced::exit()
+                } else {
+                    Task::none()
+                }
+            }
             Outcome::Done => {
                 self.command_list.begin_refresh();
                 self.start_vault(
@@ -2989,7 +3086,7 @@ impl LauncherApp {
     }
 
     fn load_bluetooth(&mut self, refresh: bool) -> Task<Message> {
-        let keep_open = !self.addons.bluetooth.close_on_action;
+        let keep_open = !self.addons.bluetooth.close_on_action(self.close_on_action);
         self.load_command_list(
             move || Ok(super::bluetooth::load_devices(keep_open)),
             refresh,
@@ -3007,14 +3104,14 @@ impl LauncherApp {
     }
 
     fn load_audio(&mut self, refresh: bool) -> Task<Message> {
-        let options = super::audio::AudioOptions::of(&self.addons.audio);
+        let options = super::audio::AudioOptions::of(&self.addons.audio, self.close_on_action);
         self.command_list.query_row = Some(self.audio_query_row(true));
         self.load_command_list(move || Ok(super::audio::load_devices(options)), refresh)
     }
 
     /// The "Set output volume" row builder; `bare` accepts a lone number.
     pub(super) fn audio_query_row(&self, bare: bool) -> super::command_list::QueryRow {
-        let options = super::audio::AudioOptions::of(&self.addons.audio);
+        let options = super::audio::AudioOptions::of(&self.addons.audio, self.close_on_action);
         let icon = self.resolve_icon_name(super::audio::SET_VOLUME_ICON);
         std::sync::Arc::new(move |query: &str| {
             let mut item = super::audio::set_volume_item(query, bare, options)?;
@@ -3024,7 +3121,7 @@ impl LauncherApp {
     }
 
     fn load_media(&mut self, refresh: bool) -> Task<Message> {
-        let keep_open = !self.addons.media.close_on_action;
+        let keep_open = !self.addons.media.close_on_action(self.close_on_action);
         self.load_command_list(move || super::media::load_players(keep_open), refresh)
     }
 
@@ -3094,20 +3191,41 @@ impl LauncherApp {
         self.in_flight.finish(addon.name(), &identity);
         let main_view = self.invalidate_main_view(addon);
         if self.command_list.addon != Some(addon) || self.command_list.session != session {
+            if let Err(error) = result {
+                if self.main_view.active {
+                    return self.show_main_view_action_error(addon, &identity, error);
+                }
+            }
             return main_view;
         }
         let task = match result {
             Ok(()) => match addon {
                 CommandListAddon::Media => self.load_media(true),
                 CommandListAddon::Audio => self.load_audio(true),
-                CommandListAddon::Kill => self.load_command_list(super::kill::load_processes, true),
+                CommandListAddon::Kill => {
+                    let keep_open = !self.addons.kill.close_on_action(self.close_on_action);
+                    self.load_command_list(move || super::kill::load_processes(keep_open), true)
+                }
                 CommandListAddon::BrowserTabs => {
-                    self.load_command_list(super::browser_tabs::load_tabs, true)
+                    let focus_keep_open =
+                        !self.should_close(self.addons.browser_tabs.close_on_action);
+                    let close_keep_open = self.addons.browser_tabs.close_on_action != Some(true);
+                    self.load_command_list(
+                        move || super::browser_tabs::load_tabs(focus_keep_open, close_keep_open),
+                        true,
+                    )
                 }
                 CommandListAddon::Bluetooth => self.load_bluetooth(true),
                 CommandListAddon::Slack => self.load_slack(true),
+                CommandListAddon::Windows => {
+                    if let Some(compositor) = (self.compositor)() {
+                        let keep_open = !self.should_close(self.addons.windows.close_on_action);
+                        self.load_command_list(move || compositor.load_windows(keep_open), true)
+                    } else {
+                        Task::none()
+                    }
+                }
                 CommandListAddon::System
-                | CommandListAddon::Windows
                 | CommandListAddon::Pass
                 | CommandListAddon::Bitwarden
                 | CommandListAddon::Terminal => Task::none(),
@@ -3129,10 +3247,20 @@ impl LauncherApp {
                 // row.
                 let refresh = match addon {
                     CommandListAddon::Kill => {
-                        self.load_command_list(super::kill::load_processes, true)
+                        let keep_open = !self.addons.kill.close_on_action(self.close_on_action);
+                        self.load_command_list(move || super::kill::load_processes(keep_open), true)
                     }
                     CommandListAddon::BrowserTabs => {
-                        self.load_command_list(super::browser_tabs::load_tabs, true)
+                        let focus_keep_open =
+                            !self.should_close(self.addons.browser_tabs.close_on_action);
+                        let close_keep_open =
+                            self.addons.browser_tabs.close_on_action != Some(true);
+                        self.load_command_list(
+                            move || {
+                                super::browser_tabs::load_tabs(focus_keep_open, close_keep_open)
+                            },
+                            true,
+                        )
                     }
                     CommandListAddon::Bluetooth => self.load_bluetooth(true),
                     _ => Task::none(),
@@ -3150,7 +3278,7 @@ impl LauncherApp {
 
     /// Show `item` above the list. The highlight stays on the same entry, so
     /// the next key never acts on the row that slid under it.
-    fn set_command_list_front(&mut self, mut item: super::command_list::CommandItem) {
+    pub(super) fn set_command_list_front(&mut self, mut item: super::command_list::CommandItem) {
         item.icon = item
             .icon_names
             .iter()
@@ -3183,6 +3311,9 @@ impl LauncherApp {
         &mut self,
         mut items: Vec<super::command_list::CommandItem>,
     ) {
+        if self.command_list.addon == Some(CommandListAddon::Slack) {
+            self.apply_slack_keep_open(&mut items);
+        }
         for item in &mut items {
             item.icon = item
                 .icon_names
@@ -3404,7 +3535,7 @@ impl LauncherApp {
         let config_index = index.saturating_sub(current_index);
         if config_index < self.filtered_configs.len() {
             let real_config_index = self.filtered_configs[config_index];
-            let config = &self.configs[real_config_index];
+            let config = self.configs[real_config_index].clone();
             let description = config
                 .description
                 .clone()
@@ -3417,6 +3548,18 @@ impl LauncherApp {
                 record_mru_use(&mut self.mru_map, description);
                 save_mru_map(get_mru_cache_path().ok().as_deref(), &self.mru_map);
                 return self.type_alias(text);
+            }
+            let close = self.should_close(config.close_on_action);
+            if !close && !self.print_only {
+                if let Err(e) =
+                    crate::spawn_launcher_command(&config, &self.view.default_script_shell)
+                {
+                    eprintln!("Error executing command: {e:#}");
+                }
+                record_mru_use(&mut self.mru_map, description);
+                save_mru_map(get_mru_cache_path().ok().as_deref(), &self.mru_map);
+                self.save_query_to_history();
+                return Task::none();
             }
             if let Ok(mut selected) = self.selected_item.lock() {
                 *selected = Some(description.clone());
@@ -3517,8 +3660,22 @@ impl LauncherApp {
         }
         match result {
             Ok(()) => {
-                self.save_query_to_history();
-                iced::exit()
+                let addon_close = if self.devtools.active {
+                    self.addons.devtools.close_on_action
+                } else {
+                    match self.query_class.inline_provider {
+                        Some(InlineProvider::Calculator) => self.addons.calculator.close_on_action,
+                        Some(InlineProvider::Currency) => self.addons.currency.close_on_action,
+                        Some(InlineProvider::Units) => self.addons.units.close_on_action,
+                        Some(InlineProvider::Color) => self.addons.color.close_on_action,
+                        Some(InlineProvider::Time) => self.addons.world_clock.close_on_action,
+                        Some(InlineProvider::Uuid | InlineProvider::Password) => {
+                            self.addons.devtools.close_on_action
+                        }
+                        None => None,
+                    }
+                };
+                self.finish_or_keep_open(addon_close)
             }
             Err(error) => {
                 self.inline_copy_error = Some(format!("Copy failed: {error}"));
@@ -3797,6 +3954,8 @@ impl LauncherApp {
 
     pub(super) fn handle_script_filter_selected(&mut self, index: usize) -> Task<Message> {
         let mut pick = None;
+        let mut addon_close = None;
+        let mut force_close = false;
         if let Some(result) = &self.script_filter.results {
             if let Some(item) = result.items.get(index) {
                 if !item.valid {
@@ -3807,6 +3966,7 @@ impl LauncherApp {
                     .config_index
                     .and_then(|index| self.addons.script_filters.get(index))
                 {
+                    addon_close = config.close_on_action;
                     let mut recent = RecentPick::new(
                         format!("script_filters.{}", config.name),
                         item.arg.clone().unwrap_or_else(|| item.title.clone()),
@@ -3823,14 +3983,20 @@ impl LauncherApp {
                 } else {
                     self.script_filter.action.as_deref()
                 };
-                execute_action_with_env(action.unwrap_or("copy"), value, &item.variables);
+                let act = action.unwrap_or("copy");
+                force_close = act == "insert";
+                execute_action_with_env(act, value, &item.variables);
             }
         }
         if let Some(pick) = pick {
             self.record_recent(pick);
         }
-        self.save_query_to_history();
-        iced::exit()
+        if force_close {
+            self.save_query_to_history();
+            iced::exit()
+        } else {
+            self.finish_or_keep_open(addon_close)
+        }
     }
 
     fn handle_text_snippet_command_result(
@@ -3883,6 +4049,12 @@ impl LauncherApp {
         if self.text_snippets.pending.is_some() {
             return Task::none();
         }
+        let addon_close = self
+            .text_snippets
+            .source_index
+            .and_then(|index| self.addons.text_snippets.get(index))
+            .and_then(|config| config.close_on_action);
+        let mut force_close = false;
         let snippet = self
             .text_snippets
             .filtered
@@ -3919,6 +4091,7 @@ impl LauncherApp {
                 state.pending = Some(PendingSelection {
                     action,
                     preparing_paste: false,
+                    restore_main_view: None,
                 });
                 return expand_final(
                     snippet.value,
@@ -3931,10 +4104,15 @@ impl LauncherApp {
             if action == "hypr_paste" {
                 return self.prepare_hypr_paste(snippet.value);
             }
+            force_close = action == "insert";
             execute_action(&action, &snippet.value);
         }
-        self.save_query_to_history();
-        iced::exit()
+        if force_close {
+            self.save_query_to_history();
+            iced::exit()
+        } else {
+            self.finish_or_keep_open(addon_close)
+        }
     }
 
     fn handle_text_snippet_expanded(
@@ -3970,8 +4148,23 @@ impl LauncherApp {
         });
         match outcome {
             Ok(()) => {
-                self.save_query_to_history();
-                iced::exit()
+                if pending.action == "insert" {
+                    self.save_query_to_history();
+                    iced::exit()
+                } else {
+                    let addon_close = self
+                        .text_snippets
+                        .source_index
+                        .and_then(|index| self.addons.text_snippets.get(index))
+                        .and_then(|config| config.close_on_action);
+                    if let Some(snapshot) = pending.restore_main_view {
+                        if !self.should_close(addon_close) {
+                            self.save_query_to_history();
+                            return self.restore_main_view_context(snapshot);
+                        }
+                    }
+                    self.finish_or_keep_open(addon_close)
+                }
             }
             Err(error) => {
                 crate::debug_log!("snippets: selection failed: {error}");
@@ -3997,6 +4190,7 @@ impl LauncherApp {
         state.pending = Some(PendingSelection {
             action: "hypr_paste".into(),
             preparing_paste: true,
+            restore_main_view: None,
         });
         let session = state.session;
         let restore_clipboard = state.restore_clipboard;
@@ -4048,8 +4242,15 @@ impl LauncherApp {
                 let _ = crate::execute_web_search_url(&web_search.url_template, &web_search.query);
             }
         }
-        self.save_query_to_history();
-        iced::exit()
+        let addon_close = match &self.query_class.mode {
+            QueryMode::WebSearch { config_index, .. } => self
+                .addons
+                .web_searches
+                .get(*config_index)
+                .and_then(|c| c.close_on_action),
+            _ => None,
+        };
+        self.finish_or_keep_open(addon_close)
     }
 
     fn handle_file_browser_row_pressed(&mut self, index: usize, path: String) -> Task<Message> {
@@ -4111,13 +4312,13 @@ impl LauncherApp {
             }
             super::dnd::DragEvent::Dropped => {
                 self.file_browser.dragging = false;
-                self.save_query_to_history();
-                iced::exit()
+                self.finish_or_keep_open(self.addons.file_browser.close_on_action)
             }
         }
     }
 
     fn handle_file_browser_selected(&mut self, index: usize) -> Task<Message> {
+        let mut force_close = false;
         if let Some(entry) = self.file_browser.entries.get(index) {
             let secondary = self.view.current_modifiers.control();
             if entry.is_dir && !secondary {
@@ -4135,11 +4336,16 @@ impl LauncherApp {
             } else {
                 config.action()
             };
+            force_close = action == "insert";
             execute_file_action(action, &entry.full_path);
         }
 
-        self.save_query_to_history();
-        iced::exit()
+        if force_close {
+            self.save_query_to_history();
+            iced::exit()
+        } else {
+            self.finish_or_keep_open(self.addons.file_browser.close_on_action)
+        }
     }
 
     /// Ctrl+Tab: narrow the main view to its next source, or back to all
@@ -4279,8 +4485,7 @@ impl LauncherApp {
             return Task::none();
         };
         execute_file_action("open", &entry.full_path);
-        self.save_query_to_history();
-        iced::exit()
+        self.finish_or_keep_open(self.addons.file_browser.close_on_action)
     }
 
     fn handle_file_browser_open_file_manager(&mut self) -> Task<Message> {
@@ -4296,8 +4501,7 @@ impl LauncherApp {
             selected,
             self.addons.file_browser.file_manager.as_deref(),
         );
-        self.save_query_to_history();
-        iced::exit()
+        self.finish_or_keep_open(self.addons.file_browser.close_on_action)
     }
 
     fn handle_history_previous(&mut self) -> Task<Message> {
@@ -4369,6 +4573,7 @@ impl LauncherApp {
     }
 
     fn handle_emoji_selected(&mut self, index: usize) -> Task<Message> {
+        let mut force_close = false;
         if let Some(&emoji_index) = self.emoji.filtered.get(index) {
             if let Some(entry) = self.emoji.data.get(emoji_index) {
                 let action = if self.view.current_modifiers.control() {
@@ -4376,11 +4581,16 @@ impl LauncherApp {
                 } else {
                     self.emoji.action.as_deref().unwrap_or("copy")
                 };
+                force_close = action == "insert";
                 execute_action(action, &entry.value);
             }
         }
-        self.save_query_to_history();
-        iced::exit()
+        if force_close {
+            self.save_query_to_history();
+            iced::exit()
+        } else {
+            self.finish_or_keep_open(self.addons.emoji.close_on_action)
+        }
     }
 
     /// Runs the item's action after Raffi closes. Actions needing
@@ -4407,17 +4617,26 @@ impl LauncherApp {
                     return Task::none();
                 }
                 self.record_command_list_pick(addon, &identity);
-                if addon == CommandListAddon::Slack && !keep_open {
+                if addon == CommandListAddon::Slack {
                     self.record_slack_pick(&identity);
                 }
                 if keep_open {
                     crate::debug_log!("{}: running {identity}", addon.name());
+                    self.save_query_to_history();
                     let session = self.command_list.session;
                     return Task::perform(
                         async move {
                             let (sender, receiver) = iced::futures::channel::oneshot::channel();
                             std::thread::spawn(move || {
-                                let _ = sender.send(super::command_list::run_kept_open(&action));
+                                let result = if matches!(
+                                    addon,
+                                    CommandListAddon::Terminal | CommandListAddon::System
+                                ) {
+                                    action.run()
+                                } else {
+                                    super::command_list::run_kept_open(&action)
+                                };
+                                let _ = sender.send(result);
                             });
                             let result = receiver
                                 .await
@@ -4686,6 +4905,7 @@ impl LauncherApp {
                             prefix,
                             hold: terminal.hold,
                         },
+                        close_on_action: terminal.close_on_action,
                     }),
                     None => {
                         crate::debug_log!("fallback: no terminal found");
@@ -4713,6 +4933,7 @@ impl LauncherApp {
                             action: FallbackAction::WebSearch {
                                 url_template: ws.url.clone(),
                             },
+                            close_on_action: ws.close_on_action,
                         });
                     } else {
                         crate::debug_log!("fallback: web search '{name}' not found");
@@ -4731,6 +4952,7 @@ impl LauncherApp {
                                 action: sf.action.clone(),
                                 secondary_action: sf.secondary_action.clone(),
                             },
+                            close_on_action: sf.close_on_action,
                         });
                     } else {
                         crate::debug_log!("fallback: script filter '{name}' not found");
@@ -4756,8 +4978,7 @@ impl LauncherApp {
                     if !query.is_empty() {
                         let _ = crate::execute_web_search_url(url_template, &query);
                     }
-                    self.save_query_to_history();
-                    return iced::exit();
+                    return self.finish_or_keep_open(fallback.close_on_action);
                 }
                 FallbackAction::ScriptFilter {
                     command,
@@ -4765,6 +4986,7 @@ impl LauncherApp {
                     action,
                     ..
                 } => {
+                    let act = action.as_deref().unwrap_or("copy");
                     if !query.is_empty() {
                         let output = std::process::Command::new(command)
                             .args(args)
@@ -4778,14 +5000,16 @@ impl LauncherApp {
                                 if let Some(first) = result.items.first() {
                                     let value =
                                         first.arg.as_deref().unwrap_or(first.title.as_str());
-                                    let act = action.as_deref().unwrap_or("copy");
                                     execute_action(act, value);
                                 }
                             }
                         }
                     }
-                    self.save_query_to_history();
-                    return iced::exit();
+                    if act == "insert" {
+                        self.save_query_to_history();
+                        return iced::exit();
+                    }
+                    return self.finish_or_keep_open(fallback.close_on_action);
                 }
                 FallbackAction::Terminal { prefix, hold } => {
                     let tab = self.terminal_tab_target(prefix);
@@ -4796,6 +5020,15 @@ impl LauncherApp {
                         *hold,
                         tab.as_ref(),
                     );
+                    if !self.should_close(fallback.close_on_action) {
+                        std::thread::spawn(move || {
+                            if let Err(error) = action.run() {
+                                eprintln!("raffi: {error}");
+                            }
+                        });
+                        self.save_query_to_history();
+                        return Task::none();
+                    }
                     if let Ok(mut slot) = self.deferred_action.lock() {
                         *slot = Some(action);
                     }

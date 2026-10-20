@@ -50,19 +50,28 @@ fn insert_command(tool: &str, cursor_moves: usize) -> String {
     format!("sleep 0.2 && {command}")
 }
 
+fn spawn_and_reap(mut command: Command) -> std::io::Result<()> {
+    let mut child = command.spawn()?;
+    let _ = std::thread::Builder::new()
+        .name("raffi-reaper".to_string())
+        .spawn(move || {
+            let _ = child.wait();
+        });
+    Ok(())
+}
+
 fn spawn_insert(value: &str, cursor_moves: usize) -> Result<(), String> {
     let tool =
         find_tool(&["wtype", "ydotool"]).ok_or("cannot type text: install wtype or ydotool")?;
-    Command::new("sh")
+    let mut command = Command::new("sh");
+    command
         .arg("-c")
         .arg(insert_command(tool, cursor_moves))
         .env("RAFFI_INSERT_VALUE", value)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| format!("cannot run {tool}: {error}"))
+        .stderr(Stdio::null());
+    spawn_and_reap(command).map_err(|error| format!("cannot run {tool}: {error}"))
 }
 
 /// Copy a value to the clipboard using the first available tool.
@@ -76,16 +85,15 @@ fn try_copy(value: &str) -> Result<(), String> {
         "xsel" => "printf '%s' \"$RAFFI_COPY_VALUE\" | xsel --clipboard --input".to_string(),
         _ => "wl-copy -- \"$RAFFI_COPY_VALUE\"".to_string(),
     };
-    Command::new("sh")
+    let mut command = Command::new("sh");
+    command
         .arg("-c")
         .arg(&copy_cmd)
         .env("RAFFI_COPY_VALUE", value)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| format!("cannot run {tool}: {error}"))
+        .stderr(Stdio::null());
+    spawn_and_reap(command).map_err(|error| format!("cannot run {tool}: {error}"))
 }
 
 /// Copy `text` and report whether the clipboard tool accepted it. The text
@@ -402,7 +410,7 @@ fn check_terminal_tab(
 
 /// Start `argv` in its own process group and fail if it exits unsuccessfully
 /// within `timeout`. A command still running then (a screen locker, an app)
-/// is left alone.
+/// is left alone and reaped in the background once it eventually exits.
 fn run_detached(argv: &[String], timeout: Duration) -> Result<(), String> {
     let (program, args) = argv.split_first().ok_or("no command to run")?;
     let name = program_name(program);
@@ -420,7 +428,14 @@ fn run_detached(argv: &[String], timeout: Duration) -> Result<(), String> {
             Ok(Some(status)) if status.success() => return Ok(()),
             Ok(Some(status)) => return Err(exit_error(name, status)),
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
-            Ok(None) => return Ok(()),
+            Ok(None) => {
+                let _ = std::thread::Builder::new()
+                    .name("raffi-reaper".to_string())
+                    .spawn(move || {
+                        let _ = child.wait();
+                    });
+                return Ok(());
+            }
             Err(_) => return Err(format!("{name} could not be waited for")),
         }
     }
@@ -449,19 +464,18 @@ fn spawn_custom_action(
     value: &str,
     env: &HashMap<String, String>,
 ) -> Result<(), String> {
-    let command = action.replace("{value}", value);
-    crate::debug_log!("action: executing shell command={command:?}");
-    Command::new("sh")
+    let command_str = action.replace("{value}", value);
+    crate::debug_log!("action: executing shell command={command_str:?}");
+    let mut command = Command::new("sh");
+    command
         .arg("-c")
-        .arg(&command)
+        .arg(&command_str)
         .envs(env)
         .env("RAFFI_VALUE", value)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| format!("cannot run action: {error}"))
+        .stderr(Stdio::null());
+    spawn_and_reap(command).map_err(|error| format!("cannot run action: {error}"))
 }
 
 /// Execute an action for a selected value.
@@ -471,6 +485,9 @@ fn spawn_custom_action(
 /// - other: execute as `sh -c` after replacing `{value}` in the command string;
 ///   the value is also available as `$RAFFI_VALUE`
 pub(super) fn execute_action(action: &str, value: &str) {
+    if cfg!(test) && action == "insert" {
+        return;
+    }
     crate::debug_log!("action: action={action:?} value={value:?}");
     let _ = dispatch(action, value, 0);
 }
@@ -492,12 +509,13 @@ pub(super) fn execute_file_action(action: &str, path: &str) {
         return execute_action(action, path);
     }
     crate::debug_log!("action: xdg-open {path:?}");
-    let _ = Command::new("xdg-open")
+    let mut command = Command::new("xdg-open");
+    command
         .arg(path)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn();
+        .stderr(Stdio::null());
+    let _ = spawn_and_reap(command);
 }
 
 /// Known file managers with the `XDG_CURRENT_DESKTOP` names that ship them.

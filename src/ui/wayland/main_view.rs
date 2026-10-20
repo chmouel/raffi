@@ -946,6 +946,7 @@ impl LauncherApp {
         let load: ListLoad = match addon {
             CommandListAddon::System => {
                 let session_id = std::env::var("XDG_SESSION_ID").ok();
+                let keep_open = !self.should_close(self.addons.system.close_on_action);
                 let items = super::system::system_entries(
                     &self.addons.system,
                     (self.compositor)(),
@@ -953,7 +954,7 @@ impl LauncherApp {
                     self.program_exists,
                 )
                 .iter()
-                .map(|entry| entry.to_item())
+                .map(|entry| entry.to_item_with(keep_open))
                 .collect();
                 return self.handle_main_view_loaded(source, generation, Ok(items));
             }
@@ -964,21 +965,27 @@ impl LauncherApp {
                 if !exists(compositor.program()) {
                     return missing(self, compositor.program());
                 }
-                Box::new(move || compositor.load_windows())
+                let keep_open = !self.should_close(self.addons.windows.close_on_action);
+                Box::new(move || compositor.load_windows(keep_open))
             }
-            CommandListAddon::BrowserTabs => Box::new(super::browser_tabs::load_tabs),
+            CommandListAddon::BrowserTabs => {
+                let focus_keep_open = !self.should_close(self.addons.browser_tabs.close_on_action);
+                let close_keep_open = self.addons.browser_tabs.close_on_action != Some(true);
+                Box::new(move || super::browser_tabs::load_tabs(focus_keep_open, close_keep_open))
+            }
             CommandListAddon::Media => {
                 if !exists("playerctl") {
                     return missing(self, "playerctl");
                 }
-                let keep_open = !self.addons.media.close_on_action;
+                let keep_open = !self.addons.media.close_on_action(self.close_on_action);
                 Box::new(move || super::media::load_players(keep_open))
             }
             CommandListAddon::Audio => {
                 if !exists("pactl") {
                     return missing(self, "pactl");
                 }
-                let options = super::audio::AudioOptions::of(&self.addons.audio);
+                let options =
+                    super::audio::AudioOptions::of(&self.addons.audio, self.close_on_action);
                 let query_row = self.audio_query_row(false);
                 if let Source::List(list) = &mut self.main_view.sources[source] {
                     list.query_row = Some(query_row);
@@ -989,7 +996,7 @@ impl LauncherApp {
                 if !exists("bluetoothctl") {
                     return missing(self, "bluetoothctl");
                 }
-                let keep_open = !self.addons.bluetooth.close_on_action;
+                let keep_open = !self.addons.bluetooth.close_on_action(self.close_on_action);
                 Box::new(move || Ok(super::bluetooth::load_devices(keep_open)))
             }
             CommandListAddon::Pass => {
@@ -1185,6 +1192,49 @@ impl LauncherApp {
             }
         }
         Task::batch(tasks)
+    }
+
+    pub(super) fn show_main_view_action_error(
+        &mut self,
+        addon: CommandListAddon,
+        identity: &str,
+        error: String,
+    ) -> Task<Message> {
+        let Some(source) = self
+            .main_view
+            .sources
+            .iter()
+            .position(|src| matches!(src, Source::List(list) if list.addon == Some(addon)))
+        else {
+            return Task::none();
+        };
+        let Some(Source::List(list)) = self.main_view.sources.get(source) else {
+            return Task::none();
+        };
+        let items = list.items.clone();
+        let usage = list.usage.clone();
+        let previews = list.previews.clone();
+        let title = items
+            .iter()
+            .find(|item| item.identity == identity)
+            .map(|item| format!("{} failed: {error}", item.title))
+            .unwrap_or(error);
+        let Some(trigger) = list_trigger(addon, &self.addons) else {
+            return Task::none();
+        };
+        let trigger = trigger.to_string();
+        let query = self.main_view.query.clone();
+        self.command_list.enter(addon);
+        self.command_list.usage = usage;
+        self.command_list.previews = previews;
+        self.command_list.set_items(items);
+        let task = self.handle_search_changed(format!("{trigger} {query}"));
+        self.set_command_list_front(super::command_list::CommandItem::info(
+            "error",
+            title,
+            "dialog-error",
+        ));
+        task
     }
 
     pub(super) fn handle_main_view_favicons(
@@ -1630,6 +1680,108 @@ impl LauncherApp {
         task
     }
 
+    pub(super) fn snapshot_main_view_context(
+        &self,
+        source: usize,
+        row: usize,
+    ) -> super::state::MainViewSnapshot {
+        let selected_row = self
+            .main_view
+            .sources
+            .get(source)
+            .and_then(|src| match src {
+                Source::List(list) => list
+                    .item(row)
+                    .map(|item| super::state::MainViewSelectedRow::List(item.identity.clone())),
+                Source::Snippets { filtered, .. } => filtered
+                    .get(row)
+                    .copied()
+                    .map(super::state::MainViewSelectedRow::Snippet),
+                Source::ScriptFilter { results, .. } => results
+                    .as_ref()
+                    .and_then(|res| res.items.get(row))
+                    .map(|item| {
+                        super::state::MainViewSelectedRow::ScriptFilter(
+                            item.title.clone(),
+                            item.arg.clone(),
+                        )
+                    }),
+            });
+        let script_filters = self
+            .main_view
+            .sources
+            .iter()
+            .enumerate()
+            .filter_map(|(i, src)| match src {
+                Source::ScriptFilter {
+                    searched, results, ..
+                } if results.is_some() => Some((i, searched.clone(), results.clone())),
+                _ => None,
+            })
+            .collect();
+        super::state::MainViewSnapshot {
+            query: self.search_query.clone(),
+            focus: self.main_view.focus,
+            selected_index: self.selected_index,
+            selected_source: Some((source, row, selected_row)),
+            script_filters,
+        }
+    }
+
+    pub(super) fn restore_main_view_context(
+        &mut self,
+        snapshot: super::state::MainViewSnapshot,
+    ) -> Task<Message> {
+        self.main_view.focus = snapshot.focus;
+        let task = self.handle_search_changed(snapshot.query);
+        for (i, prev_searched, prev_results) in snapshot.script_filters {
+            if let Some(Source::ScriptFilter {
+                searched, results, ..
+            }) = self.main_view.sources.get_mut(i)
+            {
+                if results.is_none() && (prev_searched.is_empty() || *searched == prev_searched) {
+                    *results = prev_results;
+                }
+            }
+        }
+        let resolved = snapshot
+            .selected_source
+            .and_then(|(source, old_row, selected_row)| {
+                let spans = self.main_view_spans();
+                let &(start, count) = spans.get(source)?;
+                if count == 0 {
+                    return None;
+                }
+                let found =
+                    selected_row.and_then(|sel| match (&self.main_view.sources[source], sel) {
+                        (Source::List(list), super::state::MainViewSelectedRow::List(identity)) => {
+                            list.position(&identity)
+                        }
+                        (
+                            Source::Snippets { filtered, .. },
+                            super::state::MainViewSelectedRow::Snippet(item_idx),
+                        ) => filtered.iter().position(|&idx| idx == item_idx),
+                        (
+                            Source::ScriptFilter { results, .. },
+                            super::state::MainViewSelectedRow::ScriptFilter(title, arg),
+                        ) => results.as_ref().and_then(|res| {
+                            res.items
+                                .iter()
+                                .position(|item| item.title == title && item.arg == arg)
+                        }),
+                        _ => None,
+                    });
+                let row = found
+                    .filter(|&r| r < count)
+                    .unwrap_or_else(|| old_row.min(count - 1));
+                Some(start + row)
+            });
+        self.selected_index = resolved
+            .unwrap_or(snapshot.selected_index)
+            .min(self.total_items().saturating_sub(1));
+        task
+    }
+
     /// Run a main view row by handing it to its addon's own mode, as if
     /// its trigger had been typed before the query, so it behaves exactly
     /// like there: confirmations, lists kept open, usage and history.
@@ -1640,6 +1792,7 @@ impl LauncherApp {
         if self.view.current_modifiers.alt() {
             return Task::none();
         }
+        let snapshot = self.snapshot_main_view_context(source, row);
         let query = self.main_view.query.clone();
         match &self.main_view.sources[source] {
             Source::List(list) => {
@@ -1653,6 +1806,20 @@ impl LauncherApp {
                 let items = list.items.clone();
                 let usage = list.usage.clone();
                 let previews = list.previews.clone();
+                let action_info =
+                    if self.view.current_modifiers.control() && item.secondary.is_some() {
+                        item.secondary.as_ref()
+                    } else {
+                        item.primary.as_ref()
+                    };
+                let stays_in_main_view = super::vault::VaultAddon::of(addon).is_none()
+                    && action_info.is_some_and(|act| act.keep_open && act.confirm.is_none())
+                    && matches!(
+                        addon,
+                        CommandListAddon::BrowserTabs
+                            | CommandListAddon::Windows
+                            | CommandListAddon::System
+                    );
                 let Some(trigger) = list_trigger(addon, &self.addons) else {
                     return Task::none();
                 };
@@ -1676,6 +1843,10 @@ impl LauncherApp {
                 self.selected_index = self.command_list_offset() + position;
                 let cursor = move_cursor_to_end(self.view.search_input_id.clone());
                 let selected = self.handle_command_list_selected(position);
+                if stays_in_main_view {
+                    let restore = self.restore_main_view_context(snapshot);
+                    return Task::batch([selected, restore]);
+                }
                 Task::batch([task, cursor, selected])
             }
             Source::Snippets {
@@ -1689,6 +1860,12 @@ impl LauncherApp {
                     return Task::none();
                 };
                 let items = items.clone();
+                let addon_close = self
+                    .addons
+                    .text_snippets
+                    .get(config_index)
+                    .and_then(|config| config.close_on_action);
+                let keep_open = !self.should_close(addon_close);
                 let Some(keyword) = self
                     .addons
                     .text_snippets
@@ -1718,7 +1895,18 @@ impl LauncherApp {
                     return Task::batch(tasks);
                 };
                 self.selected_index = self.keyword_rows() + self.script_filter_offset() + position;
-                tasks.push(self.handle_text_snippet_selected(position));
+                let selected = self.handle_text_snippet_selected(position);
+                if keep_open {
+                    if let Some(pending) = &mut self.text_snippets.pending {
+                        if !pending.preparing_paste && pending.action != "insert" {
+                            pending.restore_main_view = Some(snapshot);
+                        }
+                    } else if selected.units() == 0 {
+                        tasks.push(self.restore_main_view_context(snapshot));
+                        return Task::batch(tasks);
+                    }
+                }
+                tasks.push(selected);
                 Task::batch(tasks)
             }
             Source::ScriptFilter {
@@ -1733,6 +1921,12 @@ impl LauncherApp {
                 if !result.items.get(row).is_some_and(|item| item.valid) {
                     return Task::none();
                 }
+                let addon_close = self
+                    .addons
+                    .script_filters
+                    .get(config_index)
+                    .and_then(|config| config.close_on_action);
+                let keep_open = !self.should_close(addon_close);
                 let Some(keyword) = self
                     .addons
                     .script_filters
@@ -1750,7 +1944,11 @@ impl LauncherApp {
                 self.script_filter.loading = false;
                 self.script_filter.results = Some(result);
                 self.selected_index = self.keyword_rows() + row;
-                self.handle_script_filter_selected(row)
+                let selected = self.handle_script_filter_selected(row);
+                if keep_open && selected.units() == 0 {
+                    return self.restore_main_view_context(snapshot);
+                }
+                selected
             }
         }
     }

@@ -99,6 +99,8 @@ pub struct UISettings {
     pub terminal_classes: Vec<String>,
     pub show_preview: Option<bool>,
     pub show_tips: bool,
+    pub close_on_action: Option<bool>,
+    pub print_only: bool,
     pub preview: PreviewConfig,
     pub default_script_shell: String,
 }
@@ -128,6 +130,8 @@ impl Default for UISettings {
             terminal_classes: Vec::new(),
             show_preview: None,
             show_tips: true,
+            close_on_action: None,
+            print_only: false,
             preview: PreviewConfig::default(),
             default_script_shell: "bash".to_string(),
         }

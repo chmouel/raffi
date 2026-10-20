@@ -230,6 +230,7 @@ fn test_route_query_file_browser_precedence() {
         env: std::collections::HashMap::new(),
         min_query_length: None,
         dynamic_preview: None,
+        ..Default::default()
     });
 
     assert!(matches!(
@@ -252,6 +253,7 @@ fn test_route_query_prefers_script_filter_over_text_snippet() {
         env: std::collections::HashMap::new(),
         min_query_length: None,
         dynamic_preview: None,
+        ..Default::default()
     });
     addons.text_snippets.push(TextSnippetSourceConfig {
         name: "GitHub".into(),
@@ -271,6 +273,7 @@ fn test_route_query_prefers_script_filter_over_text_snippet() {
         secondary_action: None,
         placeholders: true,
         restore_clipboard: false,
+        ..Default::default()
     });
 
     assert!(matches!(
@@ -291,6 +294,7 @@ fn test_route_query_prefers_emoji_over_web_search() {
         keyword: "emoji".into(),
         url: "https://example.invalid?q={query}".into(),
         icon: None,
+        ..Default::default()
     });
 
     assert!(matches!(
@@ -321,6 +325,7 @@ fn test_route_query_requires_space_after_keyword() {
         secondary_action: None,
         placeholders: true,
         restore_clipboard: false,
+        ..Default::default()
     });
 
     assert_eq!(route_query("sn", &addons), QueryMode::Standard);
@@ -361,12 +366,14 @@ fn test_keyword_suggestions_prefix_match() {
         secondary_action: None,
         placeholders: true,
         restore_clipboard: false,
+        ..Default::default()
     });
     addons.web_searches.push(WebSearchConfig {
         name: "GitHub".into(),
         keyword: "gh".into(),
         url: "https://example.invalid?q={query}".into(),
         icon: None,
+        ..Default::default()
     });
 
     // By default a short prefix suggests nothing, but a full keyword does.
@@ -406,6 +413,7 @@ fn test_keyword_suggestions_stop_once_keyword_is_armed() {
         secondary_action: None,
         placeholders: true,
         restore_clipboard: false,
+        ..Default::default()
     });
 
     assert!(keyword_suggestions("", &addons).is_empty());
@@ -425,6 +433,7 @@ fn test_keyword_suggestions_follow_routing_precedence() {
         keyword: "gh".into(),
         url: "https://example.invalid?q={query}".into(),
         icon: None,
+        ..Default::default()
     });
     addons.script_filters.push(ScriptFilterConfig {
         name: "Gists".into(),
@@ -437,6 +446,7 @@ fn test_keyword_suggestions_follow_routing_precedence() {
         env: std::collections::HashMap::new(),
         min_query_length: None,
         dynamic_preview: None,
+        ..Default::default()
     });
 
     let subtitles: Vec<String> = keyword_suggestions("gh", &addons)
@@ -479,6 +489,7 @@ fn test_keyword_suggestions_suppress_fallbacks() {
         keyword: "g".into(),
         url: "https://google.com/search?q={query}".into(),
         icon: None,
+        ..Default::default()
     });
     let mut app = test_app_with_fallbacks(addons, vec!["addons.web_searches.Google".into()]);
     app.search_query = "sn".into();
@@ -523,6 +534,7 @@ fn test_feature_word_suggestions_keep_fallbacks() {
         keyword: "g".into(),
         url: "https://google.com/search?q={query}".into(),
         icon: None,
+        ..Default::default()
     });
     let mut app = test_app_with_fallbacks(addons, vec!["addons.web_searches.Google".into()]);
     let _ = app.update(Message::SearchChanged("volume".into()));
@@ -578,6 +590,7 @@ fn test_question_mark_keyword_wins_over_help() {
         keyword: "?".into(),
         url: "https://example.com/?q={query}".into(),
         icon: None,
+        ..Default::default()
     });
     let mut app = test_app(addons);
     let _ = app.update(Message::SearchChanged("?".into()));
@@ -626,6 +639,7 @@ fn snippet_addons() -> AddonsConfig {
         secondary_action: None,
         placeholders: true,
         restore_clipboard: false,
+        ..Default::default()
     });
     addons
 }
@@ -648,6 +662,7 @@ fn snippet_source(
         secondary_action: None,
         placeholders: true,
         restore_clipboard: false,
+        ..Default::default()
     }
 }
 
@@ -1922,6 +1937,7 @@ fn test_resolve_fallbacks_web_search() {
         keyword: "g".into(),
         url: "https://google.com/search?q={query}".into(),
         icon: None,
+        ..Default::default()
     });
 
     let app = test_app_with_fallbacks(addons, vec!["addons.web_searches.Google".into()]);
@@ -1955,6 +1971,7 @@ fn test_resolve_fallbacks_script_filter() {
         env: std::collections::HashMap::new(),
         min_query_length: None,
         dynamic_preview: None,
+        ..Default::default()
     });
 
     let app = test_app_with_fallbacks(addons, vec!["addons.script_filters.Brave".into()]);
@@ -1979,6 +1996,7 @@ fn test_resolve_fallbacks_empty_when_no_paths() {
         keyword: "g".into(),
         url: "https://google.com/search?q={query}".into(),
         icon: None,
+        ..Default::default()
     });
 
     let app = test_app(addons);
@@ -1998,6 +2016,7 @@ fn help_addons() -> AddonsConfig {
         env: std::collections::HashMap::new(),
         min_query_length: None,
         dynamic_preview: None,
+        ..Default::default()
     });
     addons.text_snippets.push(TextSnippetSourceConfig {
         name: "Snippets".into(),
@@ -2017,12 +2036,14 @@ fn help_addons() -> AddonsConfig {
         secondary_action: None,
         placeholders: true,
         restore_clipboard: false,
+        ..Default::default()
     });
     addons.web_searches.push(WebSearchConfig {
         name: "GitHub".into(),
         keyword: "gh".into(),
         url: "https://example.invalid?q={query}".into(),
         icon: None,
+        ..Default::default()
     });
     addons
 }
@@ -2678,6 +2699,7 @@ fn test_preview_text_snippet_shows_full_multiline_and_raw_template() {
         secondary_action: Some("insert".into()),
         placeholders: true,
         restore_clipboard: false,
+        ..Default::default()
     });
 
     let mut app = test_app(addons);
@@ -2816,6 +2838,7 @@ fn dynamic_preview_app(items: Vec<ScriptFilterItem>) -> LauncherApp {
         env: std::collections::HashMap::new(),
         min_query_length: None,
         dynamic_preview: None,
+        ..Default::default()
     });
     let mut app = test_app(addons);
     app.keyword_suggestions.clear();
@@ -3279,6 +3302,7 @@ fn test_preview_emoji_calculator_currency_and_web_search() {
         keyword: "gh".into(),
         url: "https://github.com/search?q={query}".into(),
         icon: None,
+        ..Default::default()
     });
 
     let mut app = test_app(addons);
@@ -4586,6 +4610,7 @@ fn test_default_triggers_do_not_shadow_each_other_or_web_searches() {
         keyword: "sys".into(),
         url: "https://example.invalid?q={query}".into(),
         icon: None,
+        ..Default::default()
     });
     assert!(matches!(
         route_query("sys x", &addons),
@@ -5093,6 +5118,7 @@ fn pull_request_addons() -> AddonsConfig {
         env: std::collections::HashMap::new(),
         min_query_length: None,
         dynamic_preview: None,
+        ..Default::default()
     });
     addons
         .launcher_keywords
@@ -5400,7 +5426,7 @@ fn media_app(query: &str) -> LauncherApp {
     assert!(task.units() > 0, "the players load");
     assert_eq!(app.command_list.status(), Some("Loading players..."));
     let generation = app.command_list.generation;
-    let keep_open = !app.addons.media.close_on_action;
+    let keep_open = !app.addons.media.close_on_action(app.close_on_action);
     let _ = app.update(Message::CommandListLoaded(
         generation,
         Ok(media_fixture(keep_open)),
@@ -5626,7 +5652,7 @@ fn test_media_failure_survives_a_refresh_started_before_it() {
 #[test]
 fn test_media_close_on_action_runs_after_close() {
     let mut addons = AddonsConfig::default();
-    addons.media.close_on_action = true;
+    addons.media.close_on_action = Some(true);
     let mut app = test_app(addons);
     app.history.max_items = 0;
     let _ = app.update(Message::SearchChanged("media spotify pause".into()));
@@ -5830,7 +5856,7 @@ fn test_audio_action_failure_shows_an_error_row() {
 #[test]
 fn test_audio_close_on_action_runs_after_close() {
     let mut addons = AddonsConfig::default();
-    addons.audio.close_on_action = true;
+    addons.audio.close_on_action = Some(true);
     let mut app = test_app(addons);
     app.history.max_items = 0;
     let _ = app.update(Message::SearchChanged("audio wh-1000".into()));
@@ -6160,6 +6186,7 @@ fn test_devtools_route_keeps_raw_payload_and_is_sensitive() {
         keyword: "dev".into(),
         url: "https://devdocs.io/#q={query}".into(),
         icon: None,
+        ..Default::default()
     });
     assert!(matches!(
         route_query("dev x", &addons),
@@ -6609,7 +6636,7 @@ fn test_bluetooth_failure_shows_an_error_row_and_refreshes() {
 #[test]
 fn test_bluetooth_close_on_action_defers_the_action() {
     let mut addons = AddonsConfig::default();
-    addons.bluetooth.close_on_action = true;
+    addons.bluetooth.close_on_action = Some(true);
     let mut app = test_app(addons);
     let _ = app.update(Message::SearchChanged("bt ".into()));
     let generation = app.command_list.generation;
@@ -7436,6 +7463,7 @@ fn test_main_view_groups_sources_in_config_order_and_caps_them() {
         secondary_action: None,
         placeholders: false,
         restore_clipboard: false,
+        ..Default::default()
     });
     let mut app = main_view_app(
         &[
@@ -7522,6 +7550,7 @@ fn test_main_view_script_filter_waits_for_min_length_and_drops_stale_runs() {
         env: std::collections::HashMap::new(),
         min_query_length: Some(3),
         dynamic_preview: None,
+        ..Default::default()
     });
     let mut app = main_view_app(&["script_filters.Issues"], Vec::new(), addons);
     let result = |title: &str| ScriptFilterResult {
@@ -7580,6 +7609,7 @@ fn issues_filter() -> ScriptFilterConfig {
         env: std::collections::HashMap::new(),
         min_query_length: None,
         dynamic_preview: None,
+        ..Default::default()
     }
 }
 
@@ -7670,6 +7700,7 @@ fn test_main_view_snippets_fill_in_placeholders() {
         secondary_action: None,
         placeholders: true,
         restore_clipboard: false,
+        ..Default::default()
     });
     let mut app = main_view_app(&["text_snippets.Notes"], Vec::new(), addons);
     let snippet = |name: &str, value: &str| TextSnippet {
@@ -7909,6 +7940,7 @@ fn test_chip_label_names_plugins() {
         env: std::collections::HashMap::new(),
         min_query_length: None,
         dynamic_preview: None,
+        ..Default::default()
     });
     assert_eq!(chip_label(addons.browser_tabs.trigger(), &addons), "Tabs");
     assert_eq!(chip_label(addons.terminal.trigger(), &addons), "Terminal");
@@ -8065,6 +8097,7 @@ fn test_main_view_lists_groups_starting_with_the_query_first() {
         secondary_action: None,
         placeholders: false,
         restore_clipboard: false,
+        ..Default::default()
     });
     let launchers = vec![RaffiConfig {
         binary: Some("brave".into()),
@@ -8153,6 +8186,7 @@ fn test_main_view_empty_query_lists_recent_picks() {
         env: std::collections::HashMap::new(),
         min_query_length: None,
         dynamic_preview: None,
+        ..Default::default()
     });
     let mut app = main_view_app(
         &[
@@ -8369,6 +8403,7 @@ fn test_main_view_ctrl_tab_focuses_each_source_then_all() {
         keyword: "g".into(),
         url: "https://google.com/search?q={query}".into(),
         icon: None,
+        ..Default::default()
     });
     let mut app = test_app_with_fallbacks(addons, vec!["addons.web_searches.Google".into()]);
     app.configs = firefox_launcher();
@@ -8435,6 +8470,7 @@ fn test_main_view_focus_lists_every_match_without_inline_rows() {
         secondary_action: None,
         placeholders: false,
         restore_clipboard: false,
+        ..Default::default()
     });
     let mut app = main_view_app(&["launchers", "text_snippets.Notes"], Vec::new(), addons);
     let snippets = (0..8)
@@ -8634,6 +8670,7 @@ fn test_slack_previews_of_another_account_are_dropped() {
 fn test_slack_unread_enter_produces_open_unread_action() {
     let mut addons = AddonsConfig::default();
     addons.slack.enabled = true;
+    addons.slack.close_on_action = Some(true);
     let mut app = test_app(addons);
     app.history.max_items = 0;
 
@@ -8657,6 +8694,7 @@ fn test_slack_unread_enter_produces_open_unread_action() {
     let generation = app.command_list.generation;
     let _ = app.update(Message::CommandListLoaded(generation, Ok(rows)));
 
+    app.selected_index = app.command_list_offset();
     let _ = app.update(Message::Submit);
     let Some(super::actions::DeferredAction::Slack(action)) = deferred_action(&app) else {
         panic!("expected a Slack action");
@@ -8766,4 +8804,309 @@ fn test_command_list_lists_dimmed_rows_last_until_a_filter_is_typed() {
     assert_eq!(out, [1, 2, 0], "muted last even when used most");
     filter_items_into(&items, "muted", &matcher, &usage, false, &mut out);
     assert_eq!(out, [0], "filtering still finds muted rows");
+}
+
+#[test]
+fn test_launcher_keep_open_respects_general_and_launcher_override() {
+    let mut app = test_app(AddonsConfig::default());
+    app.configs = vec![
+        RaffiConfig {
+            description: Some("True Launcher".into()),
+            binary: Some("true".into()),
+            ..Default::default()
+        },
+        RaffiConfig {
+            description: Some("Closing Launcher".into()),
+            binary: Some("true".into()),
+            close_on_action: Some(true),
+            ..Default::default()
+        },
+    ];
+    app.history.max_items = 0;
+    app.close_on_action = Some(false);
+    let _ = app.update(Message::SearchChanged("True".into()));
+    let task = app.update(Message::Submit);
+    assert_eq!(task.units(), 0, "general.close_on_action=false keeps open");
+    assert_eq!(app.search_query, "True", "search query preserved");
+    assert!(app.selected_item.lock().unwrap().is_none());
+
+    let _ = app.update(Message::SearchChanged("Closing".into()));
+    let task = app.update(Message::Submit);
+    assert!(
+        task.units() > 0,
+        "launcher close_on_action=true overrides general"
+    );
+    assert_eq!(
+        app.selected_item.lock().unwrap().as_deref(),
+        Some("Closing Launcher")
+    );
+}
+
+#[test]
+fn test_addon_close_on_action_precedence() {
+    let mut addons = AddonsConfig::default();
+    addons.calculator.close_on_action = Some(true);
+    addons.emoji.action = Some("true".into());
+    addons.emoji.close_on_action = Some(false);
+
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+    app.close_on_action = Some(false);
+
+    // Inline units inherits general.close_on_action = false -> stays open after copy
+    let _ = app.update(Message::SearchChanged("10 km in miles".into()));
+    assert!(app.inline_result.is_some());
+    let task = app.update(Message::InlineCopied(app.inline_generation, Ok(())));
+    assert_eq!(task.units(), 0, "units inherits general keep-open");
+    assert_eq!(app.search_query, "10 km in miles");
+
+    // Calculator overrides close_on_action = true -> closes after copy
+    let _ = app.update(Message::SearchChanged("2 + 2".into()));
+    assert!(app.inline_result.is_some());
+    let task = app.update(Message::InlineCopied(app.inline_generation, Ok(())));
+    assert!(task.units() > 0, "calculator override closes window");
+
+    // Emoji overrides close_on_action = false even when general is true
+    app.close_on_action = Some(true);
+    let _ = app.update(Message::SearchChanged("emoji party".into()));
+    let _ = app.update(Message::EmojiDataLoaded(vec![EmojiEntry {
+        value: "🎉".into(),
+        name: "party popper".into(),
+    }]));
+    assert_eq!(app.emoji.filtered.len(), 1);
+    let task = app.update(Message::Submit);
+    assert_eq!(task.units(), 0, "emoji close_on_action=false keeps open");
+    assert_eq!(app.search_query, "emoji party");
+
+    // Emoji insert action must still close even when close_on_action is false
+    app.emoji.action = Some("insert".into());
+    let task = app.update(Message::Submit);
+    assert!(task.units() > 0, "insert action always closes to type");
+}
+
+#[test]
+fn test_file_browser_insert_forces_close_when_kept_open() {
+    use super::state::FileBrowserEntry;
+    let mut addons = AddonsConfig::default();
+    addons.file_browser.action = Some("true".into());
+    addons.file_browser.secondary_action = Some("insert".into());
+    addons.file_browser.close_on_action = Some(false);
+
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+    app.close_on_action = Some(false);
+    app.file_browser.active = true;
+    app.file_browser.entries = vec![FileBrowserEntry {
+        name: "note.txt".into(),
+        full_path: "/tmp/note.txt".into(),
+        is_dir: false,
+    }];
+    app.selected_index = 0;
+
+    // Primary non-insert action stays open
+    let task = app.update(Message::Submit);
+    assert_eq!(task.units(), 0, "non-insert file browser action stays open");
+
+    // Secondary insert action (Ctrl+Enter) forces close
+    app.view.current_modifiers = iced::keyboard::Modifiers::CTRL;
+    let task = app.update(Message::Submit);
+    assert!(
+        task.units() > 0,
+        "secondary insert action forces Raffi to close"
+    );
+
+    // Primary insert action also forces close
+    app.view.current_modifiers = iced::keyboard::Modifiers::empty();
+    app.addons.file_browser.action = Some("insert".into());
+    let task = app.update(Message::Submit);
+    assert!(
+        task.units() > 0,
+        "primary insert action forces Raffi to close"
+    );
+}
+
+#[test]
+fn test_main_view_keep_open_preserves_query_and_selection() {
+    let mut addons = AddonsConfig::default();
+    addons.browser_tabs.close_on_action = Some(false);
+    addons.text_snippets.push(TextSnippetSourceConfig {
+        name: "Notes".into(),
+        keyword: "sn".into(),
+        snippets: Some(Vec::new()),
+        action: Some("true".into()),
+        close_on_action: Some(false),
+        placeholders: true,
+        ..Default::default()
+    });
+    addons.script_filters.push(ScriptFilterConfig {
+        name: "Issues".into(),
+        command: "issues".into(),
+        keyword: "is".into(),
+        action: Some("true".into()),
+        close_on_action: Some(false),
+        ..Default::default()
+    });
+
+    let mut app = main_view_app(
+        &[
+            "browser_tabs",
+            "text_snippets.Notes",
+            "script_filters.Issues",
+        ],
+        Vec::new(),
+        addons,
+    );
+    load_main_view_tabs(&mut app);
+    if let super::main_view::Source::List(list) = &mut app.main_view.sources[0] {
+        for item in &mut list.items {
+            if let Some(primary) = &mut item.primary {
+                primary.keep_open = true;
+            }
+        }
+    }
+    let _ = app.update(Message::MainViewSnippetsLoaded(
+        1,
+        Ok(vec![
+            TextSnippet {
+                name: "mail signature A".into(),
+                value: "Regards A".into(),
+                keyword: None,
+                icon: None,
+            },
+            TextSnippet {
+                name: "mail signature B".into(),
+                value: "Regards B".into(),
+                keyword: None,
+                icon: None,
+            },
+        ]),
+    ));
+    let _ = app.update(Message::SearchChanged("mail".into()));
+    let run = script_filter_generation(&app, 2);
+    let _ = app.update(Message::MainViewScriptFilter(
+        2,
+        run,
+        Some(Ok(ScriptFilterResult {
+            default_icon: None,
+            items: vec![ScriptFilterItem {
+                title: "mail bug".into(),
+                valid: true,
+                subtitle: None,
+                arg: Some("123".into()),
+                indent: 0,
+                icon: None,
+                preview: None,
+                quicklookurl: None,
+                variables: Default::default(),
+                text: None,
+            }],
+        })),
+    ));
+    assert_eq!(app.total_items(), 4);
+
+    // 1. Activating a kept-open browser tab row in main view keeps query "mail" and main view active,
+    //    AND script filter rows remain present immediately without disappearing!
+    app.selected_index = 0;
+    let tab_session = app.command_list.session.wrapping_add(1);
+    let _ = app.update(Message::Submit);
+    assert_eq!(app.search_query, "mail");
+    assert!(app.main_view.active);
+    assert_eq!(app.total_items(), 4, "script filter rows preserved");
+    assert_eq!(app.selected_index, 0);
+    assert!(app.in_flight.is_pending("browser_tabs", "10:2"));
+
+    // 2. Activating the SECOND snippet ("mail signature B" at index 2) records usage so B ranks
+    //    ahead of A ([B, A]), and restoration follows B's identity to its new row (index 1)!
+    app.selected_index = 2;
+    let task = app.update(Message::Submit);
+    assert!(task.units() > 0, "starts async placeholder expansion");
+    let session = app.text_snippets.session;
+    let task = app.update(Message::TextSnippetExpanded(
+        session,
+        Ok(Expanded {
+            text: "Regards B".into(),
+            cursor_moves: None,
+        }),
+    ));
+    assert_eq!(task.units(), 0, "stays open and restores main view");
+    assert_eq!(app.search_query, "mail");
+    assert!(app.main_view.active);
+    assert_eq!(app.total_items(), 4, "script filter rows still preserved");
+    assert_eq!(
+        app.selected_index, 1,
+        "selection follows snippet B to its new MRU-promoted row"
+    );
+    assert_eq!(app.selected_main_view(), Some((1, 0)));
+    if let super::main_view::Source::Snippets {
+        items, filtered, ..
+    } = &app.main_view.sources[1]
+    {
+        assert_eq!(items[filtered[0]].name, "mail signature B");
+    } else {
+        panic!("expected snippet source");
+    }
+
+    // 3. Activating a kept-open script filter row in main view preserves query, rows, and selection
+    app.selected_index = 3;
+    let _ = app.update(Message::Submit);
+    assert_eq!(app.search_query, "mail");
+    assert!(app.main_view.active);
+    assert_eq!(
+        app.total_items(),
+        4,
+        "script filter rows preserved on SF submit"
+    );
+    assert_eq!(app.selected_index, 3);
+
+    // 4. If the in-flight browser tab action fails while in main view, the error is surfaced visibly
+    let _ = app.update(Message::CommandListActionDone(
+        CommandListAddon::BrowserTabs,
+        tab_session,
+        "10:2".into(),
+        Err("browser socket closed".into()),
+    ));
+    assert_eq!(app.command_list.addon, Some(CommandListAddon::BrowserTabs));
+    assert!(
+        command_list_titles(&app)[0].contains("browser socket closed"),
+        "action error from main view surfaced in command list"
+    );
+}
+
+#[test]
+fn test_vault_keep_open_tracks_copy_completion_and_errors() {
+    use super::secret_io::SecretError;
+    use super::vault::{OpKind, Outcome};
+
+    let mut app = pass_app();
+    app.addons.pass.close_on_action = Some(false);
+    select_identity(&mut app, "pass:entry:web/github");
+
+    let _ = app.update(Message::Submit);
+    let fetch_gen = app.vault.generation;
+    let task = app.update(Message::VaultDone(fetch_gen, vault_report(ready_job())));
+    assert!(task.units() > 0, "spawns tracked clipboard copy task");
+    assert!(
+        app.vault.busy(),
+        "vault stays busy while clipboard copy is running"
+    );
+    assert_eq!(
+        app.vault.running.as_ref().map(|op| op.kind.clone()),
+        Some(OpKind::Copy("web/github".into()))
+    );
+    assert_eq!(app.command_list.status(), Some("Copying..."));
+
+    // Overlapping selection while copy is running is ignored
+    let copy_gen = app.vault.generation;
+    assert_eq!(app.update(Message::Submit).units(), 0);
+
+    // Copy failure is reported in the command list error row
+    let task = app.update(Message::VaultDone(
+        copy_gen,
+        vault_report(Outcome::Failed(SecretError::Tool(
+            "copy not confirmed".into(),
+        ))),
+    ));
+    assert_eq!(task.units(), 0);
+    assert!(!app.vault.busy());
+    assert_eq!(command_list_titles(&app)[0], "copy not confirmed");
 }

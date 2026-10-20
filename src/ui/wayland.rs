@@ -211,6 +211,8 @@ fn run_wayland_ui(
     let clipboard_history = settings.clipboard_history;
     let show_preview = settings.show_preview;
     let show_tips = settings.show_tips;
+    let close_on_action = settings.close_on_action;
+    let print_only = settings.print_only;
     let select_1 = settings.select_1;
     let preview_style = theme::PreviewStyle::resolve(
         &theme_colors,
@@ -259,6 +261,8 @@ fn run_wayland_ui(
                 app.select_1_query = Some(app.search_query.clone());
             }
             app.text_snippets.clipboard_history = clipboard_history;
+            app.close_on_action = close_on_action;
+            app.print_only = print_only;
             configure_preview_visibility(&mut app.view, show_preview);
             app.view.preview_style = preview_style.clone();
             app.view.window_size = iced::Size::new(window_width, window_height);

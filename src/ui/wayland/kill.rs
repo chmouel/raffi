@@ -172,13 +172,18 @@ pub(super) fn list_processes(
 
 /// List the user's processes, except Raffi and its parent. Blocking: run it
 /// off the UI thread.
-pub(super) fn load_processes() -> Result<Vec<CommandItem>, String> {
+pub(super) fn load_processes(keep_open: bool) -> Result<Vec<CommandItem>, String> {
     let exclude = [std::process::id(), std::os::unix::process::parent_id()];
     let processes = list_processes(Path::new(PROC), &exclude, Instant::now() + LOAD_BUDGET)?;
-    Ok(process_items(&processes))
+    Ok(process_items_with(&processes, keep_open))
 }
 
+#[allow(dead_code)]
 pub(super) fn process_items(processes: &[Process]) -> Vec<CommandItem> {
+    process_items_with(processes, true)
+}
+
+pub(super) fn process_items_with(processes: &[Process], keep_open: bool) -> Vec<CommandItem> {
     if processes.is_empty() {
         return vec![CommandItem::info(
             "empty",
@@ -186,7 +191,10 @@ pub(super) fn process_items(processes: &[Process]) -> Vec<CommandItem> {
             "dialog-information",
         )];
     }
-    processes.iter().map(process_item).collect()
+    processes
+        .iter()
+        .map(|process| process_item(process, keep_open))
+        .collect()
 }
 
 fn truncate(text: &str, max: usize) -> String {
@@ -198,7 +206,7 @@ fn truncate(text: &str, max: usize) -> String {
     short
 }
 
-fn process_item(process: &Process) -> CommandItem {
+fn process_item(process: &Process, keep_open: bool) -> CommandItem {
     let memory = format_byte_size(process.rss_kib * 1024);
     let action = |signal: Signal| CommandAction {
         action: DeferredAction::Signal(SignalTarget {
@@ -208,7 +216,7 @@ fn process_item(process: &Process) -> CommandItem {
             signal,
         }),
         confirm: Some(format!("send {} to {}", signal.name(), process.name)),
-        keep_open: true,
+        keep_open,
         progress: None,
     };
     let mut icon_names = vec![process.program.clone()];
@@ -496,7 +504,7 @@ mod tests {
         };
         assert_eq!(process.command, "sleep 60");
 
-        let item = process_item(&process);
+        let item = process_item(&process, true);
         let action = item.primary.unwrap().action;
         let result = super::super::command_list::run_kept_open(&action);
         if result.is_err() {

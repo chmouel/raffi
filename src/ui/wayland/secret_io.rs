@@ -511,6 +511,11 @@ pub(super) fn copy_secret(
             output.success() && output.stdout.expose() == secret.expose().as_bytes()
         });
         if copied {
+            let _ = std::thread::Builder::new()
+                .name("raffi-reaper".to_string())
+                .spawn(move || {
+                    let _ = child.wait();
+                });
             return Ok(());
         }
         if Instant::now() >= deadline {

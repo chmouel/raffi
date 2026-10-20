@@ -43,12 +43,24 @@ pub(super) fn run_action(
 }
 
 /// The row running `query` in the terminal, or a hint while it is empty.
+#[allow(dead_code)]
 pub(super) fn run_item(
     query: &str,
     prefix: &[String],
     shell: &str,
     hold: bool,
     tab: Option<&TabTarget>,
+) -> CommandItem {
+    run_item_with(query, prefix, shell, hold, tab, false)
+}
+
+pub(super) fn run_item_with(
+    query: &str,
+    prefix: &[String],
+    shell: &str,
+    hold: bool,
+    tab: Option<&TabTarget>,
+    keep_open: bool,
 ) -> CommandItem {
     let name = terminal_name(prefix);
     let command = query.trim();
@@ -77,7 +89,7 @@ pub(super) fn run_item(
         primary: Some(CommandAction {
             action: run_action(prefix, shell, command, hold, tab),
             confirm: None,
-            keep_open: false,
+            keep_open,
             progress: None,
         }),
         secondary: None,

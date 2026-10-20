@@ -55,6 +55,8 @@ pub(super) enum OpKind {
     Load,
     /// An action on the entry (pass) or item id (Bitwarden) named here.
     Entry(EntryAction, String),
+    /// Copy a fetched secret to the clipboard while Raffi stays open.
+    Copy(String),
     Lock,
     Sync,
 }
@@ -70,13 +72,14 @@ impl Op {
     pub fn log_name(&self) -> String {
         match &self.kind {
             OpKind::Entry(action, _) => format!("{:?} {action:?}", self.addon),
+            OpKind::Copy(_) => format!("{:?} Copy", self.addon),
             kind => format!("{:?} {kind:?}", self.addon),
         }
     }
 
     /// The row the operation acts on, for entry actions.
     pub fn identity(&self) -> Option<String> {
-        let OpKind::Entry(_, name) = &self.kind else {
+        let (OpKind::Entry(_, name) | OpKind::Copy(name)) = &self.kind else {
             return None;
         };
         Some(match self.addon {
@@ -90,6 +93,7 @@ impl Op {
         match (&self.kind, self.addon) {
             (OpKind::Lock, _) => Some("Locking..."),
             (OpKind::Sync, _) => Some("Syncing..."),
+            (OpKind::Copy(_), _) => Some("Copying..."),
             (OpKind::Entry(..), VaultAddon::Bitwarden) => Some("Reading from Bitwarden..."),
             _ => None,
         }
@@ -190,6 +194,7 @@ fn run_pass(runner: &dyn Runner, ctx: &PassContext, request: &Request) -> Outcom
         }
         OpKind::Lock => return done(pass::lock(runner)),
         OpKind::Sync => return done(pass::sync(runner, ctx)),
+        OpKind::Copy(_) => return Outcome::Done,
         OpKind::Entry(action, entry) => (*action, entry),
     };
     let (action, entry) = entry_action;
@@ -247,6 +252,7 @@ fn run_bitwarden(runner: &dyn Runner, request: &Request) -> Outcome {
     let result = match &request.op.kind {
         OpKind::Load => bitwarden::load_items(runner).map(Outcome::Loaded),
         OpKind::Sync => bitwarden::sync(runner).map(|()| Outcome::Done),
+        OpKind::Copy(_) => Ok(Outcome::Done),
         OpKind::Entry(action, id) => bitwarden::fetch(runner, id, *action)
             .map(|payload| Outcome::Ready(SecretJob::fetched(*action, payload, request.settings))),
         OpKind::Lock => unreachable!("handled above"),
@@ -281,6 +287,10 @@ impl SecretJob {
         }
     }
 
+    pub fn can_run_kept_open(&self) -> bool {
+        matches!(self.action, EntryAction::Copy(_)) && matches!(self.source, JobSource::Fetched(_))
+    }
+
     pub fn run(&self) -> Result<(), String> {
         self.run_with(&SystemRunner {
             cancel: Cancel::default(),
@@ -288,7 +298,7 @@ impl SecretJob {
         .map_err(|error| error.message())
     }
 
-    fn run_with(&self, runner: &dyn Runner) -> Result<(), SecretError> {
+    pub(super) fn run_with(&self, runner: &dyn Runner) -> Result<(), SecretError> {
         let secret = match &self.source {
             JobSource::Fetched(secret) => secret.clone(),
             JobSource::PassAgent { ctx, entry } => {

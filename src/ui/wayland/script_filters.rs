@@ -506,6 +506,7 @@ mod tests {
             env: std::collections::HashMap::new(),
             min_query_length: None,
             dynamic_preview: None,
+            close_on_action: None,
         };
         let item = super::ScriptFilterItem {
             title: "\u{1b}[32mAgent\u{1b}[0m".into(),

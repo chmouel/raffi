@@ -83,6 +83,17 @@ Show the right-hand preview pane for plain launcher entries. Addon results alway
 ```
 
 
+**`general.close_on_action`** `boolean` (default: `true`)
+
+Whether Raffi closes after executing a launcher or addon action in the native UI. Individual launchers and addons can override this with their own `close_on_action` field.
+
+  ```yaml
+  general:
+    close_on_action: false
+
+```
+
+
 **`general.show_tips`** `boolean` (default: `true`)
 
 Show a keyword tip, picked from your enabled addons, in the empty search box of the native UI.
@@ -371,6 +382,20 @@ Show the right-hand preview pane for this entry in the native UI, regardless of 
       kubectl apply -f deploy.yaml
     description: "Deploy"
     show_preview: true
+
+```
+
+
+**`close_on_action`** `boolean` (default: `general.close_on_action`, else `true`)
+
+Whether the native UI closes after launching this entry, overriding `general.close_on_action`.
+
+  ```yaml title="launchers.yaml"
+   volume_up:
+    binary: pactl
+    args: ["set-sink-volume", "@DEFAULT_SINK@", "+5%"]
+    description: "Volume Up"
+    close_on_action: false
 
 ```
 

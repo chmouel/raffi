@@ -331,6 +331,7 @@ impl LauncherApp {
             return Task::none();
         }
         state.pending = false;
+        let is_hypr_paste = matches!(&result, Ok(Some(_)));
         let outcome = result.and_then(|target| {
             if let Some(target) = target {
                 self.deferred_action
@@ -341,7 +342,13 @@ impl LauncherApp {
             Ok(())
         });
         match outcome {
-            Ok(()) => iced::exit(),
+            Ok(()) => {
+                if is_hypr_paste || self.should_close(self.addons.clipboard.close_on_action) {
+                    iced::exit()
+                } else {
+                    Task::none()
+                }
+            }
             Err(error) => {
                 crate::debug_log!("clipboard: action failed");
                 self.clipboard.error = Some(error);

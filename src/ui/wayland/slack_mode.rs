@@ -63,8 +63,16 @@ impl LauncherApp {
         self.slack.view = Some(view.clone());
         if view == View::Home {
             let icon = self.resolve_icon_name(slack::SLACK_ICON);
+            let action_keep_open = self.addons.slack.close_on_action != Some(true);
             self.command_list.query_row = Some(std::sync::Arc::new(move |query: &str| {
-                slack::query_row(query, icon.clone())
+                let mut item = slack::query_row(query, icon.clone())?;
+                if let Some(primary) = &mut item.primary {
+                    primary.keep_open = action_keep_open;
+                }
+                if let Some(secondary) = &mut item.secondary {
+                    secondary.keep_open = action_keep_open;
+                }
+                Some(item)
             }));
             self.command_list.usage = self.slack_usage();
         } else {
@@ -173,6 +181,20 @@ impl LauncherApp {
             None => refresh,
         };
         self.load_command_list(load, refresh)
+    }
+
+    pub(super) fn apply_slack_keep_open(&self, rows: &mut [CommandItem]) {
+        let open_keep_open = !self.should_close(self.addons.slack.close_on_action);
+        let action_keep_open = self.addons.slack.close_on_action != Some(true);
+        for row in rows {
+            for cmd in [&mut row.primary, &mut row.secondary].into_iter().flatten() {
+                match &cmd.action {
+                    super::actions::DeferredAction::Command(_) => cmd.keep_open = open_keep_open,
+                    super::actions::DeferredAction::Slack(_) => cmd.keep_open = action_keep_open,
+                    _ => {}
+                }
+            }
+        }
     }
 
     fn slack_hint(&mut self, text: &str) {

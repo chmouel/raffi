@@ -32,6 +32,13 @@
             "null"
           ]
         },
+        "close_on_action": {
+          "description": "Close Raffi after launching this entry (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "description": {
           "type": [
             "string",

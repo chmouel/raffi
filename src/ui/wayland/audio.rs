@@ -26,9 +26,12 @@ pub(super) struct AudioOptions {
 }
 
 impl AudioOptions {
-    pub(super) fn of(config: &crate::AudioAddonConfig) -> Self {
+    pub(super) fn of(
+        config: &crate::AudioAddonConfig,
+        general_close_on_action: Option<bool>,
+    ) -> Self {
         Self {
-            keep_open: !config.close_on_action,
+            keep_open: !config.close_on_action(general_close_on_action),
             step: config.volume_step(),
             max: config.max_volume(),
         }

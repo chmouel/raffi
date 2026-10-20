@@ -117,6 +117,32 @@ pub(crate) struct ClipboardSnapshot {
     pub data: ClipboardData,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum MainViewSelectedRow {
+    List(String),
+    Snippet(usize),
+    ScriptFilter(String, Option<String>),
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct MainViewSnapshot {
+    pub query: String,
+    pub focus: Option<super::main_view::Focus>,
+    pub selected_index: usize,
+    pub selected_source: Option<(usize, usize, Option<MainViewSelectedRow>)>,
+    pub script_filters: Vec<(usize, String, Option<ScriptFilterResult>)>,
+}
+
+impl PartialEq for MainViewSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        self.query == other.query
+            && self.focus == other.focus
+            && self.selected_index == other.selected_index
+    }
+}
+
+impl Eq for MainViewSnapshot {}
+
 /// A snippet selection waiting for its placeholders to expand. The action is
 /// captured when the user activates the snippet, so releasing Ctrl while the
 /// expansion runs does not change what happens.
@@ -124,6 +150,9 @@ pub(crate) struct ClipboardSnapshot {
 pub(super) struct PendingSelection {
     pub action: String,
     pub preparing_paste: bool,
+    /// When set, the selection came from the main view and kept-open
+    /// completion should restore the main view query and selection.
+    pub restore_main_view: Option<MainViewSnapshot>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -488,6 +517,7 @@ pub(super) struct ResolvedFallback {
     pub name: String,
     pub icon: Option<String>,
     pub action: FallbackAction,
+    pub close_on_action: Option<bool>,
 }
 
 impl ResolvedFallback {
@@ -594,4 +624,6 @@ pub(super) struct LauncherApp {
     pub help_entries: Vec<HelpEntry>,
     pub help_filtered: Vec<usize>,
     pub help_saved_query: Option<String>,
+    pub close_on_action: Option<bool>,
+    pub print_only: bool,
 }
