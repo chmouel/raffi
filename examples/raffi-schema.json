@@ -1127,7 +1127,7 @@
           ]
         },
         "font_family": {
-          "description": "Font family for the preview pane (default: the UI font)",
+          "description": "Font family for the preview pane, including message, snippet and\nclipboard text (default: the UI font)",
           "type": [
             "string",
             "null"
@@ -1135,7 +1135,7 @@
           "default": null
         },
         "font_size": {
-          "description": "Base font size in px for preview text (default: 16). Title, headings and\nhero values scale from it.",
+          "description": "Base font size in px for preview text (default: 0.8 × general font_size,\n16 at the default 20). Title, headings and hero values scale from it.",
           "type": [
             "number",
             "null"
@@ -1144,7 +1144,7 @@
           "default": null
         },
         "mono_font_family": {
-          "description": "Monospace font family for code/text blocks (default: system monospace)",
+          "description": "Monospace font family for code blocks such as file contents, commands\nand script output (default: system monospace)",
           "type": [
             "string",
             "null"

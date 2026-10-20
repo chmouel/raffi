@@ -34,7 +34,8 @@ pub(super) struct PreviewStyle {
 }
 
 impl PreviewStyle {
-    pub const DEFAULT_FONT_SIZE: f32 = 16.0;
+    /// Preview text size relative to the UI item size (16 px at the default 20).
+    pub const FONT_SIZE_SCALE: f32 = 0.8;
     pub const DEFAULT_WIDTH_PERCENT: f32 = 50.0;
 
     /// Build the preview style from the UI theme and the optional `general.preview` config.
@@ -42,11 +43,12 @@ impl PreviewStyle {
         theme: &ThemeColors,
         config: &PreviewConfig,
         ui_font_family: Option<&str>,
+        ui_font_size: f32,
     ) -> Self {
         let base = config
             .font_size
             .filter(|size| size.is_finite() && *size > 0.0)
-            .unwrap_or(Self::DEFAULT_FONT_SIZE);
+            .unwrap_or_else(|| (ui_font_size * Self::FONT_SIZE_SCALE).round());
         let width_percent = config
             .width_percent
             .filter(|p| p.is_finite())

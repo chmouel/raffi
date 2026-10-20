@@ -2826,7 +2826,7 @@ pub(super) fn load_preview(
             return Some(preview);
         }
     }
-    let body = PreviewBody::Text {
+    let body = PreviewBody::Prose {
         heading: None,
         content: error,
         truncated: false,
@@ -2886,7 +2886,7 @@ fn from_cached_preview(cached: CachedPreview) -> Preview {
                 heading,
                 content,
                 truncated,
-            } => PreviewBody::Text {
+            } => PreviewBody::Prose {
                 heading,
                 content,
                 truncated,
@@ -2928,7 +2928,7 @@ fn to_cached_preview(bodies: &[PreviewBody], avatar: Option<&str>) -> Option<Cac
     let bodies: Option<Vec<_>> = bodies
         .iter()
         .map(|body| match body {
-            PreviewBody::Text {
+            PreviewBody::Prose {
                 heading,
                 content,
                 truncated,
@@ -3992,7 +3992,7 @@ mod tests {
 
     #[test]
     fn test_text_and_chat_previews_survive_the_disk_cache() {
-        let text_body = PreviewBody::Text {
+        let text_body = PreviewBody::Prose {
             heading: Some("Error".into()),
             content: "network failure".into(),
             truncated: false,

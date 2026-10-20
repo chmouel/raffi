@@ -1338,14 +1338,16 @@ pub struct PreviewColorsConfig {
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default, PartialEq)]
 #[schemars(deny_unknown_fields)]
 pub struct PreviewConfig {
-    /// Base font size in px for preview text (default: 16). Title, headings and
-    /// hero values scale from it.
+    /// Base font size in px for preview text (default: 0.8 × general font_size,
+    /// 16 at the default 20). Title, headings and hero values scale from it.
     #[serde(default)]
     pub font_size: Option<f32>,
-    /// Font family for the preview pane (default: the UI font)
+    /// Font family for the preview pane, including message, snippet and
+    /// clipboard text (default: the UI font)
     #[serde(default)]
     pub font_family: Option<String>,
-    /// Monospace font family for code/text blocks (default: system monospace)
+    /// Monospace font family for code blocks such as file contents, commands
+    /// and script output (default: system monospace)
     #[serde(default)]
     pub mono_font_family: Option<String>,
     /// Width of the preview pane as a percentage of the window (10-80, default: 50)

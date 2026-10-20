@@ -732,6 +732,16 @@ fn test_snippet_previews_use_fetched_clipboard_and_ignore_stale_results() {
         app.text_snippets.clipboard.data,
         fetched("copied", "before")
     );
+
+    // Snippet text is prose, drawn in the preview font rather than monospace.
+    let preview = app.resolve_selected_preview().unwrap();
+    assert!(matches!(
+        preview.bodies.as_slice(),
+        [
+            PreviewBody::Prose { content, .. },
+            PreviewBody::Prose { content: raw, .. },
+        ] if content == "> copied" && raw == "> {clipboard}"
+    ));
 }
 
 #[test]
@@ -2508,17 +2518,22 @@ fn test_preview_style_resolves_defaults_and_overrides() {
     use super::theme::PreviewStyle;
     let theme = ThemeColors::from_mode_with_overrides(&crate::ThemeMode::Dark, None);
 
-    let default_style = PreviewStyle::resolve(&theme, &crate::PreviewConfig::default(), None);
-    assert_eq!(default_style.text, PreviewStyle::DEFAULT_FONT_SIZE);
+    let default_style = PreviewStyle::resolve(&theme, &crate::PreviewConfig::default(), None, 20.0);
+    assert_eq!(default_style.text, 16.0);
     assert_eq!(default_style.width_fraction, 0.5);
     assert_eq!(default_style.accent, theme.accent);
 
-    let inherited_font_style =
-        PreviewStyle::resolve(&theme, &crate::PreviewConfig::default(), Some("UI Font"));
+    let inherited_font_style = PreviewStyle::resolve(
+        &theme,
+        &crate::PreviewConfig::default(),
+        Some("UI Font"),
+        26.0,
+    );
     assert!(matches!(
         inherited_font_style.font.family,
         iced::font::Family::Name("UI Font")
     ));
+    assert_eq!(inherited_font_style.text, 21.0);
 
     let config = crate::PreviewConfig {
         font_size: Some(20.0),
@@ -2531,7 +2546,7 @@ fn test_preview_style_resolves_defaults_and_overrides() {
         }),
         ..Default::default()
     };
-    let style = PreviewStyle::resolve(&theme, &config, Some("UI Font"));
+    let style = PreviewStyle::resolve(&theme, &config, Some("UI Font"), 26.0);
     assert!(matches!(
         style.font.family,
         iced::font::Family::Name("Preview Font")
@@ -2612,12 +2627,12 @@ fn test_preview_ansi_palette_swaps_unreadable_colours() {
     let config = crate::PreviewConfig::default();
     // Palette black sits on a dark background: unreadable, so muted.
     let dark = ThemeColors::from_mode_with_overrides(&crate::ThemeMode::Dark, None);
-    let style = PreviewStyle::resolve(&dark, &config, None);
+    let style = PreviewStyle::resolve(&dark, &config, None, 20.0);
     assert_eq!(style.ansi[0], style.text_muted);
     assert_eq!(style.ansi[1], dark.ansi[1]);
     // Light palettes put a pale colour in slot 0 and a dark one in slot 7.
     let latte = ThemeColors::from_mode_with_overrides(&crate::ThemeMode::CatppuccinLatte, None);
-    let style = PreviewStyle::resolve(&latte, &config, None);
+    let style = PreviewStyle::resolve(&latte, &config, None, 20.0);
     assert_eq!(style.ansi[0], style.text_muted);
     assert_eq!(style.ansi[7], latte.ansi[7]);
 }
@@ -3391,7 +3406,7 @@ fn test_inspect_path_text_binary_truncation_and_directory() {
         .any(|(k, v)| k == "Type" && v == "Empty file"));
     assert!(empty_inspected.bodies.iter().any(|b| matches!(
         b,
-        PreviewBody::Text { content, .. } if content == "(Empty file)"
+        PreviewBody::Prose { content, .. } if content == "(Empty file)"
     )));
 
     // Text file
@@ -3850,7 +3865,7 @@ fn test_clipboard_previews_are_bound_to_session_and_item() {
     let preview = app.resolve_selected_preview().unwrap();
     assert!(matches!(
         preview.bodies.first(),
-        Some(PreviewBody::Text { content, .. }) if content == "Loading preview..."
+        Some(PreviewBody::Prose { content, .. }) if content == "Loading preview..."
     ));
     assert!(preview
         .metadata
@@ -3883,7 +3898,7 @@ fn test_clipboard_previews_are_bound_to_session_and_item() {
     let preview = app.resolve_selected_preview().unwrap();
     assert!(matches!(
         preview.bodies.first(),
-        Some(PreviewBody::Text { content, .. }) if content == "beta\nsecond line"
+        Some(PreviewBody::Prose { content, .. }) if content == "beta\nsecond line"
     ));
 
     let mut image = clip_text_preview("");

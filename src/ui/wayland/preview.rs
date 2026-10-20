@@ -318,8 +318,14 @@ pub(crate) fn parse_mrkdwn_spans(text: &str) -> Vec<MrkdwnSpan> {
 /// Main body block in the right-hand preview pane.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PreviewBody {
-    /// Multiline plain or monospace text block, with an optional section heading.
+    /// Multiline monospace text block (code, commands, file contents), with an optional section heading.
     Text {
+        heading: Option<String>,
+        content: String,
+        truncated: bool,
+    },
+    /// Multiline text block in the preview font (messages, snippets, clipboard text).
+    Prose {
         heading: Option<String>,
         content: String,
         truncated: bool,
@@ -467,7 +473,7 @@ pub(super) fn inspect_path(full_path: &str, show_hidden: bool) -> InspectedFile 
     let meta = match fs::metadata(path) {
         Ok(m) => m,
         Err(err) => {
-            bodies.push(PreviewBody::Text {
+            bodies.push(PreviewBody::Prose {
                 heading: Some("Error".to_string()),
                 content: format!("Cannot inspect path: {err}"),
                 truncated: false,
@@ -499,7 +505,7 @@ pub(super) fn inspect_path(full_path: &str, show_hidden: bool) -> InspectedFile 
         metadata.push(("Size".to_string(), format_byte_size(meta.len())));
         if !meta.is_file() {
             metadata.push(("Type".to_string(), "Special file".to_string()));
-            bodies.push(PreviewBody::Text {
+            bodies.push(PreviewBody::Prose {
                 heading: Some("Preview unavailable".to_string()),
                 content: "Special files cannot be previewed.".to_string(),
                 truncated: false,
@@ -517,7 +523,7 @@ pub(super) fn inspect_path(full_path: &str, show_hidden: bool) -> InspectedFile 
             if read_res.is_ok() {
                 if buf.is_empty() {
                     metadata.push(("Type".to_string(), "Empty file".to_string()));
-                    bodies.push(PreviewBody::Text {
+                    bodies.push(PreviewBody::Prose {
                         heading: Some("Contents".to_string()),
                         content: "(Empty file)".to_string(),
                         truncated: false,
@@ -532,7 +538,7 @@ pub(super) fn inspect_path(full_path: &str, show_hidden: bool) -> InspectedFile 
 
                     if slice.contains(&0) {
                         metadata.push(("Type".to_string(), "Binary file".to_string()));
-                        bodies.push(PreviewBody::Text {
+                        bodies.push(PreviewBody::Prose {
                             heading: Some("Binary File".to_string()),
                             content: "Binary file preview is not shown.".to_string(),
                             truncated: false,
@@ -562,7 +568,7 @@ pub(super) fn inspect_path(full_path: &str, show_hidden: bool) -> InspectedFile 
                             });
                         } else {
                             metadata.push(("Type".to_string(), "Binary file".to_string()));
-                            bodies.push(PreviewBody::Text {
+                            bodies.push(PreviewBody::Prose {
                                 heading: Some("Binary File".to_string()),
                                 content: "Binary file preview is not shown.".to_string(),
                                 truncated: false,
@@ -828,7 +834,7 @@ impl LauncherApp {
                     subtitle: Some("Running external command...".to_string()),
                     badge: Some("Script Filter".to_string()),
                     icon: None,
-                    bodies: vec![PreviewBody::Text {
+                    bodies: vec![PreviewBody::Prose {
                         heading: None,
                         content: format!("Waiting for {name} output..."),
                         truncated: false,
@@ -844,7 +850,7 @@ impl LauncherApp {
                     subtitle: None,
                     badge: Some("Input required".to_string()),
                     icon: None,
-                    bodies: vec![PreviewBody::Text {
+                    bodies: vec![PreviewBody::Prose {
                         heading: None,
                         content: help_msg.clone(),
                         truncated: false,
@@ -1102,7 +1108,7 @@ impl LauncherApp {
         });
         let expanded_value = expanded.unwrap_or(&snippet.value);
 
-        let mut bodies = vec![PreviewBody::Text {
+        let mut bodies = vec![PreviewBody::Prose {
             heading: Some("Snippet Content".to_string()),
             content: expanded_value.to_string(),
             truncated: false,
@@ -1110,7 +1116,7 @@ impl LauncherApp {
 
         // Expansions are only computed when placeholders are enabled.
         if expanded_value != snippet.value {
-            bodies.push(PreviewBody::Text {
+            bodies.push(PreviewBody::Prose {
                 heading: Some("Raw Template".to_string()),
                 content: snippet.value.clone(),
                 truncated: false,
@@ -1651,12 +1657,12 @@ impl LauncherApp {
             metadata.push(("Copied".to_string(), super::clipboard::full_copy_time(time)));
         }
         match self.clipboard.preview(&item.id) {
-            None => bodies.push(PreviewBody::Text {
+            None => bodies.push(PreviewBody::Prose {
                 heading: None,
                 content: "Loading preview...".to_string(),
                 truncated: false,
             }),
-            Some(Err(error)) => bodies.push(PreviewBody::Text {
+            Some(Err(error)) => bodies.push(PreviewBody::Prose {
                 heading: Some("Preview unavailable".to_string()),
                 content: error.clone(),
                 truncated: false,
@@ -1672,7 +1678,7 @@ impl LauncherApp {
                             format!("{} × {} px", image.width, image.height),
                         ));
                     }
-                    Some(Err(error)) => bodies.push(PreviewBody::Text {
+                    Some(Err(error)) => bodies.push(PreviewBody::Prose {
                         heading: Some("Image".to_string()),
                         content: error.clone(),
                         truncated: false,
@@ -1700,7 +1706,7 @@ impl LauncherApp {
                     } else {
                         "Text"
                     };
-                    bodies.push(PreviewBody::Text {
+                    bodies.push(PreviewBody::Prose {
                         heading: Some(heading.to_string()),
                         content: preview.text.clone(),
                         truncated: preview.text_truncated,

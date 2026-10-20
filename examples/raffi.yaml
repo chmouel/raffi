@@ -33,9 +33,9 @@ version: 1
 #                            # pass --keep-open / -o general.close_on_action=false on the CLI.
 #   show_tips: true          # Keyword tip in the empty search box, e.g. "clip for Clipboard history"
 #   preview:                 # Appearance of the preview pane
-#     font_size: 16          # Base preview text size in px (default: 16)
-#     font_family: "Inter"   # Font for the pane (default: the UI font)
-#     mono_font_family: "JetBrains Mono"  # Font for code/text blocks (default: system monospace)
+#     font_size: 16          # Base preview text size in px (default: 0.8 x font_size, 16 at 20)
+#     font_family: "Inter"   # Font for the pane and its message/snippet text (default: the UI font)
+#     mono_font_family: "JetBrains Mono"  # Font for code blocks: files, commands, script output (default: system monospace)
 #     width_percent: 50      # Pane width as a share of the window, 10-80 (default: 50)
 #     colors:                # Hex overrides; defaults come from the theme
 #       bg: "#31324480"

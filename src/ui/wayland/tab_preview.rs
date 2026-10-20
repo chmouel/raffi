@@ -199,7 +199,7 @@ fn is_public_v4(ip: Ipv4Addr) -> bool {
 fn bodies(description: Option<String>, image: Option<PathBuf>) -> Vec<PreviewBody> {
     let mut bodies = Vec::new();
     if let Some(description) = description {
-        bodies.push(PreviewBody::Text {
+        bodies.push(PreviewBody::Prose {
             heading: None,
             content: description,
             truncated: false,

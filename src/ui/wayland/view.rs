@@ -1582,11 +1582,11 @@ impl LauncherApp {
             }
         };
         let heading = |label: String| text(label).size(ps.small).color(ps.accent).font(ps.font);
-        let body_text = |value: String| {
+        let body_text = |value: String, font: iced::Font| {
             text(value)
                 .size(ps.text)
                 .color(ps.text_main)
-                .font(ps.mono_font)
+                .font(font)
                 .wrapping(iced::widget::text::Wrapping::WordOrGlyph)
         };
 
@@ -1684,18 +1684,25 @@ impl LauncherApp {
             if image_first && body_index == 0 {
                 continue; // already rendered above, filling the first view
             }
+            let prose = matches!(body, PreviewBody::Prose { .. });
             match body {
                 PreviewBody::Text {
                     heading: h,
                     content,
                     truncated,
+                }
+                | PreviewBody::Prose {
+                    heading: h,
+                    content,
+                    truncated,
                 } => {
+                    let font = if prose { ps.font } else { ps.mono_font };
                     let mut section = Column::new().spacing(6).width(Length::Fill);
                     if let Some(h) = h {
                         section = section.push(heading(h));
                     }
                     section = section.push(
-                        container(body_text(content))
+                        container(body_text(content, font))
                             .padding(12.0)
                             .width(Length::Fill)
                             .style(block_style),

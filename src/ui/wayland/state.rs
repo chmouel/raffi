@@ -414,7 +414,12 @@ impl ViewState {
             items_container_id: ContainerId::unique(),
             generation: 0,
             current_modifiers: iced::keyboard::Modifiers::empty(),
-            preview_style: PreviewStyle::resolve(&theme, &crate::PreviewConfig::default(), None),
+            preview_style: PreviewStyle::resolve(
+                &theme,
+                &crate::PreviewConfig::default(),
+                None,
+                font_sizes.item,
+            ),
             window_size: iced::Size::new(800.0, 600.0),
             theme,
             font_sizes,

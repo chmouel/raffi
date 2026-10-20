@@ -218,6 +218,7 @@ fn run_wayland_ui(
         &theme_colors,
         &settings.preview,
         settings.font_family.as_deref(),
+        settings.font_sizes.item,
     );
     let default_script_shell = settings.default_script_shell.clone();
 

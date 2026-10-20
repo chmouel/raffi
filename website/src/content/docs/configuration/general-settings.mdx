@@ -102,17 +102,17 @@ Shows a tip in the empty search box of the native UI, such as `Type to search...
 
 Appearance of the right-hand preview pane. All fields are optional.
 
-**`preview.font_size`** `number` (default: `16`)
+**`preview.font_size`** `number` (default: 0.8 × `font_size`, so `16` at the default `20`)
 
-Base text size in pixels. The title (1.4×), headings (0.8×), hero values (2.2×) and emoji glyphs (5×) scale from it.
+Base text size in pixels. When unset it follows the UI `font_size`. The title (1.4×), headings (0.8×), hero values (2.2×) and emoji glyphs (5×) scale from it.
 
 **`preview.font_family`** `string`
 
-Font family for the pane. Defaults to the UI font (`font_family`).
+Font family for the pane: titles, metadata, and text such as Slack messages, snippets, clipboard entries and browser tab descriptions. Defaults to the UI font (`font_family`), or the system sans-serif font when that is unset.
 
 **`preview.mono_font_family`** `string`
 
-Font family for code and text blocks (snippet content, scripts, file contents). Defaults to the system monospace font.
+Font family for code-like blocks: file contents, launcher commands and scripts, URLs, file lists, and Script Filter output. Defaults to the system monospace font.
 
 **`preview.width_percent`** `number` (default: `50`)
 
@@ -134,6 +134,7 @@ general:
   show_preview: true
   preview:
     font_size: 18
+    font_family: "Inter"
     mono_font_family: "JetBrains Mono"
     width_percent: 55
     colors:
