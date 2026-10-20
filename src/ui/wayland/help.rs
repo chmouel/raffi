@@ -504,7 +504,7 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
 
 /// List Ctrl+Tab and the chip arrows after Tab, for a configured
 /// `general.main_view`.
-pub(super) fn add_main_view_shortcut(entries: &mut Vec<HelpEntry>) {
+pub(super) fn add_main_view_shortcut(entries: &mut Vec<HelpEntry>, chips: bool) {
     let at = entries
         .iter()
         .position(|entry| entry.section == HelpSection::KeyboardShortcuts && entry.trigger == "Tab")
@@ -517,21 +517,19 @@ pub(super) fn add_main_view_shortcut(entries: &mut Vec<HelpEntry>) {
         icon: None,
         completion: None,
     };
-    entries.splice(
-        at..at,
-        [
-            row(
-                "Ctrl+Tab",
-                "Cycle main view sources",
-                "Lists one main_view source at a time, then all of them; Shift goes back",
-            ),
-            row(
-                "Left/Right",
-                "Pick a plugin chip",
-                "On an empty query, moves along the main_view keyword chips; Enter arms one",
-            ),
-        ],
-    );
+    let mut rows = vec![row(
+        "Ctrl+Tab",
+        "Cycle main view sources",
+        "Lists one main_view source at a time, then all of them; Shift goes back",
+    )];
+    if chips {
+        rows.push(row(
+            "Left/Right",
+            "Pick a plugin chip",
+            "On an empty query, moves along the main_view plugin chips; Enter arms one",
+        ));
+    }
+    entries.splice(at..at, rows);
 }
 
 /// Return the indices of the help rows matching `query`.

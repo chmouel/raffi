@@ -1254,6 +1254,19 @@ pub enum SortMode {
     Hybrid,
 }
 
+/// What the chips on an empty main view query show
+#[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum MainViewChips {
+    /// A short name such as "Tabs" or "Clipboard"
+    #[default]
+    Name,
+    /// The keyword that starts the plugin, such as `tabs` or `clip`
+    Keyword,
+    /// No chips: an empty query starts with the apps
+    Off,
+}
+
 /// How the native UI draws its window
 #[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -1323,6 +1336,10 @@ pub struct GeneralConfig {
     /// only show if `launchers` is listed.
     #[serde(default)]
     pub main_view: Option<Vec<String>>,
+    /// What the chips row above the apps shows on an empty query when
+    /// `main_view` is set: `name` (default), `keyword` or `off` (native UI only)
+    #[serde(default)]
+    pub main_view_chips: MainViewChips,
     /// Clipboard manager for `{clipboard:N}` snippet placeholders
     #[serde(default)]
     pub clipboard_history: ClipboardHistory,
@@ -3353,6 +3370,7 @@ pub fn run(args: Args) -> Result<()> {
         sort_mode: general.sort_mode.clone(),
         fallbacks: general.fallbacks.clone(),
         main_view: general.main_view.clone(),
+        main_view_chips: general.main_view_chips,
         clipboard_history: general.clipboard_history,
         terminal_classes: general.terminal_classes.clone(),
         show_preview: general.show_preview,

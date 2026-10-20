@@ -48,8 +48,8 @@ version: 1
 #     - addons.script_filters."Search Google"  # Switches to the script filter mode
 #     - addons.terminal                        # Runs the query in a terminal
 #   main_view:               # Mix addon results into the main list (native UI only); Ctrl+Tab shows one source at a time.
-#                            # An empty query shows one row of chips with each detected entry's keyword
-#                            # (sys, tabs, clip...) above the apps; Left/Right pick one, Enter arms it.
+#                            # An empty query shows one row of chips with each detected entry's name
+#                            # (Tabs, System, Clipboard...) above the apps; Left/Right pick one, Enter arms it.
 #                            # With no config file at all, raffi uses launchers, windows, browser_tabs, system,
 #                            # media, audio, bluetooth, pass, clipboard, bitwarden, terminal, emoji.
 #     - launchers            # Keep launchers; once main_view is set they only show if listed
@@ -60,6 +60,7 @@ version: 1
 #     - clipboard            # Keyword chip only, no rows: also bitwarden, terminal, emoji
 #     - text_snippets."Emails"       # A snippet source, by name
 #     - script_filters."Bookmarks"   # A script filter, run when typing pauses
+#   main_view_chips: name    # What those chips show: name (default), keyword, or off for no chips
 #   theme_colors:            # Override individual colours (hex: #RGB, #RRGGBB, or #RRGGBBAA)
 #     bg_base: "#1e1e2e"
 #     bg_input: "#313244"

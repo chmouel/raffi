@@ -7858,6 +7858,62 @@ fn test_main_view_offers_detected_plugins_before_apps() {
 }
 
 #[test]
+fn test_short_label_fits_chip() {
+    use super::main_view::short_label;
+    assert_eq!(short_label("Snippets", 12), "Snippets");
+    assert_eq!(short_label("Search the Web", 12), "Search Web");
+    assert_eq!(short_label("PAC Pull Requests", 12), "PAC Pull…");
+    assert_eq!(short_label("Kubernetesclusters", 12), "Kubernetesc…");
+}
+
+#[test]
+fn test_chip_label_names_plugins() {
+    use super::main_view::chip_label;
+    let mut addons = AddonsConfig::default();
+    addons.script_filters.push(ScriptFilterConfig {
+        name: "PAC Pull Requests".into(),
+        command: "pac".into(),
+        keyword: "pr".into(),
+        icon: None,
+        args: Vec::new(),
+        action: None,
+        secondary_action: None,
+        env: std::collections::HashMap::new(),
+        min_query_length: None,
+        dynamic_preview: None,
+    });
+    assert_eq!(chip_label(addons.browser_tabs.trigger(), &addons), "Tabs");
+    assert_eq!(chip_label(addons.terminal.trigger(), &addons), "Terminal");
+    assert_eq!(chip_label("pr", &addons), "PAC Pull…");
+    assert_eq!(chip_label("zz", &addons), "zz", "unknown keeps the keyword");
+}
+
+#[test]
+fn test_main_view_chips_setting() {
+    let mut addons = AddonsConfig::default();
+    addons.clipboard.enabled = Some(true);
+    let entries = ["system", "clipboard", "launchers"].map(String::from);
+
+    let mut app = main_view_app(&[], firefox_launcher(), addons.clone());
+    app.main_view.chips = crate::MainViewChips::Keyword;
+    let _ = app.configure_main_view(Some(&entries));
+    let _ = app.update(Message::SearchChanged(String::new()));
+    assert_eq!(app.chip_labels(), ["sys", "clip"]);
+
+    let mut app = main_view_app(&[], firefox_launcher(), addons.clone());
+    let _ = app.configure_main_view(Some(&entries));
+    let _ = app.update(Message::SearchChanged(String::new()));
+    assert_eq!(app.chip_labels(), ["System", "Clipboard"]);
+
+    let mut app = main_view_app(&[], firefox_launcher(), addons);
+    app.main_view.chips = crate::MainViewChips::Off;
+    let _ = app.configure_main_view(Some(&entries));
+    let _ = app.update(Message::SearchChanged(String::new()));
+    assert!(!app.keyword_chips);
+    assert_eq!(app.total_items(), 1, "off starts with the apps");
+}
+
+#[test]
 fn test_chip_window_keeps_active_chip_on_one_line() {
     use super::view::chip_window;
     let widths = [50.0; 9];

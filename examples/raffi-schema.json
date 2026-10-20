@@ -692,6 +692,10 @@
             "type": "string"
           }
         },
+        "main_view_chips": {
+          "description": "What the chips row above the apps shows on an empty query when\n`main_view` is set: `name` (default), `keyword` or `off` (native UI only)",
+          "$ref": "#/$defs/MainViewChips"
+        },
         "max_history": {
           "type": [
             "integer",
@@ -812,6 +816,26 @@
         }
       },
       "additionalProperties": false
+    },
+    "MainViewChips": {
+      "description": "What the chips on an empty main view query show",
+      "oneOf": [
+        {
+          "description": "A short name such as \"Tabs\" or \"Clipboard\"",
+          "type": "string",
+          "const": "name"
+        },
+        {
+          "description": "The keyword that starts the plugin, such as `tabs` or `clip`",
+          "type": "string",
+          "const": "keyword"
+        },
+        {
+          "description": "No chips: an empty query starts with the apps",
+          "type": "string",
+          "const": "off"
+        }
+      ]
     },
     "MediaAddonConfig": {
       "description": "Configuration for the media controls addon (native UI only)",

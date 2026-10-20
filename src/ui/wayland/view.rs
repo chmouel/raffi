@@ -1461,7 +1461,18 @@ impl LauncherApp {
             .into()
     }
 
-    /// The plugins offered on an empty query, as a single row: icon and keyword
+    /// What each chip shows, per `general.main_view_chips`.
+    pub(super) fn chip_labels(&self) -> Vec<String> {
+        self.keyword_suggestions
+            .iter()
+            .map(|suggestion| match self.main_view.chips {
+                crate::MainViewChips::Keyword => suggestion.keyword.clone(),
+                _ => super::main_view::chip_label(&suggestion.keyword, &self.addons),
+            })
+            .collect()
+    }
+
+    /// The plugins offered on an empty query, as a single row: icon and label
     /// per chip, the active one in a pill, "‹" / "›" where chips are hidden.
     fn chips_row(&self) -> Element<'_, Message> {
         let t = self.view.theme;
@@ -1479,23 +1490,23 @@ impl LauncherApp {
                     .and_then(|icon| self.keyword_icon(icon))
             })
             .collect();
-        let widths: Vec<f32> = self
-            .keyword_suggestions
+        let labels = self.chip_labels();
+        let widths: Vec<f32> = labels
             .iter()
             .zip(&icons)
-            .map(|(suggestion, icon)| {
-                chip_width(
-                    &suggestion.keyword,
-                    icon.as_ref().map(|_| icon_size),
-                    label_size,
-                )
-            })
+            .map(|(label, icon)| chip_width(label, icon.as_ref().map(|_| icon_size), label_size))
             .collect();
         let active = self
             .chip_index
             .min(self.keyword_suggestions.len().saturating_sub(1));
-        let subtitle = (row_selected && self.resolve_selected_preview().is_none())
-            .then(|| self.keyword_suggestions[active].subtitle.clone());
+        let subtitle = (row_selected && self.resolve_selected_preview().is_none()).then(|| {
+            let suggestion = &self.keyword_suggestions[active];
+            if labels[active] == suggestion.keyword {
+                suggestion.subtitle.clone()
+            } else {
+                format!("{} · {}", suggestion.keyword, suggestion.subtitle)
+            }
+        });
 
         let strip = iced::widget::responsive(move |size| {
             let window = chip_window(&widths, size.width, active);
@@ -1515,7 +1526,6 @@ impl LauncherApp {
                 chips = chips.push(marker("‹", true));
             }
             for chip in window.clone() {
-                let suggestion = &self.keyword_suggestions[chip];
                 let is_active = chip == active;
                 let mut content = Row::new()
                     .spacing(CHIP_ICON_SPACING)
@@ -1535,7 +1545,7 @@ impl LauncherApp {
                     None => {}
                 }
                 content = content.push(
-                    text(suggestion.keyword.clone())
+                    text(labels[chip].clone())
                         .size(label_size)
                         .color(if is_active { t.accent } else { t.text_muted }),
                 );

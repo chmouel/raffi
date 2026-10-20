@@ -261,6 +261,7 @@ pub(super) struct MainViewState {
     pub launchers_strong: bool,
     /// What the empty query offers by keyword, in config order.
     pub offers: Vec<Offer>,
+    pub chips: crate::MainViewChips,
     /// Whether the sources' rows are the recent picks rather than matches.
     recent_applied: bool,
 }
@@ -637,6 +638,92 @@ async fn off_thread<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static
 
 type ListLoad = Box<dyn FnOnce() -> Result<Vec<CommandItem>, String> + Send>;
 
+/// Longest chip name before [`short_label`] shortens it.
+const CHIP_LABEL_MAX: usize = 12;
+
+/// The name a chip shows for `keyword`: a fixed one for built-in addons, the
+/// configured `name` of a snippet, script filter or web search source, and
+/// the keyword itself otherwise.
+pub(super) fn chip_label(keyword: &str, addons: &AddonsConfig) -> String {
+    let builtin = [
+        (addons.browser_tabs.trigger(), "Tabs"),
+        (addons.windows.trigger(), "Windows"),
+        (addons.system.trigger(), "System"),
+        (addons.media.trigger(), "Media"),
+        (addons.audio.trigger(), "Audio"),
+        (addons.bluetooth.trigger(), "Bluetooth"),
+        (addons.pass.trigger(), "Passwords"),
+        (addons.bitwarden.trigger(), "Bitwarden"),
+        (addons.clipboard.trigger(), "Clipboard"),
+        (addons.terminal.trigger(), "Terminal"),
+        (KeywordAddon::Emoji.trigger(addons), "Emoji"),
+        (addons.slack.trigger(), "Slack"),
+        ("~/", "Files"),
+    ];
+    if let Some((_, label)) = builtin.iter().find(|(trigger, _)| *trigger == keyword) {
+        return label.to_string();
+    }
+    let configured = addons
+        .text_snippets
+        .iter()
+        .map(|config| (&config.keyword, &config.name))
+        .chain(
+            addons
+                .script_filters
+                .iter()
+                .map(|config| (&config.keyword, &config.name)),
+        )
+        .chain(
+            addons
+                .web_searches
+                .iter()
+                .map(|config| (&config.keyword, &config.name)),
+        )
+        .find(|(trigger, _)| trigger.as_str() == keyword);
+    match configured {
+        Some((_, name)) if !name.trim().is_empty() => short_label(name, CHIP_LABEL_MAX),
+        _ => keyword.to_string(),
+    }
+}
+
+/// `name` in at most `max` characters: filler words go first, then the
+/// trailing words, marked with "…".
+pub(super) fn short_label(name: &str, max: usize) -> String {
+    let words: Vec<&str> = name.split_whitespace().collect();
+    let joined = |words: &[&str]| words.join(" ");
+    let fits = |label: &str| label.chars().count() <= max;
+    if fits(&joined(&words)) {
+        return joined(&words);
+    }
+    const FILLER: [&str; 8] = ["a", "an", "and", "for", "my", "of", "the", "to"];
+    let kept: Vec<&str> = words
+        .iter()
+        .copied()
+        .filter(|word| !FILLER.contains(&word.to_lowercase().as_str()))
+        .collect();
+    let words = if kept.is_empty() { words } else { kept };
+    if fits(&joined(&words)) {
+        return joined(&words);
+    }
+    // Room for the "…".
+    let mut label = String::new();
+    for word in &words {
+        let candidate = if label.is_empty() {
+            word.to_string()
+        } else {
+            format!("{label} {word}")
+        };
+        if candidate.chars().count() > max - 1 {
+            break;
+        }
+        label = candidate;
+    }
+    if label.is_empty() {
+        label = words[0].chars().take(max - 1).collect();
+    }
+    format!("{label}…")
+}
+
 impl LauncherApp {
     /// Set up `general.main_view` and start loading its addons.
     pub(super) fn configure_main_view(&mut self, entries: Option<&[String]>) -> Task<Message> {
@@ -644,7 +731,9 @@ impl LauncherApp {
             return Task::none();
         };
         let entries = resolve(entries, &self.addons);
+        let chips = self.main_view.chips;
         self.main_view = MainViewState::new(&entries);
+        self.main_view.chips = chips;
         self.main_view.names = entries
             .iter()
             .filter_map(|entry| match *entry {
@@ -744,6 +833,9 @@ impl LauncherApp {
     /// Offer the main view plugins as the chips row, keeping `chip` the
     /// selected one while it is still offered.
     pub(super) fn offer_main_view_plugins(&mut self, chip: Option<String>) {
+        if self.main_view.chips == crate::MainViewChips::Off {
+            return;
+        }
         self.keyword_suggestions = self.main_view_plugin_suggestions();
         self.keyword_chips = true;
         self.chip_index = chip

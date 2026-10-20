@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 
 use crate::{
-    AddonsConfig, ClipboardHistory, PreviewConfig, RaffiConfig, Renderer, SortMode,
+    AddonsConfig, ClipboardHistory, MainViewChips, PreviewConfig, RaffiConfig, Renderer, SortMode,
     ThemeColorsConfig, ThemeMode, UIType,
 };
 
@@ -91,6 +91,7 @@ pub struct UISettings {
     pub sort_mode: SortMode,
     pub fallbacks: Vec<String>,
     pub main_view: Option<Vec<String>>,
+    pub main_view_chips: MainViewChips,
     pub clipboard_history: ClipboardHistory,
     pub terminal_classes: Vec<String>,
     pub show_preview: Option<bool>,
@@ -117,6 +118,7 @@ impl Default for UISettings {
             sort_mode: SortMode::default(),
             fallbacks: Vec::new(),
             main_view: None,
+            main_view_chips: MainViewChips::default(),
             clipboard_history: ClipboardHistory::default(),
             terminal_classes: Vec::new(),
             show_preview: None,

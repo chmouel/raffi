@@ -2002,7 +2002,10 @@ impl LauncherApp {
         if self.help_entries.is_empty() {
             self.help_entries = help_entries(&self.addons);
             if !self.main_view.stops.is_empty() {
-                add_main_view_shortcut(&mut self.help_entries);
+                add_main_view_shortcut(
+                    &mut self.help_entries,
+                    self.main_view.chips != crate::MainViewChips::Off,
+                );
             }
         }
     }
