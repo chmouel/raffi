@@ -87,14 +87,18 @@ static RENDERER_OVERRIDE: AtomicBool = AtomicBool::new(false);
 
 /// iced reads its renderer only from `ICED_BACKEND`. Must run before any
 /// thread starts, since setting the environment is not thread safe.
-fn select_renderer(renderer: crate::Renderer) {
-    if std::env::var_os("ICED_BACKEND").is_some() {
-        return;
+/// Returns whether the GPU renderer is used: the software one presents
+/// opaque buffers on Wayland, so the window cannot be translucent with it.
+fn select_renderer(renderer: crate::Renderer) -> bool {
+    if let Some(backend) = std::env::var_os("ICED_BACKEND") {
+        return !backend.to_string_lossy().starts_with("tiny-skia");
     }
-    if renderer == crate::Renderer::Cpu {
-        std::env::set_var("ICED_BACKEND", "tiny-skia");
-        RENDERER_OVERRIDE.store(true, Ordering::SeqCst);
+    if renderer == crate::Renderer::Gpu {
+        return true;
     }
+    std::env::set_var("ICED_BACKEND", "tiny-skia");
+    RENDERER_OVERRIDE.store(true, Ordering::SeqCst);
+    false
 }
 
 /// Drop Raffi's `ICED_BACKEND` once the window exists, so programs launched
@@ -122,7 +126,7 @@ fn run_wayland_ui(
     addons: &AddonsConfig,
     settings: &UISettings,
 ) -> Result<String> {
-    select_renderer(settings.renderer);
+    let translucent = select_renderer(settings.renderer);
     prewarm_fonts();
     crate::debug_log!(
         "wayland: starting UI: {}x{} theme={:?} sort_mode={:?} no_icons={} max_history={} renderer={:?}",
@@ -135,7 +139,8 @@ fn run_wayland_ui(
         settings.renderer
     );
     let theme_colors =
-        ThemeColors::from_mode_with_overrides(&settings.theme, settings.theme_colors.as_ref());
+        ThemeColors::from_mode_with_overrides(&settings.theme, settings.theme_colors.as_ref())
+            .with_opacity(if translucent { settings.opacity } else { 1.0 });
     let iced_theme = if settings.theme.is_light() {
         iced::Theme::Light
     } else {
@@ -190,6 +195,7 @@ fn run_wayland_ui(
         position: window::Position::Centered,
         decorations: false,
         transparent: true,
+        blur: settings.blur,
         visible: true,
         level: window::Level::AlwaysOnTop,
         #[cfg(target_os = "linux")]
@@ -246,6 +252,19 @@ fn run_wayland_ui(
     )
     .subscription(LauncherApp::subscription)
     .theme(move |_state: &LauncherApp| iced_theme.clone())
+    // iced clears the window with the theme's opaque background; clear it
+    // transparent so the rounded frame and `opacity` show what is behind.
+    .style(move |_state: &LauncherApp, theme: &iced::Theme| {
+        let palette = theme.palette();
+        iced::theme::Style {
+            background_color: if translucent {
+                iced::Color::TRANSPARENT
+            } else {
+                palette.background
+            },
+            text_color: palette.text,
+        }
+    })
     .window(window_settings);
 
     if let Some(ref family) = settings.font_family {

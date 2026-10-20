@@ -69,6 +69,18 @@ set $menu raffi -p -c ~/.config/raffi/custom.yaml
 set $menu raffi -p -u native
 ```
 
+### Transparency and Blur
+
+The native UI is translucent by default (`opacity: 0.85` in `general`). Plain
+Sway has no blur. [SwayFX](https://github.com/WillPower3309/swayfx) can blur
+behind it:
+
+```ini
+for_window [app_id="com.chmouel.raffi"] blur enable
+```
+
+See [Transparency and Blur](../../features/themes/#transparency-and-blur).
+
 ## Testing
 
 After adding the configuration:

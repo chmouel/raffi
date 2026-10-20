@@ -648,6 +648,14 @@
       "description": "General configuration for persistent defaults",
       "type": "object",
       "properties": {
+        "blur": {
+          "description": "Ask the compositor to blur what shows through the native UI window\n(KDE/KWin; other compositors use their own rules). Default: true.",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
         "clipboard_history": {
           "description": "Clipboard manager for `{clipboard:N}` snippet placeholders",
           "$ref": "#/$defs/ClipboardHistory"
@@ -712,6 +720,17 @@
           ],
           "default": null
         },
+        "opacity": {
+          "description": "Opacity of the native UI backgrounds, from 0.0 (see-through) to 1.0\n(the theme as designed). Text and icons stay opaque. Default: 0.85.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float",
+          "default": null,
+          "maximum": 1.0,
+          "minimum": 0.0
+        },
         "padding": {
           "type": [
             "number",
@@ -725,7 +744,7 @@
           "$ref": "#/$defs/PreviewConfig"
         },
         "renderer": {
-          "description": "Renderer for the native UI: `cpu` (default, faster to open) or `gpu`.\nAn `ICED_BACKEND` environment variable takes precedence.",
+          "description": "Renderer for the native UI: `auto` (default: `gpu` when `opacity` is\nbelow 1, else `cpu`), `cpu` (faster to open, opaque on Wayland) or `gpu`.\nAn `ICED_BACKEND` environment variable takes precedence.",
           "$ref": "#/$defs/Renderer"
         },
         "show_preview": {
@@ -1137,7 +1156,12 @@
       "description": "How the native UI draws its window",
       "oneOf": [
         {
-          "description": "Software rendering: opens faster because no GPU driver has to be loaded",
+          "description": "`gpu` when `opacity` is below 1, since only the GPU renderer shows\ntransparency on Wayland, `cpu` otherwise",
+          "type": "string",
+          "const": "auto"
+        },
+        {
+          "description": "Software rendering: opens faster because no GPU driver has to be loaded.\nThe window stays opaque on Wayland.",
           "type": "string",
           "const": "cpu"
         },

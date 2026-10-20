@@ -247,6 +247,37 @@ general:
     # All other colors use dark theme defaults
 ```
 
+## Transparency and Blur
+
+The window background is see-through by default, like Vicinae. `opacity` scales the background colours (window, search box, selection and preview pane) from `0.0`, fully see-through, to `1.0`, the theme as designed. Text, icons, accents and borders stay opaque. The default is `0.85`. `--opacity` overrides it for one run.
+
+```yaml raffi.yaml
+general:
+  opacity: 0.75   # 1 for a solid window
+  blur: true      # default
+```
+
+Colours set with `#RRGGBBAA` in `theme_colors` keep their alpha and are scaled by `opacity` too.
+
+Transparency needs the GPU renderer: the software renderer draws an opaque window on Wayland. The default `renderer: auto` uses the GPU when `opacity` is below `1`, and the faster software renderer at `opacity: 1`. With `renderer: cpu`, `opacity` is ignored.
+
+Blurring what shows through is up to the compositor:
+
+- KDE Plasma (KWin) blurs the window when `blur` is `true`, which it is by default.
+- Hyprland blurs translucent windows when `decoration:blur:enabled` is on, which it is by default.
+- niri 26.04 and later blur when a window rule asks for it:
+
+  ```kdl
+  window-rule {
+      match app-id="^com\\.chmouel\\.raffi$"
+      background-effect { blur true }
+  }
+  ```
+
+- SwayFX blurs with `for_window [app_id="com.chmouel.raffi"] blur enable`. Plain Sway has no blur.
+
+The app ID is `com.chmouel.raffi` unless you change it with `--app-name`. Without a compositor (bare X11), or when no GPU is usable, the see-through parts can render black: set `opacity: 1` there.
+
 ## Font Customization
 
 Combine theme customization with font settings:

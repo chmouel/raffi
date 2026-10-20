@@ -1271,8 +1271,12 @@ pub enum MainViewChips {
 #[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Renderer {
-    /// Software rendering: opens faster because no GPU driver has to be loaded
+    /// `gpu` when `opacity` is below 1, since only the GPU renderer shows
+    /// transparency on Wayland, `cpu` otherwise
     #[default]
+    Auto,
+    /// Software rendering: opens faster because no GPU driver has to be loaded.
+    /// The window stays opaque on Wayland.
     Cpu,
     /// GPU rendering through Vulkan, falling back to software if no GPU is usable
     Gpu,
@@ -1309,7 +1313,17 @@ pub struct GeneralConfig {
     pub theme: Option<String>,
     #[serde(default)]
     pub theme_colors: Option<ThemeColorsConfig>,
-    /// Renderer for the native UI: `cpu` (default, faster to open) or `gpu`.
+    /// Opacity of the native UI backgrounds, from 0.0 (see-through) to 1.0
+    /// (the theme as designed). Text and icons stay opaque. Default: 0.85.
+    #[serde(default)]
+    #[schemars(range(min = 0.0, max = 1.0))]
+    pub opacity: Option<f32>,
+    /// Ask the compositor to blur what shows through the native UI window
+    /// (KDE/KWin; other compositors use their own rules). Default: true.
+    #[serde(default)]
+    pub blur: Option<bool>,
+    /// Renderer for the native UI: `auto` (default: `gpu` when `opacity` is
+    /// below 1, else `cpu`), `cpu` (faster to open, opaque on Wayland) or `gpu`.
     /// An `ICED_BACKEND` environment variable takes precedence.
     #[serde(default)]
     pub renderer: Renderer,
@@ -1554,6 +1568,12 @@ pub struct Args {
     )]
     pub theme: Option<String>,
     #[options(
+        help = "native UI background opacity, 0.0 to 1.0 (default: 0.85)",
+        no_short,
+        meta = "OPACITY"
+    )]
+    pub opacity: Option<f32>,
+    #[options(
         help = "write both JSON Schemas beside the config file and exit",
         no_short
     )]
@@ -1587,6 +1607,25 @@ fn resolve_window_dimensions(general: &GeneralConfig) -> (f32, f32) {
         general.window_width.unwrap_or(800.0),
         general.window_height.unwrap_or(600.0),
     )
+}
+
+const DEFAULT_OPACITY: f32 = 0.85;
+
+/// Background opacity for the native UI: `--opacity` wins over `general.opacity`.
+fn resolve_opacity(args: &Args, general: &GeneralConfig) -> f32 {
+    args.opacity
+        .or(general.opacity)
+        .filter(|o| o.is_finite())
+        .unwrap_or(DEFAULT_OPACITY)
+        .clamp(0.0, 1.0)
+}
+
+fn resolve_renderer(renderer: Renderer, opacity: f32) -> Renderer {
+    match renderer {
+        Renderer::Auto if opacity < 1.0 => Renderer::Gpu,
+        Renderer::Auto => Renderer::Cpu,
+        explicit => explicit,
+    }
 }
 
 /// A trait for checking environment variables.
@@ -3352,6 +3391,7 @@ pub fn run(args: Args) -> Result<()> {
     }
 
     let (window_width, window_height) = resolve_window_dimensions(general);
+    let opacity = resolve_opacity(&args, general);
 
     // Build UI settings
     let ui_settings = ui::UISettings {
@@ -3361,7 +3401,9 @@ pub fn run(args: Args) -> Result<()> {
         app_name: args.app_name.clone(),
         theme,
         theme_colors: parsed_config.general.theme_colors.clone(),
-        renderer: general.renderer,
+        opacity,
+        blur: general.blur.unwrap_or(true),
+        renderer: resolve_renderer(general.renderer, opacity),
         max_history,
         font_sizes,
         font_family: general.font_family.clone(),
@@ -3715,6 +3757,7 @@ mod tests {
             initial_query: None,
             select_1: false,
             theme: None,
+            opacity: None,
             generate_schemas: false,
             check_config: false,
             debug_file: None,
@@ -3795,6 +3838,7 @@ mod tests {
             initial_query: None,
             select_1: false,
             theme: None,
+            opacity: None,
             generate_schemas: false,
             check_config: false,
             debug_file: None,
@@ -3870,6 +3914,7 @@ mod tests {
             initial_query: None,
             select_1: false,
             theme: None,
+            opacity: None,
             generate_schemas: false,
             check_config: false,
             debug_file: None,
@@ -4009,6 +4054,7 @@ mod tests {
             initial_query: None,
             select_1: false,
             theme: None,
+            opacity: None,
             generate_schemas: false,
             check_config: false,
             debug_file: None,
@@ -4096,6 +4142,7 @@ mod tests {
             initial_query: None,
             select_1: false,
             theme: None,
+            opacity: None,
             generate_schemas: false,
             check_config: false,
             debug_file: None,
@@ -4294,6 +4341,7 @@ mod tests {
             initial_query: None,
             select_1: false,
             theme: None,
+            opacity: None,
             generate_schemas: false,
             check_config: false,
             debug_file: None,
@@ -4333,6 +4381,7 @@ mod tests {
             initial_query: None,
             select_1: false,
             theme: None,
+            opacity: None,
             generate_schemas: false,
             check_config: false,
             debug_file: None,
@@ -4391,6 +4440,7 @@ mod tests {
             initial_query: None,
             select_1: false,
             theme: None,
+            opacity: None,
             generate_schemas: false,
             check_config: false,
             debug_file: None,
@@ -4432,6 +4482,7 @@ mod tests {
             initial_query: None,
             select_1: false,
             theme: None,
+            opacity: None,
             generate_schemas: false,
             check_config: false,
             debug_file: None,
@@ -4469,6 +4520,7 @@ mod tests {
             initial_query: None,
             select_1: false,
             theme: None,
+            opacity: None,
             generate_schemas: false,
             check_config: false,
             debug_file: None,
@@ -4503,6 +4555,34 @@ mod tests {
                 "{flag} should not be accepted"
             );
         }
+    }
+
+    #[test]
+    fn test_opacity_resolution() {
+        let general = GeneralConfig {
+            opacity: Some(0.6),
+            ..Default::default()
+        };
+        let args = Args::parse_args_default::<&str>(&["--opacity", "0.4"]).unwrap();
+        assert_eq!(resolve_opacity(&args, &general), 0.4);
+        assert_eq!(resolve_opacity(&Args::default(), &general), 0.6);
+        assert_eq!(
+            resolve_opacity(&Args::default(), &GeneralConfig::default()),
+            DEFAULT_OPACITY
+        );
+        let too_high = GeneralConfig {
+            opacity: Some(3.0),
+            ..Default::default()
+        };
+        assert_eq!(resolve_opacity(&Args::default(), &too_high), 1.0);
+
+        assert_eq!(resolve_renderer(Renderer::Auto, 0.85), Renderer::Gpu);
+        assert_eq!(resolve_renderer(Renderer::Auto, 1.0), Renderer::Cpu);
+        assert_eq!(resolve_renderer(Renderer::Cpu, 0.5), Renderer::Cpu);
+
+        let parsed: GeneralConfig = serde_yaml::from_str("opacity: 0.7\nblur: false\n").unwrap();
+        assert_eq!(parsed.opacity, Some(0.7));
+        assert_eq!(parsed.blur, Some(false));
     }
 
     #[test]
@@ -4602,6 +4682,7 @@ mod tests {
             initial_query: None,
             select_1: false,
             theme: None,
+            opacity: None,
             generate_schemas: false,
             check_config: false,
             debug_file: None,
@@ -4668,6 +4749,7 @@ mod tests {
             initial_query: None,
             select_1: false,
             theme: None,
+            opacity: None,
             generate_schemas: false,
             check_config: false,
             debug_file: None,
@@ -4748,6 +4830,7 @@ mod tests {
             initial_query: None,
             select_1: false,
             theme: None,
+            opacity: None,
             generate_schemas: false,
             check_config: false,
             debug_file: None,
@@ -4793,6 +4876,7 @@ mod tests {
             initial_query: None,
             select_1: false,
             theme: None,
+            opacity: None,
             generate_schemas: false,
             check_config: false,
             debug_file: None,
@@ -4834,6 +4918,7 @@ mod tests {
             initial_query: None,
             select_1: false,
             theme: None,
+            opacity: None,
             generate_schemas: false,
             check_config: false,
             debug_file: None,
@@ -4878,6 +4963,7 @@ mod tests {
                 initial_query: None,
                 select_1: false,
                 theme: None,
+                opacity: None,
                 generate_schemas: false,
                 check_config: false,
                 debug_file: None,
@@ -5073,6 +5159,7 @@ shell:
             initial_query: None,
             select_1: false,
             theme: None,
+            opacity: None,
             generate_schemas: false,
             check_config: false,
             debug_file: None,
@@ -5120,6 +5207,7 @@ shell:
             initial_query: None,
             select_1: false,
             theme: None,
+            opacity: None,
             generate_schemas: false,
             check_config: false,
             debug_file: None,
@@ -5166,6 +5254,7 @@ shell:
             initial_query: None,
             select_1: false,
             theme: None,
+            opacity: None,
             generate_schemas: false,
             check_config: false,
             debug_file: None,

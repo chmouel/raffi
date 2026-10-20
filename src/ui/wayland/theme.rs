@@ -448,6 +448,24 @@ impl ThemeColors {
         }
         colors
     }
+
+    /// Scale the alpha of the background colours, leaving text, accents and
+    /// borders opaque. `1.0` keeps the theme as designed.
+    pub fn with_opacity(mut self, opacity: f32) -> Self {
+        let opacity = if opacity.is_finite() {
+            opacity.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        for c in [
+            &mut self.bg_base,
+            &mut self.bg_input,
+            &mut self.selection_bg,
+        ] {
+            c.a *= opacity;
+        }
+        self
+    }
 }
 
 fn parse_hex_color(hex: &str) -> Option<iced::Color> {

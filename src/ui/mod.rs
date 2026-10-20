@@ -82,6 +82,9 @@ pub struct UISettings {
     pub app_name: Option<String>,
     pub theme: ThemeMode,
     pub theme_colors: Option<ThemeColorsConfig>,
+    /// Multiplier for the alpha of the native UI backgrounds.
+    pub opacity: f32,
+    pub blur: bool,
     pub renderer: Renderer,
     pub max_history: u32,
     pub font_sizes: FontSizes,
@@ -109,6 +112,8 @@ impl Default for UISettings {
             app_name: None,
             theme: ThemeMode::Dark,
             theme_colors: None,
+            opacity: crate::DEFAULT_OPACITY,
+            blur: true,
             renderer: Renderer::default(),
             max_history: 10,
             font_sizes: FontSizes::default_sizes(),

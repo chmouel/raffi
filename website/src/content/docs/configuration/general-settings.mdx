@@ -50,6 +50,18 @@ Color theme for the native interface. Valid options:
   Equivalent to `-t` or `--theme` flag. Only applies to native UI.
 
 
+**`opacity`** `number` (default: `0.85`)
+
+Opacity of the native UI backgrounds, from `0.0` (see-through) to `1.0` (the theme as designed). Text and icons stay opaque. Set `1` for a solid window. Transparency needs the GPU renderer, which `renderer: auto` picks when `opacity` is below `1`.
+
+  Equivalent to `--opacity` flag. See [Transparency and Blur](../../features/themes/#transparency-and-blur).
+
+
+**`blur`** `boolean` (default: `true`)
+
+Ask the compositor to blur what shows through the window. KDE Plasma honours it; Hyprland, niri and SwayFX use their own rules, see [Transparency and Blur](../../features/themes/#transparency-and-blur).
+
+
 **`no_icons`** `boolean` (default: `false`)
 
 Disables icon loading for faster startup.
@@ -57,11 +69,12 @@ Disables icon loading for faster startup.
   Equivalent to `-I` or `--no-icons` flag.
 
 
-**`renderer`** `string` (default: `cpu`)
+**`renderer`** `string` (default: `auto`)
 
 How the native UI draws its window. Valid options:
-  - `cpu` - Software rendering (default). Skips GPU driver setup, so the window opens sooner.
-  - `gpu` - Vulkan/OpenGL rendering through wgpu.
+  - `auto` - `gpu` when `opacity` is below `1`, otherwise `cpu` (default).
+  - `cpu` - Software rendering. Skips GPU driver setup, so the window opens sooner. The window stays opaque on Wayland and `opacity` is ignored.
+  - `gpu` - Vulkan/OpenGL rendering through wgpu. Needed for a translucent window.
 
   An `ICED_BACKEND` environment variable (`tiny-skia` or `wgpu`) takes precedence. See [Startup performance](#startup-performance).
 
@@ -354,7 +367,11 @@ Large or SVG launcher icons are converted to small PNG copies in
 `~/.cache/raffi/icon-thumbnails` on first use, so later launches skip decoding
 them. `raffi --refresh-cache` clears these copies along with the icon cache.
 
-If you use `renderer: gpu`, Vulkan layers installed by other programs (Steam,
+The translucent default (`opacity: 0.85`) uses the GPU renderer. For the
+fastest start, set `opacity: 1` or `renderer: cpu` to use the software
+renderer with an opaque window.
+
+If you use the GPU renderer, Vulkan layers installed by other programs (Steam,
 for example) are loaded on every launch. Setting `VK_LOADER_LAYERS_DISABLE=all`
 in Raffi's environment skips them.
 
@@ -400,7 +417,7 @@ general:
 ## Command-Line Override
 
 The following general settings can be overridden with command-line flags.
-`window_width`, `window_height`, `clipboard_history`, and `terminal_classes` have no flag and can only be set in the configuration file.
+`window_width`, `window_height`, `blur`, `clipboard_history`, and `terminal_classes` have no flag and can only be set in the configuration file.
 
 ```bash
 # Override UI type
@@ -408,6 +425,9 @@ raffi --ui-type native
 
 # Override theme
 raffi --theme light
+
+# Override background opacity
+raffi --opacity 0.7
 
 # Disable icons
 raffi --no-icons

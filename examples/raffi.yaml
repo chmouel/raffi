@@ -16,6 +16,8 @@ version: 1
 #   theme: dark              # Built-in theme: dark (default), light, catppuccin, catppuccin-latte,
 #                            # tokyo-night, nord, gruvbox, dracula, rose-pine, or kanagawa.
 #                            # Also sets the ANSI palette used in previews
+#   opacity: 0.85            # Background opacity, 0.0 (see-through) to 1.0 (solid); --opacity overrides
+#   blur: true               # Ask the compositor to blur behind the window (KDE; see docs for others)
 #   font_size: 20            # Base font size in px (default: 20). Other sizes and paddings
 #                            # scale proportionally (input=24, items=20, subtitles=14, hints=12)
 #   font_family: "Inter"     # Font family name (default: system sans-serif)
@@ -70,7 +72,8 @@ version: 1
 #     text_muted: "#6c7086"
 #     selection_bg: "#45475a"
 #     border: "#585b70"
-#   renderer: cpu            # Native UI renderer: cpu (default, opens fastest) or gpu; ICED_BACKEND overrides it
+#   renderer: auto           # Native UI renderer: auto (default: gpu when opacity < 1, else cpu), cpu (opens
+#                            # fastest, opaque on Wayland) or gpu; ICED_BACKEND overrides it
 
 # Launchers live in launchers.yaml next to this file, see examples/launchers.yaml.
 # A `launchers:` section here still works and takes precedence over launchers.yaml.

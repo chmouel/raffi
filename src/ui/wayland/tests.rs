@@ -2558,6 +2558,25 @@ fn test_theme_colors_presets_and_overrides() {
 }
 
 #[test]
+fn test_theme_opacity_scales_only_backgrounds() {
+    let base = ThemeColors::from_mode_with_overrides(&crate::ThemeMode::Nord, None);
+    let half = base.with_opacity(0.5);
+    for (scaled, orig) in [
+        (half.bg_base, base.bg_base),
+        (half.bg_input, base.bg_input),
+        (half.selection_bg, base.selection_bg),
+    ] {
+        assert!((scaled.a - orig.a * 0.5).abs() < f32::EPSILON);
+        assert_eq!((scaled.r, scaled.g, scaled.b), (orig.r, orig.g, orig.b));
+    }
+    assert_eq!(half.text_main, base.text_main);
+    assert_eq!(half.accent, base.accent);
+    assert_eq!(half.border, base.border);
+    assert_eq!(base.with_opacity(7.0).bg_base, base.bg_base);
+    assert_eq!(base.with_opacity(f32::NAN).bg_base, base.bg_base);
+}
+
+#[test]
 fn test_preview_ansi_palette_swaps_unreadable_colours() {
     use super::theme::PreviewStyle;
     let config = crate::PreviewConfig::default();
