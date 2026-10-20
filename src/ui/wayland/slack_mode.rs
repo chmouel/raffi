@@ -2,7 +2,7 @@
 //! views as the query changes, debounces searches, loads previews and keeps
 //! usage counts.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -30,14 +30,23 @@ pub(super) struct SlackState {
     usage: HashMap<String, MruEntry>,
     usage_path: Option<PathBuf>,
     usage_loaded: bool,
+    /// Rows whose preview came from the disk cache and is being refreshed.
+    stale_previews: HashSet<String>,
+    /// The account epoch the previews shown belong to.
+    pub epoch: u64,
+    /// The last preview request, and the first one of the current epoch.
+    pub preview_request: u64,
+    first_request: u64,
 }
 
 impl LauncherApp {
     pub(super) fn handle_slack_query(&mut self, query: String) -> Task<Message> {
         self.command_list.enter(CommandListAddon::Slack);
+        super::slack_api::set_cache_fresh(self.addons.slack.cache_fresh());
         if self.slack.session != self.command_list.session {
             self.slack.session = self.command_list.session;
             self.slack.view = None;
+            self.slack.stale_previews.clear();
         }
         if !self.slack.usage_loaded {
             self.slack.usage_loaded = true;
@@ -64,6 +73,7 @@ impl LauncherApp {
         }
         self.command_list.set_query(filter);
         let people = matches!(view, View::People(_));
+        let searched = slack::cached_search(&view);
         match view {
             View::Search(terms) | View::People(terms)
                 if terms.chars().count() < MIN_SEARCH_CHARS =>
@@ -73,6 +83,11 @@ impl LauncherApp {
                 } else {
                     "Type the words to search for"
                 });
+                Task::none()
+            }
+            View::Search(_) | View::People(_) if searched.is_some() => {
+                self.command_list.begin_load();
+                self.set_command_list_items(searched.unwrap_or_default());
                 Task::none()
             }
             View::Search(terms) | View::People(terms) => {
@@ -115,9 +130,13 @@ impl LauncherApp {
     pub(super) fn load_slack(&mut self, refresh: bool) -> Task<Message> {
         let config = self.addons.slack.clone();
         match self.slack.view.clone() {
-            Some(View::Home) => self.load_command_list(move || slack::load_home(config), refresh),
+            Some(View::Home) => {
+                let cached = (!refresh).then(|| slack::cached_home(&config)).flatten();
+                self.load_slack_cached(cached, refresh, move || slack::load_home(config))
+            }
             Some(View::Unread) => {
-                self.load_command_list(move || slack::load_unread(config), refresh)
+                let cached = (!refresh).then(|| slack::cached_unread(&config)).flatten();
+                self.load_slack_cached(cached, refresh, move || slack::load_unread(config))
             }
             Some(View::Search(terms)) if terms.chars().count() >= MIN_SEARCH_CHARS => {
                 self.load_command_list(move || slack::load_search(config, terms), refresh)
@@ -127,6 +146,24 @@ impl LauncherApp {
             }
             _ => Task::none(),
         }
+    }
+
+    /// Show the cached rows, if any, while loading the fresh ones.
+    fn load_slack_cached(
+        &mut self,
+        cached: Option<Vec<CommandItem>>,
+        refresh: bool,
+        load: impl FnOnce() -> Result<Vec<CommandItem>, String> + Send + 'static,
+    ) -> Task<Message> {
+        let refresh = match cached {
+            Some(rows) => {
+                self.command_list.begin_load();
+                self.set_command_list_items(rows);
+                true
+            }
+            None => refresh,
+        };
+        self.load_command_list(load, refresh)
     }
 
     fn slack_hint(&mut self, text: &str) {
@@ -166,36 +203,48 @@ impl LauncherApp {
 
     /// Load the preview of the selected row, one at a time.
     pub(super) fn ensure_slack_preview(&mut self) -> Task<Message> {
+        self.sync_slack_account();
         let identity = self
             .selected_index
             .checked_sub(self.command_list_offset())
             .and_then(|row| self.command_list.item(row))
             .map(|item| item.identity.clone())
             .filter(|identity| slack::has_preview(identity));
-        let list = &mut self.command_list;
         let Some(identity) = identity else {
-            list.preview_wanted.clear();
+            self.command_list.preview_wanted.clear();
             return Task::none();
         };
-        list.preview_wanted.set(&identity);
-        if list.preview_inflight.is_some() || list.previews.contains_key(&identity) {
+        self.command_list.preview_wanted.set(&identity);
+        if !self.command_list.previews.contains_key(&identity) {
+            if let Some(preview) = slack::cached_preview(&identity) {
+                self.show_slack_preview(identity.clone(), preview);
+                self.slack.stale_previews.insert(identity.clone());
+            }
+        }
+        let stale = self.slack.stale_previews.contains(&identity);
+        let list = &mut self.command_list;
+        if list.preview_inflight.is_some() || (list.previews.contains_key(&identity) && !stale) {
             return Task::none();
         }
         list.preview_inflight = Some(identity.clone());
         let wanted = list.preview_wanted.clone();
         let session = list.session;
+        self.slack.preview_request += 1;
+        let request = self.slack.preview_request;
+        let epoch = self.slack.epoch;
         Task::perform(
             {
                 let identity = identity.clone();
                 async move {
                     let (sender, receiver) = iced::futures::channel::oneshot::channel();
                     std::thread::spawn(move || {
-                        let _ = sender.send(slack::load_preview(&identity, &wanted));
+                        let preview = slack::load_preview(&identity, &wanted, stale, epoch);
+                        let _ = sender.send(preview);
                     });
                     receiver.await.ok().flatten()
                 }
             },
-            move |preview| Message::SlackPreviewLoaded(session, identity.clone(), preview),
+            move |preview| Message::SlackPreviewLoaded(session, identity.clone(), request, preview),
         )
     }
 
@@ -203,18 +252,50 @@ impl LauncherApp {
         &mut self,
         session: u64,
         identity: String,
+        request: u64,
         preview: Option<slack::Preview>,
     ) -> Task<Message> {
-        let list = &mut self.command_list;
-        if session != list.session {
+        if session != self.command_list.session {
             return Task::none();
         }
-        if list.preview_inflight.as_ref() == Some(&identity) {
+        self.sync_slack_account();
+        let list = &mut self.command_list;
+        // Only the request in flight releases the mark, so one dropped by an
+        // account change cannot release its successor's.
+        if request == self.slack.preview_request
+            && list.preview_inflight.as_ref() == Some(&identity)
+        {
             list.preview_inflight = None;
         }
-        let Some((bodies, avatar)) = preview else {
+        let Some(preview) = preview.filter(|_| request >= self.slack.first_request) else {
             return Task::none();
         };
+        self.slack.stale_previews.remove(&identity);
+        self.show_slack_preview(identity, preview);
+        Task::none()
+    }
+
+    /// Forget the previews of the account the credentials no longer belong
+    /// to, once Slack has said so.
+    pub(super) fn sync_slack_account(&mut self) {
+        self.sync_slack_account_to(super::slack_api::account_epoch());
+    }
+
+    pub(super) fn sync_slack_account_to(&mut self, epoch: u64) {
+        if epoch == self.slack.epoch {
+            return;
+        }
+        self.slack.epoch = epoch;
+        self.slack.first_request = self.slack.preview_request + 1;
+        self.slack.stale_previews.clear();
+        if self.command_list.addon == Some(CommandListAddon::Slack) {
+            self.command_list.previews.clear();
+            self.command_list.preview_inflight = None;
+        }
+    }
+
+    fn show_slack_preview(&mut self, identity: String, (bodies, avatar): slack::Preview) {
+        let list = &mut self.command_list;
         if let Some(avatar) = avatar {
             for item in list
                 .items
@@ -225,6 +306,5 @@ impl LauncherApp {
             }
         }
         list.previews.insert(identity, bodies);
-        Task::none()
     }
 }

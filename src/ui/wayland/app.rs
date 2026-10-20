@@ -1632,8 +1632,8 @@ impl LauncherApp {
                 Task::none()
             }
             Message::SlackSearchDue(session, terms) => self.handle_slack_search_due(session, terms),
-            Message::SlackPreviewLoaded(session, identity, preview) => {
-                self.handle_slack_preview_loaded(session, identity, preview)
+            Message::SlackPreviewLoaded(session, identity, request, preview) => {
+                self.handle_slack_preview_loaded(session, identity, request, preview)
             }
             Message::FaviconsFetched(session, fetched) if session & MAIN_VIEW_SESSION != 0 => {
                 self.handle_main_view_favicons(session, fetched)
@@ -2972,6 +2972,9 @@ impl LauncherApp {
         generation: u64,
         result: Result<Vec<super::command_list::CommandItem>, String>,
     ) -> Task<Message> {
+        if self.command_list.addon == Some(CommandListAddon::Slack) {
+            self.sync_slack_account();
+        }
         if !self.command_list.is_current(generation) {
             return Task::none();
         }

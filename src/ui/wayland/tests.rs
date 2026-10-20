@@ -8558,6 +8558,67 @@ fn test_slack_status_fill_and_debounced_search() {
 }
 
 #[test]
+fn test_slack_previews_of_another_account_are_dropped() {
+    let mut addons = AddonsConfig::default();
+    addons.slack.enabled = true;
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+    let _ = app.update(Message::SearchChanged("slack unread ".into()));
+    let identity = "slack:unread:C1".to_string();
+    let rows = vec![super::command_list::CommandItem::info(
+        &identity,
+        "#general".into(),
+        "icon",
+    )];
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(rows)));
+    let _ = app.ensure_slack_preview();
+    assert_eq!(app.command_list.preview_inflight.as_ref(), Some(&identity));
+    let old_request = app.slack.preview_request;
+    let session = app.command_list.session;
+    let text = |content: &str| super::preview::PreviewBody::Text {
+        heading: None,
+        content: content.into(),
+        truncated: false,
+    };
+    app.command_list
+        .previews
+        .insert(identity.clone(), vec![text("account A")]);
+
+    // Slack says the token is someone else's.
+    app.sync_slack_account_to(app.slack.epoch + 1);
+    assert!(app.command_list.previews.is_empty());
+    assert_eq!(app.command_list.preview_inflight, None);
+    let _ = app.ensure_slack_preview();
+    let request = app.slack.preview_request;
+    assert_ne!(request, old_request);
+
+    let _ = app.update(Message::SlackPreviewLoaded(
+        session,
+        identity.clone(),
+        old_request,
+        Some((vec![text("late A")], None)),
+    ));
+    assert!(
+        app.command_list.previews.is_empty(),
+        "the old one is dropped"
+    );
+    assert_eq!(
+        app.command_list.preview_inflight.as_ref(),
+        Some(&identity),
+        "and does not release the new request"
+    );
+    let _ = app.update(Message::SlackPreviewLoaded(
+        session,
+        identity.clone(),
+        request,
+        Some((vec![text("account B")], None)),
+    ));
+    assert_eq!(app.command_list.previews[&identity], [text("account B")]);
+    assert_eq!(app.command_list.preview_inflight, None);
+}
+
+#[test]
 fn test_command_list_lists_dimmed_rows_last_until_a_filter_is_typed() {
     use super::command_list::{filter_items_into, CommandItem};
     let item = |id: &str, dimmed: bool| CommandItem {

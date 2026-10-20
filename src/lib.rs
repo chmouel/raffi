@@ -1107,11 +1107,23 @@ pub struct SlackAddonConfig {
     /// conversations for the token, as with `xoxp-` tokens.
     #[serde(default)]
     pub unread_conversations: Vec<String>,
+    /// Minutes the cached conversations, people, muted conversations and
+    /// searches count as fresh before Raffi asks Slack again (default: 60);
+    /// 0 asks every time. Cached rows and previews show at once while the
+    /// fresh ones load.
+    #[serde(default)]
+    pub cache_minutes: Option<u64>,
 }
 
 impl SlackAddonConfig {
     pub fn trigger(&self) -> &str {
         self.trigger.as_deref().unwrap_or("slack")
+    }
+
+    pub fn cache_fresh(&self) -> std::time::Duration {
+        self.cache_minutes
+            .map(|minutes| std::time::Duration::from_secs(minutes.saturating_mul(60)))
+            .unwrap_or(std::time::Duration::from_secs(60 * 60))
     }
 }
 

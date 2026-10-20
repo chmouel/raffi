@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Datelike, Local, TimeZone};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::actions::DeferredAction;
@@ -30,6 +31,10 @@ const MAX_AVATAR_BYTES: u64 = 512 * 1024;
 /// Wait before loading a preview, so moving quickly through the rows does
 /// not send one request per row.
 const PREVIEW_SETTLE: std::time::Duration = std::time::Duration::from_millis(150);
+/// Previews kept on disk, at most.
+const MAX_CACHED_PREVIEWS: usize = 500;
+/// Searches kept in memory, at most.
+const MAX_CACHED_SEARCHES: usize = 50;
 
 /// What the text after the keyword asks for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -422,6 +427,63 @@ pub(super) fn run_action(action: &SlackAction) -> Result<(), String> {
     }
     let client = slack_api::current_client()?;
     let now = Local::now();
+    call_action(&client, action, now)?;
+    if let Some(account) = client.known_identity() {
+        remember_action(action, account, now);
+    }
+    Ok(())
+}
+
+/// Bring the cached state in line with what `action` did, so a list shown
+/// from the cache before Slack answers does not show the old state.
+fn remember_action(action: &SlackAction, account: &Workspace, now: DateTime<Local>) {
+    if matches!(action, SlackAction::MarkRead { .. }) {
+        slack_api::update_cache(slack_api::UNREAD_FILE, account, |unread| {
+            apply_to_unread(unread, action)
+        });
+    } else {
+        slack_api::update_cache(slack_api::LIVE_FILE, account, |live| {
+            apply_to_live(live, action, now)
+        });
+    }
+}
+
+pub(super) fn apply_to_live(live: &mut Live, action: &SlackAction, now: DateTime<Local>) {
+    match action {
+        SlackAction::SetStatus(status) => {
+            live.status = Some((
+                status.emoji.clone(),
+                status.text.clone(),
+                status.expiry.epoch(now),
+            ));
+        }
+        SlackAction::SetPresence { away } => live.away = Some(*away),
+        SlackAction::Snooze(snooze) => {
+            if let Ok(minutes) = snooze_minutes(snooze, now) {
+                live.snoozed_until = Some(now.timestamp() + minutes as i64 * 60);
+            }
+        }
+        SlackAction::EndSnooze => live.snoozed_until = None,
+        _ => {}
+    }
+}
+
+pub(super) fn apply_to_unread(unread: &mut Vec<Unread>, action: &SlackAction) {
+    if let SlackAction::MarkRead { channel, .. } = action {
+        unread.retain(|entry| &entry.channel != channel);
+    }
+}
+
+fn snooze_minutes(snooze: &Snooze, now: DateTime<Local>) -> Result<u64, String> {
+    match snooze {
+        Snooze::Minutes(minutes) => Ok(*minutes),
+        Snooze::UntilMorning => local_at(now, 1, 9)
+            .map(|morning| (morning.timestamp() - now.timestamp()).max(60) as u64 / 60)
+            .ok_or_else(|| "cannot tell when tomorrow morning is".to_string()),
+    }
+}
+
+fn call_action(client: &Client, action: &SlackAction, now: DateTime<Local>) -> Result<(), String> {
     match action {
         SlackAction::Fill(_) => Ok(()),
         SlackAction::SetStatus(status) => {
@@ -442,12 +504,7 @@ pub(super) fn run_action(action: &SlackAction) -> Result<(), String> {
             )
             .map(drop),
         SlackAction::Snooze(snooze) => {
-            let minutes = match snooze {
-                Snooze::Minutes(minutes) => *minutes,
-                Snooze::UntilMorning => local_at(now, 1, 9)
-                    .map(|morning| (morning.timestamp() - now.timestamp()).max(60) as u64 / 60)
-                    .ok_or("cannot tell when tomorrow morning is")?,
-            };
+            let minutes = snooze_minutes(snooze, now)?;
             client
                 .call("dnd.setSnooze", &[("num_minutes", &minutes.to_string())])
                 .map(drop)
@@ -456,7 +513,7 @@ pub(super) fn run_action(action: &SlackAction) -> Result<(), String> {
         SlackAction::MarkRead { channel, ts } => client
             .call("conversations.mark", &[("channel", channel), ("ts", ts)])
             .map(drop),
-        SlackAction::ReloadDirectory => slack_api::directory(&client, true).map(drop),
+        SlackAction::ReloadDirectory => slack_api::directory(client, true).map(drop),
         SlackAction::Open(_) => Ok(()),
     }
 }
@@ -475,7 +532,7 @@ fn open_in_app(url: &str) -> Result<(), String> {
 }
 
 /// The user's own status, presence and snooze, shown on the action rows.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct Live {
     /// Emoji, text and expiry in seconds since the epoch, 0 for never.
     pub status: Option<(String, String, i64)>,
@@ -483,16 +540,45 @@ pub(super) struct Live {
     pub away: Option<bool>,
 }
 
-/// Ask for the live state in parallel; what fails is left unknown.
-fn fetch_live(client: &Client) -> Live {
+/// The replies of the live state calls, made in parallel; None for those
+/// that failed.
+type LiveReplies = (Option<Value>, Option<Value>, Option<Value>);
+
+fn fetch_live(client: &Client) -> LiveReplies {
     std::thread::scope(|scope| {
         let profile = scope.spawn(|| client.call("users.profile.get", &[]).ok());
         let dnd = scope.spawn(|| client.call("dnd.info", &[]).ok());
         let presence = scope.spawn(|| client.call("users.getPresence", &[]).ok());
         let join =
             |handle: std::thread::ScopedJoinHandle<'_, Option<Value>>| handle.join().ok().flatten();
-        parse_live(join(profile), join(dnd), join(presence))
+        (join(profile), join(dnd), join(presence))
     })
+}
+
+/// The live state from `replies`, keeping from `previous` what the calls
+/// that failed would have said.
+pub(super) fn merge_live(previous: Option<Live>, (profile, dnd, presence): LiveReplies) -> Live {
+    let previous = previous.unwrap_or_default();
+    let (has_profile, has_dnd, has_presence) =
+        (profile.is_some(), dnd.is_some(), presence.is_some());
+    let fresh = parse_live(profile, dnd, presence);
+    Live {
+        status: if has_profile {
+            fresh.status
+        } else {
+            previous.status
+        },
+        snoozed_until: if has_dnd {
+            fresh.snoozed_until
+        } else {
+            previous.snoozed_until
+        },
+        away: if has_presence {
+            fresh.away
+        } else {
+            previous.away
+        },
+    }
 }
 
 pub(super) fn parse_live(
@@ -971,16 +1057,39 @@ fn refresh_directory_in_background(client: std::sync::Arc<Client>) {
 /// The home rows. Blocking.
 pub(super) fn load_home(config: crate::SlackAddonConfig) -> Result<Vec<CommandItem>, String> {
     let (client, directory) = connect(&config)?;
-    let live = fetch_live(&client);
+    let replies = fetch_live(&client);
     // The directory may come from the cache, so this is the first call that
     // tells whether the user has been logged out.
     if let Some(error) = client.rejection() {
         return Err(error);
     }
+    let answered = replies.0.is_some() || replies.1.is_some() || replies.2.is_some();
+    let account = client.known_identity();
+    let previous = account
+        .and_then(|account| slack_api::read_cache(slack_api::LIVE_FILE, account))
+        .map(|(live, _)| live);
+    let live = merge_live(previous, replies);
+    if let Some(account) = account.filter(|_| answered) {
+        slack_api::write_cache(slack_api::LIVE_FILE, account, &live);
+    }
+    Ok(home_list(&directory, &live, config.open_in))
+}
+
+/// The home rows from the cache, without asking Slack, to show until
+/// [`load_home`] lands.
+pub(super) fn cached_home(config: &crate::SlackAddonConfig) -> Option<Vec<CommandItem>> {
+    let directory = slack_api::cached_directory()?;
+    let live = slack_api::read_cache(slack_api::LIVE_FILE, &directory.workspace)
+        .map(|(live, _)| live)
+        .unwrap_or_default();
+    Some(home_list(&directory, &live, config.open_in))
+}
+
+fn home_list(directory: &Directory, live: &Live, open_in: SlackOpenIn) -> Vec<CommandItem> {
     let avatars = avatar_dir()
         .map(|dir| cached_avatars(&dir))
         .unwrap_or_default();
-    let mut rows = home_rows(&directory, &live, config.open_in, &avatars, Local::now());
+    let mut rows = home_rows(directory, live, open_in, &avatars, Local::now());
     rows.push(action_row(
         "reload",
         "Reload conversations and people",
@@ -993,7 +1102,7 @@ pub(super) fn load_home(config: crate::SlackAddonConfig) -> Result<Vec<CommandIt
         &["view-refresh", SLACK_ICON],
         run(SlackAction::ReloadDirectory, "Reloading..."),
     ));
-    Ok(rows)
+    rows
 }
 
 /// The author of a message as Slack shows it.
@@ -1129,15 +1238,48 @@ pub(super) fn load_search(
             ("highlight", "false"),
         ],
     )?;
-    let rows = search_rows(&reply, &directory, config.open_in, Local::now());
+    let mut rows = search_rows(&reply, &directory, config.open_in, Local::now());
     if rows.is_empty() {
-        return Ok(vec![row(
+        rows.push(row(
             "slack:none",
             format!("No messages match \u{201c}{terms}\u{201d}"),
             &["edit-find", SLACK_ICON],
-        )]);
+        ));
     }
+    remember_search(View::Search(terms), &rows);
     Ok(rows)
+}
+
+/// A search or people lookup of this process, with the account epoch it
+/// was made in.
+type Search = (View, u64, std::time::Instant, Vec<CommandItem>);
+
+/// Searches and people lookups of this process, newest last.
+static SEARCHES: std::sync::Mutex<Vec<Search>> = std::sync::Mutex::new(Vec::new());
+
+fn remember_search(view: View, rows: &[CommandItem]) {
+    let epoch = slack_api::account_epoch();
+    let Ok(mut searches) = SEARCHES.lock() else {
+        return;
+    };
+    searches.retain(|(seen, ..)| seen != &view);
+    if searches.len() >= MAX_CACHED_SEARCHES {
+        searches.remove(0);
+    }
+    searches.push((view, epoch, std::time::Instant::now(), rows.to_vec()));
+}
+
+/// The rows of a search or people lookup done while they are fresh, for the
+/// account of the credentials.
+pub(super) fn cached_search(view: &View) -> Option<Vec<CommandItem>> {
+    let searches = SEARCHES.lock().ok()?;
+    let epoch = slack_api::account_epoch();
+    searches
+        .iter()
+        .find(|(seen, made, at, _)| {
+            seen == view && *made == epoch && at.elapsed() < slack_api::cache_fresh()
+        })
+        .map(|(.., rows)| rows.clone())
 }
 
 /// People whose name matches `query`: the whole organization on Enterprise
@@ -1181,11 +1323,12 @@ pub(super) fn load_people(
             &["system-users", SLACK_ICON],
         ));
     }
+    remember_search(View::People(query), &rows);
     Ok(rows)
 }
 
 /// A conversation with unread messages.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct Unread {
     pub channel: String,
     pub last_read: String,
@@ -1288,7 +1431,7 @@ fn check_configured(
     directory: &Directory,
     entries: &[String],
     muted: &HashSet<String>,
-) -> Vec<Unread> {
+) -> Checked {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
 
@@ -1298,6 +1441,7 @@ fn check_configured(
         .take(MAX_UNREAD)
         .collect();
     let next = AtomicUsize::new(0);
+    let failed = AtomicUsize::new(0);
     let found = Mutex::new(Vec::new());
     std::thread::scope(|scope| {
         for _ in 0..4 {
@@ -1314,7 +1458,10 @@ fn check_configured(
                                 })
                         }
                         Ok(None) => {}
-                        Err(error) => crate::debug_log!("slack: cannot check {channel}: {error}"),
+                        Err(error) => {
+                            failed.fetch_add(1, Ordering::Relaxed);
+                            crate::debug_log!("slack: cannot check {channel}: {error}");
+                        }
                     }
                 }
             });
@@ -1322,7 +1469,11 @@ fn check_configured(
     });
     let mut found = found.into_inner().unwrap_or_else(|e| e.into_inner());
     sort_unread(&mut found);
-    found
+    Checked {
+        found,
+        asked: channels.len(),
+        failed: failed.into_inner(),
+    }
 }
 
 fn check_conversation(client: &Client, channel: &str) -> Result<Option<Unread>, String> {
@@ -1416,13 +1567,45 @@ pub(super) fn unread_rows(
         .collect()
 }
 
-/// The conversations the user muted, or none when Slack does not say.
-fn fetch_muted(client: &Client) -> HashSet<String> {
+/// The conversations the user muted, from the cache while it is fresh,
+/// else from Slack, or none when Slack does not say. Blocking unless cached.
+fn muted(client: &std::sync::Arc<Client>) -> HashSet<String> {
+    let cached = client
+        .known_identity()
+        .and_then(|account| slack_api::read_cache(slack_api::MUTED_FILE, account));
+    let Some((muted, age)) = cached else {
+        return fetch_muted(client).unwrap_or_default();
+    };
+    if age >= slack_api::cache_fresh() {
+        refresh_muted_in_background(client.clone());
+    }
+    muted
+}
+
+fn refresh_muted_in_background(client: std::sync::Arc<Client>) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static RUNNING: AtomicBool = AtomicBool::new(false);
+    if RUNNING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        fetch_muted(&client);
+        RUNNING.store(false, Ordering::SeqCst);
+    });
+}
+
+fn fetch_muted(client: &Client) -> Option<HashSet<String>> {
     match client.call("users.prefs.get", &[]) {
-        Ok(reply) => muted_channels(&reply),
+        Ok(reply) => {
+            let muted = muted_channels(&reply);
+            if let Some(account) = client.known_identity() {
+                slack_api::write_cache(slack_api::MUTED_FILE, account, &muted);
+            }
+            Some(muted)
+        }
         Err(error) => {
             crate::debug_log!("slack: users.prefs.get failed: {error}");
-            HashSet::new()
+            None
         }
     }
 }
@@ -1432,36 +1615,115 @@ fn fetch_muted(client: &Client) -> HashSet<String> {
 pub(super) fn load_unread(config: crate::SlackAddonConfig) -> Result<Vec<CommandItem>, String> {
     let (client, directory) = connect(&config)?;
     let (counts, muted) = std::thread::scope(|scope| {
-        let muted = scope.spawn(|| fetch_muted(&client));
+        let muted = scope.spawn(|| muted(&client));
         let counts = client.call("client.counts", &[("thread_counts_by_channel", "true")]);
         (counts, muted.join().unwrap_or_default())
     });
-    let unread = match counts {
-        Ok(reply) => counts_unread(&reply, &muted),
-        Err(error) if config.unread_conversations.is_empty() => {
-            crate::debug_log!("slack: client.counts failed: {error}");
-            return Err("Slack does not list unread conversations for this token: \
-                 set addons.slack.unread_conversations to the ones to check"
-                .to_string());
-        }
+    let checked = match counts {
+        Ok(reply) => Checked::complete(counts_unread(&reply, &muted)),
         Err(error) => {
+            if let Some(rejection) = client.rejection() {
+                return Err(rejection);
+            }
+            if config.unread_conversations.is_empty() {
+                crate::debug_log!("slack: client.counts failed: {error}");
+                return Err("Slack does not list unread conversations for this token: \
+                     set addons.slack.unread_conversations to the ones to check"
+                    .to_string());
+            }
             crate::debug_log!("slack: client.counts failed, checking the configured list: {error}");
             check_configured(&client, &directory, &config.unread_conversations, &muted)
         }
     };
+    if let Some(error) = client.rejection() {
+        return Err(error);
+    }
+    let account = client.known_identity();
+    let cached = || {
+        account
+            .and_then(|account| slack_api::read_cache(slack_api::UNREAD_FILE, account))
+            .map(|(unread, _)| unread)
+    };
+    let (unread, warning, keep) = unread_outcome(checked, cached)?;
+    if let Some(account) = account.filter(|_| keep) {
+        slack_api::write_cache(slack_api::UNREAD_FILE, account, &unread);
+    }
+    let mut rows = unread_list(&unread, &directory, config.open_in);
+    if let Some(warning) = warning {
+        rows.insert(
+            0,
+            row("slack:warning", warning, &["dialog-warning", SLACK_ICON]),
+        );
+    }
+    Ok(rows)
+}
+
+/// The unread conversations found, and how many of those asked about could
+/// not be checked.
+pub(super) struct Checked {
+    pub found: Vec<Unread>,
+    pub asked: usize,
+    pub failed: usize,
+}
+
+impl Checked {
+    fn complete(found: Vec<Unread>) -> Self {
+        Self {
+            found,
+            asked: 0,
+            failed: 0,
+        }
+    }
+}
+
+/// What to show for `checked`, a warning to show above it, and whether it is
+/// complete enough to cache. When nothing could be checked, the last list
+/// from `cached` is shown rather than an empty one.
+pub(super) fn unread_outcome(
+    checked: Checked,
+    cached: impl FnOnce() -> Option<Vec<Unread>>,
+) -> Result<(Vec<Unread>, Option<String>, bool), String> {
+    let Checked {
+        found,
+        asked,
+        failed,
+    } = checked;
+    if failed == 0 {
+        return Ok((found, None, true));
+    }
+    if failed < asked {
+        let warning = format!("Could not check {failed} of {asked} conversations");
+        return Ok((found, Some(warning), false));
+    }
+    let message = "Could not check the unread conversations";
+    match cached() {
+        Some(last) => Ok((
+            last,
+            Some(format!("{message}, showing the last list")),
+            false,
+        )),
+        None => Err(message.to_string()),
+    }
+}
+
+/// The unread rows from the cache, without asking Slack, to show until
+/// [`load_unread`] lands.
+pub(super) fn cached_unread(config: &crate::SlackAddonConfig) -> Option<Vec<CommandItem>> {
+    let directory = slack_api::cached_directory()?;
+    let (unread, _): (Vec<Unread>, _) =
+        slack_api::read_cache(slack_api::UNREAD_FILE, &directory.workspace)?;
+    Some(unread_list(&unread, &directory, config.open_in))
+}
+
+fn unread_list(unread: &[Unread], directory: &Directory, open_in: SlackOpenIn) -> Vec<CommandItem> {
     if unread.is_empty() {
-        return Ok(vec![row(
+        return vec![row(
             "slack:none",
             "No unread messages",
             &["mail-read", SLACK_ICON],
-        )]);
+        )];
     }
-    Ok(unread_rows(
-        &unread,
-        &directory,
-        config.open_in,
-        Local::now(),
-    ))
+    unread_rows(unread, directory, open_in, Local::now())
 }
 
 /// Preview bodies and, for a person, the avatar file.
@@ -1529,31 +1791,153 @@ fn recent(client: &Client, channel: &str, extra: &[(&str, &str)]) -> Result<Vec<
 
 /// The preview of the row with `identity`, or None when another row was
 /// selected meanwhile. Errors show in the pane, so a failing preview is not
-/// asked for again. Blocking.
-pub(super) fn load_preview(identity: &str, wanted: &Wanted) -> Option<Preview> {
+/// asked for again, unless a cached one is shown: then it comes back
+/// instead. Blocking.
+///
+/// Nothing comes back from a load started before the credentials turned
+/// out to be another account's (`epoch`).
+pub(super) fn load_preview(
+    identity: &str,
+    wanted: &Wanted,
+    cached: bool,
+    epoch: u64,
+) -> Option<Preview> {
     std::thread::sleep(PREVIEW_SETTLE);
     if !wanted.is(identity) {
         return None;
     }
-    let bodies = slack_api::current_client()
-        .and_then(|client| {
-            let directory =
-                slack_api::cached_directory().ok_or("Slack conversations are not loaded yet")?;
-            Ok((client, directory))
-        })
-        .map(|(client, directory)| preview_bodies(identity, &client, directory));
-    let (bodies, avatar) = match bodies {
-        Ok((bodies, avatar)) => (bodies, avatar),
-        Err(error) => (Err(error), None),
-    };
-    let bodies = bodies.unwrap_or_else(|error| {
-        vec![PreviewBody::Text {
-            heading: None,
-            content: error,
-            truncated: false,
-        }]
+    let loaded = slack_api::current_client().and_then(|client| {
+        let directory = slack_api::verified_directory(&client)?
+            .ok_or("Slack conversations are not loaded yet")?;
+        Ok((preview_bodies(identity, &client, directory), client))
     });
-    Some((bodies, avatar))
+    if slack_api::account_epoch() != epoch {
+        return None;
+    }
+    let (error, avatar) = match loaded {
+        Ok(((Ok(bodies), avatar), client)) => {
+            if let Some(account) = client.known_identity() {
+                store_preview(identity, account, &bodies, avatar.as_deref());
+            }
+            return Some((bodies, avatar));
+        }
+        Ok(((Err(error), avatar), _)) => (error, avatar),
+        Err(error) => (error, None),
+    };
+    if cached {
+        if let Some(preview) = cached_preview(identity) {
+            return Some(preview);
+        }
+    }
+    let body = PreviewBody::Text {
+        heading: None,
+        content: error,
+        truncated: false,
+    };
+    Some((vec![body], avatar))
+}
+
+/// A preview as kept on disk: the text blocks Slack previews are made of.
+#[derive(Serialize, Deserialize)]
+struct CachedPreview {
+    texts: Vec<(Option<String>, String, bool)>,
+    avatar: Option<String>,
+}
+
+fn preview_cache_name(identity: &str) -> String {
+    let name: String = identity
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("{}/{name}.json", slack_api::PREVIEW_DIR)
+}
+
+/// The preview last loaded for `identity`, to show until a fresh one lands.
+pub(super) fn cached_preview(identity: &str) -> Option<Preview> {
+    let directory = slack_api::cached_directory()?;
+    let (cached, _): (CachedPreview, _) =
+        slack_api::read_cache(&preview_cache_name(identity), &directory.workspace)?;
+    Some(from_cached_preview(cached))
+}
+
+fn from_cached_preview(cached: CachedPreview) -> Preview {
+    let bodies = cached
+        .texts
+        .into_iter()
+        .map(|(heading, content, truncated)| PreviewBody::Text {
+            heading,
+            content,
+            truncated,
+        })
+        .collect();
+    let avatar = cached.avatar.filter(|path| Path::new(path).exists());
+    (bodies, avatar)
+}
+
+fn store_preview(
+    identity: &str,
+    account: &Workspace,
+    bodies: &[PreviewBody],
+    avatar: Option<&str>,
+) {
+    let Some(cached) = to_cached_preview(bodies, avatar) else {
+        return;
+    };
+    slack_api::write_cache(&preview_cache_name(identity), account, &cached);
+    if let Some(dir) = slack_api::cache_path(slack_api::PREVIEW_DIR) {
+        prune_previews(&dir, MAX_CACHED_PREVIEWS, slack_api::cache_max_age());
+    }
+}
+
+/// The preview as kept on disk; none when it is not only text.
+fn to_cached_preview(bodies: &[PreviewBody], avatar: Option<&str>) -> Option<CachedPreview> {
+    let texts: Option<Vec<_>> = bodies
+        .iter()
+        .map(|body| match body {
+            PreviewBody::Text {
+                heading,
+                content,
+                truncated,
+            } => Some((heading.clone(), content.clone(), *truncated)),
+            _ => None,
+        })
+        .collect();
+    Some(CachedPreview {
+        texts: texts?,
+        avatar: avatar.map(str::to_string),
+    })
+}
+
+/// Remove the previews older than `max_age`, then the oldest past `keep`.
+pub(super) fn prune_previews(dir: &Path, keep: usize, max_age: std::time::Duration) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| Some((entry.metadata().ok()?.modified().ok()?, entry.path())))
+        .collect();
+    files.retain(|(modified, path)| {
+        let old = now.duration_since(*modified).is_ok_and(|age| age > max_age);
+        if old {
+            let _ = std::fs::remove_file(path);
+        }
+        !old
+    });
+    if files.len() <= keep {
+        return;
+    }
+    files.sort_by_key(|(modified, _)| *modified);
+    for (_, path) in &files[..files.len() - keep] {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 /// The authors and mentioned people of `list`.
@@ -2054,5 +2438,149 @@ mod tests {
         assert!(content.contains("parent") && content.contains("the hit"));
         assert!(!content.contains("later reply"));
         assert_eq!(fake.methods(), ["conversations.replies"]);
+    }
+
+    #[test]
+    fn test_searches_are_remembered_per_view() {
+        let rows = vec![row("slack:none", "No messages match", &[SLACK_ICON])];
+        let view = View::Search("remembered terms".into());
+        assert!(cached_search(&view).is_none());
+        remember_search(view.clone(), &rows);
+        let found = cached_search(&view).unwrap();
+        assert_eq!(found[0].identity, "slack:none");
+        assert!(cached_search(&View::People("remembered terms".into())).is_none());
+    }
+
+    #[test]
+    fn test_prune_previews_drops_old_then_oldest() {
+        let dir = std::env::temp_dir().join(format!("raffi-slack-previews-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let now = std::time::SystemTime::now();
+        for (name, age) in [("old", 3 * 3600), ("a", 30), ("b", 20), ("c", 10)] {
+            let file = std::fs::File::create(dir.join(name)).unwrap();
+            file.set_modified(now - std::time::Duration::from_secs(age))
+                .unwrap();
+        }
+        prune_previews(&dir, 2, std::time::Duration::from_secs(3600));
+        let mut left: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["b", "c"]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_failed_live_calls_keep_the_last_known_state() {
+        let previous = Live {
+            status: Some(("🍕".into(), "Lunch".into(), 0)),
+            snoozed_until: Some(1_900),
+            away: Some(true),
+        };
+        let fresh = merge_live(
+            Some(previous.clone()),
+            (None, Some(json!({"snooze_enabled": false})), None),
+        );
+        assert_eq!(fresh.status, previous.status, "profile call failed");
+        assert_eq!(fresh.snoozed_until, None, "snooze ended");
+        assert_eq!(fresh.away, Some(true), "presence call failed");
+    }
+
+    #[test]
+    fn test_actions_update_the_cached_state() {
+        let mut live = Live::default();
+        let status = StatusArgs {
+            text: "Lunch".into(),
+            emoji: ":pizza:".into(),
+            expiry: Expiry::Minutes(30),
+        };
+        apply_to_live(&mut live, &SlackAction::SetStatus(status), now());
+        apply_to_live(&mut live, &SlackAction::SetPresence { away: true }, now());
+        apply_to_live(&mut live, &SlackAction::Snooze(Snooze::Minutes(10)), now());
+        let at = now().timestamp();
+        assert_eq!(
+            live,
+            Live {
+                status: Some((":pizza:".into(), "Lunch".into(), at + 30 * 60)),
+                snoozed_until: Some(at + 10 * 60),
+                away: Some(true),
+            }
+        );
+        apply_to_live(&mut live, &SlackAction::EndSnooze, now());
+        assert_eq!(live.snoozed_until, None);
+
+        let entry = |channel: &str| Unread {
+            channel: channel.into(),
+            ..Unread::default()
+        };
+        let mut unread = vec![entry("C1"), entry("C2")];
+        let read = SlackAction::MarkRead {
+            channel: "C1".into(),
+            ts: "1.0".into(),
+        };
+        apply_to_unread(&mut unread, &read);
+        assert_eq!(unread, [entry("C2")]);
+    }
+
+    #[test]
+    fn test_unread_refresh_failures_keep_the_last_list() {
+        let entry = |channel: &str| Unread {
+            channel: channel.into(),
+            ..Unread::default()
+        };
+        let checked = |found: Vec<Unread>, asked, failed| Checked {
+            found,
+            asked,
+            failed,
+        };
+        let last = || Some(vec![entry("C9")]);
+
+        let (rows, warning, keep) = unread_outcome(checked(vec![entry("C1")], 2, 0), last).unwrap();
+        assert_eq!((rows, warning, keep), (vec![entry("C1")], None, true));
+
+        let (rows, warning, keep) = unread_outcome(checked(vec![entry("C1")], 2, 1), last).unwrap();
+        assert_eq!(rows, [entry("C1")]);
+        assert_eq!(
+            warning.as_deref(),
+            Some("Could not check 1 of 2 conversations")
+        );
+        assert!(!keep, "a partial list is not cached");
+
+        let (rows, warning, keep) = unread_outcome(checked(Vec::new(), 2, 2), last).unwrap();
+        assert_eq!(rows, [entry("C9")], "the last list, not an empty one");
+        assert!(warning.unwrap().contains("showing the last list"));
+        assert!(!keep);
+
+        let error = unread_outcome(checked(Vec::new(), 2, 2), || None).unwrap_err();
+        assert_eq!(error, "Could not check the unread conversations");
+    }
+
+    #[test]
+    fn test_text_previews_survive_the_disk_cache() {
+        let body = PreviewBody::Text {
+            heading: Some("Unread messages".into()),
+            content: "alice · 09:00\nhello".into(),
+            truncated: true,
+        };
+        let cached =
+            to_cached_preview(std::slice::from_ref(&body), Some("/no/avatar.png")).unwrap();
+        let data = serde_json::to_vec(&cached).unwrap();
+        let (bodies, avatar) = from_cached_preview(serde_json::from_slice(&data).unwrap());
+        assert_eq!(bodies, [body]);
+        assert_eq!(avatar, None, "an avatar gone from disk is dropped");
+        let image = PreviewBody::Image {
+            path: "/tmp/image.png".into(),
+        };
+        assert!(to_cached_preview(&[image], None).is_none());
+    }
+
+    #[test]
+    fn test_preview_cache_names_stay_in_the_previews_directory() {
+        assert_eq!(
+            preview_cache_name("slack:msg:C1:1700000000.000100:../x"),
+            "previews/slack_msg_C1_1700000000.000100_.._x.json"
+        );
     }
 }

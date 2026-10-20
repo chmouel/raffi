@@ -35,8 +35,9 @@ seconds for its window.
 
 ## Getting a token
 
-Raffi reads the token from `token_command` every time it starts the Slack
-list, so the token can live in a password manager. Two kinds of token work.
+Raffi reads the token from `token_command` the first time the Slack list
+asks Slack for something in a run, so the token can live in a password
+manager. Two kinds of token work.
 
 ### A user token from your own Slack app
 
@@ -207,14 +208,39 @@ scope, show in the pane.
 
 ## Caching and privacy
 
-The list of conversations and people is kept in
-`~/.cache/raffi/slack/directory.json` and refreshed in the background
-after an hour, or right away with the Reload conversations and people row.
-Avatars are kept in `~/.cache/raffi/slack/avatars/`, and how often you
-open each conversation in `~/.cache/raffi/slack/usage.cache`.
-`raffi --refresh-cache` removes the list and the avatars. Raffi never writes the token or the
-cookie to disk and keeps them in memory only while it runs; message text
-is never cached.
+Raffi keeps what Slack last answered in `~/.cache/raffi/slack/` and shows it
+at once, then replaces it when Slack answers again:
+
+- `directory.json`: conversations and people, refreshed in the background
+  once older than `cache_minutes` (an hour by default), or right away
+  with the Reload conversations and people row.
+- `live.json` and `unread.json`: your status, presence and snooze, and the
+  conversations with unread messages, asked again every time the list
+  opens.
+- `muted.json`: your muted conversations, asked again once older than
+  `cache_minutes`.
+- `previews/`: the text of the last 500 previews, so a preview you saw
+  before shows without waiting while Slack is asked for the current one.
+- `avatars/`: profile pictures.
+
+Searches are kept in memory for `cache_minutes` while Raffi runs, so
+typing back to an earlier query shows its results without asking again.
+Set `cache_minutes: 0` to always ask Slack. Cached data is dropped after a
+day, or after `cache_minutes` if that is longer. When a refresh fails,
+the last answer stays: an unread list Slack could not check shows the
+previous one with a warning on top. How often you open each conversation
+is kept in `usage.cache`.
+
+Each cache belongs to the Slack account and workspace that fetched it.
+Until Slack answers, Raffi shows the cache of the account it last used.
+If `token_command` now prints another account's token, Raffi drops that
+account's directory, searches and previews as soon as Slack says so, and
+fetches the new account's.
+
+The cache files are readable by you only, but the previews hold message
+text. `raffi --refresh-cache` removes everything but the usage counts.
+Raffi never writes the token or the cookie to disk and keeps them in
+memory only while it runs.
 
 To open the list from a key binding, pass the keyword as the initial query:
 

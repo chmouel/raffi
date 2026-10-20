@@ -7,7 +7,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::de::DeserializeOwned;
@@ -33,15 +34,21 @@ const MAX_DIRECTORY_RETRY_WAIT: u64 = 60;
 const PAGE_SIZE: &str = "200";
 const MAX_PAGES: usize = 200;
 const DIRECTORY_FILE: &str = "directory.json";
+pub(super) const LIVE_FILE: &str = "live.json";
+pub(super) const UNREAD_FILE: &str = "unread.json";
+pub(super) const MUTED_FILE: &str = "muted.json";
+pub(super) const PREVIEW_DIR: &str = "previews";
 const DIRECTORY_VERSION: u32 = 2;
 /// People looked up one by one when the directory cannot list them all.
 const MAX_LOOKUPS: usize = 200;
 const LOOKUP_THREADS: usize = 8;
 const PEOPLE_COUNT: u64 = 30;
-/// Age past which the cached directory is refreshed in the background.
-pub(super) const DIRECTORY_FRESH: Duration = Duration::from_secs(60 * 60);
-/// Age past which the cached directory is not shown at all.
-const DIRECTORY_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+/// Age past which cached data is refreshed, unless the config says
+/// otherwise.
+const DEFAULT_CACHE_FRESH: Duration = Duration::from_secs(60 * 60);
+/// Age past which cached data is not shown at all, unless the freshness is
+/// longer.
+const CACHE_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TokenKind {
@@ -204,6 +211,8 @@ pub(super) struct Client {
     kind: TokenKind,
     /// Why Slack refused the credentials, once it has.
     rejection: Mutex<Option<String>>,
+    /// Who the credentials belong to, once asked.
+    identity: OnceLock<Workspace>,
 }
 
 impl Client {
@@ -218,6 +227,7 @@ impl Client {
             http: Box::new(UreqHttp { agent, credentials }),
             sleep: std::thread::sleep,
             rejection: Mutex::new(None),
+            identity: OnceLock::new(),
         }
     }
 
@@ -233,6 +243,7 @@ impl Client {
             sleep: |_| {},
             kind,
             rejection: Mutex::new(None),
+            identity: OnceLock::new(),
         }
     }
 
@@ -240,6 +251,21 @@ impl Client {
     /// out.
     pub fn rejection(&self) -> Option<String> {
         self.rejection.lock().ok().and_then(|slot| slot.clone())
+    }
+
+    /// The account and workspace the credentials belong to, asked once.
+    pub fn identity(&self) -> Result<Workspace, String> {
+        if let Some(workspace) = self.identity.get() {
+            return Ok(workspace.clone());
+        }
+        let workspace = auth_test(self)?;
+        Ok(self.identity.get_or_init(|| workspace).clone())
+    }
+
+    /// The account the credentials belong to if Slack said so already;
+    /// what is fetched is only cached for it.
+    pub fn known_identity(&self) -> Option<&Workspace> {
+        self.identity.get()
     }
 
     pub fn call(&self, method: &str, params: &[(&str, &str)]) -> Result<Value, String> {
@@ -454,7 +480,14 @@ struct AuthTest {
     is_enterprise_install: bool,
 }
 
-pub(super) fn auth_test(client: &Client) -> Result<Workspace, String> {
+impl Workspace {
+    /// Whether `other` is the same person in the same workspace.
+    pub fn same_account(&self, other: &Workspace) -> bool {
+        self.team_id == other.team_id && self.user_id == other.user_id
+    }
+}
+
+fn auth_test(client: &Client) -> Result<Workspace, String> {
     let auth: AuthTest = client.call_as("auth.test", &[])?;
     Ok(Workspace {
         team_id: auth.team_id,
@@ -645,6 +678,10 @@ pub(super) struct Directory {
     pub workspace: Workspace,
     pub users: Vec<User>,
     pub conversations: Vec<Conversation>,
+    /// User ids looked up and not found, so they are not asked again until
+    /// the directory is fetched anew.
+    #[serde(default)]
+    pub missing: Vec<String>,
     #[serde(skip)]
     user_index: HashMap<String, usize>,
     #[serde(skip)]
@@ -708,8 +745,23 @@ impl Directory {
     }
 
     pub fn is_fresh(&self, now: u64) -> bool {
-        self.age(now) < DIRECTORY_FRESH
+        self.age(now) < cache_fresh()
     }
+}
+
+/// Seconds cached data stays fresh, from `addons.slack.cache_minutes`.
+static CACHE_FRESH_SECS: AtomicU64 = AtomicU64::new(DEFAULT_CACHE_FRESH.as_secs());
+
+pub(super) fn set_cache_fresh(fresh: Duration) {
+    CACHE_FRESH_SECS.store(fresh.as_secs(), Ordering::Relaxed);
+}
+
+pub(super) fn cache_fresh() -> Duration {
+    Duration::from_secs(CACHE_FRESH_SECS.load(Ordering::Relaxed))
+}
+
+pub(super) fn cache_max_age() -> Duration {
+    CACHE_MAX_AGE.max(cache_fresh())
 }
 
 pub(super) fn now_secs() -> u64 {
@@ -720,7 +772,7 @@ pub(super) fn now_secs() -> u64 {
 }
 
 pub(super) fn fetch_directory(client: &Client) -> Result<Directory, String> {
-    let workspace = auth_test(client)?;
+    let workspace = client.identity()?;
     if workspace.enterprise {
         return fetch_enterprise_directory(client, workspace);
     }
@@ -787,30 +839,34 @@ fn fetch_enterprise_directory(client: &Client, workspace: Workspace) -> Result<D
         .iter()
         .filter_map(|conversation| conversation.user.clone())
         .collect();
-    let users = look_up_users(client, &workspace, &partners);
+    let (users, _) = look_up_users(client, &workspace, &partners);
     Ok(Directory::new(workspace, users, conversations, now_secs()))
 }
 
 /// The people among `ids` Slack returns: in one edge API call for session
-/// tokens, else with `users.info` for each, a few at a time.
-fn look_up_users(client: &Client, workspace: &Workspace, ids: &[String]) -> Vec<User> {
+/// tokens, else with `users.info` for each, a few at a time. The flag tells
+/// whether every id got an answer, so the others are known not to exist.
+fn look_up_users(client: &Client, workspace: &Workspace, ids: &[String]) -> (Vec<User>, bool) {
     let mut ids: Vec<&str> = ids.iter().map(String::as_str).collect();
     ids.sort_unstable();
     ids.dedup();
+    let complete = ids.len() <= MAX_LOOKUPS;
     ids.truncate(MAX_LOOKUPS);
     if client.is_session() {
         let body = serde_json::json!({ "ids": ids, "check_interaction": true });
         match client.edge(&format!("cache/{}/users/info", workspace.team_id), &body) {
             Ok(mut reply) => {
-                return match reply["results"].take() {
+                let users = match reply["results"].take() {
                     Value::Array(results) => results.into_iter().filter_map(parse_user).collect(),
                     _ => Vec::new(),
-                }
+                };
+                return (users, complete);
             }
             Err(error) => crate::debug_log!("slack: edge users/info failed: {error}"),
         }
     }
     let mut users = Vec::new();
+    let mut answered = true;
     for chunk in ids.chunks(LOOKUP_THREADS) {
         std::thread::scope(|scope| {
             let handles: Vec<_> = chunk
@@ -820,17 +876,17 @@ fn look_up_users(client: &Client, workspace: &Workspace, ids: &[String]) -> Vec<
             for (handle, id) in handles.into_iter().zip(chunk) {
                 match handle.join() {
                     Ok(Ok(mut reply)) => users.extend(parse_user(reply["user"].take())),
-                    Ok(Err(error)) => crate::debug_log!("slack: cannot look up {id}: {error}"),
-                    Err(_) => {}
+                    Ok(Err(error)) => {
+                        answered &= error.ends_with("user_not_found");
+                        crate::debug_log!("slack: cannot look up {id}: {error}");
+                    }
+                    Err(_) => answered = false,
                 }
             }
         });
     }
-    users
+    (users, complete && answered)
 }
-
-/// User ids already looked up and not found, so they are not asked again.
-static MISSING_USERS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 /// The directory with the people among `ids` it lacks looked up, for an
 /// organization whose directory holds only some people. Blocking.
@@ -842,34 +898,38 @@ pub(super) fn learn_users(
     if !directory.workspace.enterprise {
         return directory.clone();
     }
-    let unknown: Vec<String> = {
-        let missing = MISSING_USERS.lock().map(|m| m.clone()).unwrap_or_default();
-        ids.iter()
-            .filter(|id| id.starts_with(['U', 'W']) && directory.user(id).is_none())
-            .filter(|id| !missing.contains(id))
-            .cloned()
-            .collect()
-    };
+    let mut unknown: Vec<String> = ids
+        .iter()
+        .filter(|id| id.starts_with(['U', 'W']) && directory.user(id).is_none())
+        .filter(|id| !directory.missing.contains(id))
+        .cloned()
+        .collect();
+    unknown.sort_unstable();
+    unknown.dedup();
     if unknown.is_empty() {
         return directory.clone();
     }
-    let found = look_up_users(client, &directory.workspace, &unknown);
-    if let Ok(mut missing) = MISSING_USERS.lock() {
-        missing.extend(
-            unknown
-                .iter()
-                .filter(|id| !found.iter().any(|user| &&user.id == id))
-                .cloned(),
-        );
-    }
-    if found.is_empty() {
+    let (found, complete) = look_up_users(client, &directory.workspace, &unknown);
+    if found.is_empty() && !complete {
         return directory.clone();
     }
     let mut learned = Directory::clone(directory);
+    if complete {
+        learned.missing.extend(
+            unknown
+                .into_iter()
+                .filter(|id| !found.iter().any(|user| &user.id == id)),
+        );
+    }
     learned.users.extend(found);
     learned.reindex();
     let learned = Arc::new(learned);
-    store_directory(&learned);
+    if client
+        .known_identity()
+        .is_some_and(|account| account.same_account(&learned.workspace))
+    {
+        store_directory(&learned);
+    }
     learned
 }
 
@@ -891,15 +951,13 @@ pub(super) fn search_people(
 }
 
 fn directory_path() -> Option<PathBuf> {
-    crate::ui::get_slack_cache_dir()
-        .ok()
-        .map(|dir| dir.join(DIRECTORY_FILE))
+    cache_path(DIRECTORY_FILE)
 }
 
 pub(super) fn read_directory_from(path: &Path, now: u64) -> Option<Directory> {
     let data = std::fs::read(path).ok()?;
     let mut directory: Directory = serde_json::from_slice(&data).ok()?;
-    if directory.version != DIRECTORY_VERSION || directory.age(now) > DIRECTORY_MAX_AGE {
+    if directory.version != DIRECTORY_VERSION || directory.age(now) > cache_max_age() {
         return None;
     }
     directory.reindex();
@@ -907,24 +965,114 @@ pub(super) fn read_directory_from(path: &Path, now: u64) -> Option<Directory> {
 }
 
 pub(super) fn write_directory_to(path: &Path, directory: &Directory) {
+    if let Ok(data) = serde_json::to_vec(directory) {
+        write_private(path, &data);
+    }
+}
+
+/// Write `data` to `path` readable by the user only, replacing it at once.
+fn write_private(path: &Path, data: &[u8]) {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
 
-    let Ok(data) = serde_json::to_vec(directory) else {
-        return;
-    };
-    let temp = path.with_extension("tmp");
+    static WRITES: AtomicU64 = AtomicU64::new(0);
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(
+        ".{}.{}.tmp",
+        std::process::id(),
+        WRITES.fetch_add(1, Ordering::Relaxed)
+    ));
+    // Each write has its own file, so writers racing never share one.
+    let temp = path.with_file_name(name);
     let written = std::fs::OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .mode(0o600)
         .open(&temp)
-        .and_then(|mut file| file.write_all(&data))
+        .and_then(|mut file| file.write_all(data))
         .and_then(|()| std::fs::rename(&temp, path));
     if let Err(error) = written {
-        crate::debug_log!("slack: cannot write the directory cache: {error}");
+        crate::debug_log!("slack: cannot write {}: {error}", path.display());
         let _ = std::fs::remove_file(&temp);
+    }
+}
+
+/// A value cached on disk for the Slack user `user` of the workspace
+/// `team`, so another account never sees it.
+#[derive(Serialize, Deserialize)]
+struct Cached<T> {
+    team: String,
+    user: String,
+    /// Seconds since the epoch.
+    fetched_at: u64,
+    value: T,
+}
+
+/// The value cached in `path` for the account of `workspace` and its age,
+/// unless it is too old.
+pub(super) fn read_cache_from<T: DeserializeOwned>(
+    path: &Path,
+    workspace: &Workspace,
+    now: u64,
+) -> Option<(T, Duration)> {
+    let data = std::fs::read(path).ok()?;
+    let cached: Cached<T> = serde_json::from_slice(&data).ok()?;
+    let age = Duration::from_secs(now.saturating_sub(cached.fetched_at));
+    let owned = cached.team == workspace.team_id && cached.user == workspace.user_id;
+    (owned && age <= cache_max_age()).then_some((cached.value, age))
+}
+
+pub(super) fn write_cache_to<T: Serialize>(
+    path: &Path,
+    workspace: &Workspace,
+    value: &T,
+    now: u64,
+) {
+    let cached = Cached {
+        team: workspace.team_id.clone(),
+        user: workspace.user_id.clone(),
+        fetched_at: now,
+        value,
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(data) = serde_json::to_vec(&cached) {
+        write_private(path, &data);
+    }
+}
+
+/// Change the value cached as `name` for the account of `workspace`. A
+/// write racing this one may be lost; the next load writes it again.
+pub(super) fn update_cache<T: Serialize + DeserializeOwned>(
+    name: &str,
+    workspace: &Workspace,
+    update: impl FnOnce(&mut T),
+) {
+    if let Some((mut value, _)) = read_cache::<T>(name, workspace) {
+        update(&mut value);
+        write_cache(name, workspace, &value);
+    }
+}
+
+/// The file `name` in the Slack cache directory; none in unit tests.
+pub(super) fn cache_path(name: &str) -> Option<PathBuf> {
+    crate::ui::get_slack_cache_dir()
+        .ok()
+        .map(|dir| dir.join(name))
+}
+
+/// The value cached as `name` for the account of `workspace` and its age.
+pub(super) fn read_cache<T: DeserializeOwned>(
+    name: &str,
+    workspace: &Workspace,
+) -> Option<(T, Duration)> {
+    read_cache_from(&cache_path(name)?, workspace, now_secs())
+}
+
+pub(super) fn write_cache<T: Serialize>(name: &str, workspace: &Workspace, value: &T) {
+    if let Some(path) = cache_path(name) {
+        write_cache_to(&path, workspace, value, now_secs());
     }
 }
 
@@ -942,11 +1090,53 @@ pub(super) fn cached_directory() -> Option<Arc<Directory>> {
     Some(directory)
 }
 
-/// The directory, from the cache unless `refresh` or it is missing or too
-/// old.
+/// Bumped each time the credentials turn out to belong to another account
+/// than the cached directory, so work started for the old one is dropped.
+static ACCOUNT_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+pub(super) fn account_epoch() -> u64 {
+    ACCOUNT_EPOCH.load(Ordering::SeqCst)
+}
+
+/// The cached directory if it belongs to the account of `client`. One of
+/// another account is forgotten at once, so it is never shown again. When
+/// Slack cannot be asked, as offline, the cached one is kept; nothing is
+/// cached until [`Client::known_identity`] is known.
+pub(super) fn verified_directory(client: &Client) -> Result<Option<Arc<Directory>>, String> {
+    let account = match client.identity() {
+        Ok(account) => account,
+        Err(error) if client.rejection().is_some() => return Err(error),
+        Err(error) => {
+            crate::debug_log!("slack: cannot tell whose the token is: {error}");
+            return Ok(cached_directory());
+        }
+    };
+    let Some(directory) = cached_directory() else {
+        return Ok(None);
+    };
+    if directory.workspace.same_account(&account) {
+        return Ok(Some(directory));
+    }
+    crate::debug_log!("slack: the token belongs to another account, forgetting the cache");
+    forget_directory();
+    Ok(None)
+}
+
+fn forget_directory() {
+    if let Ok(mut slot) = DIRECTORY.lock() {
+        *slot = None;
+    }
+    if let Some(path) = directory_path() {
+        let _ = std::fs::remove_file(path);
+    }
+    ACCOUNT_EPOCH.fetch_add(1, Ordering::SeqCst);
+}
+
+/// The directory of the account of `client`, from the cache unless
+/// `refresh` or it is missing or too old.
 pub(super) fn directory(client: &Client, refresh: bool) -> Result<Arc<Directory>, String> {
-    if !refresh {
-        if let Some(directory) = cached_directory() {
+    if let Some(directory) = verified_directory(client)? {
+        if !refresh {
             return Ok(directory);
         }
     }
@@ -966,16 +1156,25 @@ fn store_directory(directory: &Arc<Directory>) {
     if let Some(path) = directory_path() {
         write_directory_to(&path, directory);
     }
+    // Like the disk cache, kept out of unit tests so one test's directory
+    // does not turn into another's cached rows.
+    if cfg!(test) {
+        return;
+    }
     if let Ok(mut slot) = DIRECTORY.lock() {
         *slot = Some(directory.clone());
     }
 }
 
-/// Remove the cached directory and avatars; the usage counts stay.
+/// Remove everything cached but the usage counts.
 pub fn clear_cache() {
     if let Ok(dir) = crate::ui::get_slack_cache_dir() {
-        let _ = std::fs::remove_file(dir.join(DIRECTORY_FILE));
-        let _ = std::fs::remove_dir_all(dir.join("avatars"));
+        for file in [DIRECTORY_FILE, LIVE_FILE, UNREAD_FILE, MUTED_FILE] {
+            let _ = std::fs::remove_file(dir.join(file));
+        }
+        for subdir in ["avatars", PREVIEW_DIR] {
+            let _ = std::fs::remove_dir_all(dir.join(subdir));
+        }
     }
 }
 
@@ -1261,6 +1460,100 @@ pub(super) mod tests {
         assert!(read.user("U1").is_some());
         assert!(!read.is_fresh(1_000 + 2 * 3600));
         assert!(read_directory_from(&path, 1_000 + 2 * 24 * 3600).is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_cache_belongs_to_one_account_and_expires() {
+        let dir = std::env::temp_dir().join(format!("raffi-slack-cache-{}", std::process::id()));
+        let path = dir.join("sub").join("live.json");
+        let account = |team: &str, user: &str| Workspace {
+            team_id: team.into(),
+            user_id: user.into(),
+            ..Default::default()
+        };
+        let owner = account("T1", "U1");
+        write_cache_to(&path, &owner, &vec!["C1".to_string()], 1_000);
+        let read: Option<(Vec<String>, Duration)> = read_cache_from(&path, &owner, 1_060);
+        assert_eq!(
+            read,
+            Some((vec!["C1".to_string()], Duration::from_secs(60)))
+        );
+        for other in [account("T1", "U2"), account("T2", "U1")] {
+            assert!(read_cache_from::<Vec<String>>(&path, &other, 1_060).is_none());
+        }
+        assert!(read_cache_from::<Vec<String>>(&path, &owner, 1_000 + 2 * 24 * 3600).is_none());
+        // Written before the workspace was recorded.
+        std::fs::write(&path, r#"{"user":"U1","fetched_at":1000,"value":["C1"]}"#).unwrap();
+        assert!(read_cache_from::<Vec<String>>(&path, &owner, 1_060).is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_racing_writes_leave_one_whole_file() {
+        let dir = std::env::temp_dir().join(format!("raffi-slack-race-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("unread.json");
+        std::thread::scope(|scope| {
+            for writer in 0..8 {
+                let path = &path;
+                scope.spawn(move || {
+                    let data = serde_json::to_vec(&vec![writer.to_string(); 2_000]).unwrap();
+                    for _ in 0..20 {
+                        write_private(path, &data);
+                    }
+                });
+            }
+        });
+        let read: Vec<String> = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert!(read.iter().all(|entry| entry == &read[0]));
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no temp left");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_client_asks_whose_credentials_once_slack_answers() {
+        let fake = FakeHttp::with(vec![
+            ok(serde_json::json!({"ok": false, "error": "fatal_error"})),
+            ok(serde_json::json!({"ok": true, "team_id": "T2", "user_id": "U2"})),
+        ]);
+        let client = Client::fake(Box::new(fake.clone()));
+        assert!(
+            client.identity().is_err() && client.known_identity().is_none(),
+            "not known while Slack cannot say"
+        );
+        assert_eq!(client.identity().unwrap().user_id, "U2");
+        assert_eq!(client.identity().unwrap().team_id, "T2");
+        assert_eq!(fake.methods(), ["auth.test", "auth.test"], "asked once");
+        assert!(client.known_identity().is_some());
+    }
+
+    #[test]
+    fn test_learn_users_remembers_only_people_slack_says_are_missing() {
+        let workspace = Workspace {
+            team_id: "E1".into(),
+            enterprise: true,
+            ..Default::default()
+        };
+        let directory = Arc::new(Directory::new(workspace, Vec::new(), Vec::new(), 1_000));
+        let fake = FakeHttp::with(vec![
+            ok(serde_json::json!({"ok": false, "error": "fatal_error"})),
+            ok(serde_json::json!({"ok": false, "error": "user_not_found"})),
+        ]);
+        let client = Client::fake(Box::new(fake.clone()));
+        let ids = ["U8".to_string()];
+        let learned = learn_users(&client, &directory, &ids);
+        assert!(learned.missing.is_empty());
+        let learned = learn_users(&client, &learned, &ids);
+        assert_eq!(learned.missing, ["U8"]);
+        // Kept with the directory, so it is not asked for again.
+        let dir = std::env::temp_dir().join(format!("raffi-slack-missing-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("directory.json");
+        write_directory_to(&path, &learned);
+        let read = Arc::new(read_directory_from(&path, 1_060).unwrap());
+        learn_users(&client, &read, &ids);
+        assert_eq!(fake.methods(), ["users.info", "users.info"]);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

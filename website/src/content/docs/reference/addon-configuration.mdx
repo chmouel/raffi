@@ -1397,6 +1397,13 @@ Conversations checked by `slack unread` when Slack does not say which
 conversations have unread messages, as with user tokens: `#channel`,
 `@handle` for the direct conversation, or a conversation id. At most 30.
 
+**`addons.slack.cache_minutes`** `integer` (default: `60`)
+
+How long the cached conversations, people, muted conversations and
+search results count as fresh before Raffi asks Slack again. `0` asks
+every time. The last home rows, unread conversations and previews show
+right away whatever this is set to, and are replaced when Slack answers.
+
 ### Example
 
 ```yaml

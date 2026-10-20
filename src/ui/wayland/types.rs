@@ -520,8 +520,9 @@ pub(crate) enum Message {
     /// The Slack search for these terms in this list session is due.
     SlackSearchDue(u64, String),
     /// The preview of the Slack row with this identity in this list
-    /// session; None when the row was left before it loaded.
-    SlackPreviewLoaded(u64, String, Option<super::slack::Preview>),
+    /// session, for this preview request; None when the row was left before
+    /// it loaded.
+    SlackPreviewLoaded(u64, String, u64, Option<super::slack::Preview>),
     /// Rows of the main view command list source at this index, from its
     /// load of this generation.
     MainViewLoaded(

@@ -464,6 +464,7 @@ addons:
   #   cookie_command: "pass show slack/cookie"   # xoxc- tokens only
   #   open_in: desktop                            # desktop | browser
   #   unread_conversations: ["#ops", "@alice"]    # for xoxp- tokens
+  #   cache_minutes: 60                           # 0 asks Slack every time
 
   # Unit conversion (native UI only). Type "10 km to mi", "70f to c" or
   # "5 GB in MB" without any keyword. Enter copies the number, Ctrl+Enter
