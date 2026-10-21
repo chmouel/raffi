@@ -513,6 +513,17 @@ fn scrollable_style(
 /// Opacity of rows drawn dimmed, such as muted Slack conversations.
 const DIMMED_OPACITY: f32 = 0.45;
 
+const PINNED_BADGE: &str = "Pinned";
+
+/// `title` led by a pin for pinned browser tabs.
+fn pinned_title(title: &str, pinned: bool) -> String {
+    if pinned {
+        format!("📌 {title}")
+    } else {
+        title.to_string()
+    }
+}
+
 fn badge_pill<'a>(label: String, t: ThemeColors, size: f32) -> Element<'a, Message> {
     tinted_badge_pill(label, t.accent, size)
 }
@@ -1177,6 +1188,29 @@ impl LauncherApp {
             })
     }
 
+    /// The heading over a section of command list rows, such as a browser.
+    fn row_group_header(&self, group: &super::command_list::RowGroup) -> Element<'_, Message> {
+        let t = self.view.theme;
+        let fs = self.view.font_sizes;
+        let mut header = Row::new().spacing(8).align_y(iced::Alignment::Center);
+        if let Some(icon) = group
+            .icon
+            .as_deref()
+            .and_then(|path| icon_element(Path::new(path), 20.0))
+        {
+            header = header.push(icon);
+        }
+        header = header.push(text(group.title.clone()).size(fs.subtitle).color(t.accent));
+        container(header)
+            .padding(iced::Padding {
+                top: 6.0,
+                bottom: 0.0,
+                left: fs.item_padding,
+                right: fs.item_padding,
+            })
+            .into()
+    }
+
     /// Row `row` of main view source `source`, shown at `display_idx`, with
     /// a badge naming where it comes from.
     fn main_view_row(
@@ -1202,13 +1236,20 @@ impl LauncherApp {
                     item_row = item_row.push(icon);
                 }
                 text_col = text_col
-                    .push(text(item.title.clone()).size(fs.item).color(t.text_main))
+                    .push(
+                        text(pinned_title(&item.title, item.pinned))
+                            .size(fs.item)
+                            .color(t.text_main),
+                    )
                     .push(
                         text(item.subtitle.clone())
                             .size(fs.subtitle)
                             .color(t.text_muted),
                     );
                 badges.extend(item.badge.clone());
+                if item.pinned {
+                    badges.push(PINNED_BADGE.to_string());
+                }
                 badges.extend(list.addon.map(|addon| addon.badge().to_string()));
             }
             MainViewSource::Snippets {
@@ -2365,10 +2406,25 @@ impl LauncherApp {
             );
             special_item_idx += 1;
         } else if self.command_list.is_active() {
+            // Section headings only while nothing is typed: a filter lists
+            // the best matches first, whatever their section.
+            let grouping = self.command_list.query.is_empty();
+            let group_of = |row: usize| {
+                self.command_list
+                    .item(row)
+                    .and_then(|item| item.group.as_ref())
+                    .filter(|_| grouping)
+            };
             for row in 0..self.command_list.row_count() {
                 let Some(item) = self.command_list.item(row) else {
                     continue;
                 };
+                let group = group_of(row);
+                if let Some(group) = group {
+                    if row == 0 || group_of(row - 1) != Some(group) {
+                        items_column = items_column.push(self.row_group_header(group));
+                    }
+                }
                 let is_selected = self.selected_index == special_item_idx;
                 // Faded towards the background so dimmed rows stand apart
                 // from the others in any theme.
@@ -2415,7 +2471,11 @@ impl LauncherApp {
                     t.text_main
                 };
                 let text_col = Column::new()
-                    .push(text(item.title.clone()).size(fs.item).color(title_color))
+                    .push(
+                        text(pinned_title(&item.title, item.pinned))
+                            .size(fs.item)
+                            .color(title_color),
+                    )
                     .push(subtitle);
                 item_row = item_row.push(text_col.width(Length::Fill));
                 let notes = self
@@ -2427,17 +2487,30 @@ impl LauncherApp {
                 } else {
                     t.accent
                 };
-                for badge in notes.iter().chain(&item.badge) {
+                let pinned = item.pinned.then(|| PINNED_BADGE.to_string());
+                for badge in notes.iter().chain(&item.badge).chain(&pinned) {
                     item_row =
                         item_row.push(tinted_badge_pill(badge.clone(), badge_color, fs.subtitle));
                 }
-                items_column = items_column.push(
-                    button(item_row)
-                        .on_press(Message::ItemClicked(special_item_idx))
-                        .padding(fs.item_padding)
-                        .width(Length::Fill)
-                        .style(item_button_style(t, is_selected, t.text_main)),
-                );
+                let indent = if group.is_some() { indent_left(1) } else { 0.0 };
+                let item_button = button(item_row)
+                    .on_press(Message::ItemClicked(special_item_idx))
+                    .padding(iced::Padding {
+                        left: fs.item_padding + indent,
+                        ..fs.item_padding.into()
+                    })
+                    .width(Length::Fill)
+                    .style(item_button_style(t, is_selected, t.text_main));
+                items_column = items_column.push(if group.is_some() {
+                    let guide = TreeGuideSegments {
+                        above: true,
+                        below: group_of(row + 1) == group,
+                        elbow: true,
+                    };
+                    with_tree_guide(item_button, vec![guide], fs.item_padding, t)
+                } else {
+                    item_button.into()
+                });
                 special_item_idx += 1;
             }
         }

@@ -521,6 +521,7 @@ pub(super) fn add_cycle_view_shortcut(
             "Slack: home, unread, threads, activity, people, actions",
         ),
         (addons.audio.enabled, "audio: all, outputs, inputs"),
+        (addons.browser_tabs.enabled, "tabs: by browser, recent"),
         (
             addons.bookmarks.enabled,
             "bookmarks: all browsers, then each one",

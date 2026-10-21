@@ -128,6 +128,29 @@ pub(super) struct CommandItem {
     pub sort_priority: u8,
     /// Left out of the unfiltered list, shown once the query matches it.
     pub typed_only: bool,
+    /// Section heading drawn above a run of rows sharing it while nothing
+    /// is typed, such as the browser of a tab.
+    pub group: Option<RowGroup>,
+    /// A pinned browser tab, marked with a pin and a "Pinned" pill.
+    pub pinned: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RowGroup {
+    pub title: String,
+    /// Icon name, resolved to `icon` on the UI thread.
+    pub icon_name: Option<String>,
+    pub icon: Option<String>,
+}
+
+impl RowGroup {
+    pub fn new(title: &str, icon_name: Option<&str>) -> Self {
+        Self {
+            title: title.to_string(),
+            icon_name: icon_name.map(str::to_string),
+            icon: None,
+        }
+    }
 }
 
 impl CommandItem {
@@ -157,6 +180,8 @@ impl CommandItem {
             dimmed: false,
             sort_priority: 0,
             typed_only: false,
+            group: None,
+            pinned: false,
         }
     }
 }
@@ -229,6 +254,8 @@ pub(super) struct CommandListState {
     pub strict: bool,
     /// Devices the audio list shows; All for every other list.
     pub audio_view: super::audio::View,
+    /// Order of the browser tab list.
+    pub tabs_view: super::browser_tabs::View,
     /// Which Slack slice this list shows when used as a `main_view` source.
     pub slack_source: Option<super::main_view::SlackSource>,
     /// Hide muted or zero-usage unpromoted Slack channels when the query is empty.
@@ -261,6 +288,7 @@ impl CommandListState {
         self.preview_wanted.clear();
         self.query_row = None;
         self.audio_view = super::audio::View::All;
+        self.tabs_view = super::browser_tabs::View::ByBrowser;
         self.slack_source = None;
         self.slack_hide_cold_channels = false;
         self.generation = self.generation.wrapping_add(1);

@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use chrono::{DateTime, Local, NaiveDateTime};
+
 use crate::browser_host::{self, HostSetup, InstalledBrowser, Listing, Request, Tab};
 
 use super::actions::DeferredAction;
-use super::command_list::{domains_of, CommandAction, CommandItem};
+use super::command_list::{domains_of, CommandAction, CommandItem, RowGroup};
 use super::url_match::uri_host;
 
 pub(super) const NO_BROWSER: &str =
@@ -44,6 +46,7 @@ pub(super) fn tab_target(item: &CommandItem) -> Option<&TabAction> {
 /// The tabs of every connected browser, or the steps to connect one.
 /// Blocking: run it off the UI thread.
 pub(super) fn load_tabs(
+    view: View,
     focus_keep_open: bool,
     close_keep_open: bool,
 ) -> Result<Vec<CommandItem>, String> {
@@ -63,7 +66,7 @@ pub(super) fn load_tabs(
         return Ok(setup_items(&setup, &installed));
     }
     let icons = super::favicons::lookup(&browsers);
-    tab_items_with(&browsers, &icons, focus_keep_open, close_keep_open)
+    tab_items_with(&browsers, &icons, view, focus_keep_open, close_keep_open)
 }
 
 /// Rows that connect the browsers to Raffi: write the manifests, get the
@@ -221,50 +224,147 @@ fn setup_row(
     }
 }
 
-/// Playing tabs first, then the most recently used. `icons` holds the site
-/// icons by [`super::favicons::host_key`].
+/// How the tab list is ordered, switched with Ctrl+Tab.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum View {
+    /// Pinned tabs, then a section per browser.
+    #[default]
+    ByBrowser,
+    /// Pinned tabs, then every other tab, the most recently used first.
+    Recent,
+}
+
+impl View {
+    pub(super) fn cycle(self) -> Self {
+        match self {
+            Self::ByBrowser => Self::Recent,
+            Self::Recent => Self::ByBrowser,
+        }
+    }
+
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::ByBrowser => "By browser",
+            Self::Recent => "Recent",
+        }
+    }
+}
+
+/// Pinned tabs first, then a section per browser, the one used last
+/// first; within each, playing tabs first, then the most recently used.
+/// `icons` holds the site icons by [`super::favicons::host_key`].
 #[allow(dead_code)]
 pub(super) fn tab_items(
     browsers: &[(PathBuf, Listing)],
     icons: &HashMap<String, PathBuf>,
 ) -> Result<Vec<CommandItem>, String> {
-    tab_items_with(browsers, icons, false, true)
+    tab_items_with(browsers, icons, View::ByBrowser, false, true)
 }
 
+type TabRow<'a> = (&'a Path, &'a Listing, &'a Tab);
+
+/// The rows of `browsers` in `view` order. In both views the tab being
+/// looked at, the newest one if it is shown in its window, comes last of
+/// its list so that the previous tab comes first.
 pub(super) fn tab_items_with(
     browsers: &[(PathBuf, Listing)],
     icons: &HashMap<String, PathBuf>,
+    view: View,
     focus_keep_open: bool,
     close_keep_open: bool,
 ) -> Result<Vec<CommandItem>, String> {
     if browsers.is_empty() {
         return Err(NO_BROWSER.to_string());
     }
-    let mut tabs: Vec<(&Path, &Listing, &Tab)> = browsers
-        .iter()
-        .flat_map(|(socket, listing)| {
-            listing
-                .tabs
-                .iter()
-                .map(move |tab| (socket.as_path(), listing, tab))
-        })
-        .collect();
-    if tabs.is_empty() {
+    let mut pinned: Vec<TabRow> = Vec::new();
+    let mut sections: Vec<Vec<TabRow>> = Vec::new();
+    for (socket, listing) in browsers {
+        let (pins, rest): (Vec<_>, Vec<_>) = listing
+            .tabs
+            .iter()
+            .map(|tab| (socket.as_path(), listing, tab))
+            .partition(|(_, _, tab)| tab.pinned);
+        pinned.extend(pins);
+        if !rest.is_empty() {
+            sections.push(rest);
+        }
+    }
+    if pinned.is_empty() && sections.is_empty() {
         return Ok(vec![CommandItem::info(
             "empty",
             NO_TABS.to_string(),
             "dialog-information",
         )]);
     }
-    tabs.sort_by(|(_, _, a), (_, _, b)| {
-        b.audible
-            .cmp(&a.audible)
-            .then(b.last_accessed.total_cmp(&a.last_accessed))
-    });
-    Ok(tabs
+    let current = pinned
+        .iter()
+        .chain(sections.iter().flatten())
+        .filter(|(_, _, tab)| tab.last_accessed > 0.0)
+        .max_by(|(_, _, a), (_, _, b)| a.last_accessed.total_cmp(&b.last_accessed))
+        .filter(|(_, _, tab)| tab.active)
+        .map(|(socket, _, tab)| (*socket, tab.id));
+    let is_current = |(socket, _, tab): &TabRow| current == Some((*socket, tab.id));
+    let playing_first = view == View::ByBrowser;
+    let by_use = |a: &TabRow, b: &TabRow| {
+        is_current(a)
+            .cmp(&is_current(b))
+            .then(if playing_first {
+                b.2.audible.cmp(&a.2.audible)
+            } else {
+                std::cmp::Ordering::Equal
+            })
+            .then(b.2.last_accessed.total_cmp(&a.2.last_accessed))
+    };
+    pinned.sort_by(by_use);
+    if view == View::Recent {
+        let mut rest: Vec<TabRow> = sections.into_iter().flatten().collect();
+        rest.sort_by(by_use);
+        return Ok(pinned
+            .into_iter()
+            .chain(rest)
+            .map(|(socket, listing, tab)| {
+                tab_item(
+                    socket,
+                    listing,
+                    tab,
+                    icons,
+                    focus_keep_open,
+                    close_keep_open,
+                )
+            })
+            .collect());
+    }
+    let last_used = |section: &[TabRow]| {
+        section
+            .iter()
+            .map(|(_, _, tab)| tab.last_accessed)
+            .fold(f64::MIN, f64::max)
+    };
+    for section in &mut sections {
+        section.sort_by(by_use);
+    }
+    sections.sort_by(|a, b| last_used(b).total_cmp(&last_used(a)));
+    // A lone browser needs no heading unless pinned tabs sit above it.
+    let headed = sections.len() > 1 || !pinned.is_empty();
+    let pinned_group = RowGroup::new("Pinned", None);
+    let rows = pinned
         .into_iter()
-        .map(|(socket, listing, tab)| {
-            tab_item(
+        .map(|row| (row, Some(pinned_group.clone())))
+        .chain(sections.into_iter().flat_map(|section| {
+            let browser = &section[0].1.browser;
+            let group = headed.then(|| {
+                let title = [&browser.name, &browser.id]
+                    .into_iter()
+                    .find(|name| !name.is_empty())
+                    .map_or("Browser", String::as_str);
+                RowGroup::new(title, Some(browser.id.as_str()).filter(|id| !id.is_empty()))
+            });
+            section.into_iter().map(move |row| (row, group.clone()))
+        }));
+    Ok(rows
+        .map(|((socket, listing, tab), group)| CommandItem {
+            group,
+            ..tab_item(
                 socket,
                 listing,
                 tab,
@@ -274,6 +374,18 @@ pub(super) fn tab_items_with(
             )
         })
         .collect())
+}
+
+/// When a tab last had the focus, from its epoch milliseconds, as the
+/// clipboard rows show times; None when the browser did not say.
+fn last_used(last_accessed: f64, now: NaiveDateTime) -> Option<String> {
+    if last_accessed <= 0.0 {
+        return None;
+    }
+    let time = DateTime::from_timestamp_millis(last_accessed as i64)?
+        .with_timezone(&Local)
+        .naive_local();
+    Some(super::clipboard::short_copy_time(time, now))
 }
 
 fn tab_item(
@@ -314,8 +426,6 @@ fn tab_item(
         Some("Muted")
     } else if tab.audible {
         Some("Playing")
-    } else if tab.pinned {
-        Some("Pinned")
     } else {
         None
     };
@@ -331,6 +441,20 @@ fn tab_item(
         .chain([browser.id.clone(), FALLBACK_ICON.to_string()])
         .collect();
     icon_names.retain(|name| !name.is_empty());
+    let mut details = vec![
+        ("URL".to_string(), tab.url.clone()),
+        ("Browser".to_string(), browser.name.clone()),
+    ];
+    if tab.pinned {
+        details.push(("Pinned".to_string(), "Yes".to_string()));
+    }
+    if let Some(time) = last_used(tab.last_accessed, Local::now().naive_local()) {
+        details.push(("Last used".to_string(), time));
+    }
+    details.extend([
+        ("Enter".to_string(), "Switch to the tab".to_string()),
+        ("Ctrl+Enter".to_string(), "Close the tab".to_string()),
+    ]);
     CommandItem {
         match_text: format!("{title} {}", tab.url),
         subtitle,
@@ -344,17 +468,14 @@ fn tab_item(
             close_keep_open,
             Some("Closing..."),
         )),
-        details: vec![
-            ("URL".to_string(), tab.url.clone()),
-            ("Browser".to_string(), browser.name.clone()),
-            ("Enter".to_string(), "Switch to the tab".to_string()),
-            ("Ctrl+Enter".to_string(), "Close the tab".to_string()),
-        ],
+        details,
         badge: badge.map(str::to_string),
         domains: domains_of([tab.url.as_str()]),
         dimmed: false,
         sort_priority: 0,
         typed_only: false,
+        group: None,
+        pinned: tab.pinned,
         title,
     }
 }
@@ -481,10 +602,16 @@ mod tests {
     }
 
     #[test]
-    fn test_tab_items_merge_browsers_and_sort_playing_then_recent() {
+    fn test_tab_items_group_by_browser_and_sort_playing_then_recent() {
         let mut playing = tab(7, "Music", "https://music.youtube.com/watch", 1.0);
         playing.audible = true;
+        let mut radio = tab(3, "Radio", "https://radio.test", 50.0);
+        radio.audible = true;
         let browsers = vec![
+            (
+                PathBuf::from("/run/raffi/browsers/20.sock"),
+                listing("google-chrome", "Google Chrome", None, vec![playing]),
+            ),
             (
                 PathBuf::from("/run/raffi/browsers/10.sock"),
                 listing(
@@ -494,22 +621,39 @@ mod tests {
                     vec![
                         tab(1, "Old", "https://example.com/a", 100.0),
                         tab(2, "", "https://www.github.com/chmouel/raffi", 300.0),
+                        radio,
                     ],
                 ),
             ),
-            (
-                PathBuf::from("/run/raffi/browsers/20.sock"),
-                listing("google-chrome", "Google Chrome", None, vec![playing]),
-            ),
         ];
         let items = tab_items(&browsers, &HashMap::new()).unwrap();
-        let titles: Vec<_> = items.iter().map(|item| item.title.as_str()).collect();
+        let rows: Vec<_> = items
+            .iter()
+            .map(|item| {
+                let group = item.group.as_ref().unwrap();
+                (
+                    item.title.as_str(),
+                    group.title.as_str(),
+                    group.icon_name.as_deref(),
+                )
+            })
+            .collect();
         assert_eq!(
-            titles,
-            vec!["Music", "https://www.github.com/chmouel/raffi", "Old"]
+            rows,
+            vec![
+                ("Radio", "Firefox", Some("firefox")),
+                (
+                    "https://www.github.com/chmouel/raffi",
+                    "Firefox",
+                    Some("firefox")
+                ),
+                ("Old", "Firefox", Some("firefox")),
+                ("Music", "Google Chrome", Some("google-chrome")),
+            ],
+            "the browser used last comes first, playing tabs first in each"
         );
 
-        let music = &items[0];
+        let music = &items[3];
         assert_eq!(music.identity, "20:7");
         assert_eq!(music.subtitle, "music.youtube.com · Google Chrome");
         assert_eq!(music.badge.as_deref(), Some("Playing"));
@@ -655,6 +799,7 @@ mod tests {
         muted.muted = true;
         let mut pinned = tab(2, "b", "https://b.test", 0.0);
         pinned.pinned = true;
+        pinned.audible = true;
         let items = tab_items(
             &[(
                 PathBuf::from("1.sock"),
@@ -663,9 +808,172 @@ mod tests {
             &HashMap::new(),
         )
         .unwrap();
-        assert_eq!(items[0].badge.as_deref(), Some("Muted"));
-        assert_eq!(items[1].badge.as_deref(), Some("Pinned"));
-        assert_eq!(items[0].subtitle, "a.test");
-        assert_eq!(items[0].icon_names, vec![FALLBACK_ICON]);
+        assert!(items[0].pinned);
+        assert_eq!(
+            items[0].badge.as_deref(),
+            Some("Playing"),
+            "a pinned tab keeps its sound badge"
+        );
+        assert!(items[0]
+            .details
+            .contains(&("Pinned".to_string(), "Yes".to_string())));
+        assert!(!items[1].pinned);
+        assert_eq!(items[1].badge.as_deref(), Some("Muted"));
+        assert_eq!(items[1].subtitle, "a.test");
+        assert_eq!(items[1].icon_names, vec![FALLBACK_ICON]);
+        assert_eq!(items[1].group.as_ref().unwrap().title, "Browser");
+    }
+
+    #[test]
+    fn test_tab_items_list_pinned_tabs_first() {
+        let pin = |id, title: &str, last_accessed| Tab {
+            pinned: true,
+            ..tab(id, title, "https://pin.test", last_accessed)
+        };
+        let firefox = || {
+            (
+                PathBuf::from("10.sock"),
+                listing(
+                    "firefox",
+                    "Firefox",
+                    None,
+                    vec![
+                        tab(1, "Docs", "https://docs.test", 50.0),
+                        pin(2, "Mail", 10.0),
+                    ],
+                ),
+            )
+        };
+        let chrome = (
+            PathBuf::from("20.sock"),
+            listing(
+                "chromium",
+                "Chromium",
+                None,
+                vec![
+                    pin(3, "Chat", 20.0),
+                    tab(4, "News", "https://news.test", 90.0),
+                ],
+            ),
+        );
+        let groups = |browsers: &[(PathBuf, Listing)]| -> Vec<(String, Option<String>)> {
+            tab_items(browsers, &HashMap::new())
+                .unwrap()
+                .into_iter()
+                .map(|item| (item.title, item.group.map(|group| group.title)))
+                .collect()
+        };
+        let named = |title: &str, group: &str| (title.to_string(), Some(group.to_string()));
+
+        assert_eq!(
+            groups(&[firefox(), chrome]),
+            vec![
+                named("Chat", "Pinned"),
+                named("Mail", "Pinned"),
+                named("News", "Chromium"),
+                named("Docs", "Firefox"),
+            ]
+        );
+        assert_eq!(
+            groups(&[firefox()]),
+            vec![named("Mail", "Pinned"), named("Docs", "Firefox")],
+            "a lone browser is headed below pinned tabs"
+        );
+        let unpinned = (
+            PathBuf::from("10.sock"),
+            listing(
+                "firefox",
+                "Firefox",
+                None,
+                vec![tab(1, "Docs", "https://docs.test", 50.0)],
+            ),
+        );
+        assert_eq!(
+            groups(&[unpinned]),
+            vec![("Docs".to_string(), None)],
+            "a lone browser without pinned tabs has no heading"
+        );
+    }
+
+    #[test]
+    fn test_tab_items_recent_view_and_current_tab_last() {
+        let firefox = (
+            PathBuf::from("10.sock"),
+            listing(
+                "firefox",
+                "Firefox",
+                None,
+                vec![
+                    Tab {
+                        audible: true,
+                        ..tab(1, "Radio", "https://radio.test", 10.0)
+                    },
+                    Tab {
+                        active: true,
+                        ..tab(2, "Current", "https://current.test", 90.0)
+                    },
+                    tab(3, "Docs", "https://docs.test", 50.0),
+                ],
+            ),
+        );
+        let chrome = (
+            PathBuf::from("20.sock"),
+            listing(
+                "chromium",
+                "Chromium",
+                None,
+                vec![
+                    tab(4, "News", "https://news.test", 70.0),
+                    Tab {
+                        pinned: true,
+                        ..tab(5, "Mail", "https://mail.test", 5.0)
+                    },
+                ],
+            ),
+        );
+        let browsers = [firefox, chrome];
+        let order = |view| -> Vec<(String, Option<String>)> {
+            tab_items_with(&browsers, &HashMap::new(), view, false, true)
+                .unwrap()
+                .into_iter()
+                .map(|item| (item.title, item.group.map(|group| group.title)))
+                .collect()
+        };
+        let row = |title: &str, group: Option<&str>| (title.to_string(), group.map(str::to_string));
+
+        assert_eq!(
+            order(View::Recent),
+            vec![
+                row("Mail", None),
+                row("News", None),
+                row("Docs", None),
+                row("Radio", None),
+                row("Current", None),
+            ],
+            "pinned first, then by last use without sections, the current tab last"
+        );
+        assert_eq!(
+            order(View::ByBrowser),
+            vec![
+                row("Mail", Some("Pinned")),
+                row("Radio", Some("Firefox")),
+                row("Docs", Some("Firefox")),
+                row("Current", Some("Firefox")),
+                row("News", Some("Chromium")),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_last_used() {
+        let now = DateTime::from_timestamp_millis(1_000_000_000_000)
+            .unwrap()
+            .with_timezone(&Local)
+            .naive_local();
+        let day_before = 1_000_000_000_000.0 - 86_400_000.0;
+        assert_eq!(last_used(0.0, now), None);
+        assert!(last_used(day_before, now)
+            .unwrap()
+            .starts_with("Yesterday "));
     }
 }

@@ -337,6 +337,8 @@ fn window_item(window: Window) -> CommandItem {
         dimmed: false,
         sort_priority: 0,
         typed_only: false,
+        group: None,
+        pinned: false,
     }
 }
 

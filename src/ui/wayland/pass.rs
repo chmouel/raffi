@@ -127,6 +127,8 @@ fn entry_item(name: &str) -> CommandItem {
         dimmed: false,
         sort_priority: 0,
         typed_only: false,
+        group: None,
+        pinned: false,
     }
 }
 
@@ -153,6 +155,8 @@ pub(super) fn command_item(identity: &str, title: &str, subtitle: &str, icon: &s
         dimmed: false,
         sort_priority: 0,
         typed_only: false,
+        group: None,
+        pinned: false,
     }
 }
 

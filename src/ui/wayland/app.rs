@@ -1670,13 +1670,7 @@ impl LauncherApp {
                     && self.command_list.addon == Some(CommandListAddon::BrowserTabs)
                     && self.command_list.session == session
                 {
-                    let focus_keep_open =
-                        !self.should_close(self.addons.browser_tabs.close_on_action);
-                    let close_keep_open = self.addons.browser_tabs.close_on_action != Some(true);
-                    self.load_command_list(
-                        move || super::browser_tabs::load_tabs(focus_keep_open, close_keep_open),
-                        true,
-                    )
+                    self.load_browser_tabs(true)
                 } else {
                     Task::none()
                 }
@@ -1752,15 +1746,7 @@ impl LauncherApp {
                     let keep_open = !self.addons.kill.close_on_action(self.close_on_action);
                     self.load_command_list(move || super::kill::load_processes(keep_open), true)
                 }
-                CommandListAddon::BrowserTabs => {
-                    let focus_keep_open =
-                        !self.should_close(self.addons.browser_tabs.close_on_action);
-                    let close_keep_open = self.addons.browser_tabs.close_on_action != Some(true);
-                    self.load_command_list(
-                        move || super::browser_tabs::load_tabs(focus_keep_open, close_keep_open),
-                        true,
-                    )
-                }
+                CommandListAddon::BrowserTabs => self.load_browser_tabs(true),
                 CommandListAddon::Bluetooth => self.load_bluetooth(true),
                 CommandListAddon::Windows => match (self.compositor)() {
                     Some(compositor) if (self.program_exists)(compositor.program()) => {
@@ -2588,12 +2574,7 @@ impl LauncherApp {
             }
             CommandListAddon::BrowserTabs if !entered => Task::none(),
             CommandListAddon::BrowserTabs => {
-                let focus_keep_open = !self.should_close(self.addons.browser_tabs.close_on_action);
-                let close_keep_open = self.addons.browser_tabs.close_on_action != Some(true);
-                let load = self.load_command_list(
-                    move || super::browser_tabs::load_tabs(focus_keep_open, close_keep_open),
-                    false,
-                );
+                let load = self.load_browser_tabs(false);
                 let session = self.command_list.session;
                 let service = self.addons.browser_tabs.favicon_service;
                 load.chain(Task::perform(
@@ -3122,6 +3103,16 @@ impl LauncherApp {
         (self.terminal_tab)(prefix, terminal.kitty_socket.as_deref())
     }
 
+    fn load_browser_tabs(&mut self, refresh: bool) -> Task<Message> {
+        let view = self.command_list.tabs_view;
+        let focus_keep_open = !self.should_close(self.addons.browser_tabs.close_on_action);
+        let close_keep_open = self.addons.browser_tabs.close_on_action != Some(true);
+        self.load_command_list(
+            move || super::browser_tabs::load_tabs(view, focus_keep_open, close_keep_open),
+            refresh,
+        )
+    }
+
     fn load_audio(&mut self, refresh: bool) -> Task<Message> {
         let options = super::audio::AudioOptions::of(&self.addons.audio, self.close_on_action);
         self.command_list.query_row = Some(self.audio_query_row(true));
@@ -3233,15 +3224,7 @@ impl LauncherApp {
                     let keep_open = !self.addons.kill.close_on_action(self.close_on_action);
                     self.load_command_list(move || super::kill::load_processes(keep_open), true)
                 }
-                CommandListAddon::BrowserTabs => {
-                    let focus_keep_open =
-                        !self.should_close(self.addons.browser_tabs.close_on_action);
-                    let close_keep_open = self.addons.browser_tabs.close_on_action != Some(true);
-                    self.load_command_list(
-                        move || super::browser_tabs::load_tabs(focus_keep_open, close_keep_open),
-                        true,
-                    )
-                }
+                CommandListAddon::BrowserTabs => self.load_browser_tabs(true),
                 CommandListAddon::Bluetooth => self.load_bluetooth(true),
                 CommandListAddon::Slack => self.load_slack(true),
                 CommandListAddon::Windows => {
@@ -3277,18 +3260,7 @@ impl LauncherApp {
                         let keep_open = !self.addons.kill.close_on_action(self.close_on_action);
                         self.load_command_list(move || super::kill::load_processes(keep_open), true)
                     }
-                    CommandListAddon::BrowserTabs => {
-                        let focus_keep_open =
-                            !self.should_close(self.addons.browser_tabs.close_on_action);
-                        let close_keep_open =
-                            self.addons.browser_tabs.close_on_action != Some(true);
-                        self.load_command_list(
-                            move || {
-                                super::browser_tabs::load_tabs(focus_keep_open, close_keep_open)
-                            },
-                            true,
-                        )
-                    }
+                    CommandListAddon::BrowserTabs => self.load_browser_tabs(true),
                     CommandListAddon::Bluetooth => self.load_bluetooth(true),
                     _ => Task::none(),
                 };
@@ -3346,6 +3318,12 @@ impl LauncherApp {
                 .icon_names
                 .iter()
                 .find_map(|name| self.resolve_icon_name(name));
+            if let Some(group) = &mut item.group {
+                group.icon = group
+                    .icon_name
+                    .as_deref()
+                    .and_then(|name| self.resolve_icon_name(name));
+            }
         }
         if self.command_list.addon == Some(CommandListAddon::Slack) {
             self.apply_slack_images(&mut items);
@@ -4400,6 +4378,10 @@ impl LauncherApp {
                 self.command_list.set_audio_view(view);
                 return self.handle_search_changed(self.search_query.clone());
             }
+            Some(CommandListAddon::BrowserTabs) => {
+                self.command_list.tabs_view = self.command_list.tabs_view.cycle();
+                return self.load_browser_tabs(true);
+            }
             _ => {}
         }
         if self.main_view.active && !self.main_view.stops.is_empty() {
@@ -4431,6 +4413,9 @@ impl LauncherApp {
             }
             Some(CommandListAddon::Audio) => {
                 return Some(self.command_list.audio_view.label().to_string());
+            }
+            Some(CommandListAddon::BrowserTabs) => {
+                return Some(self.command_list.tabs_view.label().to_string());
             }
             Some(CommandListAddon::Bookmarks) if self.bookmarks.prompt.is_some() => return None,
             Some(CommandListAddon::Bookmarks) => return self.bookmarks.view_label(),

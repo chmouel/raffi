@@ -1170,7 +1170,13 @@ impl LauncherApp {
             CommandListAddon::BrowserTabs => {
                 let focus_keep_open = !self.should_close(self.addons.browser_tabs.close_on_action);
                 let close_keep_open = self.addons.browser_tabs.close_on_action != Some(true);
-                Box::new(move || super::browser_tabs::load_tabs(focus_keep_open, close_keep_open))
+                Box::new(move || {
+                    super::browser_tabs::load_tabs(
+                        super::browser_tabs::View::ByBrowser,
+                        focus_keep_open,
+                        close_keep_open,
+                    )
+                })
             }
             CommandListAddon::Bookmarks => {
                 let config = self.addons.bookmarks.clone();

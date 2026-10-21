@@ -7389,6 +7389,40 @@ fn test_browser_tabs_close_selects_the_next_tab() {
     );
 }
 
+#[test]
+fn test_browser_tabs_ctrl_tab_switches_to_recent() {
+    let mut app = browser_tabs_app("tabs ");
+    assert_eq!(app.cycle_view_label().as_deref(), Some("By browser"));
+    let _ = app.update(Message::MoveDown);
+    assert_eq!(command_list_titles(&app), vec!["Raffi", "Mail"]);
+
+    let task = app.update(Message::CycleView(false));
+    assert!(task.units() > 0, "the tabs reload in the new order");
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Recent"));
+    assert_eq!(
+        app.command_list.status(),
+        None,
+        "the rows stay usable while the new order loads"
+    );
+    let mut rows = super::browser_tabs::fixture_items();
+    rows.reverse();
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(rows)));
+    assert_eq!(command_list_titles(&app), vec!["Mail", "Raffi"]);
+    assert_eq!(app.selected_index, 0, "the same tab stays selected");
+
+    let _ = app.update(Message::CycleView(true));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("By browser"));
+    let _ = app.update(Message::CycleView(false));
+    let _ = app.update(Message::SearchChanged(String::new()));
+    let app = browser_tabs_app("tabs ");
+    assert_eq!(
+        app.cycle_view_label().as_deref(),
+        Some("By browser"),
+        "entering the list again starts grouped by browser"
+    );
+}
+
 fn main_view_app(entries: &[&str], configs: Vec<RaffiConfig>, addons: AddonsConfig) -> LauncherApp {
     let (mut app, _) = LauncherApp::new(
         configs,

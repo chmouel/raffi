@@ -104,6 +104,8 @@ pub(super) fn run_item_with(
         dimmed: false,
         sort_priority: 0,
         typed_only: false,
+        group: None,
+        pinned: false,
     }
 }
 

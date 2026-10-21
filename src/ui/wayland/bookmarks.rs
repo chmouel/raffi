@@ -1083,6 +1083,8 @@ impl Builder<'_> {
             domains: domains_of([bookmark.url.as_str()]),
             dimmed: false,
             typed_only: false,
+            group: None,
+            pinned: false,
             sort_priority: 0,
             title,
         });
