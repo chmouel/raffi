@@ -1533,6 +1533,10 @@
           "type": "boolean",
           "default": false
         },
+        "message_order": {
+          "description": "Order of the messages in the previews (default: `newest_first`).\nThreads keep their first message on top.",
+          "$ref": "#/$defs/SlackMessageOrder"
+        },
         "open_in": {
           "description": "Open conversations in the desktop app or in the browser (default:\ndesktop). Ctrl+Enter uses the other one.",
           "$ref": "#/$defs/SlackOpenIn"
@@ -1563,6 +1567,21 @@
         }
       },
       "additionalProperties": false
+    },
+    "SlackMessageOrder": {
+      "description": "Order of the messages in the Slack previews",
+      "oneOf": [
+        {
+          "description": "The newest message on top",
+          "type": "string",
+          "const": "newest_first"
+        },
+        {
+          "description": "The oldest message on top, as in Slack",
+          "type": "string",
+          "const": "oldest_first"
+        }
+      ]
     },
     "SlackOpenIn": {
       "description": "Where the Slack addon opens conversations",

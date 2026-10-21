@@ -489,6 +489,7 @@ addons:
   #   token_command: "pass show slack/token"
   #   cookie_command: "pass show slack/cookie"   # xoxc- tokens only
   #   open_in: desktop                            # desktop | browser
+  #   message_order: newest_first                 # newest_first | oldest_first
   #   unread_conversations: ["#ops", "@alice"]    # for xoxp- tokens
   #   cache_minutes: 60                           # 0 asks Slack every time
 

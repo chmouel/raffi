@@ -308,8 +308,9 @@ impl LauncherApp {
             return Task::none();
         };
         self.command_list.preview_wanted.set(&identity);
+        let newest_first = self.addons.slack.message_order == crate::SlackMessageOrder::NewestFirst;
         if !self.command_list.previews.contains_key(&identity) {
-            if let Some(preview) = slack::cached_preview(&identity) {
+            if let Some(preview) = slack::cached_preview(&identity, newest_first) {
                 self.show_slack_preview(identity.clone(), preview);
                 self.slack.stale_previews.insert(identity.clone());
             }
@@ -331,7 +332,8 @@ impl LauncherApp {
                 async move {
                     let (sender, receiver) = iced::futures::channel::oneshot::channel();
                     std::thread::spawn(move || {
-                        let preview = slack::load_preview(&identity, &wanted, stale, epoch);
+                        let preview =
+                            slack::load_preview(&identity, &wanted, stale, epoch, newest_first);
                         let _ = sender.send(preview);
                     });
                     receiver.await.ok().flatten()

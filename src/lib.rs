@@ -1276,6 +1276,17 @@ pub enum SlackOpenIn {
     Browser,
 }
 
+/// Order of the messages in the Slack previews
+#[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SlackMessageOrder {
+    /// The newest message on top
+    #[default]
+    NewestFirst,
+    /// The oldest message on top, as in Slack
+    OldestFirst,
+}
+
 /// Configuration for the Slack addon
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
@@ -1299,6 +1310,10 @@ pub struct SlackAddonConfig {
     /// desktop). Ctrl+Enter uses the other one.
     #[serde(default)]
     pub open_in: SlackOpenIn,
+    /// Order of the messages in the previews (default: `newest_first`).
+    /// Threads keep their first message on top.
+    #[serde(default)]
+    pub message_order: SlackMessageOrder,
     /// Conversations to check for unread messages (`#channel`, `@user` or
     /// an id), up to 30, used when Slack does not report unread
     /// conversations for the token, as with `xoxp-` tokens.

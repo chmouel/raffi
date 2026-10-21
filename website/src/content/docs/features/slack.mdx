@@ -155,6 +155,12 @@ a session (`xoxc-`) token, ignored with a user token.
 Where Enter opens conversations and messages: the Slack desktop app
 (`slack://` links) or `app.slack.com`. Ctrl+Enter uses the other one.
 
+**`addons.slack.message_order`** `newest_first | oldest_first` (default: `newest_first`)
+
+Order of the messages in the [previews](#previews): the newest on top, or
+the oldest on top as in Slack. Thread previews always keep the first
+message of the thread on top, with the replies below it in this order.
+
 **`addons.slack.unread_conversations`** `list of strings` (default: `[]`)
 
 Conversations checked by `slack unread` when Slack does not say which
@@ -183,6 +189,7 @@ addons:
     token_command: "pass show slack/token"
     cookie_command: "pass show slack/cookie"   # session tokens only
     open_in: browser                            # or desktop
+    message_order: oldest_first                 # or newest_first
     unread_conversations: ["#ops", "@alice"]
     cache_minutes: 30
     close_on_action: false
@@ -289,6 +296,10 @@ With the preview pane open (Ctrl+P), the selected row shows:
 | Unread            | The unread messages                                  |
 | Thread            | The thread                                           |
 | Activity          | The thread of the message, or the messages around it |
+
+Messages are listed newest first, under a divider for each day. Threads
+keep their first message on top. Set `message_order: oldest_first` to read
+them the other way.
 
 Previews load after a short pause on a row. Errors, such as a missing
 scope, show in the pane.

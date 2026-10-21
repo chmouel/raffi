@@ -24,6 +24,8 @@ const USER_ICONS: [&str; 3] = ["avatar-default", "user-available", SLACK_ICON];
 const SEARCH_COUNT: &str = "40";
 /// Conversations checked for unread messages, at most, as in Raycast.
 const MAX_UNREAD: usize = 30;
+/// Heading of thread previews, which keep their parent message on top.
+const THREAD_HEADING: &str = "Thread";
 /// Messages shown in a preview.
 const PREVIEW_MESSAGES: usize = 12;
 /// Recent messages kept around a search hit inside its conversation.
@@ -3192,6 +3194,15 @@ pub(super) fn messages_body(
     }
 }
 
+/// `list` (oldest first) in display order. In a thread the parent stays on top.
+fn display_order(mut list: Vec<Value>, newest_first: bool, thread: bool) -> Vec<Value> {
+    if newest_first {
+        let skip = usize::from(thread).min(list.len());
+        list[skip..].reverse();
+    }
+    list
+}
+
 fn messages(reply: &Value) -> Vec<Value> {
     reply["messages"].as_array().cloned().unwrap_or_default()
 }
@@ -3218,6 +3229,7 @@ pub(super) fn load_preview(
     wanted: &Wanted,
     cached: bool,
     epoch: u64,
+    newest_first: bool,
 ) -> Option<Preview> {
     std::thread::sleep(PREVIEW_SETTLE);
     if !wanted.is(identity) {
@@ -3226,7 +3238,10 @@ pub(super) fn load_preview(
     let loaded = slack_api::current_client().and_then(|client| {
         let directory = slack_api::verified_directory(&client)?
             .ok_or("Slack conversations are not loaded yet")?;
-        Ok((preview_bodies(identity, &client, directory), client))
+        Ok((
+            preview_bodies(identity, &client, directory, newest_first),
+            client,
+        ))
     });
     if slack_api::account_epoch() != epoch {
         return None;
@@ -3234,7 +3249,7 @@ pub(super) fn load_preview(
     let (error, avatar) = match loaded {
         Ok(((Ok(bodies), avatar), client)) => {
             if let Some(account) = client.known_identity() {
-                store_preview(identity, account, &bodies, avatar.as_deref());
+                store_preview(identity, account, &bodies, avatar.as_deref(), newest_first);
             }
             return Some((bodies, avatar));
         }
@@ -3242,7 +3257,7 @@ pub(super) fn load_preview(
         Err(error) => (error, None),
     };
     if cached {
-        if let Some(preview) = cached_preview(identity) {
+        if let Some(preview) = cached_preview(identity, newest_first) {
             return Some(preview);
         }
     }
@@ -3273,6 +3288,9 @@ struct CachedPreview {
     #[serde(default)]
     bodies: Vec<CachedBody>,
     avatar: Option<String>,
+    /// Message order the bodies were built in.
+    #[serde(default)]
+    newest_first: bool,
 }
 
 fn preview_cache_name(identity: &str) -> String {
@@ -3290,11 +3308,13 @@ fn preview_cache_name(identity: &str) -> String {
 }
 
 /// The preview last loaded for `identity`, to show until a fresh one lands.
-pub(super) fn cached_preview(identity: &str) -> Option<Preview> {
+/// None when it was built in the other message order.
+pub(super) fn cached_preview(identity: &str, newest_first: bool) -> Option<Preview> {
     let directory = slack_api::cached_directory()?;
     let (cached, _): (CachedPreview, _) =
         slack_api::read_cache(&preview_cache_name(identity), &directory.workspace)?;
-    (!cached.bodies.is_empty()).then(|| from_cached_preview(cached))
+    (!cached.bodies.is_empty() && cached.newest_first == newest_first)
+        .then(|| from_cached_preview(cached))
 }
 
 fn from_cached_preview(cached: CachedPreview) -> Preview {
@@ -3333,8 +3353,9 @@ fn store_preview(
     account: &Workspace,
     bodies: &[PreviewBody],
     avatar: Option<&str>,
+    newest_first: bool,
 ) {
-    let Some(cached) = to_cached_preview(bodies, avatar) else {
+    let Some(cached) = to_cached_preview(bodies, avatar, newest_first) else {
         return;
     };
     slack_api::write_cache(&preview_cache_name(identity), account, &cached);
@@ -3344,7 +3365,11 @@ fn store_preview(
 }
 
 /// The preview as kept on disk; none when it contains non-cacheable bodies.
-fn to_cached_preview(bodies: &[PreviewBody], avatar: Option<&str>) -> Option<CachedPreview> {
+fn to_cached_preview(
+    bodies: &[PreviewBody],
+    avatar: Option<&str>,
+    newest_first: bool,
+) -> Option<CachedPreview> {
     let bodies: Option<Vec<_>> = bodies
         .iter()
         .map(|body| match body {
@@ -3367,6 +3392,7 @@ fn to_cached_preview(bodies: &[PreviewBody], avatar: Option<&str>) -> Option<Cac
     Some(CachedPreview {
         bodies: bodies?,
         avatar: avatar.map(str::to_string),
+        newest_first,
     })
 }
 
@@ -3415,6 +3441,7 @@ fn preview_bodies(
     identity: &str,
     client: &Client,
     directory: std::sync::Arc<Directory>,
+    newest_first: bool,
 ) -> (Result<Vec<PreviewBody>, String>, Option<String>) {
     let now = Local::now();
     let parts: Vec<&str> = identity.split(':').collect();
@@ -3428,8 +3455,9 @@ fn preview_bodies(
                       directory: &std::sync::Arc<Directory>| {
         let directory = slack_api::learn_users(client, directory, &message_users(list));
         let avatars = fetch_message_avatars(&directory, list);
+        let list = display_order(list.to_vec(), newest_first, heading == THREAD_HEADING);
         messages_body(
-            list,
+            &list,
             channel,
             heading,
             &directory,
@@ -3487,7 +3515,13 @@ fn preview_bodies(
                         let start = upto.saturating_sub(PREVIEW_MESSAGES).max(1).min(upto);
                         let mut shown: Vec<Value> = list.first().cloned().into_iter().collect();
                         shown.extend(list[start..upto].iter().cloned());
-                        vec![build_chat(&shown, channel, "Thread", Some(ts), directory)]
+                        vec![build_chat(
+                            &shown,
+                            channel,
+                            THREAD_HEADING,
+                            Some(ts),
+                            directory,
+                        )]
                     })
             }
             None => recent(client, channel, &[("latest", ts), ("inclusive", "true")]).map(|list| {
@@ -3861,7 +3895,7 @@ mod tests {
             "slack:thread:C1:5.0:1.0",
         ] {
             assert!(has_preview(identity));
-            let (bodies, _) = preview_bodies(identity, &client, directory.clone());
+            let (bodies, _) = preview_bodies(identity, &client, directory.clone(), true);
             assert!(bodies.is_ok_and(|bodies| bodies.len() == 1), "{identity}");
         }
         assert_eq!(
@@ -4451,44 +4485,109 @@ mod tests {
     #[test]
     fn test_thread_preview_shows_parent_and_replies_up_to_the_hit() {
         let message = |ts: &str, text: &str| json!({"ts": ts, "user": "U1", "text": text});
+        let reply = || {
+            (
+                200,
+                None,
+                json!({"ok": true, "messages": [
+                    message("1.0", "parent"),
+                    message("2.0", "first reply"),
+                    message("3.0", "the hit"),
+                    message("4.0", "later reply"),
+                ]}),
+            )
+        };
+        let fake = FakeHttp::with(vec![reply(), reply()]);
+        let client = Client::fake(Box::new(fake.clone()));
+        for (newest_first, expected) in [
+            (
+                false,
+                [("parent", false), ("first reply", false), ("the hit", true)],
+            ),
+            (
+                true,
+                [("parent", false), ("the hit", true), ("first reply", false)],
+            ),
+        ] {
+            let (bodies, avatar) = preview_bodies(
+                "slack:msg:C1:3.0:1.0",
+                &client,
+                std::sync::Arc::new(directory()),
+                newest_first,
+            );
+            assert_eq!(avatar, None);
+            let Ok(bodies) = bodies else {
+                panic!("preview failed");
+            };
+            let [PreviewBody::Chat { heading, entries }] = bodies.as_slice() else {
+                panic!("expected one chat body");
+            };
+            assert_eq!(heading.as_deref(), Some("Thread"));
+            let texts: Vec<(&str, bool)> = entries
+                .iter()
+                .filter_map(|entry| match entry {
+                    ChatEntry::Messages(group) => Some(&group.messages),
+                    ChatEntry::DayDivider(_) => None,
+                })
+                .flatten()
+                .map(|msg| (msg.text.as_str(), msg.highlighted))
+                .collect();
+            assert_eq!(texts, expected, "newest_first: {newest_first}");
+        }
+        assert_eq!(
+            fake.methods(),
+            ["conversations.replies", "conversations.replies"]
+        );
+    }
+
+    #[test]
+    fn test_channel_preview_lists_newest_first_under_day_dividers() {
+        let midnight = Local::now()
+            .date_naive()
+            .and_hms_opt(0, 1, 0)
+            .unwrap()
+            .and_local_timezone(Local)
+            .unwrap()
+            .timestamp();
+        let t1 = format!("{}.0001", midnight - 86_400);
+        let t2 = format!("{midnight}.0001");
+        let t3 = format!("{}.0001", midnight + 60);
+        // conversations.history answers newest first.
         let fake = FakeHttp::with(vec![(
             200,
             None,
             json!({"ok": true, "messages": [
-                message("1.0", "parent"),
-                message("2.0", "first reply"),
-                message("3.0", "the hit"),
-                message("4.0", "later reply"),
+                {"ts": t3, "user": "U1", "text": "later today"},
+                {"ts": t2, "user": "U1", "text": "today"},
+                {"ts": t1, "user": "U2", "text": "yesterday"},
             ]}),
         )]);
-        let client = Client::fake(Box::new(fake.clone()));
-        let (bodies, avatar) = preview_bodies(
-            "slack:msg:C1:3.0:1.0",
+        let client = Client::fake(Box::new(fake));
+        let (bodies, _) = preview_bodies(
+            "slack:conv:C1",
             &client,
             std::sync::Arc::new(directory()),
+            true,
         );
-        assert_eq!(avatar, None);
         let Ok(bodies) = bodies else {
             panic!("preview failed");
         };
-        let [PreviewBody::Chat { heading, entries }] = bodies.as_slice() else {
+        let [PreviewBody::Chat { entries, .. }] = bodies.as_slice() else {
             panic!("expected one chat body");
         };
-        assert_eq!(heading.as_deref(), Some("Thread"));
-        let texts: Vec<(&str, bool)> = entries
-            .iter()
-            .filter_map(|entry| match entry {
-                ChatEntry::Messages(group) => Some(&group.messages),
-                ChatEntry::DayDivider(_) => None,
-            })
-            .flatten()
-            .map(|msg| (msg.text.as_str(), msg.highlighted))
-            .collect();
-        assert_eq!(
-            texts,
-            [("parent", false), ("first reply", false), ("the hit", true)]
-        );
-        assert_eq!(fake.methods(), ["conversations.replies"]);
+        assert_eq!(entries.len(), 4);
+        assert_eq!(entries[0], ChatEntry::DayDivider("Today".into()));
+        let ChatEntry::Messages(today) = &entries[1] else {
+            panic!("expected message group");
+        };
+        assert_eq!(today.time, format_hhmm(&t3), "header shows the newest time");
+        let texts: Vec<&str> = today.messages.iter().map(|m| m.text.as_str()).collect();
+        assert_eq!(texts, ["later today", "today"]);
+        assert_eq!(entries[2], ChatEntry::DayDivider("Yesterday".into()));
+        let ChatEntry::Messages(yesterday) = &entries[3] else {
+            panic!("expected message group");
+        };
+        assert_eq!(yesterday.messages[0].text, "yesterday");
     }
 
     #[test]
@@ -4781,7 +4880,7 @@ mod tests {
             ],
         };
         let input = [text_body.clone(), chat_body];
-        let cached = to_cached_preview(&input, Some("/no/avatar.png")).unwrap();
+        let cached = to_cached_preview(&input, Some("/no/avatar.png"), true).unwrap();
         let data = serde_json::to_vec(&cached).unwrap();
         let (bodies, avatar) = from_cached_preview(serde_json::from_slice(&data).unwrap());
         assert_eq!(bodies[0], text_body);
@@ -4796,7 +4895,7 @@ mod tests {
         let image = PreviewBody::Image {
             path: "/tmp/image.png".into(),
         };
-        assert!(to_cached_preview(&[image], None).is_none());
+        assert!(to_cached_preview(&[image], None, true).is_none());
     }
 
     #[test]
