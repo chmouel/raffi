@@ -7336,6 +7336,59 @@ fn test_browser_tabs_ctrl_enter_closes_and_refreshes() {
     assert!(!app.in_flight.is_pending("browser_tabs", &identity));
 }
 
+#[test]
+fn test_browser_tabs_close_selects_the_next_tab() {
+    let mut app = browser_tabs_app("tabs ");
+    let mut items = super::browser_tabs::fixture_items();
+    let mut docs = items[1].clone();
+    docs.identity = "10:3".into();
+    docs.title = "Docs".into();
+    items.push(docs);
+    let without = |items: &[super::command_list::CommandItem], identity: &str| {
+        items
+            .iter()
+            .filter(|item| item.identity != identity)
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let close_selected = |app: &mut LauncherApp, rows: Vec<super::command_list::CommandItem>| {
+        let identity = app
+            .command_list
+            .item(app.selected_index)
+            .unwrap()
+            .identity
+            .clone();
+        let _ = app.update(Message::ModifiersChanged(iced::keyboard::Modifiers::CTRL));
+        let _ = app.update(Message::Submit);
+        let _ = app.update(Message::CommandListActionDone(
+            CommandListAddon::BrowserTabs,
+            app.command_list.session,
+            identity,
+            Ok(()),
+        ));
+        assert!(app.command_list.refreshing);
+        let generation = app.command_list.generation;
+        let _ = app.update(Message::CommandListLoaded(generation, Ok(rows)));
+    };
+
+    let generation = app.command_list.begin_refresh();
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(items.clone())));
+    assert_eq!(command_list_titles(&app), vec!["Raffi", "Mail", "Docs"]);
+    let _ = app.update(Message::MoveDown);
+    assert_eq!(app.selected_index, 1);
+
+    let rows = without(&items, "10:2");
+    close_selected(&mut app, rows.clone());
+    assert_eq!(command_list_titles(&app), vec!["Raffi", "Docs"]);
+    assert_eq!(app.selected_index, 1, "the next tab is selected");
+
+    close_selected(&mut app, without(&rows, "10:3"));
+    assert_eq!(
+        app.selected_index, 0,
+        "closing the last tab selects the new last"
+    );
+}
+
 fn main_view_app(entries: &[&str], configs: Vec<RaffiConfig>, addons: AddonsConfig) -> LauncherApp {
     let (mut app, _) = LauncherApp::new(
         configs,

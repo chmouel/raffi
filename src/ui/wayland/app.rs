@@ -3185,6 +3185,7 @@ impl LauncherApp {
             .command_list
             .item(self.selected_index)
             .map(|item| item.identity.clone());
+        let refreshing = self.command_list.refreshing;
         match result {
             Ok(items) => self.set_command_list_items(items),
             Err(error) => {
@@ -3192,9 +3193,15 @@ impl LauncherApp {
                 self.command_list.set_notice(error);
             }
         }
-        self.selected_index = selected
-            .and_then(|identity| self.command_list.position(&identity))
-            .unwrap_or(0);
+        self.selected_index = match selected.and_then(|id| self.command_list.position(&id)) {
+            Some(row) => row,
+            // The selected row went away, e.g. a closed tab: select what
+            // now sits there, so the next one can be closed right away.
+            None if refreshing => self
+                .selected_index
+                .min(self.command_list.row_count().saturating_sub(1)),
+            None => 0,
+        };
         Task::none()
     }
 
