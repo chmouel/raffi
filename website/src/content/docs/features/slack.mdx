@@ -43,8 +43,8 @@ general:
 
 | Key        | Action                                                    |
 |------------|-----------------------------------------------------------|
-| Enter      | Open the conversation, person or message                  |
-| Ctrl+Enter | Open it in the other app (browser or desktop), or mark an unread conversation or thread read |
+| Enter      | Open the conversation, person or message in the Slack app or the browser (`open_in`) |
+| Ctrl+Enter | Mark an unread conversation, thread or activity item read without leaving Raffi |
 | Ctrl+R     | Refresh the current view and preview                      |
 | Ctrl+Tab   | Switch between home, unread, threads, activity, people and actions (Shift goes back) |
 | Ctrl+P     | Show the preview pane                                     |
@@ -52,9 +52,9 @@ general:
 The footer shows the current view. [More on Ctrl+Tab](../../reference/keyboard-shortcuts/#switching-views-with-ctrltab).
 
 Opening a person opens your direct conversation with them, or their
-profile when you have none. Clicking a message or thread in the preview pane
-jumps straight to that message or thread (hold `Ctrl` while clicking to open
-it in the other app). Raffi opens
+profile when you have none. Opening an unread conversation from the home
+list also marks it read. Clicking a message or thread in the preview pane
+jumps straight to that message or thread. Raffi opens
 links in the Slack desktop app by default (`slack://` links); set
 `open_in: browser` to open `app.slack.com` instead.
 
@@ -174,7 +174,7 @@ a session (`xoxc-`) token, ignored with a user token.
 **`addons.slack.open_in`** `desktop | browser` (default: `desktop`)
 
 Where Enter opens conversations and messages: the Slack desktop app
-(`slack://` links) or `app.slack.com`. Ctrl+Enter uses the other one.
+(`slack://` links) or `app.slack.com`.
 
 **`addons.slack.message_order`** `newest_first | oldest_first` (default: `newest_first`)
 
@@ -305,9 +305,10 @@ thread and marks it read; Ctrl+Enter marks it read without leaving Raffi.
 
 `slack activity` lists the unread items of Slack's Activity tab: mentions,
 reactions to your messages, new replies in your threads, and new messages
-in direct conversations and bot conversations. Enter opens the message,
-and Ctrl+Enter opens it in the other app. Opening it in Slack clears it
-from the list.
+in direct conversations and bot conversations. Enter opens the message;
+opening it in Slack clears it from the list. Ctrl+Enter marks the
+conversation or thread read up to that message without leaving Raffi.
+Reaction rows have no Ctrl+Enter.
 
 Both lists need a browser session token. Slack refuses them for a user
 token, and Raffi says so in the list.

@@ -2312,10 +2312,7 @@ fn describe_addon_by_keyword(
                     "Usage".to_string(),
                     format!("{trigger} <name> opens a channel, DM or person"),
                 ),
-                (
-                    "Search".to_string(),
-                    format!("{trigger} search <words>"),
-                ),
+                ("Search".to_string(), format!("{trigger} search <words>")),
                 ("People".to_string(), format!("{trigger} people <name>")),
                 ("Unread".to_string(), format!("{trigger} unread")),
                 ("Threads".to_string(), format!("{trigger} threads")),
@@ -2330,7 +2327,7 @@ fn describe_addon_by_keyword(
                 ),
                 (
                     "Ctrl+Enter".to_string(),
-                    "Open in the other app (browser or desktop), or mark an unread conversation or thread read".to_string(),
+                    "Mark the unread conversation, thread or activity item read".to_string(),
                 ),
             ],
         );

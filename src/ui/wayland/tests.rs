@@ -9909,7 +9909,7 @@ fn test_slack_mrkdwn_parsing_and_chat_preview_header() {
         )
     );
 
-    // Ctrl+Click opens in the alternate target (browser when open_in is desktop)
+    // Ctrl+Click still opens with open_in: there is no "other app" any more
     app.in_flight = Default::default();
     app.view.current_modifiers = iced::keyboard::Modifiers::CTRL;
     let task = app.update(Message::SlackPreviewOpen {
@@ -9917,15 +9917,14 @@ fn test_slack_mrkdwn_parsing_and_chat_preview_header() {
         browser_url: Some("https://acme.slack.com/archives/C1/p10?thread_ts=1.0&cid=C1".into()),
     });
     assert!(task.units() > 0);
-    let Some(super::actions::DeferredAction::Command(args)) = deferred_action(&app) else {
-        panic!("expected an xdg-open command action");
+    let Some(super::actions::DeferredAction::Slack(action)) = deferred_action(&app) else {
+        panic!("expected a Slack action");
     };
     assert_eq!(
-        args,
-        vec![
-            "xdg-open".to_string(),
-            "https://acme.slack.com/archives/C1/p10?thread_ts=1.0&cid=C1".to_string(),
-        ]
+        action,
+        super::slack::SlackAction::Open(
+            "slack://channel?team=T1&id=C1&message=1.0&thread_ts=1.0".into()
+        )
     );
 }
 

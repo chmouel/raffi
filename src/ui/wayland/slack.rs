@@ -410,13 +410,6 @@ fn truncate(text: &str, max: usize) -> (String, bool) {
     }
 }
 
-fn other(open_in: SlackOpenIn) -> SlackOpenIn {
-    match open_in {
-        SlackOpenIn::Desktop => SlackOpenIn::Browser,
-        SlackOpenIn::Browser => SlackOpenIn::Desktop,
-    }
-}
-
 fn target_name(open_in: SlackOpenIn) -> &'static str {
     match open_in {
         SlackOpenIn::Desktop => "Open in the Slack app",
@@ -671,6 +664,14 @@ fn mark_thread(client: &Client, channel: &str, thread_ts: &str, ts: &str) -> Res
 /// Bring the cached state in line with what `action` did, so a list shown
 /// from the cache before Slack answers does not show the old state.
 fn remember_action(action: &SlackAction, account: &Workspace, now: DateTime<Local>) {
+    if matches!(
+        action,
+        SlackAction::MarkRead { .. } | SlackAction::MarkThreadRead { .. }
+    ) {
+        slack_api::update_cache(slack_api::ACTIVITY_FILE, account, |activity| {
+            apply_to_activity(activity, action)
+        });
+    }
     if let SlackAction::MarkThreadRead {
         channel, thread_ts, ..
     } = action
@@ -725,6 +726,33 @@ pub(super) fn apply_to_unread(unread: &mut Vec<Unread>, action: &SlackAction) {
     {
         unread.retain(|entry| &entry.channel != channel);
     }
+}
+
+/// Drop the Activity items that `action` read: the ones whose own mark
+/// action covers no more than `action` does.
+pub(super) fn apply_to_activity(activity: &mut Vec<Activity>, action: &SlackAction) {
+    activity.retain(|entry| match (activity_mark_read(entry), action) {
+        (
+            Some(SlackAction::MarkRead { channel, ts }),
+            SlackAction::MarkRead {
+                channel: read,
+                ts: up_to,
+            },
+        ) => !(&channel == read && &ts <= up_to),
+        (
+            Some(SlackAction::MarkThreadRead {
+                channel,
+                thread_ts,
+                ts,
+            }),
+            SlackAction::MarkThreadRead {
+                channel: read,
+                thread_ts: thread,
+                ts: up_to,
+            },
+        ) => !(&channel == read && &thread_ts == thread && &ts <= up_to),
+        _ => true,
+    });
 }
 
 fn snooze_minutes(snooze: &Snooze, now: DateTime<Local>) -> Result<u64, String> {
@@ -1180,13 +1208,31 @@ fn first_line(text: &str) -> String {
 }
 
 fn open_details(open_in: SlackOpenIn) -> Vec<(String, String)> {
-    vec![
-        ("Enter".to_string(), target_name(open_in).to_string()),
-        (
-            "Ctrl+Enter".to_string(),
-            target_name(other(open_in)).to_string(),
-        ),
-    ]
+    vec![("Enter".to_string(), target_name(open_in).to_string())]
+}
+
+fn mark_read_details() -> (String, String) {
+    ("Ctrl+Enter".to_string(), "Mark as read".to_string())
+}
+
+/// Make Enter on a Home row with unread messages also mark them read, and
+/// Ctrl+Enter mark them read without opening.
+fn promote_unread(item: &mut CommandItem, url: String, unread: &Unread) {
+    item.primary = Some(open_unread(
+        url,
+        unread.channel.clone(),
+        unread.latest.clone(),
+    ));
+    if !unread.latest.is_empty() {
+        item.secondary = Some(run(
+            SlackAction::MarkRead {
+                channel: unread.channel.clone(),
+                ts: unread.latest.clone(),
+            },
+            "Marking as read...",
+        ));
+        item.details.push(mark_read_details());
+    }
 }
 
 fn conversation_row(
@@ -1229,11 +1275,6 @@ fn conversation_row(
     }
     item.details.extend(open_details(open_in));
     item.primary = Some(open(conversation_url(open_in, workspace, &conversation.id)));
-    item.secondary = Some(open(conversation_url(
-        other(open_in),
-        workspace,
-        &conversation.id,
-    )));
     item
 }
 
@@ -1298,7 +1339,6 @@ fn user_row(
         .direct_with(&user.id)
         .map(|direct| direct.id.as_str());
     item.primary = Some(open(user_url(open_in, workspace, &user.id, direct)));
-    item.secondary = Some(open(user_url(other(open_in), workspace, &user.id, direct)));
     item
 }
 
@@ -1342,6 +1382,8 @@ pub(super) fn home_rows(
         if let Some(unread) = unread_by_channel.get(conversation.id.as_str()) {
             let mut item = item;
             item.sort_priority = 1;
+            let url = conversation_url(open_in, &directory.workspace, &conversation.id);
+            promote_unread(&mut item, url, unread);
             promoted.push((unread.latest.clone(), item.title.to_lowercase(), item));
         } else {
             remaining_conversations.push(item);
@@ -1363,6 +1405,8 @@ pub(super) fn home_rows(
         if let Some(unread) = unread {
             let mut item = item;
             item.sort_priority = 1;
+            let url = conversation_url(open_in, &directory.workspace, &unread.channel);
+            promote_unread(&mut item, url, unread);
             promoted.push((unread.latest.clone(), item.title.to_lowercase(), item));
         } else {
             remaining_users.push(item);
@@ -1998,13 +2042,6 @@ pub(super) fn search_rows(
             item.details.extend(open_details(open_in));
             item.primary = Some(open(message_url(
                 open_in, workspace, channel, ts, permalink,
-            )));
-            item.secondary = Some(open(message_url(
-                other(open_in),
-                workspace,
-                channel,
-                ts,
-                permalink,
             )));
             Some(item)
         })
@@ -2957,17 +2994,32 @@ pub(super) fn activity_rows(
                 thread,
                 &permalink,
             )));
-            item.secondary = Some(open(thread_message_url(
-                other(open_in),
-                workspace,
-                &entry.channel,
-                &entry.ts,
-                thread,
-                &permalink,
-            )));
+            if let Some(action) = activity_mark_read(entry) {
+                item.secondary = Some(run(action, "Marking as read..."));
+                item.details.push(mark_read_details());
+            }
             item
         })
         .collect()
+}
+
+/// What marks an Activity item read: its thread or conversation up to the
+/// message. A reaction has no read position to move, so it gets nothing.
+fn activity_mark_read(entry: &Activity) -> Option<SlackAction> {
+    if entry.kind == "message_reaction" {
+        return None;
+    }
+    if !entry.thread_ts.is_empty() && entry.thread_ts != entry.ts {
+        return Some(SlackAction::MarkThreadRead {
+            channel: entry.channel.clone(),
+            thread_ts: entry.thread_ts.clone(),
+            ts: entry.ts.clone(),
+        });
+    }
+    Some(SlackAction::MarkRead {
+        channel: entry.channel.clone(),
+        ts: entry.ts.clone(),
+    })
 }
 
 fn activity_list(
@@ -3909,6 +3961,57 @@ mod tests {
             command(&rows[0].primary).as_deref(),
             Some("slack://channel?team=T1&id=C1&message=3.0&thread_ts=1.0")
         );
+        let marks: Vec<Option<SlackAction>> = rows
+            .iter()
+            .map(|row| slack_action(&row.secondary))
+            .collect();
+        assert_eq!(
+            marks,
+            [
+                Some(SlackAction::MarkThreadRead {
+                    channel: "C1".to_string(),
+                    thread_ts: "1.0".to_string(),
+                    ts: "3.0".to_string(),
+                }),
+                None,
+                Some(SlackAction::MarkThreadRead {
+                    channel: "G1".to_string(),
+                    thread_ts: "5.0".to_string(),
+                    ts: "6.0".to_string(),
+                }),
+                Some(SlackAction::MarkRead {
+                    channel: "D1".to_string(),
+                    ts: "7.0".to_string(),
+                }),
+            ]
+        );
+
+        let mut cached = activity.clone();
+        apply_to_activity(
+            &mut cached,
+            &SlackAction::MarkRead {
+                channel: "D1".to_string(),
+                ts: "7.0".to_string(),
+            },
+        );
+        apply_to_activity(
+            &mut cached,
+            &SlackAction::MarkThreadRead {
+                channel: "C1".to_string(),
+                thread_ts: "1.0".to_string(),
+                ts: "2.0".to_string(),
+            },
+        );
+        apply_to_activity(
+            &mut cached,
+            &SlackAction::MarkThreadRead {
+                channel: "G1".to_string(),
+                thread_ts: "5.0".to_string(),
+                ts: "6.0".to_string(),
+            },
+        );
+        let keys: Vec<&str> = cached.iter().map(|entry| entry.key.as_str()).collect();
+        assert_eq!(keys, ["k1", "k2"], "k1 is newer than its mark");
     }
 
     #[test]
@@ -4102,10 +4205,7 @@ mod tests {
             command(&alice.primary).as_deref(),
             Some("slack://channel?team=T1&id=D1")
         );
-        assert_eq!(
-            command(&alice.secondary).as_deref(),
-            Some("https://app.slack.com/client/T1/D1")
-        );
+        assert!(alice.secondary.is_none());
 
         let rows = home_rows(
             &directory,
@@ -4190,6 +4290,30 @@ mod tests {
         assert!(rows[first_conversation..first_conversation + 3]
             .iter()
             .all(|row| row.sort_priority == 1));
+
+        let row = |id: &str| rows.iter().find(|row| row.identity == id).unwrap();
+        assert_eq!(
+            slack_action(&row("slack:user:U1").primary),
+            Some(SlackAction::OpenUnread {
+                url: "slack://channel?team=T1&id=D1".to_string(),
+                channel: "D1".to_string(),
+                ts: "9.0".to_string(),
+            })
+        );
+        assert_eq!(
+            slack_action(&row("slack:conv:C1").secondary),
+            Some(SlackAction::MarkRead {
+                channel: "C1".to_string(),
+                ts: "7.0".to_string(),
+            })
+        );
+        assert!(row("slack:conv:C1")
+            .details
+            .contains(&("Ctrl+Enter".to_string(), "Mark as read".to_string())));
+        for read in ["slack:conv:M1", "slack:user:U2"] {
+            assert!(row(read).secondary.is_none(), "{read}");
+            assert!(!row(read).details.iter().any(|(key, _)| key == "Ctrl+Enter"));
+        }
     }
 
     #[test]
@@ -4416,10 +4540,7 @@ mod tests {
             command(&rows[0].primary).as_deref(),
             Some("slack://channel?team=T1&id=C1&message=1715349600.000200")
         );
-        assert_eq!(
-            command(&rows[0].secondary).as_deref(),
-            reply["messages"]["matches"][0]["permalink"].as_str()
-        );
+        assert!(rows[0].secondary.is_none());
         assert_eq!(rows[1].identity, "slack:msg:C9:1715349000.000100");
         assert_eq!(rows[1].title, "[file: build.log]");
         assert!(rows[1].subtitle.starts_with("#ops · ci-bot · "));

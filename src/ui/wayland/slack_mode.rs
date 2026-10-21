@@ -585,14 +585,7 @@ impl LauncherApp {
         desktop_url: Option<String>,
         browser_url: Option<String>,
     ) -> Task<Message> {
-        let mut open_in = self.addons.slack.open_in;
-        if self.view.current_modifiers.control() {
-            open_in = match open_in {
-                crate::SlackOpenIn::Desktop => crate::SlackOpenIn::Browser,
-                crate::SlackOpenIn::Browser => crate::SlackOpenIn::Desktop,
-            };
-        }
-        let url = match open_in {
+        let url = match self.addons.slack.open_in {
             crate::SlackOpenIn::Desktop => desktop_url.or(browser_url),
             crate::SlackOpenIn::Browser => browser_url.or(desktop_url),
         };
