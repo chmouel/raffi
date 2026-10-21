@@ -232,12 +232,17 @@ impl LauncherApp {
     }
 
     pub(super) fn apply_slack_keep_open(&self, rows: &mut [CommandItem]) {
-        let open_keep_open = !self.should_close(self.addons.slack.close_on_action);
+        let open_keep_open = !self.addons.slack.close_on_action(self.close_on_action);
         let action_keep_open = self.addons.slack.close_on_action != Some(true);
         for row in rows {
             for cmd in [&mut row.primary, &mut row.secondary].into_iter().flatten() {
                 match &cmd.action {
-                    super::actions::DeferredAction::Command(_) => cmd.keep_open = open_keep_open,
+                    super::actions::DeferredAction::Command(_)
+                    | super::actions::DeferredAction::Slack(
+                        slack::SlackAction::Open(_)
+                        | slack::SlackAction::OpenUnread { .. }
+                        | slack::SlackAction::OpenThread { .. },
+                    ) => cmd.keep_open = open_keep_open,
                     super::actions::DeferredAction::Slack(_) => cmd.keep_open = action_keep_open,
                     _ => {}
                 }
@@ -592,7 +597,7 @@ impl LauncherApp {
             .map(|item| item.identity.clone())
             .unwrap_or_else(|| format!("slack:open:{url}"));
         let action = slack::open_action(url);
-        let keep_open = !self.should_close(self.addons.slack.close_on_action);
+        let keep_open = !self.addons.slack.close_on_action(self.close_on_action);
         self.run_command_list_action(CommandListAddon::Slack, identity, action, keep_open)
     }
 }

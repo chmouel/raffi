@@ -9441,6 +9441,7 @@ fn test_slack_mrkdwn_parsing_and_chat_preview_header() {
 
     let mut addons = AddonsConfig::default();
     addons.slack.enabled = true;
+    addons.slack.close_on_action = Some(true);
     let mut app = test_app(addons);
     app.history.max_items = 0;
     let _ = app.update(Message::SearchChanged("slack ".into()));

@@ -1325,7 +1325,7 @@ pub struct SlackAddonConfig {
     /// fresh ones load.
     #[serde(default)]
     pub cache_minutes: Option<u64>,
-    /// Close Raffi after opening a conversation or message (default: `general.close_on_action`, else true).
+    /// Close Raffi after opening a conversation or message (default: `general.close_on_action`, else false).
     #[serde(default)]
     pub close_on_action: Option<bool>,
 }
@@ -1333,6 +1333,10 @@ pub struct SlackAddonConfig {
 impl SlackAddonConfig {
     pub fn trigger(&self) -> &str {
         self.trigger.as_deref().unwrap_or("slack")
+    }
+
+    pub fn close_on_action(&self, general: Option<bool>) -> bool {
+        self.close_on_action.or(general).unwrap_or(false)
     }
 
     pub fn cache_fresh(&self) -> std::time::Duration {

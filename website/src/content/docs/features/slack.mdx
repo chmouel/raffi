@@ -178,11 +178,12 @@ The last home rows, unread conversations and previews show right away
 whatever this is set to, and are replaced when Slack answers. See
 [Caching and privacy](#caching-and-privacy).
 
-**`addons.slack.close_on_action`** `boolean` (default: `true`)
+**`addons.slack.close_on_action`** `boolean` (default: `false`)
 
-Close Raffi after opening a conversation, person or message. When unset,
-`general.close_on_action` applies. Status, presence, snooze and mark-read
-actions keep Raffi open unless this is set to `true`.
+Close Raffi after opening a conversation, person or message instead of
+staying open. When unset, `general.close_on_action` applies. Status,
+presence, snooze and mark-read actions keep Raffi open unless this is set
+to `true`.
 
 ```yaml raffi.yaml
 addons:
