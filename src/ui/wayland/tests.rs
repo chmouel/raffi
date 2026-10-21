@@ -1998,6 +1998,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "win",
             "tabs",
             "bm",
+            "hist",
             "media",
             "audio",
             "kill",
@@ -2048,7 +2049,10 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
     assert_eq!(entries[1].icon.as_deref(), Some("gist-icon"));
     assert_eq!(entries[1].completion.as_deref(), Some("gist "));
     assert_eq!(entries[0].completion.as_deref(), Some("~/"));
-    assert_eq!(entries[17].completion, None);
+    assert!(entries
+        .iter()
+        .find(|entry| entry.trigger == "math")
+        .is_some_and(|entry| entry.completion.is_none()));
     // Shortcut rows are informational: they never arm a keyword.
     for entry in entries
         .iter()
@@ -2069,6 +2073,7 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
     addons.windows.enabled = false;
     addons.browser_tabs.enabled = false;
     addons.bookmarks.enabled = false;
+    addons.browser_history.enabled = false;
     addons.media.enabled = false;
     addons.audio.enabled = false;
     addons.kill.enabled = false;
@@ -2138,6 +2143,7 @@ fn test_help_entries_skip_disabled_addons() {
     addons.windows.enabled = false;
     addons.browser_tabs.enabled = false;
     addons.bookmarks.enabled = false;
+    addons.browser_history.enabled = false;
     addons.media.enabled = false;
     addons.audio.enabled = false;
     addons.kill.enabled = false;
@@ -9387,7 +9393,7 @@ fn test_ctrl_r_refreshes_command_list_and_file_browser() {
 
 #[test]
 fn test_command_list_lists_dimmed_rows_last_until_a_filter_is_typed() {
-    use super::command_list::{filter_items_into, CommandItem};
+    use super::command_list::{filter_items_into, CommandItem, MatchMode};
     let item = |id: &str, dimmed: bool| CommandItem {
         match_text: id.into(),
         dimmed,
@@ -9401,15 +9407,31 @@ fn test_command_list_lists_dimmed_rows_last_until_a_filter_is_typed() {
     let matcher = fuzzy_matcher::skim::SkimMatcherV2::default();
     let usage = std::collections::HashMap::from([("ops-muted".to_string(), 5)]);
     let mut out = Vec::new();
-    filter_items_into(&items, "", &matcher, &usage, false, &mut out);
+    filter_items_into(
+        &items,
+        "",
+        &matcher,
+        &usage,
+        false,
+        MatchMode::Fuzzy,
+        &mut out,
+    );
     assert_eq!(out, [1, 2, 0], "muted last even when used most");
-    filter_items_into(&items, "muted", &matcher, &usage, false, &mut out);
+    filter_items_into(
+        &items,
+        "muted",
+        &matcher,
+        &usage,
+        false,
+        MatchMode::Fuzzy,
+        &mut out,
+    );
     assert_eq!(out, [0], "filtering still finds muted rows");
 }
 
 #[test]
 fn test_command_list_hides_typed_only_rows_until_the_query_matches() {
-    use super::command_list::{filter_items_into, CommandItem};
+    use super::command_list::{filter_items_into, CommandItem, MatchMode};
     let item = |id: &str, typed_only: bool| CommandItem {
         match_text: id.into(),
         typed_only,
@@ -9419,15 +9441,31 @@ fn test_command_list_hides_typed_only_rows_until_the_query_matches() {
     let matcher = fuzzy_matcher::skim::SkimMatcherV2::default();
     let usage = std::collections::HashMap::new();
     let mut out = Vec::new();
-    filter_items_into(&items, "", &matcher, &usage, false, &mut out);
+    filter_items_into(
+        &items,
+        "",
+        &matcher,
+        &usage,
+        false,
+        MatchMode::Fuzzy,
+        &mut out,
+    );
     assert_eq!(out, [1]);
-    filter_items_into(&items, "snoo", &matcher, &usage, false, &mut out);
+    filter_items_into(
+        &items,
+        "snoo",
+        &matcher,
+        &usage,
+        false,
+        MatchMode::Fuzzy,
+        &mut out,
+    );
     assert_eq!(out, [0]);
 }
 
 #[test]
 fn test_command_list_sort_priority_precedes_usage_and_keeps_priority_order() {
-    use super::command_list::{filter_items_into, CommandItem};
+    use super::command_list::{filter_items_into, CommandItem, MatchMode};
     let item = |id: &str, sort_priority: u8| CommandItem {
         sort_priority,
         ..CommandItem::info(id, id.into(), "icon")
@@ -9444,7 +9482,15 @@ fn test_command_list_sort_priority_precedes_usage_and_keeps_priority_order() {
         ("unread-old".to_string(), 50),
     ]);
     let mut out = Vec::new();
-    filter_items_into(&items, "", &matcher, &usage, false, &mut out);
+    filter_items_into(
+        &items,
+        "",
+        &matcher,
+        &usage,
+        false,
+        MatchMode::Fuzzy,
+        &mut out,
+    );
     assert_eq!(out, [2, 0, 3, 1]);
 }
 
@@ -10189,4 +10235,206 @@ fn test_search_change_scrolls_back_only_when_the_list_is_scrolled() {
     assert!(app.update(Message::SearchChanged("ab".into())).units() > 0);
     let _ = app.update(Message::ListScrolled(0.0));
     assert_eq!(app.update(Message::SearchChanged("a".into())).units(), 0);
+}
+
+fn browser_history_app(query: &str) -> LauncherApp {
+    let mut app = test_app(AddonsConfig::default());
+    app.history.max_items = 0;
+    let task = app.update(Message::SearchChanged(query.into()));
+    assert!(task.units() > 0, "the history loads");
+    assert_eq!(
+        app.command_list.status(),
+        Some("Loading browser history...")
+    );
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::BrowserHistoryLoaded(
+        generation,
+        Some(Arc::new(super::browser_history::fixture_library())),
+    ));
+    app
+}
+
+#[test]
+fn test_route_query_browser_history_trigger() {
+    let mut addons = AddonsConfig::default();
+    assert_eq!(
+        route_query("hist raffi", &addons),
+        QueryMode::CommandList {
+            addon: CommandListAddon::BrowserHistory,
+            query: "raffi".into()
+        }
+    );
+    assert!(suggested_keywords("history", &addons).contains(&"hist".to_string()));
+
+    addons.browser_history.enabled = false;
+    assert_eq!(route_query("hist raffi", &addons), QueryMode::Standard);
+}
+
+#[test]
+fn test_browser_history_ctrl_tab_cycles_views() {
+    let mut app = browser_history_app("hist ");
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Recent"));
+
+    let _ = app.update(Message::CycleView(false));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Frequent"));
+
+    let _ = app.update(Message::CycleView(false));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("By browser"));
+    assert!(command_list_titles(&app).contains(&"Raffi"));
+
+    let _ = app.update(Message::CycleView(true));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Frequent"));
+}
+
+#[test]
+fn test_browser_history_search_waits_for_the_debounce() {
+    let mut app = browser_history_app("hist ");
+    assert_eq!(command_list_titles(&app), ["Raffi on GitHub", "Rust docs"]);
+
+    let _ = app.update(Message::SearchChanged("hist docs".into()));
+    assert!(app.browser_history.search_pending);
+    assert_eq!(
+        command_list_titles(&app),
+        ["Raffi on GitHub", "Rust docs"],
+        "the old rows stay while typing"
+    );
+
+    let session = app.browser_history.session;
+    let generation = app.browser_history.search_generation;
+    let _ = app.update(Message::BrowserHistorySearchDue(session, generation));
+    assert!(!app.browser_history.search_pending);
+    assert_eq!(command_list_titles(&app), ["Rust docs"]);
+}
+
+#[test]
+fn test_browser_history_ignores_a_stale_debounce() {
+    let mut app = browser_history_app("hist ");
+    let _ = app.update(Message::SearchChanged("hist rust".into()));
+    let stale_generation = app.browser_history.search_generation;
+
+    let _ = app.update(Message::SearchChanged("hist github".into()));
+    let generation = app.browser_history.search_generation;
+    let session = app.browser_history.session;
+    let _ = app.update(Message::BrowserHistorySearchDue(session, stale_generation));
+    assert!(app.browser_history.search_pending);
+    assert_eq!(command_list_titles(&app), ["Raffi on GitHub", "Rust docs"]);
+
+    let _ = app.update(Message::BrowserHistorySearchDue(session, generation));
+    assert!(!app.browser_history.search_pending);
+    assert_eq!(command_list_titles(&app), ["Raffi on GitHub"]);
+}
+
+#[test]
+fn test_browser_history_empty_query_refreshes_immediately() {
+    let mut app = browser_history_app("hist ");
+    let _ = app.update(Message::SearchChanged("hist rust".into()));
+    assert!(app.browser_history.search_pending);
+
+    let _ = app.update(Message::SearchChanged("hist ".into()));
+    assert!(!app.browser_history.search_pending);
+    assert_eq!(command_list_titles(&app), ["Raffi on GitHub", "Rust docs"]);
+}
+
+#[test]
+fn test_browser_history_enter_flushes_the_pending_search() {
+    let mut app = browser_history_app("hist ");
+    let _ = app.update(Message::SearchChanged("hist docs".into()));
+    assert!(app.browser_history.search_pending);
+
+    let _ = app.update(Message::Submit);
+    assert!(!app.browser_history.search_pending);
+    assert_eq!(command_list_titles(&app), ["Rust docs"]);
+    assert!(matches!(
+        deferred_action(&app),
+        Some(DeferredAction::Command(argv)) if argv == ["firefox", "https://doc.rust-lang.org/std/"]
+    ));
+}
+
+#[test]
+fn test_browser_history_click_flushes_without_activating_a_stale_row() {
+    let mut app = browser_history_app("hist ");
+    let _ = app.update(Message::SearchChanged("hist docs".into()));
+
+    let _ = app.update(Message::CommandListSelected(0));
+    assert!(!app.browser_history.search_pending);
+    assert_eq!(command_list_titles(&app), ["Rust docs"]);
+    assert!(deferred_action(&app).is_none());
+}
+
+#[test]
+fn test_browser_history_structured_filters_use_the_debounce() {
+    let mut app = browser_history_app("hist ");
+    let _ = app.update(Message::SearchChanged("hist site:github.com".into()));
+    assert!(app.browser_history.search_pending);
+    assert_eq!(command_list_titles(&app), ["Raffi on GitHub", "Rust docs"]);
+
+    let session = app.browser_history.session;
+    let generation = app.browser_history.search_generation;
+    let _ = app.update(Message::BrowserHistorySearchDue(session, generation));
+    assert_eq!(command_list_titles(&app), ["Raffi on GitHub"]);
+}
+
+#[test]
+fn test_browser_history_uses_literal_substring_search() {
+    let mut app = browser_history_app("hist ");
+    let _ = app.update(Message::SearchChanged("hist gtb".into()));
+    let session = app.browser_history.session;
+    let generation = app.browser_history.search_generation;
+    let _ = app.update(Message::BrowserHistorySearchDue(session, generation));
+    assert!(
+        command_list_titles(&app).is_empty(),
+        "a fuzzy subsequence of github.com must not match"
+    );
+}
+
+#[test]
+fn test_browser_history_stale_debounce_after_leaving_is_ignored() {
+    let mut app = browser_history_app("hist ");
+    let _ = app.update(Message::SearchChanged("hist rust".into()));
+    let session = app.browser_history.session;
+    let generation = app.browser_history.search_generation;
+
+    let _ = app.update(Message::SearchChanged("zzzz".into()));
+    let before: Vec<String> = command_list_titles(&app)
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    let _ = app.update(Message::BrowserHistorySearchDue(session, generation));
+    assert_eq!(command_list_titles(&app), before);
+}
+
+#[test]
+fn test_browser_history_filters_and_opens_pages() {
+    let mut app = browser_history_app("hist site:github.com");
+    assert_eq!(command_list_titles(&app), ["Raffi on GitHub"]);
+    let _ = app.update(Message::CommandListSelected(0));
+    assert!(matches!(
+        deferred_action(&app),
+        Some(DeferredAction::Command(argv)) if argv == ["firefox", "https://github.com/chmouel/raffi?utm_source=news"]
+    ));
+}
+
+#[test]
+fn test_main_view_lists_browser_history_and_opens_pages() {
+    let mut app = main_view_app(&["browser_history"], Vec::new(), AddonsConfig::default());
+    let super::main_view::Source::List(list) = &app.main_view.sources[0] else {
+        panic!("command list source");
+    };
+    let generation = list.generation;
+    let options = app.browser_history_options();
+    let _ = app.update(Message::MainViewLoaded(
+        0,
+        generation,
+        Ok(super::browser_history::flat_items(
+            &super::browser_history::fixture_library(),
+            options,
+        )),
+    ));
+    let _ = app.update(Message::SearchChanged("raffi".into()));
+    assert_eq!(main_view_titles(&app), ["Raffi on GitHub"]);
+    let _ = app.update(Message::Submit);
+    assert!(matches!(
+        deferred_action(&app),
+        Some(DeferredAction::Command(argv)) if argv == ["firefox", "https://github.com/chmouel/raffi?utm_source=news"]
+    ));
 }

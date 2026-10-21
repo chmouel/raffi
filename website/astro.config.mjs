@@ -43,6 +43,7 @@ export default defineConfig({
             { label: 'Bitwarden', slug: 'features/bitwarden' },
             { label: 'Bluetooth', slug: 'features/bluetooth' },
             { label: 'Bookmarks', slug: 'features/bookmarks' },
+            { label: 'Browser History', slug: 'features/browser-history' },
             { label: 'Browser Tabs', slug: 'features/browser-tabs' },
             { label: 'Calculator', slug: 'features/calculator' },
             { label: 'Clipboard History', slug: 'features/clipboard-history' },

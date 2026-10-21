@@ -12,17 +12,10 @@ use super::bookmarks::{
     self, keyword_query, split_query, BookmarksState, Library, RowOptions, SearchIndex,
     SearchPrompt, SearchTarget,
 };
+use super::browser_data::off_thread;
 use super::command_list::CommandListAddon;
 use super::state::LauncherApp;
 use super::types::Message;
-
-async fn off_thread<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Option<T> {
-    let (sender, receiver) = iced::futures::channel::oneshot::channel();
-    std::thread::spawn(move || {
-        let _ = sender.send(work());
-    });
-    receiver.await.ok()
-}
 
 impl LauncherApp {
     pub(super) fn bookmark_options(&self) -> RowOptions {

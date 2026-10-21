@@ -432,6 +432,7 @@ pub(super) const SYSTEM_ICON: &str = "system-shutdown";
 pub(super) const WINDOWS_ICON: &str = "preferences-system-windows";
 pub(super) const BROWSER_TABS_ICON: &str = "web-browser";
 pub(super) const BOOKMARKS_ICON: &str = "user-bookmarks";
+pub(super) const BROWSER_HISTORY_ICON: &str = "document-open-recent";
 pub(super) const MEDIA_ICON: &str = "multimedia-player";
 pub(super) const AUDIO_ICON: &str = "audio-speakers";
 pub(super) const KILL_ICON: &str = "utilities-system-monitor";
@@ -457,6 +458,7 @@ pub(super) fn fallback_emoji(icon: &str) -> Option<&'static str> {
         SYSTEM_ICON => "🔌",
         WINDOWS_ICON => "🪟",
         BROWSER_TABS_ICON => "🌐",
+        BROWSER_HISTORY_ICON => "🕘",
         MEDIA_ICON => "🎵",
         AUDIO_ICON => "🔊",
         KILL_ICON => "💀",
@@ -638,6 +640,15 @@ pub(super) fn route_query(query: &str, addons: &AddonsConfig) -> QueryMode {
         if let Some(query) = extract_keyword_query(input, addons.bookmarks.trigger()) {
             return QueryMode::CommandList {
                 addon: CommandListAddon::Bookmarks,
+                query,
+            };
+        }
+    }
+
+    if addons.browser_history.enabled {
+        if let Some(query) = extract_keyword_query(input, addons.browser_history.trigger()) {
+            return QueryMode::CommandList {
+                addon: CommandListAddon::BrowserHistory,
                 query,
             };
         }
@@ -869,6 +880,17 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
             keyword: addons.bookmarks.trigger().to_string(),
             subtitle: "Open a browser bookmark".to_string(),
             icon: Some(BOOKMARKS_ICON.to_string()),
+        });
+    }
+
+    if addons.browser_history.enabled
+        && (matches(addons.browser_history.trigger())
+            || intent(&["history", "visited", "recent", "browser"]))
+    {
+        suggestions.push(KeywordSuggestion {
+            keyword: addons.browser_history.trigger().to_string(),
+            subtitle: "Open a page from browser history".to_string(),
+            icon: Some(BROWSER_HISTORY_ICON.to_string()),
         });
     }
 
@@ -1145,6 +1167,7 @@ impl LauncherApp {
                 slack: Default::default(),
                 bookmarks: Default::default(),
                 bookmark_searches: Default::default(),
+                browser_history: Default::default(),
                 clipboard: ClipboardState::default(),
                 fallbacks,
                 main_view: Default::default(),
@@ -1664,10 +1687,24 @@ impl LauncherApp {
             Message::BookmarkIconsLoaded(session, icons, fetch) => {
                 self.handle_bookmark_icons_loaded(session, icons, fetch)
             }
+            Message::BrowserHistoryLoaded(generation, library) => {
+                self.handle_browser_history_loaded(generation, library)
+            }
+            Message::BrowserHistoryIconsLoaded(session, icons, fetch) => {
+                self.handle_browser_history_icons_loaded(session, icons, fetch)
+            }
+            Message::BrowserHistorySearchDue(session, generation) => {
+                self.handle_browser_history_search_due(session, generation)
+            }
             Message::FaviconsFetched(session, true)
                 if self.command_list.addon == Some(CommandListAddon::Bookmarks) =>
             {
                 self.handle_bookmark_favicons_fetched(session)
+            }
+            Message::FaviconsFetched(session, true)
+                if self.command_list.addon == Some(CommandListAddon::BrowserHistory) =>
+            {
+                self.handle_browser_history_favicons_fetched(session)
             }
             Message::FaviconsFetched(session, fetched) => {
                 if fetched
@@ -1728,6 +1765,8 @@ impl LauncherApp {
                 CommandListAddon::Slack => self.refresh_slack(),
                 CommandListAddon::Bookmarks if self.command_list.loading => Task::none(),
                 CommandListAddon::Bookmarks => self.load_bookmarks(true),
+                CommandListAddon::BrowserHistory if self.command_list.loading => Task::none(),
+                CommandListAddon::BrowserHistory => self.load_browser_history(true),
                 CommandListAddon::Pass | CommandListAddon::Bitwarden => {
                     let Some(vault) = self.vault_addon() else {
                         return Task::none();
@@ -2543,6 +2582,9 @@ impl LauncherApp {
         if addon == CommandListAddon::Bookmarks {
             return self.handle_bookmarks_query(query);
         }
+        if addon == CommandListAddon::BrowserHistory {
+            return self.handle_browser_history_query(query);
+        }
         let entered = self.command_list.enter(addon);
         self.command_list.set_query(query);
         match addon {
@@ -2660,7 +2702,9 @@ impl LauncherApp {
                 Task::none()
             }
             // Handled above.
-            CommandListAddon::Slack | CommandListAddon::Bookmarks => Task::none(),
+            CommandListAddon::Slack
+            | CommandListAddon::Bookmarks
+            | CommandListAddon::BrowserHistory => Task::none(),
             CommandListAddon::Bitwarden if !entered => self.search_vault_notes(),
             CommandListAddon::Pass if !entered => Task::none(),
             CommandListAddon::Pass | CommandListAddon::Bitwarden => {
@@ -3221,7 +3265,7 @@ impl LauncherApp {
         }
         let task = match result {
             Ok(()) => match addon {
-                CommandListAddon::Bookmarks => Task::none(),
+                CommandListAddon::Bookmarks | CommandListAddon::BrowserHistory => Task::none(),
                 CommandListAddon::Media => self.load_media(true),
                 CommandListAddon::Audio => self.load_audio(true),
                 CommandListAddon::Kill => {
@@ -3318,10 +3362,12 @@ impl LauncherApp {
             self.apply_slack_keep_open(&mut items);
         }
         for item in &mut items {
-            item.icon = item
-                .icon_names
-                .iter()
-                .find_map(|name| self.resolve_icon_name(name));
+            if item.icon.is_none() {
+                item.icon = item
+                    .icon_names
+                    .iter()
+                    .find_map(|name| self.resolve_icon_name(name));
+            }
             if let Some(group) = &mut item.group {
                 group.icon = group
                     .icon_name
@@ -3438,6 +3484,11 @@ impl LauncherApp {
     fn activate_index(&mut self, index: usize) -> Task<Message> {
         if self.view.help_active {
             return self.update(Message::HelpEntrySelected(index));
+        }
+        if self.command_list.addon == Some(CommandListAddon::BrowserHistory)
+            && self.flush_browser_history_search()
+        {
+            return self.activate_index(self.command_list_offset());
         }
 
         let mut current_index = 0;
@@ -4399,6 +4450,9 @@ impl LauncherApp {
             Some(CommandListAddon::Bookmarks) if self.bookmarks.view_label().is_some() => {
                 return self.handle_bookmarks_cycle_view(backwards);
             }
+            Some(CommandListAddon::BrowserHistory) => {
+                return self.handle_browser_history_cycle_view(backwards);
+            }
             Some(CommandListAddon::Audio) => {
                 let view = self.command_list.audio_view.cycle(backwards);
                 self.command_list.set_audio_view(view);
@@ -4445,6 +4499,9 @@ impl LauncherApp {
             }
             Some(CommandListAddon::Bookmarks) if self.bookmarks.prompt.is_some() => return None,
             Some(CommandListAddon::Bookmarks) => return self.bookmarks.view_label(),
+            Some(CommandListAddon::BrowserHistory) => {
+                return Some(self.browser_history.view_label());
+            }
             _ => {}
         }
         (self.main_view.active && !self.main_view.stops.is_empty())
@@ -4730,6 +4787,11 @@ impl LauncherApp {
     /// confirmation run on a second Enter on the same target with the same
     /// modifiers.
     pub(super) fn handle_command_list_selected(&mut self, row: usize) -> Task<Message> {
+        if self.command_list.addon == Some(CommandListAddon::BrowserHistory)
+            && self.flush_browser_history_search()
+        {
+            return Task::none();
+        }
         let Some(addon) = self.command_list.addon else {
             return Task::none();
         };
@@ -4787,6 +4849,7 @@ impl LauncherApp {
                             CommandListAddon::Terminal
                                 | CommandListAddon::System
                                 | CommandListAddon::Bookmarks
+                                | CommandListAddon::BrowserHistory
                         ) {
                             action.run()
                         } else {

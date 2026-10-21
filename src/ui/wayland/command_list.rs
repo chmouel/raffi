@@ -19,6 +19,7 @@ pub(super) enum CommandListAddon {
     Windows,
     BrowserTabs,
     Bookmarks,
+    BrowserHistory,
     Media,
     Audio,
     Kill,
@@ -37,6 +38,7 @@ impl CommandListAddon {
             Self::Windows => "windows",
             Self::BrowserTabs => "browser_tabs",
             Self::Bookmarks => "bookmarks",
+            Self::BrowserHistory => "browser_history",
             Self::Media => "media",
             Self::Audio => "audio",
             Self::Kill => "kill",
@@ -54,6 +56,7 @@ impl CommandListAddon {
             Self::Windows => "Window",
             Self::BrowserTabs => "Tab",
             Self::Bookmarks => "Bookmark",
+            Self::BrowserHistory => "History",
             Self::Media => "Media",
             Self::Audio => "Audio",
             Self::Kill => "Process",
@@ -71,6 +74,7 @@ impl CommandListAddon {
             Self::Windows => "Loading windows...",
             Self::BrowserTabs => "Loading browser tabs...",
             Self::Bookmarks => "Loading bookmarks...",
+            Self::BrowserHistory => "Loading browser history...",
             Self::Media => "Loading players...",
             Self::Audio => "Loading audio devices...",
             Self::Kill => "Loading processes...",
@@ -82,6 +86,19 @@ impl CommandListAddon {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum MatchMode {
+    #[default]
+    Fuzzy,
+    /// Literal, case-insensitive substring; matches where a term starts at a
+    /// word boundary sort before matches that contain it later.
+    Substring,
+}
+
+/// Separates ranked fields in `match_text` for [`MatchMode::Substring`].
+/// [`CommandItem::match_text`] documents the order.
+pub(super) const MATCH_FIELD_SEPARATOR: char = '\u{1f}';
 
 #[derive(Debug, Clone)]
 pub(super) struct CommandAction {
@@ -101,7 +118,9 @@ pub(super) struct CommandItem {
     pub title: String,
     pub subtitle: String,
     /// Text the query is matched against. Rows without one, such as errors,
-    /// show whatever the query.
+    /// show whatever the query. In [`MatchMode::Substring`], fields separated
+    /// by [`MATCH_FIELD_SEPARATOR`] are ranked in order: URL, title, then the
+    /// rest.
     pub match_text: String,
     /// Icon names tried in order; resolved to `icon` on the UI thread.
     pub icon_names: Vec<String>,
@@ -450,12 +469,18 @@ impl CommandListState {
                 self.items.insert(0, row);
             }
         }
+        let mode = if self.addon == Some(CommandListAddon::BrowserHistory) {
+            MatchMode::Substring
+        } else {
+            MatchMode::Fuzzy
+        };
         filter_items_into(
             &self.items,
             &self.query,
             &self.matcher,
             &self.usage,
             self.strict,
+            mode,
             &mut self.filtered,
         );
         if self.audio_view != super::audio::View::All {
@@ -566,6 +591,7 @@ pub(super) fn filter_items_into(
     matcher: &SkimMatcherV2,
     usage: &HashMap<String, u64>,
     strict: bool,
+    mode: MatchMode,
     out: &mut Vec<usize>,
 ) {
     out.clear();
@@ -595,37 +621,110 @@ pub(super) fn filter_items_into(
         return;
     }
     let domain = query_host(query).map(|host| base_domain(&host));
+    let terms: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
     // Rows without match text, then rows for the site a URL names, then
-    // fuzzy matches by score; past use breaks ties.
-    let mut ranked: Vec<(usize, u8, i64)> = items
-        .iter()
-        .enumerate()
-        .filter_map(|(index, item)| {
-            if item.match_text.is_empty() {
-                return Some((index, 0, 0));
+    // matches by score; past use breaks ties.
+    let rank = |index: usize, item: &CommandItem| {
+        if item.match_text.is_empty() {
+            return Some((index, 0, 0, used(item)));
+        }
+        if domain
+            .as_ref()
+            .is_some_and(|domain| item.domains.contains(domain))
+        {
+            return Some((index, 1, 0, used(item)));
+        }
+        match mode {
+            MatchMode::Fuzzy => {
+                if strict && !super::support::contains_words(&item.match_text, query) {
+                    return None;
+                }
+                matcher
+                    .fuzzy_match(&item.match_text, query)
+                    .map(|score| (index, 2, score, used(item)))
             }
-            if domain
-                .as_ref()
-                .is_some_and(|domain| item.domains.contains(domain))
-            {
-                return Some((index, 1, 0));
+            MatchMode::Substring => {
+                if terms.is_empty() {
+                    return None;
+                }
+                let text = item.match_text.to_lowercase();
+                if !terms.iter().all(|term| text.contains(term)) {
+                    return None;
+                }
+                let mut fields = text.split(MATCH_FIELD_SEPARATOR);
+                let url = fields.next().unwrap_or_default();
+                let title = fields.next().unwrap_or_default();
+                let rank = if terms.iter().all(|term| word_prefix(url, term)) {
+                    2
+                } else if terms.iter().all(|term| word_prefix(title, term)) {
+                    3
+                } else if terms.iter().all(|term| url.contains(term)) {
+                    4
+                } else if terms.iter().all(|term| title.contains(term)) {
+                    5
+                } else {
+                    6
+                };
+                Some((index, rank, 0, used(item)))
             }
-            if strict && !super::support::contains_words(&item.match_text, query) {
-                return None;
-            }
-            matcher
-                .fuzzy_match(&item.match_text, query)
-                .map(|score| (index, 2, score))
+        }
+    };
+    // Large lists spend tens of milliseconds in the matcher on a broad query.
+    // Split the scan across cores, keeping each chunk in its original order
+    // so the stable sort still makes ties deterministic.
+    let threads = if query.is_empty() || items.len() < 10_000 {
+        1
+    } else {
+        std::thread::available_parallelism()
+            .map(|count| count.get())
+            .unwrap_or(1)
+            .min(8)
+    };
+    let mut ranked: Vec<(usize, u8, i64, u64)> = if threads == 1 {
+        items
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| rank(index, item))
+            .collect()
+    } else {
+        let chunk_size = items.len().div_ceil(threads);
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = items
+                .chunks(chunk_size)
+                .enumerate()
+                .map(|(chunk_index, chunk)| {
+                    let rank = &rank;
+                    scope.spawn(move || {
+                        let start = chunk_index * chunk_size;
+                        chunk
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(offset, item)| rank(start + offset, item))
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .flat_map(|handle| handle.join().unwrap_or_default())
+                .collect()
         })
-        .collect();
-    ranked.sort_by_key(|&(index, rank, score)| {
-        (
-            rank,
-            std::cmp::Reverse(score),
-            std::cmp::Reverse(used(&items[index])),
-        )
+    };
+    ranked.sort_by_key(|&(_, rank, score, used)| {
+        (rank, std::cmp::Reverse(score), std::cmp::Reverse(used))
     });
-    out.extend(ranked.iter().map(|&(index, _, _)| index));
+    out.extend(ranked.iter().map(|&(index, _, _, _)| index));
+}
+
+/// Whether `term` appears at the start of `text` or after a non-alphanumeric
+/// character. `text` and `term` are already lowercase.
+fn word_prefix(text: &str, term: &str) -> bool {
+    text.match_indices(term).any(|(at, _)| {
+        text[..at]
+            .chars()
+            .next_back()
+            .is_none_or(|before| !before.is_alphanumeric())
+    })
 }
 
 /// Base domains of the sites in `uris`, without repeats.
@@ -641,4 +740,91 @@ pub(super) fn domains_of<'a>(uris: impl IntoIterator<Item = &'a str>) -> Vec<Str
         }
     }
     domains
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(index: usize) -> CommandItem {
+        let mut item = CommandItem::info(
+            &format!("perf:{index}"),
+            format!("Page {index} with a browser title"),
+            "web-browser",
+        );
+        item.match_text = format!(
+            "Page {index} with a browser title https://site{}.example.com/{index}",
+            index % 500
+        );
+        item
+    }
+
+    #[test]
+    fn test_large_filter_keeps_stable_order() {
+        let items: Vec<CommandItem> = (0..10_001).map(item).collect();
+        let mut usage = HashMap::new();
+        for (index, item) in items.iter().enumerate() {
+            usage.insert(item.identity.clone(), index as u64);
+        }
+        let matcher = SkimMatcherV2::default();
+        let mut first = Vec::new();
+        filter_items_into(
+            &items,
+            "page",
+            &matcher,
+            &usage,
+            false,
+            MatchMode::Fuzzy,
+            &mut first,
+        );
+        let mut second = Vec::new();
+        filter_items_into(
+            &items,
+            "page",
+            &matcher,
+            &usage,
+            false,
+            MatchMode::Fuzzy,
+            &mut second,
+        );
+        assert_eq!(first.len(), items.len());
+        assert_eq!(first, second);
+    }
+
+    fn substring_item(identity: &str, title: &str, url: &str) -> CommandItem {
+        let mut item = CommandItem::info(identity, title.to_string(), "web-browser");
+        item.match_text =
+            format!("{url}{MATCH_FIELD_SEPARATOR}{title}{MATCH_FIELD_SEPARATOR}browser profile");
+        item
+    }
+
+    #[test]
+    fn test_substring_mode_rejects_fuzzy_only_and_ranks_url_before_title() {
+        let items = vec![
+            substring_item(
+                "title-substring",
+                "Securing trust",
+                "https://example.com/weak",
+            ),
+            substring_item("url-substring", "Other", "https://example.com/trust"),
+            substring_item("title-prefix", "Rust docs", "https://example.com/docs"),
+            substring_item("url-prefix", "Docs", "https://rust.example.com/"),
+            substring_item(
+                "scattered",
+                "Really useful search tool",
+                "https://example.com/scattered",
+            ),
+        ];
+        let mut out = Vec::new();
+        filter_items_into(
+            &items,
+            "rust",
+            &SkimMatcherV2::default(),
+            &HashMap::new(),
+            false,
+            MatchMode::Substring,
+            &mut out,
+        );
+        assert_eq!(out, [3, 2, 1, 0]);
+    }
 }

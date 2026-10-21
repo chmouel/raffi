@@ -49,8 +49,8 @@ list if you still want your apps.
 These sources are accepted:
 
 - `launchers`: installed apps and your [custom entries](../entries/)
-- `browser_tabs`, `bookmarks`, `windows`, `system`, `media`, `audio`,
-  `bluetooth`, `kill`, `pass` and `slack`
+- `browser_tabs`, `bookmarks`, `browser_history`, `windows`, `system`, `media`,
+  `audio`, `bluetooth`, `kill`, `pass` and `slack`
 - `slack` shows your unread or recently opened channels and direct messages on
   an empty query (muted and unused channels stay hidden until you type or focus
   Slack with Ctrl+Tab) and searches Slack messages when you type. You can also
@@ -102,7 +102,8 @@ Emoji. Left and Right pick a chip, and Enter, Tab or a click types its
 keyword. Because of that, Enter on an empty search arms the first chip instead
 of opening the first app; press Down or start typing for that. When the chips
 don't all fit, `‹` and `›` at the ends show there are more. `browser_tabs`,
-`bookmarks`, `windows` and `media` drop their chip when there is nothing to show.
+`browser_tabs`, `bookmarks`, `browser_history`, `windows` and `media` drop
+their chip when there is nothing to show.
 
 **`main_view_chips`** `name | keyword | off` (default: `name`)
 
@@ -112,8 +113,8 @@ the chip-only sources (`clipboard`, `bitwarden`, `terminal`, `emoji`) show
 nothing.
 
 Below the chips come your apps, Slack Home rows if listed, and the 5 things
-you picked most recently from `browser_tabs`, `bookmarks`, `windows`, `pass`,
-text snippets and script filters.
+you picked most recently from `browser_tabs`, `bookmarks`, `browser_history`,
+`windows`, `pass`, text snippets and script filters.
 Each sits with its own source, newest first. A tab or window that has been
 closed since is skipped, and so are windows from before you last logged in.
 A tab is found again by its address after a browser restart. Picks count

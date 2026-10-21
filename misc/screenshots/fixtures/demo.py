@@ -120,13 +120,16 @@ def _firefox(home: Path, repo: Path):
     (profile / "favicons.sqlite").touch()
     with sqlite3.connect(profile / "places.sqlite") as conn:
         conn.execute("CREATE TABLE moz_places "
-                     "(id INTEGER PRIMARY KEY, url TEXT, rev_host TEXT, description TEXT, preview_image_url TEXT)")
+                     "(id INTEGER PRIMARY KEY, url TEXT, rev_host TEXT, description TEXT, preview_image_url TEXT, "
+                     "title TEXT, visit_count INTEGER DEFAULT 0, typed INTEGER DEFAULT 0, "
+                     "hidden INTEGER DEFAULT 0, last_visit_date INTEGER DEFAULT 0)")
         conn.execute("INSERT INTO moz_places (url, rev_host, description, preview_image_url) VALUES (?, ?, ?, ?)", (
             "https://raffi.example.com/guide", "moc.elpmaxe.iffar.",
             "Launch apps, browse files, switch tabs, and inspect results without leaving the keyboard. Demo browser data.",
             "https://raffi.example.com/logo.png",
         ))
         _firefox_bookmarks(conn)
+        _firefox_history(conn)
     # Raffi caches link previews under an FNV-1a hash of the image URL.
     image_url = "https://raffi.example.com/logo.png"
     key_hash = 0xcbf29ce484222325
@@ -181,11 +184,34 @@ def _firefox_bookmarks(conn):
                      "SELECT ?, fk FROM moz_bookmarks WHERE id = ?", (keyword, bookmark))
 
 
+def _firefox_history(conn):
+    now = int(time.time())
+    rows = [
+        ("https://news.ycombinator.com/", "Hacker News", 120, 12, now - 30 * 60),
+        ("https://raffi.example.com/guide", "Raffi guide", 42, 3, now - 2 * 60 * 60),
+        ("https://github.com/chmouel/raffi", "Raffi on GitHub", 15, 2, now - 3 * 60 * 60),
+        ("https://doc.rust-lang.org/std/", "Rust standard library", 8, 1, now - 26 * 60 * 60),
+        ("https://en.wikipedia.org/wiki/Rust_(programming_language)", "Rust (programming language)", 9, 0, now - 2 * 86400),
+        ("https://recipes.example.org/sourdough", "Sourdough recipe", 4, 0, now - 5 * 86400),
+    ]
+    for link, title, visits, typed, visited in rows:
+        updated = conn.execute(
+            "UPDATE moz_places SET title = ?, visit_count = ?, typed = ?, last_visit_date = ? WHERE url = ?",
+            (title, visits, typed, visited * 1_000_000, link),
+        ).rowcount
+        if not updated:
+            conn.execute(
+                "INSERT INTO moz_places (url, title, visit_count, typed, last_visit_date) VALUES (?, ?, ?, ?, ?)",
+                (link, title, visits, typed, visited * 1_000_000),
+            )
+
+
 def _brave(home: Path):
     root = home / ".config/BraveSoftware/Brave-Browser"
     profile = root / "Default"
     profile.mkdir(parents=True)
     (root / "Local State").write_text(json.dumps({"profile": {"info_cache": {"Default": {"name": "Personal"}}}}))
+    _brave_history(profile)
 
     def url(name, link):
         return {"type": "url", "name": name, "url": link, "date_added": "13400000000000000"}
@@ -199,6 +225,22 @@ def _brave(home: Path):
         "other": {"type": "folder", "name": "Other bookmarks", "children": []},
         "synced": {"type": "folder", "name": "Mobile bookmarks", "children": []},
     }}))
+
+
+def _brave_history(profile: Path):
+    epoch = 11_644_473_600_000_000
+    now = int(time.time())
+    rows = [
+        ("https://github.com/chmouel/raffi", "Raffi on GitHub", 7, 1, now - 20 * 60),
+        ("https://forum.example.com/latest", "Forum", 6, 0, now - 60 * 60),
+        ("https://news.example.com/", "Example News", 30, 2, now - 6 * 60 * 60),
+    ]
+    with sqlite3.connect(profile / "History") as conn:
+        conn.execute("CREATE TABLE urls (id INTEGER PRIMARY KEY, url TEXT, title TEXT, "
+                     "visit_count INTEGER, typed_count INTEGER, last_visit_time INTEGER, hidden INTEGER DEFAULT 0)")
+        for index, (link, title, visits, typed, visited) in enumerate(rows, 1):
+            conn.execute("INSERT INTO urls VALUES (?, ?, ?, ?, ?, ?, 0)",
+                         (index, link, title, visits, typed, epoch + visited * 1_000_000))
 
 
 def _fix_mtimes(*roots: Path):

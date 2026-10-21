@@ -1321,14 +1321,34 @@ pub fn bookmark_profiles(
     home: &Path,
     config: &Path,
 ) -> Vec<BrowserProfile> {
+    profiles_with(browser, home, config, "places.sqlite", "Bookmarks")
+}
+
+/// The profiles with browser history of `browser`, or of every supported
+/// browser.
+pub fn history_profiles(
+    browser: Option<crate::BookmarkBrowser>,
+    home: &Path,
+    config: &Path,
+) -> Vec<BrowserProfile> {
+    profiles_with(browser, home, config, "places.sqlite", "History")
+}
+
+fn profiles_with(
+    browser: Option<crate::BookmarkBrowser>,
+    home: &Path,
+    config: &Path,
+    gecko_file: &str,
+    chromium_file: &str,
+) -> Vec<BrowserProfile> {
     let mut profiles: Vec<BrowserProfile> = Vec::new();
     for known in KNOWN_BROWSERS
         .iter()
         .filter(|known| browser.is_none_or(|browser| known.key == browser))
     {
         let file = match known.kind {
-            ManifestKind::Gecko => "places.sqlite",
-            ManifestKind::Chromium => "Bookmarks",
+            ManifestKind::Gecko => gecko_file,
+            ManifestKind::Chromium => chromium_file,
         };
         let mut found: Vec<BrowserProfile> = Vec::new();
         for root in known.roots.iter().map(|root| match root {

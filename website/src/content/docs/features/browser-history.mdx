@@ -1,0 +1,192 @@
+---
+title: Browser History
+description: Search and reopen pages from your Firefox and Chromium browser histories in Raffi
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import browserHistoryScreenshot from '../../../assets/screenshots/browser-history.png';
+import browserHistoryFrequentScreenshot from '../../../assets/screenshots/browser-history-frequent.png';
+
+Type `hist ` (with the trailing space) to search the pages you visited in
+your browsers. Raffi reads the history databases directly, so there is no
+extension to install and the browser does not need to be running.
+
+<Image src={browserHistoryScreenshot} alt="Recent browser history rows with their site, profile and relative visit time" width={800} />
+
+Words after the keyword match titles, addresses, browser names and profile
+names. Matching is literal and case-insensitive: every word must appear as a
+substring, and pages where a word starts with it rank first. At the same prefix
+quality, matches in the address rank before matches in the title. Results
+refresh one second after you stop typing; pressing Enter applies the pending
+search immediately. The same address visited in several profiles appears once,
+with every profile listed in the preview.
+
+| Key            | Action                                      |
+|----------------|---------------------------------------------|
+| Enter          | Open the page                               |
+| Ctrl+Enter     | Copy the link                               |
+| Ctrl+Tab       | Switch between recent, frequent and by browser |
+| Ctrl+R         | Read browser history again                  |
+
+<Aside type="note">
+Browser history is only available in native mode. Raffi only reads history:
+it never edits, deletes or prunes it.
+</Aside>
+
+## Views
+
+Ctrl+Tab cycles through three views, shown in the footer:
+
+- **Recent** lists pages by their latest visit.
+- **Frequent** ranks pages by frecency: recent visits count more, then how
+  often and whether you typed the address. Pages picked from Raffi before
+  get a small boost.
+- **By browser** keeps one section per profile, so the same address can
+  appear once for each browser it was visited in.
+
+<Image src={browserHistoryFrequentScreenshot} alt="Frequent browser history rows ordered by frecency, with the view name in the footer" width={800} />
+
+## Filters
+
+Mix filters into the query. Words that are not filters still match titles,
+addresses and profiles.
+
+| Filter | Example | Matches |
+|--------|---------|---------|
+| `site:` | `site:github.com` | The site and its subdomains |
+| `browser:` | `browser:firefox` | One browser family |
+| `profile:` | `profile:work` | A profile name or directory |
+| `after:` | `after:7d` | Visits after a time |
+| `before:` | `before:2026-01-01` | Visits before a time |
+
+`after:` and `before:` take `today`, `yesterday`, a relative duration such as
+`7d`, `2w`, `3m` or `1y`, or a `YYYY-MM-DD` date. `after:` includes the time
+and `before:` excludes it. An unknown filter is treated as ordinary search
+text.
+
+## What is read
+
+Raffi looks for profiles with history in the Firefox family (Firefox,
+LibreWolf, Zen, Floorp, Waterfox) and the Chromium family (Chrome and its beta
+and dev channels, Chromium, Brave, Edge, Vivaldi, Opera, Thorium). Each profile
+is listed under the browser's name, followed by the profile name when a browser
+has several.
+
+Only `http` and `https` pages are kept. Internal pages such as `about:`,
+`chrome://` or extension pages, as well as local files, data URLs and
+JavaScript URLs, are skipped. Raffi reads a bounded number of the most recent
+and most visited addresses per profile (`max_entries`, default 2000).
+
+Firefox and Chromium keep their latest changes in separate log files until
+the browser closes, so Raffi reads a private copy of the database and its logs,
+then deletes the copy. Pages visited a moment ago therefore show up while the
+browser is still open.
+
+To collapse tracking links, Raffi normalizes addresses before comparing them:
+it lowercases the scheme and host, drops default ports and common tracking
+parameters, and ignores a trailing slash. The version you open is the raw
+address from the most recent visit.
+
+## Browsers and profiles
+
+Enter opens a page in the browser and profile it comes from. When that
+browser's program is not found, for example when it is installed as a Flatpak,
+the link goes to your default browser through `xdg-open`. On Hyprland, niri and
+sway, Raffi then focuses the browser window it last used, where the link opens,
+starting the browser when needed.
+
+List `sources` to choose what is read; this replaces the detection.
+
+```yaml
+addons:
+  browser_history:
+    open_with: brave
+    sources:
+      - browser: firefox
+        profile: default-release
+        name: Firefox
+        open_with: chrome
+      - browser: chromium
+      - path: ~/snap/chromium/History
+        open_with: ["qutebrowser", "--target", "tab", "{url}"]
+```
+
+- `browser` reads every profile of that browser, or only `profile`, given
+  by its name or directory.
+- `path` reads a Chromium `History` file, a Firefox `places.sqlite`, or a
+  profile directory holding one. Add `browser` to open its pages in that
+  browser and profile.
+- `name` is the label the source shows in the list, the preview and the
+  by-browser view.
+
+`open_with` picks what opens the pages: a browser (`firefox`, `librewolf`,
+`zen`, `floorp`, `waterfox`, `chrome`, `chrome-beta`, `chrome-dev`, `chromium`,
+`brave`, `edge`, `vivaldi`, `opera`, `thorium`) or a command, where `{url}`
+stands for the page. Set on a source, it applies to that source; set on
+`browser_history`, to every source without its own.
+
+A source that cannot be read shows as a row when the list opens.
+
+## Site icons
+
+Pages show the icon of their site, found the same way as for
+[browser tabs](../browser-tabs/#site-icons): first in the browser profile,
+then downloaded through the service set by `browser_tabs.favicon_service`.
+Set it to `none` to keep everything local.
+
+## In the main list
+
+Browser history is opt-in in the main list. To find visited pages without
+typing `hist` first, add `browser_history` to
+[`general.main_view`](../../configuration/main-list/):
+
+```yaml
+general:
+  main_view:
+    - launchers
+    - browser_history
+```
+
+Typing `rust docs` then lists the matching pages next to your launchers.
+
+## Configuration
+
+**`addons.browser_history.enabled`** `boolean` (default: `true`)
+
+Enable or disable the browser history list.
+
+**`addons.browser_history.trigger`** `string` (default: `hist`)
+
+Keyword that opens the list. Type it followed by a space.
+
+**`addons.browser_history.max_entries`** `integer` (default: `2000`)
+
+Most recent and most visited addresses read per source, clamped between
+`100` and `10000`.
+
+**`addons.browser_history.open_with`** `string | list of strings` (default: source browser)
+
+Browser name or command argv (`{url}` placeholder) that opens pages from
+sources without their own `open_with`.
+
+**`addons.browser_history.sources`** `list of objects` (default: auto-detected profiles)
+
+Explicit history sources (`browser`, `profile`, `path`, `name`, `open_with`),
+replacing automatic profile detection.
+
+**`addons.browser_history.close_on_action`** `boolean` (default: `true`)
+
+Close Raffi after opening or copying a page. Leave it unset to follow
+`general.close_on_action`.
+
+```yaml
+addons:
+  browser_history:
+    trigger: "h"
+    max_entries: 5000
+    close_on_action: false
+```
+
+See the [addon reference](../../reference/addon-configuration/) for how
+addon keywords and `close_on_action` work across Raffi.

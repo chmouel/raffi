@@ -5,9 +5,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::ffi::OsStr;
 use std::fs;
 use std::io::Read;
-use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use rusqlite::{Connection, OpenFlags};
@@ -17,6 +15,7 @@ use crate::browser_host::{self, BrowserProfile};
 use crate::{BookmarkBrowser, BookmarkOpener, BookmarksAddonConfig};
 
 use super::actions::DeferredAction;
+use super::browser_data::{dir_name, opener, snapshot_database, Opener};
 use super::command_list::{domains_of, CommandAction, CommandItem};
 use super::url_match::uri_host;
 
@@ -96,42 +95,6 @@ pub(super) struct Bookmark {
     pub added: Option<i64>,
     /// Firefox keyword typed before a search term to search with it.
     pub keyword: Option<String>,
-}
-
-/// What opens a source's links.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum Opener {
-    /// Run this, with `{url}` replaced by the link; `name` says by what.
-    /// The window of one of `apps` is focused after.
-    Argv {
-        argv: Vec<String>,
-        name: String,
-        apps: Vec<String>,
-    },
-    /// Why the links cannot be opened.
-    Missing(String),
-}
-
-impl Opener {
-    fn action(&self, url: &str) -> Option<DeferredAction> {
-        let argv = self.command(url)?;
-        Some(match self {
-            Self::Argv { apps, .. } if !apps.is_empty() => DeferredAction::OpenInApp {
-                argv,
-                apps: apps.clone(),
-            },
-            _ => DeferredAction::Command(argv),
-        })
-    }
-
-    fn command(&self, url: &str) -> Option<Vec<String>> {
-        match self {
-            Self::Argv { argv, .. } => {
-                Some(argv.iter().map(|arg| arg.replace("{url}", url)).collect())
-            }
-            Self::Missing(_) => None,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -466,12 +429,6 @@ fn profile_spec(profile: BrowserProfile) -> Spec {
     }
 }
 
-fn dir_name(dir: &Path) -> String {
-    dir.file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default()
-}
-
 pub(super) fn load_from(
     config: &BookmarksAddonConfig,
     home: &Path,
@@ -667,85 +624,6 @@ fn read_source(
     })
 }
 
-/// What opens the links of a source of `browser` read from `profile`.
-fn opener(
-    choice: Option<&BookmarkOpener>,
-    browser: Option<BookmarkBrowser>,
-    profile: Option<&Path>,
-    path: &OsStr,
-) -> Opener {
-    let fallback = || Opener::Argv {
-        argv: vec!["xdg-open".to_string(), "{url}".to_string()],
-        name: "the default browser".to_string(),
-        apps: Vec::new(),
-    };
-    match choice {
-        None => match browser {
-            Some(browser) => match browser_opener(browser, Some(browser), profile, path) {
-                // A browser installed some other way, such as a Flatpak.
-                Opener::Missing(_) => fallback(),
-                opener => opener,
-            },
-            None => fallback(),
-        },
-        Some(BookmarkOpener::Browser(target)) => browser_opener(*target, browser, profile, path),
-        Some(BookmarkOpener::Command(argv)) => {
-            let Some(program) = argv.first().filter(|program| !program.is_empty()) else {
-                return Opener::Missing("open_with is an empty command".to_string());
-            };
-            if browser_host::find_program(&[program.as_str()], path).is_none() {
-                return Opener::Missing(format!("{program} is not installed"));
-            }
-            let mut argv = argv.clone();
-            if !argv.iter().any(|arg| arg.contains("{url}")) {
-                argv.push("{url}".to_string());
-            }
-            let name = dir_name(Path::new(program));
-            Opener::Argv {
-                argv,
-                apps: vec![name.clone()],
-                name,
-            }
-        }
-    }
-}
-
-/// Open in `target`, in the profile the bookmarks come from when it is
-/// their browser.
-fn browser_opener(
-    target: BookmarkBrowser,
-    source: Option<BookmarkBrowser>,
-    profile: Option<&Path>,
-    path: &OsStr,
-) -> Opener {
-    let Some((name, _, gecko)) = browser_host::browser_details(target) else {
-        return Opener::Missing("unknown browser".to_string());
-    };
-    let Some(program) = browser_host::browser_program(target, path) else {
-        return Opener::Missing(format!("{name} is not installed"));
-    };
-    let mut argv = vec![program.to_string_lossy().into_owned()];
-    if let Some(profile) = profile.filter(|_| source == Some(target)) {
-        if gecko {
-            argv.extend([
-                "--profile".to_string(),
-                profile.to_string_lossy().into_owned(),
-            ]);
-        } else if profile
-            .parent()
-            .is_some_and(|data| data.join("Local State").is_file())
-        {
-            argv.push(format!("--profile-directory={}", dir_name(profile)));
-        }
-    }
-    argv.push("{url}".to_string());
-    Opener::Argv {
-        argv,
-        name: name.to_string(),
-        apps: browser_host::browser_window_apps(target),
-    }
-}
-
 /// The roots of a Chromium `Bookmarks` file.
 fn parse_chromium(text: &str) -> Result<Folder, String> {
     let value: Value =
@@ -817,43 +695,8 @@ fn chromium_folder(node: &Value, depth: usize) -> Folder {
     folder
 }
 
-/// A private copy of a Firefox database and its write-ahead log, which
-/// holds the latest changes while the browser runs; removed when dropped.
-struct PlacesCopy {
-    dir: PathBuf,
-}
-
-impl Drop for PlacesCopy {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.dir);
-    }
-}
-
-fn copy_places(file: &Path) -> Result<(PlacesCopy, PathBuf), String> {
-    static NEXT: AtomicUsize = AtomicUsize::new(0);
-    let dir = std::env::temp_dir().join(format!(
-        "raffi-bookmarks-{}-{}",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    ));
-    let _ = fs::remove_dir_all(&dir);
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&dir)
-        .map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
-    let copy = PlacesCopy { dir };
-    let target = copy.dir.join("places.sqlite");
-    fs::copy(file, &target).map_err(|error| format!("cannot copy {}: {error}", file.display()))?;
-    let mut wal = file.as_os_str().to_owned();
-    wal.push("-wal");
-    if Path::new(&wal).is_file() {
-        let _ = fs::copy(&wal, copy.dir.join("places.sqlite-wal"));
-    }
-    Ok((copy, target))
-}
-
 fn read_places(file: &Path) -> Result<Folder, String> {
-    let (_copy, target) = copy_places(file)?;
+    let (_copy, target) = snapshot_database(file, "bookmarks")?;
     let connection = Connection::open_with_flags(
         &target,
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,

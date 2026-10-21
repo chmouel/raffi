@@ -162,6 +162,10 @@ pub(super) fn resolve(entries: &[String], addons: &AddonsConfig) -> Vec<Entry> {
             "windows" => list(addons.windows.enabled, CommandListAddon::Windows),
             "browser_tabs" => list(addons.browser_tabs.enabled, CommandListAddon::BrowserTabs),
             "bookmarks" => list(addons.bookmarks.enabled, CommandListAddon::Bookmarks),
+            "browser_history" => list(
+                addons.browser_history.enabled,
+                CommandListAddon::BrowserHistory,
+            ),
             "media" => list(addons.media.enabled, CommandListAddon::Media),
             "audio" => list(addons.audio.enabled, CommandListAddon::Audio),
             "bluetooth" => list(addons.bluetooth.enabled, CommandListAddon::Bluetooth),
@@ -222,6 +226,7 @@ pub(super) fn list_trigger(addon: CommandListAddon, addons: &AddonsConfig) -> Op
         CommandListAddon::Windows => addons.windows.trigger(),
         CommandListAddon::BrowserTabs => addons.browser_tabs.trigger(),
         CommandListAddon::Bookmarks => addons.bookmarks.trigger(),
+        CommandListAddon::BrowserHistory => addons.browser_history.trigger(),
         CommandListAddon::Media => addons.media.trigger(),
         CommandListAddon::Audio => addons.audio.trigger(),
         CommandListAddon::Bluetooth => addons.bluetooth.trigger(),
@@ -257,6 +262,7 @@ pub(super) fn recent_list_name(addon: CommandListAddon) -> Option<&'static str> 
         CommandListAddon::Windows => Some("windows"),
         CommandListAddon::BrowserTabs => Some("browser_tabs"),
         CommandListAddon::Bookmarks => Some("bookmarks"),
+        CommandListAddon::BrowserHistory => Some("browser_history"),
         CommandListAddon::Pass => Some("pass"),
         _ => None,
     }
@@ -774,6 +780,7 @@ pub(super) fn chip_label(keyword: &str, addons: &AddonsConfig) -> String {
     let builtin = [
         (addons.browser_tabs.trigger(), "Tabs"),
         (addons.bookmarks.trigger(), "Bookmarks"),
+        (addons.browser_history.trigger(), "History"),
         (addons.windows.trigger(), "Windows"),
         (addons.system.trigger(), "System"),
         (addons.media.trigger(), "Media"),
@@ -1191,6 +1198,15 @@ impl LauncherApp {
                     Ok(super::bookmarks::flat_items(&library, options))
                 })
             }
+            CommandListAddon::BrowserHistory => {
+                let config = self.addons.browser_history.clone();
+                let options = self.browser_history_options();
+                Box::new(move || {
+                    let mut library = super::browser_history::load(&config);
+                    library.icons = super::browser_history::lookup_icons(&library);
+                    Ok(super::browser_history::flat_items(&library, options))
+                })
+            }
             CommandListAddon::Media => {
                 if !exists("playerctl") {
                     return missing(self, "playerctl");
@@ -1252,7 +1268,9 @@ impl LauncherApp {
         });
         let has_favicons = matches!(
             addon,
-            CommandListAddon::BrowserTabs | CommandListAddon::Bookmarks
+            CommandListAddon::BrowserTabs
+                | CommandListAddon::Bookmarks
+                | CommandListAddon::BrowserHistory
         );
         if !has_favicons || !fetch_favicons {
             return load;
@@ -1294,10 +1312,12 @@ impl LauncherApp {
             is_mixable(addon, item) && slack_source.is_none_or(|slack| slack.keeps_item(item))
         });
         for item in &mut items {
-            item.icon = item
-                .icon_names
-                .iter()
-                .find_map(|name| self.resolve_icon_name(name));
+            if item.icon.is_none() {
+                item.icon = item
+                    .icon_names
+                    .iter()
+                    .find_map(|name| self.resolve_icon_name(name));
+            }
         }
         if addon == CommandListAddon::Slack {
             self.apply_slack_keep_open(&mut items);
@@ -1959,6 +1979,7 @@ impl LauncherApp {
                 (Some(CommandListAddon::Slack), Some(slack)) => slack.focus_label(),
                 (Some(CommandListAddon::BrowserTabs), _) => "Tabs",
                 (Some(CommandListAddon::Bookmarks), _) => "Bookmarks",
+                (Some(CommandListAddon::BrowserHistory), _) => "History",
                 (Some(CommandListAddon::Windows), _) => "Windows",
                 (Some(CommandListAddon::Pass), _) => "Passwords",
                 (Some(addon), _) => addon.badge(),
@@ -2192,6 +2213,7 @@ impl LauncherApp {
                         addon,
                         CommandListAddon::BrowserTabs
                             | CommandListAddon::Bookmarks
+                            | CommandListAddon::BrowserHistory
                             | CommandListAddon::Windows
                             | CommandListAddon::System
                     );

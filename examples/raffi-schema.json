@@ -50,6 +50,9 @@
         "bookmarks": {
           "$ref": "#/$defs/BookmarksAddonConfig"
         },
+        "browser_history": {
+          "$ref": "#/$defs/BrowserHistoryAddonConfig"
+        },
         "browser_tabs": {
           "$ref": "#/$defs/BrowserTabsAddonConfig"
         },
@@ -271,7 +274,7 @@
       "additionalProperties": false
     },
     "BookmarkBrowser": {
-      "description": "A browser the bookmarks addon reads from or opens links with",
+      "description": "A browser the bookmarks and browser history addons read from or open\nlinks with",
       "type": "string",
       "enum": [
         "firefox",
@@ -404,6 +407,117 @@
         },
         "trigger": {
           "description": "Keyword that opens the bookmarks (default: `bm`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "BrowserHistoryAddonConfig": {
+      "description": "Configuration for the browser history addon (native UI only)",
+      "type": "object",
+      "properties": {
+        "close_on_action": {
+          "description": "Close Raffi after opening a page (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "max_entries": {
+          "description": "Most recent and most visited URLs read per source (default: 2000,\nclamped to 100..10000).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "default": null,
+          "minimum": 0
+        },
+        "open_with": {
+          "description": "Opens pages of every source without its own `open_with`\n(default: the browser and profile they come from).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BookmarkOpener"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sources": {
+          "description": "Where history comes from (default: every profile of every supported\nbrowser found).",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/BrowserHistorySourceConfig"
+          }
+        },
+        "trigger": {
+          "description": "Keyword that opens browser history (default: `hist`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "BrowserHistorySourceConfig": {
+      "description": "One place browser history is read from",
+      "type": "object",
+      "properties": {
+        "browser": {
+          "description": "Browser whose profiles hold the history. Optional with `path`,\nwhere it only picks the browser that opens the links.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BookmarkBrowser"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "description": "Label of the source in the list (default: the browser and profile).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "open_with": {
+          "description": "Opens this source's pages (default: `addons.browser_history.open_with`,\nelse the browser and profile they come from).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BookmarkOpener"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "path": {
+          "description": "A history file read directly: Chromium's `History`, Firefox's\n`places.sqlite`, or the profile directory holding one.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "profile": {
+          "description": "Profile to read, by name or directory (default: every profile).",
           "type": [
             "string",
             "null"
@@ -914,7 +1028,7 @@
           "default": null
         },
         "main_view": {
-          "description": "Sources mixed into the main view, in display order, when typing without\nan addon trigger. Entries: `launchers`, `browser_tabs`,\n`bookmarks`, `windows`, `system`, `media`, `audio`, `bluetooth`, `pass`,\n`kill`, `slack`, `slack.unread`, `slack.threads` (`slack.unread_threads`),\n`slack.activity`, `slack.actions`, `slack.directs` (`slack.dms`),\n`slack.channels`, `text_snippets.<name>` and `script_filters.<name>`.\nSlack shows its Home rows on an empty query and searches messages when\ntyping. When set, launchers only show if `launchers` is listed.",
+          "description": "Sources mixed into the main view, in display order, when typing without\nan addon trigger. Entries: `launchers`, `browser_tabs`,\n`bookmarks`, `browser_history`, `windows`, `system`, `media`, `audio`,\n`bluetooth`, `pass`,\n`kill`, `slack`, `slack.unread`, `slack.threads` (`slack.unread_threads`),\n`slack.activity`, `slack.actions`, `slack.directs` (`slack.dms`),\n`slack.channels`, `text_snippets.<name>` and `script_filters.<name>`.\nSlack shows its Home rows on an empty query and searches messages when\ntyping. When set, launchers only show if `launchers` is listed.",
           "type": [
             "array",
             "null"

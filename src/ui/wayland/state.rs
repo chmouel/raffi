@@ -664,6 +664,7 @@ pub(super) struct LauncherApp {
     pub vault: super::vault::VaultState,
     pub slack: super::slack_mode::SlackState,
     pub bookmarks: super::bookmarks::BookmarksState,
+    pub browser_history: super::browser_history::BrowserHistoryState,
     /// The search bookmarks last loaded, by the bookmarks list or the main
     /// view's loader.
     pub bookmark_searches: Arc<Mutex<super::bookmarks::SearchIndex>>,

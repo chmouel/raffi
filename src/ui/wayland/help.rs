@@ -168,6 +168,20 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         });
     }
 
+    if addons.browser_history.enabled {
+        let trigger = addons.browser_history.trigger();
+        entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
+            trigger: trigger.to_string(),
+            title: "Browser history".to_string(),
+            usage: format!(
+                "{trigger} <title or URL>, site:/browser:/profile:/after:/before: filters, Enter opens, Ctrl+Enter copies the link"
+            ),
+            icon: Some(super::app::BROWSER_HISTORY_ICON.to_string()),
+            completion: Some(format!("{trigger} ")),
+        });
+    }
+
     if addons.media.enabled {
         let trigger = addons.media.trigger();
         entries.push(HelpEntry {
@@ -525,6 +539,10 @@ pub(super) fn add_cycle_view_shortcut(
         (
             addons.bookmarks.enabled,
             "bookmarks: all browsers, then each one",
+        ),
+        (
+            addons.browser_history.enabled,
+            "history: recent, frequent, by browser",
         ),
     ]
     .into_iter()

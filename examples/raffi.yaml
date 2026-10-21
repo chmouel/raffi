@@ -59,11 +59,13 @@ version: 1
 #                            # (Tabs, System, Clipboard...) above the apps; Left/Right pick one, Enter arms it.
 #                            # With no config file at all, raffi uses launchers, windows, browser_tabs, bookmarks,
 #                            # system, media, audio, bluetooth, pass, clipboard, bitwarden, terminal, emoji.
+#                            # browser_history is opt-in: add it below to show it in the main view.
 #     - launchers            # Keep launchers; once main_view is set they only show if listed
 #     - browser_tabs         # Typing "gmail" lists matching tabs, up to 5 per addon;
 #                            # with no query, your 5 latest addon picks are listed;
 #                            # groups with a title starting with the query come first
 #     - windows              # Also: bookmarks, system, media, audio, bluetooth, kill, pass, slack
+#     - browser_history      # Visited pages; not in the automatic set, add it to opt in
 #     - slack                # Home rows when empty; searches messages as you type (enable and configure below)
 #                            # Sub-views: slack.unread, slack.threads, slack.activity, slack.actions,
 #                            # slack.directs (or slack.dms), slack.channels
@@ -388,6 +390,24 @@ addons:
   #       name: Work                      # Label in the list and the Ctrl+Tab footer
   #       open_with: chrome               # A browser, or a command:
   #     - path: ~/sync/Bookmarks          # A Bookmarks or places.sqlite file, or a profile directory
+  #       open_with: ["qutebrowser", "{url}"]
+
+  # Browser history (native UI only). Type "hist " to search pages you
+  # visited in every Firefox and Chromium profile found. Ctrl+Tab cycles
+  # recent, frequent and by-browser views; filters such as site:github.com,
+  # browser:firefox, profile:work, after:7d and before:2026-01-01 narrow the
+  # list. Enter opens the page, Ctrl+Enter copies the URL. Raffi never edits
+  # or deletes history.
+  # browser_history:
+  #   enabled: true
+  #   trigger: hist
+  #   max_entries: 2000                 # Stored visits read per source (100..10000)
+  #   open_with: firefox                # A browser, or a command:
+  #   sources:
+  #     - browser: firefox
+  #       profile: default-release      # Default: every profile
+  #       name: Firefox                 # Label in the by-browser view
+  #     - path: ~/snap/chromium/History # A History or places.sqlite file, or a profile directory
   #       open_with: ["qutebrowser", "{url}"]
 
   # Media controls (needs playerctl). Type "media " to play,

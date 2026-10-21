@@ -799,7 +799,8 @@ impl Default for BrowserTabsAddonConfig {
     }
 }
 
-/// A browser the bookmarks addon reads from or opens links with
+/// A browser the bookmarks and browser history addons read from or open
+/// links with
 #[derive(Deserialize, JsonSchema, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum BookmarkBrowser {
@@ -890,6 +891,79 @@ impl Default for BookmarksAddonConfig {
             trigger: None,
             open_with: None,
             sources: None,
+            close_on_action: None,
+        }
+    }
+}
+
+/// One place browser history is read from
+#[derive(Deserialize, JsonSchema, Debug, Clone, Default, PartialEq, Eq)]
+#[schemars(deny_unknown_fields)]
+pub struct BrowserHistorySourceConfig {
+    /// Browser whose profiles hold the history. Optional with `path`,
+    /// where it only picks the browser that opens the links.
+    #[serde(default)]
+    pub browser: Option<BookmarkBrowser>,
+    /// Profile to read, by name or directory (default: every profile).
+    #[serde(default)]
+    pub profile: Option<String>,
+    /// A history file read directly: Chromium's `History`, Firefox's
+    /// `places.sqlite`, or the profile directory holding one.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Label of the source in the list (default: the browser and profile).
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Opens this source's pages (default: `addons.browser_history.open_with`,
+    /// else the browser and profile they come from).
+    #[serde(default)]
+    pub open_with: Option<BookmarkOpener>,
+}
+
+/// Configuration for the browser history addon (native UI only)
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
+pub struct BrowserHistoryAddonConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Keyword that opens browser history (default: `hist`).
+    #[serde(default)]
+    pub trigger: Option<String>,
+    /// Opens pages of every source without its own `open_with`
+    /// (default: the browser and profile they come from).
+    #[serde(default)]
+    pub open_with: Option<BookmarkOpener>,
+    /// Where history comes from (default: every profile of every supported
+    /// browser found).
+    #[serde(default)]
+    pub sources: Option<Vec<BrowserHistorySourceConfig>>,
+    /// Most recent and most visited URLs read per source (default: 2000,
+    /// clamped to 100..10000).
+    #[serde(default)]
+    pub max_entries: Option<usize>,
+    /// Close Raffi after opening a page (default: `general.close_on_action`, else true).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
+}
+
+impl BrowserHistoryAddonConfig {
+    pub fn trigger(&self) -> &str {
+        self.trigger.as_deref().unwrap_or("hist")
+    }
+
+    pub fn max_entries(&self) -> usize {
+        self.max_entries.unwrap_or(2000).clamp(100, 10_000)
+    }
+}
+
+impl Default for BrowserHistoryAddonConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            trigger: None,
+            open_with: None,
+            sources: None,
+            max_entries: None,
             close_on_action: None,
         }
     }
@@ -1375,6 +1449,8 @@ pub struct AddonsConfig {
     #[serde(default)]
     pub bookmarks: BookmarksAddonConfig,
     #[serde(default)]
+    pub browser_history: BrowserHistoryAddonConfig,
+    #[serde(default)]
     pub media: MediaAddonConfig,
     #[serde(default)]
     pub audio: AudioAddonConfig,
@@ -1580,7 +1656,8 @@ pub struct GeneralConfig {
     pub fallbacks: Vec<String>,
     /// Sources mixed into the main view, in display order, when typing without
     /// an addon trigger. Entries: `launchers`, `browser_tabs`,
-    /// `bookmarks`, `windows`, `system`, `media`, `audio`, `bluetooth`, `pass`,
+    /// `bookmarks`, `browser_history`, `windows`, `system`, `media`, `audio`,
+    /// `bluetooth`, `pass`,
     /// `kill`, `slack`, `slack.unread`, `slack.threads` (`slack.unread_threads`),
     /// `slack.activity`, `slack.actions`, `slack.directs` (`slack.dms`),
     /// `slack.channels`, `text_snippets.<name>` and `script_filters.<name>`.
@@ -2860,6 +2937,18 @@ fn process_config(config: Config, args: &Args) -> Result<ParsedConfig> {
         }
     }
     if let Some(BookmarkOpener::Command(argv)) = &mut bm.open_with {
+        argv.iter_mut()
+            .for_each(|arg| *arg = expand_config_value(arg));
+    }
+    let bh = &mut addons.browser_history;
+    for source in bh.sources.iter_mut().flatten() {
+        source.path = source.path.as_ref().map(|s| expand_config_value(s));
+        if let Some(BookmarkOpener::Command(argv)) = &mut source.open_with {
+            argv.iter_mut()
+                .for_each(|arg| *arg = expand_config_value(arg));
+        }
+    }
+    if let Some(BookmarkOpener::Command(argv)) = &mut bh.open_with {
         argv.iter_mut()
             .for_each(|arg| *arg = expand_config_value(arg));
     }
@@ -5823,6 +5912,40 @@ shell:
         );
         assert_eq!(sources[1].path.as_deref(), Some("~/Bookmarks"));
         assert!(serde_yaml::from_str::<BookmarksAddonConfig>("open_with: netscape\n").is_err());
+    }
+
+    #[test]
+    fn test_browser_history_addon_config_parsing() {
+        let defaults = AddonsConfig::default().browser_history;
+        assert!(defaults.enabled);
+        assert_eq!(defaults.trigger(), "hist");
+        assert_eq!(defaults.max_entries(), 2000);
+        assert!(defaults.sources.is_none());
+
+        let config: BrowserHistoryAddonConfig = serde_yaml::from_str(
+            "trigger: bh\nmax_entries: 5\nopen_with: brave\nsources:\n  - browser: firefox\n    profile: default-release\n    open_with: [qutebrowser, \"{url}\"]\n  - path: ~/History\n",
+        )
+        .unwrap();
+        assert_eq!(config.trigger(), "bh");
+        assert_eq!(config.max_entries(), 100);
+        assert_eq!(
+            config.open_with,
+            Some(BookmarkOpener::Browser(BookmarkBrowser::Brave))
+        );
+        let sources = config.sources.unwrap();
+        assert_eq!(sources[0].browser, Some(BookmarkBrowser::Firefox));
+        assert_eq!(sources[0].profile.as_deref(), Some("default-release"));
+        assert_eq!(
+            sources[0].open_with,
+            Some(BookmarkOpener::Command(vec![
+                "qutebrowser".into(),
+                "{url}".into()
+            ]))
+        );
+        assert_eq!(sources[1].path.as_deref(), Some("~/History"));
+        assert!(
+            serde_yaml::from_str::<BrowserHistoryAddonConfig>("open_with: netscape\n").is_err()
+        );
     }
 
     #[test]
