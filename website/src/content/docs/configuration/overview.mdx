@@ -1,20 +1,26 @@
 ---
 title: Configuration Overview
-description: Learn how to configure Raffi's launcher entries and settings
+description: Where Raffi's settings, addons and custom entries live
 ---
 
 import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
 
+Raffi runs without any config. When you want to change how it looks, what the
+main list shows or which addons are on, you write it in a YAML file.
+
 ## Configuration Files
 
-Raffi reads two files from `$HOME/.config/raffi/`:
+Raffi reads two files from `$HOME/.config/raffi/`, and both are optional:
 
 ```
-$HOME/.config/raffi/raffi.yaml       # general settings and addons
-$HOME/.config/raffi/launchers.yaml   # launcher entries
+$HOME/.config/raffi/raffi.yaml       # settings and addons
+$HOME/.config/raffi/launchers.yaml   # your own entries
 ```
 
-Keeping launchers in `launchers.yaml` is the recommended layout: the file you edit most stays short and free of settings, and `raffi.yaml` only holds what you rarely touch. Both files are optional. Raffi reads `launchers.yaml` when `raffi.yaml` is missing or has no `launchers:` section of its own; if `raffi.yaml` does define launchers, those win and `launchers.yaml` is ignored with a warning.
+`raffi.yaml` holds almost everything: the theme, fonts, what the main list
+shows, which addons are on and their keywords, web searches, snippets and
+script filters. `launchers.yaml` only holds commands and scripts you add
+yourself, and many people never need it.
 
 You can override the location of `raffi.yaml` with the `-c` or `--configfile` flag. Raffi then looks for `launchers.yaml` in the same directory:
 
@@ -24,72 +30,88 @@ raffi --configfile /path/to/custom/raffi.yaml
 
 Raffi writes `raffi-schema.json` and `launchers-schema.json` next to your config so editors can validate both files as you type, and warns on stderr about unknown or invalid keys when it starts. Run `raffi --check-config` to validate them on demand. See [Validation](../../reference/yaml-schema/#validation) for details.
 
-## Basic Structure
+<Aside type="note">
+With no config file at all, Raffi mixes windows, system commands and other
+addons into the main list. Once a config file exists, the main list shows
+only your apps and entries until you set
+[`main_view`](../general-settings/#main-view).
+</Aside>
 
-`launchers.yaml` is a mapping of entry names to [entries](../entries/). `raffi.yaml` has two main sections:
+## raffi.yaml
 
-1. **General settings** - UI preferences, theme, fonts, window dimensions
-2. **Addons** - Optional features like script filters, web searches, text snippets
+`raffi.yaml` has two main sections:
+
+1. `general`: theme, fonts, window size, what the main list shows
+2. `addons`: turn addons on or off, change their keywords, and add web searches, snippets and script filters
 
 ### Minimal Example
 
-```yaml title="launchers.yaml"
-firefox:
-  binary: firefox
-  args: [--marionette]
-  icon: firefox
-  description: Firefox browser with marionette enabled
+```yaml title="raffi.yaml"
+general:
+  theme: dark
 ```
 
-### Complete Structure
+### A Fuller Example
 
 ```yaml title="raffi.yaml"
 version: 1
 
-# General settings (optional)
 general:
   theme: dark
   font_size: 20
-  window_width: 800
-  window_height: 600
+  main_view: [launchers, windows, browser_tabs, system, clipboard]
 
-# Addons (optional)
 addons:
-  script_filters:
-    - name: "Timezones"
-      keyword: "tz"
-      command: "batz"
-      args: ["-j"]
-
+  apps:
+    enabled: true
+  system:
+    trigger: power
   web_searches:
-    - name: "Google"
-      keyword: "g"
+    - name: Google
+      keyword: g
       url: "https://google.com/search?q={query}"
+  script_filters:
+    - name: Timezones
+      keyword: tz
+      command: batz
+      args: ["-j"]
 ```
+
+`apps` keeps installed applications in the list once you have entries of
+your own; without any entries they are listed anyway.
+
+## launchers.yaml
+
+`launchers.yaml` is a mapping of names to [custom entries](../entries/):
 
 ```yaml title="launchers.yaml"
-firefox:
+firefox_private:
   binary: firefox
-  description: "Firefox"
+  args: [--private-window]
   icon: firefox
-  args: ["--marionette"]
+  description: Firefox private window
 
-terminal:
-  binary: kitty
-  description: "Terminal"
-  icon: terminal
+backup:
+  script: |
+    rsync -a ~/Documents /mnt/backup/
+    notify-send "Raffi" "Backup done"
+  icon: drive-harddisk
+  description: Back up my documents
 ```
 
-### Launchers Inside raffi.yaml
+Raffi reads `launchers.yaml` when `raffi.yaml` is missing or has no `launchers:` section of its own. If `raffi.yaml` does define entries, those win and `launchers.yaml` is ignored with a warning.
 
-A single file still works. Put the entries under a `launchers:` key in `raffi.yaml`, indented one level. The snippets in these docs are written for `launchers.yaml`; to use one in `raffi.yaml`, nest it under `launchers:`:
+### Entries Inside raffi.yaml
+
+A single file still works. Put the entries under a `launchers:` key in `raffi.yaml`, indented one level. The entry snippets in these docs are written for `launchers.yaml`; to use one in `raffi.yaml`, nest it under `launchers:`:
 
 ```yaml title="raffi.yaml"
 version: 1
 
 launchers:
-  firefox:
+  firefox_private:
     binary: firefox
+    args: [--private-window]
     icon: firefox
 ```
 
@@ -99,17 +121,17 @@ launchers:
   <CardGrid>
     <a href="../general-settings/">
       <Card title="General Settings" icon="setting">
-        UI type, theme, fonts, and window settings
+        Theme, fonts, window size and what the main list shows
+      </Card>
+    </a>
+    <a href="../../reference/addon-configuration/">
+      <Card title="Addons" icon="puzzle">
+        Turn addons on or off, change keywords, add web searches and snippets
       </Card>
     </a>
     <a href="../entries/">
-      <Card title="Entries" icon="rocket">
-        Define launcher entries with binaries, scripts, and arguments
-      </Card>
-    </a>
-    <a href="../icons/">
-      <Card title="Icons" icon="star">
-        Icon caching, discovery, and path configuration
+      <Card title="Custom Entries" icon="rocket">
+        Your own commands, with arguments, icons and descriptions
       </Card>
     </a>
     <a href="../scripts/">
@@ -119,12 +141,12 @@ launchers:
     </a>
     <a href="../conditions/">
       <Card title="Conditions" icon="magnifier">
-        Conditional visibility based on environment or binary existence
+        Show an entry only when a program or variable is there
       </Card>
     </a>
-    <a href="../../reference/addon-configuration/">
-      <Card title="Addons" icon="puzzle">
-        Optional features like script filters, web searches, and text snippets
+    <a href="../icons/">
+      <Card title="Icons" icon="star">
+        Icon caching, discovery, and path configuration
       </Card>
     </a>
   </CardGrid>

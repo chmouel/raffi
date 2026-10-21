@@ -1,28 +1,26 @@
 ---
 title: Introduction
-description: A YAML-driven application launcher for Wayland with fuzzy search and built-in addons
+description: A keyboard-driven search box for your Wayland desktop
 ---
 
 import { Image } from 'astro:assets';
 import mainScreenshot from '../../assets/screenshots/main.png';
 
-Raffi is an application launcher for Wayland. You write down the programs,
-scripts and commands you use in a YAML file, and Raffi puts them one fuzzy
-search away. It is written in Rust, opens fast, and runs without a daemon or
-database.
+Raffi is a keyboard-driven search box for your Wayland desktop. From one
+place you can open apps, browse files, switch windows, paste from your
+clipboard history, fill in passwords, do sums and convert currencies. It is
+written in Rust, opens fast, and runs without a daemon or database.
 
 <Image src={mainScreenshot} alt="Raffi with the preview pane open" width={800} />
 
 ## What you can do with it
 
-Your launchers can carry arguments, icons and descriptions. They can run an
-inline script in Bash, Python or any other interpreter, and they can hide
-themselves unless a condition holds, such as a program being installed or an
-environment variable being set. With no config at all, Raffi lists the
-applications installed on your system.
+Raffi works as soon as it is installed. With no config, typing searches
+your installed applications, open windows and system commands in one list,
+along with browser tabs, media players and audio devices when the tools for
+them are set up.
 
-The same search box also reaches a set of addons. Some answer as soon as your
-query looks right:
+Some addons answer as soon as your query looks right:
 
 ```
 2 + 2 * 5
@@ -37,47 +35,46 @@ for the file browser, `clip ` for clipboard history, `win ` for open windows,
 snippets and script filters, each under a keyword you choose. Script filters
 use the Alfred JSON format, so any command that prints a list can feed Raffi.
 
+You can also add entries of your own: a command with arguments, an inline
+script in Bash, Python or any other interpreter, or an entry that only shows
+up when a program is installed.
+
 Press `Ctrl+/` or type `?` to see every keyword and shortcut your config
 turns on. When a list has more than one view, `Ctrl+Tab` switches between
 them.
 
-## A few examples
+## Making it yours
 
-A launcher with arguments:
+Settings live in `~/.config/raffi/raffi.yaml`. This one picks a theme,
+chooses what the main list shows as you type, keeps installed apps listed,
+and adds a Google search under `g`:
 
-```yaml
-firefox:
+```yaml title="raffi.yaml"
+general:
+  theme: dark
+  main_view: [launchers, windows, browser_tabs, system, clipboard]
+addons:
+  apps:
+    enabled: true
+  web_searches:
+    - name: Google
+      keyword: g
+      url: "https://google.com/search?q={query}"
+```
+
+Your own entries go in `~/.config/raffi/launchers.yaml`:
+
+```yaml title="launchers.yaml"
+firefox_private:
   binary: firefox
-  args: [--marionette]
+  args: [--private-window]
   icon: firefox
-  description: Firefox with marionette enabled
-```
-
-An inline Python script:
-
-```yaml
-hello_python:
-  binary: python3
-  script: |
-    import os
-    print("Hello from Python!")
-    print(os.environ)
-  description: Hello Python script
-  icon: script
-```
-
-An entry that only shows up in GNOME:
-
-```yaml
-gnome_app:
-  binary: gnome-tweaks
-  description: GNOME Tweaks
-  ifenveq: [DESKTOP_SESSION, GNOME]
+  description: Firefox private window
 ```
 
 ## Next steps
 
 [Install Raffi](installation/), then follow the [quick start](quickstart/) to
-write your first config and bind Raffi to a key. The
+bind it to a key and set it up. The
 [keyboard shortcuts](reference/keyboard-shortcuts/) page lists every key, and
 the Features section of the sidebar covers each addon.

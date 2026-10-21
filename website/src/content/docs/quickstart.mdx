@@ -1,6 +1,6 @@
 ---
 title: Quick Start
-description: Write your first launchers, bind Raffi to a key and try the addons
+description: Bind Raffi to a key, find your way around, try the addons and make it yours
 ---
 
 import { Aside, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
@@ -9,87 +9,10 @@ import keywordSuggestionScreenshot from '../../assets/screenshots/keyword-sugges
 import keywordHelpScreenshot from '../../assets/screenshots/keyword-help.png';
 import mainSourceScreenshot from '../../assets/screenshots/main-source.png';
 
-You can run `raffi` before writing any config. With no launchers defined, it
-lists the applications installed on your system. This page walks you through
-adding your own entries, binding Raffi to a key and trying a few addons.
-
-## Write your first launchers
-
-<Steps>
-1. Create the config folder:
-
-   ```bash
-   mkdir -p ~/.config/raffi
-   ```
-
-2. Create `~/.config/raffi/launchers.yaml`. Each top-level key is one entry:
-
-   ```yaml title="launchers.yaml"
-   firefox:
-     binary: firefox
-     icon: firefox
-     description: Firefox Web Browser
-
-   terminal:
-     binary: kitty
-     icon: kitty
-     description: Kitty Terminal
-
-   file_manager:
-     binary: nautilus
-     icon: folder
-     description: File Manager
-   ```
-
-   Swap in programs you have. Raffi hides an entry whose program it can't
-   find in your `PATH`.
-
-3. Run `raffi`, pick an entry and press Enter. Add `-p` to print the command
-   instead of running it, which is handy for checking your config.
-</Steps>
-
-## Run scripts
-
-An entry can carry a script and the program that runs it:
-
-<Tabs>
-<TabItem label="Bash">
-```yaml title="launchers.yaml"
-hello_script:
-  script: |
-    echo "Hello from Bash!"
-    notify-send "Raffi" "Script finished"
-  description: Hello Script
-  icon: script
-```
-</TabItem>
-<TabItem label="Python">
-```yaml title="launchers.yaml"
-check_disk:
-  binary: python3
-  script: |
-    import shutil
-    usage = shutil.disk_usage("/")
-    print(f"Disk usage: {usage.used / usage.total * 100:.1f}%")
-  description: Check Disk Usage
-  icon: drive-harddisk
-```
-</TabItem>
-<TabItem label="Node.js">
-```yaml title="launchers.yaml"
-node_example:
-  binary: node
-  script: |
-    const os = require('os');
-    console.log(`Hostname: ${os.hostname()}`);
-  description: System Info (Node)
-  icon: nodejs
-```
-</TabItem>
-</Tabs>
-
-Scripts without a `binary` run with Bash unless you change
-`default_script_shell`. See [Scripts](../configuration/scripts/) for more.
+You can run `raffi` before writing any config. With no config, typing
+searches your installed applications, open windows and system commands in one
+list. This page walks you through binding Raffi to a key, finding your way
+around, trying a few addons, and then setting it up the way you like.
 
 ## Bind it to a key
 
@@ -173,10 +96,27 @@ Type `/` or `~/` to browse files. Tab completes a path, Backspace after a
 `/` goes up a folder, Ctrl+H shows dotfiles, and Ctrl+Y copies the path. The
 preview pane shows the folder contents, images, PDFs and source code.
 
-Web searches are yours to define:
+The Features section of the sidebar covers the other addons, from the window
+switcher to password managers.
+
+## Make it yours
+
+Settings live in `~/.config/raffi/raffi.yaml`. Create the folder first:
+
+```bash
+mkdir -p ~/.config/raffi
+```
+
+This config picks a theme, chooses what the main list shows as you type,
+keeps installed apps listed, and adds two web searches:
 
 ```yaml title="raffi.yaml"
+general:
+  theme: dark
+  main_view: [launchers, windows, browser_tabs, system, clipboard]
 addons:
+  apps:
+    enabled: true
   web_searches:
     - name: Google
       keyword: g
@@ -189,10 +129,101 @@ addons:
 ```
 
 Then `g wayland protocol` or `wiki rust` opens the search in your browser.
-The Features section of the sidebar covers the other addons, from the window
-switcher to password managers.
 
-## More launcher ideas
+<Aside type="note">
+With no config file, Raffi mixes windows, system commands and other addons
+into the main list for you. Once you create a config file, the main list
+shows only your apps and entries until you set
+[`main_view`](../configuration/general-settings/#main-view) to the sources
+you want.
+</Aside>
+
+Every addon can be turned off, or given another keyword, under its own name
+in `addons`. For example, to free up `sys ` for something else:
+
+```yaml title="raffi.yaml"
+addons:
+  system:
+    enabled: false
+```
+
+The [general settings](../configuration/general-settings/) page covers fonts,
+window size and history, and [themes](../features/themes/) covers colors.
+
+## Add your own entries
+
+For commands Raffi doesn't know about, such as an app opened with particular
+arguments or a script you run often, add entries of your own.
+
+<Steps>
+1. Create `~/.config/raffi/launchers.yaml`. Each top-level key is one entry:
+
+   ```yaml title="launchers.yaml"
+   firefox_private:
+     binary: firefox
+     args: [--private-window]
+     icon: firefox
+     description: Firefox private window
+
+   notes:
+     binary: kitty
+     args: [nvim, ~/notes/todo.md]
+     icon: kitty
+     description: Open my todo list
+   ```
+
+   Swap in programs you have. Raffi hides an entry whose program it can't
+   find in your `PATH`. Installed apps stay in the list next to your entries
+   only while `addons.apps.enabled` is `true`, as in the config above.
+
+2. Run `raffi`, pick an entry and press Enter. Add `-p` to print the command
+   instead of running it, which is handy for checking your config.
+</Steps>
+
+### Run scripts
+
+An entry can carry a script and the program that runs it:
+
+<Tabs>
+<TabItem label="Bash">
+```yaml title="launchers.yaml"
+hello_script:
+  script: |
+    echo "Hello from Bash!"
+    notify-send "Raffi" "Script finished"
+  description: Hello Script
+  icon: script
+```
+</TabItem>
+<TabItem label="Python">
+```yaml title="launchers.yaml"
+check_disk:
+  binary: python3
+  script: |
+    import shutil
+    usage = shutil.disk_usage("/")
+    print(f"Disk usage: {usage.used / usage.total * 100:.1f}%")
+  description: Check Disk Usage
+  icon: drive-harddisk
+```
+</TabItem>
+<TabItem label="Node.js">
+```yaml title="launchers.yaml"
+node_example:
+  binary: node
+  script: |
+    const os = require('os');
+    console.log(`Hostname: ${os.hostname()}`);
+  description: System Info (Node)
+  icon: nodejs
+```
+</TabItem>
+</Tabs>
+
+Scripts without a `binary` run with Bash unless you change
+`default_script_shell`. See [Scripts](../configuration/scripts/) for more.
+
+### More ideas
 
 <details>
 <summary>Arguments</summary>

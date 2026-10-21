@@ -27,8 +27,8 @@ export default defineConfig({
           label: 'Configuration',
           items: [
             { label: 'Overview', slug: 'configuration/overview' },
-            { label: 'Launcher Entries', slug: 'configuration/entries' },
             { label: 'General Settings', slug: 'configuration/general-settings' },
+            { label: 'Custom Entries', slug: 'configuration/entries' },
             { label: 'Scripts', slug: 'configuration/scripts' },
             { label: 'Conditions', slug: 'configuration/conditions' },
             { label: 'Icons', slug: 'configuration/icons' },

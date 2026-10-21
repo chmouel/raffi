@@ -1,13 +1,13 @@
 ---
-title: Launcher Entries
-description: Define applications, commands, and scripts in your Raffi launcher
+title: Custom Entries
+description: Add your own commands and scripts to Raffi's list
 ---
 
 ## Overview
 
-Entries are the core of Raffi's configuration. Each entry represents an application, command, or script that appears in the launcher. Entries live in `~/.config/raffi/launchers.yaml`, where each top-level key is an entry. They can also go under a `launchers:` key in `raffi.yaml`, see [Configuration Files](../overview/#configuration-files).
+Custom entries are optional. Raffi already lists your installed applications and its addons; an entry adds something it can't find by itself, such as an app opened with particular arguments, a command, or an inline script. Entries live in `~/.config/raffi/launchers.yaml`, where each top-level key is an entry. They can also go under a `launchers:` key in `raffi.yaml`, see [Configuration Files](../overview/#configuration-files).
 
-You don't need an entry for every application: [Installed Apps](../../features/installed-apps/) lists the apps installed on your system next to your entries, leaving out those an entry already covers.
+Once you have entries, installed apps are only listed next to them when [`addons.apps.enabled`](../../features/installed-apps/) is `true`. Apps that an entry already covers are left out.
 
 ## Entry Structure
 

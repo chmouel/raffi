@@ -2,9 +2,9 @@
 
 # Raffi
 
-Raffi is an application launcher for Wayland. You list the programs, scripts and commands you use in a YAML file, give them icons and arguments, and Raffi puts them one fuzzy search away. It is written in Rust, starts fast, and needs no daemon or database.
+Raffi is a keyboard-driven search box for your Wayland desktop. From one place you can open apps, browse files, switch windows, paste from your clipboard history, fill in passwords, do sums, convert currencies and a lot more. It is written in Rust, starts fast, and needs no daemon or database.
 
-Beyond launching things, Raffi can do sums, convert currencies, browse files, switch windows, paste from your clipboard history, fill in passwords and a lot more, all from the same search box.
+It works as soon as it is installed. A YAML file lets you pick a theme, choose which addons are on, add web searches and snippets, and add commands or scripts of your own.
 
 ![Raffi with the preview pane open](website/src/assets/screenshots/main.png)
 
@@ -41,7 +41,7 @@ Prebuilt binaries are on the [releases page](https://github.com/chmouel/raffi/re
 
 ## Bind it to a key
 
-Run `raffi` and pick an entry. With no config yet, Raffi lists the applications installed on your system, so you can try it straight away.
+Run `raffi` and start typing. With no config yet, Raffi searches your installed applications, open windows and system commands in one list, so you can try it straight away.
 
 Most people bind it to a key in their compositor. For Sway:
 
@@ -62,7 +62,7 @@ The [Sway](https://chmouel.github.io/raffi/integration/sway/) and [Hyprland](htt
 
 ## Features
 
-Type to search your launchers, use the arrow keys to move, and press Enter. A preview pane on the right shows what the selected entry will do, and `Ctrl+P` hides or shows it. Press `Ctrl+/`, or type `?` on its own, to see every keyword and shortcut your config turns on. If you forget a keyword, type what you want, such as `volume` or `password`, and Raffi suggests the right one.
+Type to search, use the arrow keys to move, and press Enter. A preview pane on the right shows what the selected entry will do, and `Ctrl+P` hides or shows it. Press `Ctrl+/`, or type `?` on its own, to see every keyword and shortcut your config turns on. If you forget a keyword, type what you want, such as `volume` or `password`, and Raffi suggests the right one.
 
 Some lists have more than one view, and `Ctrl+Tab` always switches between them, with `Ctrl+Shift+Tab` going back. The footer tells you which view you are on. See [keyboard shortcuts](https://chmouel.github.io/raffi/reference/keyboard-shortcuts/) for the full list.
 
@@ -83,7 +83,7 @@ Search and pick:
 - Emoji and Nerd Font icons: `emoji `
 - [Clipboard history](https://chmouel.github.io/raffi/features/clipboard-history/) from CopyQ: `clip `
 - [Text snippets](https://chmouel.github.io/raffi/features/text-snippets/), [web searches](https://chmouel.github.io/raffi/features/web-search/) and [script filters](https://chmouel.github.io/raffi/features/script-filters/), each under a keyword you choose
-- [Installed apps](https://chmouel.github.io/raffi/features/installed-apps/) listed next to your own launchers
+- [Installed apps](https://chmouel.github.io/raffi/features/installed-apps/), with their actions such as opening a private window
 
 Control your desktop:
 
@@ -105,21 +105,38 @@ Passwords, copied or typed for you:
 
 You can change how Raffi looks with the built-in [themes](https://chmouel.github.io/raffi/features/themes/) or your own colors.
 
-If you already use [Fuzzel](https://codeberg.org/dnkl/fuzzel), Raffi can show your launchers there instead. See the [Fuzzel page](https://chmouel.github.io/raffi/integration/fuzzel/) for what that gives up.
+If you already use [Fuzzel](https://codeberg.org/dnkl/fuzzel), Raffi can show your apps and entries there instead. See the [Fuzzel page](https://chmouel.github.io/raffi/integration/fuzzel/) for what that gives up.
 
 ## Configuration
 
-Your launchers go in `~/.config/raffi/launchers.yaml` and your settings in `~/.config/raffi/raffi.yaml`. Neither file is required. A launcher looks like this:
+Raffi needs no config to start. When you want to change something, settings go in `~/.config/raffi/raffi.yaml`:
 
 ```yaml
-firefox:
-  binary: firefox
-  args: [--marionette]
-  icon: firefox
-  description: Firefox with marionette enabled
+general:
+  theme: dark
+  main_view: [launchers, windows, browser_tabs, system, clipboard]
+addons:
+  apps:
+    enabled: true
+  web_searches:
+    - name: Google
+      keyword: g
+      url: "https://google.com/search?q={query}"
 ```
 
-[`examples/raffi.yaml`](examples/raffi.yaml) shows every setting with a comment, and [`examples/launchers.yaml`](examples/launchers.yaml) has more launchers to copy from. The [configuration guide](https://chmouel.github.io/raffi/configuration/overview/) explains entries, scripts, conditions, icons and addon settings.
+`main_view` picks what shows up in the main list as you type. Once you have a config file, the main list shows only apps and your own entries unless you set it. `apps` keeps installed applications listed after you add entries of your own, and `web_searches` turns `g rust` into a Google search.
+
+Commands and scripts of your own go in `~/.config/raffi/launchers.yaml`:
+
+```yaml
+firefox_private:
+  binary: firefox
+  args: [--private-window]
+  icon: firefox
+  description: Firefox private window
+```
+
+[`examples/raffi.yaml`](examples/raffi.yaml) shows every setting with a comment, and [`examples/launchers.yaml`](examples/launchers.yaml) has entries to copy from. The [configuration guide](https://chmouel.github.io/raffi/configuration/overview/) covers settings, addons and custom entries.
 
 ## Contributing
 
