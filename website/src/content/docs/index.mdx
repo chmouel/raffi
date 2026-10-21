@@ -1,154 +1,83 @@
 ---
 title: Introduction
-description: A YAML-based application launcher for Wayland with fuzzy search and powerful addons
+description: A YAML-driven application launcher for Wayland with fuzzy search and built-in addons
 ---
 
-import { Aside } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import mainScreenshot from '../../assets/screenshots/main.png';
 
-Raffi is a flexible application launcher designed for Wayland environments that lets you define commands, scripts, and workflows in a simple YAML configuration file.
+Raffi is an application launcher for Wayland. You write down the programs,
+scripts and commands you use in a YAML file, and Raffi puts them one fuzzy
+search away. It is written in Rust, opens fast, and runs without a daemon or
+database.
 
-<Image src={mainScreenshot} alt="Raffi launcher screenshot" width={800} />
+<Image src={mainScreenshot} alt="Raffi with the preview pane open" width={800} />
 
-## What is Raffi?
+## What you can do with it
 
-Raffi is an application launcher with its own built-in native interface by default. The deprecated external Fuzzel interface remains available as a legacy option. Raffi provides a powerful way to launch applications, run scripts, and execute commands with support for:
+Your launchers can carry arguments, icons and descriptions. They can run an
+inline script in Bash, Python or any other interpreter, and they can hide
+themselves unless a condition holds, such as a program being installed or an
+environment variable being set. With no config at all, Raffi lists the
+applications installed on your system.
 
-- **YAML-based configuration** - Define all your commands and workflows in a simple, readable format
-- **Icon support** - Visual application identification with cached icon paths
-- **Script execution** - Run inline scripts with configurable interpreters (Bash, Python, etc.)
-- **Conditional visibility** - Show/hide entries based on environment variables or binary availability
-- **Native UI by default** - Use the built-in interface, with the legacy Fuzzel backend available for existing setups
-
-## Key Features
-
-- **Native Interface by Default** — Use the built-in iced-based GUI with fuzzy search and theming; the deprecated Fuzzel integration remains available for existing setups.
-- **YAML Configuration** — Define applications, scripts, and commands in `~/.config/raffi/launchers.yaml` with support for arguments, icons, and conditional display.
-- **Native Interface Addons** — Built-in calculator, currency converter, file browser, web searches, text snippets, and script filters for extended functionality.
-- **Script Support** — Execute inline scripts with any interpreter (Bash, Python, Node.js) directly from the launcher with environment variable expansion.
-
-## Native Interface Addons
-
-When using the native UI mode (`-u native`), Raffi includes several powerful addons:
-
-### Calculator
-
-Evaluate mathematical expressions as you type with support for standard operators and functions like `sqrt`, `sin`, `cos`, `log`, and more. Results can be copied to clipboard with Enter.
+The same search box also reaches a set of addons. Some answer as soon as your
+query looks right:
 
 ```
 2 + 2 * 5
-sqrt(144)
-sin(90) * cos(45)
-```
-
-### Currency Converter
-
-Convert between currencies with real-time exchange rates from the Frankfurter API (cached for one hour).
-
-```
 $10 to eur
-$50 gbp to usd
-$100eur to jpy
+10 km to mi
+time tokyo
 ```
 
-### File Browser
+Others start with a keyword and give you a list to pick from: `/` or `~/`
+for the file browser, `clip ` for clipboard history, `win ` for open windows,
+`pass ` for passwords, and many more. You can add your own web searches, text
+snippets and script filters, each under a keyword you choose. Script filters
+use the Alfred JSON format, so any command that prints a list can feed Raffi.
 
-Navigate your filesystem directly in the launcher. Type `/` for root or `~` for home directory. Select files to open with `xdg-open`, use Ctrl+Enter for the secondary action (copy path by default), or Ctrl+Y to copy the path regardless of configured actions. Ctrl+Alt+Y copies a supported image file to the system clipboard.
+Press `Ctrl+/` or type `?` to see every keyword and shortcut your config
+turns on. When a list has more than one view, `Ctrl+Tab` switches between
+them.
 
-### Script Filters
+## A few examples
 
-Extend Raffi with dynamic results from external commands using the Alfred Script Filter JSON format. Perfect for custom workflows like PR browsers, password managers, or any data source.
+A launcher with arguments:
 
-### Web Searches
-
-Quick web searches via URL templates. Type a keyword followed by your query to search Google, DuckDuckGo, GitHub, Wikipedia, and more.
-
+```yaml
+firefox:
+  binary: firefox
+  args: [--marionette]
+  icon: firefox
+  description: Firefox with marionette enabled
 ```
-g rust async traits
-gh user/repo
-wiki wayland
+
+An inline Python script:
+
+```yaml
+hello_python:
+  binary: python3
+  script: |
+    import os
+    print("Hello from Python!")
+    print(os.environ)
+  description: Hello Python script
+  icon: script
 ```
 
-### Text Snippets
+An entry that only shows up in GNOME:
 
-Store and quickly insert reusable text snippets from inline config, YAML files, directories, or command output.
+```yaml
+gnome_app:
+  binary: gnome-tweaks
+  description: GNOME Tweaks
+  ifenveq: [DESKTOP_SESSION, GNOME]
+```
 
-## Use Cases
+## Next steps
 
-
-  <details>
-<summary>Application Launcher</summary>
-
-    Launch applications with custom arguments and environment variables. Define entries only for binaries that exist in your PATH.
-
-    ```yaml
-    firefox:
-      binary: firefox
-      args: [--marionette]
-      icon: firefox
-      description: Firefox browser with marionette enabled
-    ```
-  </details>
-
-  <details>
-<summary>Script Execution</summary>
-
-    Run inline scripts with any interpreter directly from the launcher.
-
-    ```yaml
-    hello_python:
-      binary: python3
-      script: |
-        import os
-        print("Hello from Python!")
-        print(os.environ)
-      description: "Hello Python script"
-      icon: "script"
-    ```
-  </details>
-
-  <details>
-<summary>Conditional Workflows</summary>
-
-    Show entries only when specific conditions are met.
-
-    ```yaml
-    gnome_app:
-      binary: gnome-tweaks
-      description: GNOME Tweaks
-      ifenveq: [DESKTOP_SESSION, GNOME]
-    ```
-  </details>
-
-  <details>
-<summary>Window Manager Integration</summary>
-
-    Integrate with Sway, Hyprland, or other Wayland compositors for seamless launching.
-
-    ```ini
-    # Sway
-    bindsym $super+Space exec cmd=$(raffi -p) && [ -n "$cmd" ] && swaymsg exec -- "$cmd"
-
-    # Hyprland
-    bind = $super, R, exec, (val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val")
-    ```
-  </details>
-
-
-## Why Raffi?
-
-- **Lightweight** - 1.1 MB binary when built without native UI, ~15 MB with GUI support
-- **Flexible** - Runs with the built-in interface by default, with legacy Fuzzel support available
-- **Extensible** - Script filters and addons for custom workflows
-- **Wayland-first** - Designed specifically for modern Wayland compositors
-- **Simple configuration** - Human-readable YAML with path expansion and environment variables
-
-<Aside type="note">
-  For a legacy Fuzzel-only build, disable default features to get a significantly smaller binary: `cargo build --release --no-default-features`
-</Aside>
-
-## Next Steps
-
-- [Install Raffi](installation/) — Get started with installation via cargo, AUR, Homebrew, or build from source
-- [Quick Start](quickstart/) — Configure and launch your first application with Raffi
+[Install Raffi](installation/), then follow the [quick start](quickstart/) to
+write your first config and bind Raffi to a key. The
+[keyboard shortcuts](reference/keyboard-shortcuts/) page lists every key, and
+the Features section of the sidebar covers each addon.

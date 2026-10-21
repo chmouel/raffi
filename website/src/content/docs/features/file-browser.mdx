@@ -14,11 +14,7 @@ import richPreviewScreenshot from '../../../assets/screenshots/file-browser-rich
 import pdfPreviewScreenshot from '../../../assets/screenshots/file-browser-pdf.png';
 import filterScreenshot from '../../../assets/screenshots/file-browser-filter.png';
 
-The native interface includes a built-in file browser for quick filesystem navigation using keyboard shortcuts.
-
-<Aside type="note">
-The file browser is only available in **native mode**. It is not available when using Fuzzel mode.
-</Aside>
+Raffi includes a built-in file browser for quick filesystem navigation using keyboard shortcuts.
 
 ## Overview
 
@@ -296,7 +292,7 @@ A quick press and release on a row still activates it like **Enter** would.
 The drag offers the file as `text/uri-list` (what file managers expect) and as plain UTF-8 text of the full path (what terminals and most editors take), so text targets that are not drop-aware may still receive the path if they accept text drops.
 
 <Aside type="note">
-Dragging out of raffi requires the native Wayland interface (the default). It does not work under XWayland, X11, or in Fuzzel mode.
+Dragging out of Raffi needs it to run as a Wayland client. It does not work under XWayland or X11.
 </Aside>
 
 <Aside type="note">
@@ -371,7 +367,7 @@ Reverse the order of whichever `sort` mode is active: Z to A for `name`, oldest 
 
 **`show`** `string` (default: `all`)
 
-Which entries the listing starts with. Press Ctrl+Tab to cycle through the modes while browsing (Ctrl+Shift+Tab goes back); the hint bar shows the current one, and Raffi keeps it until it closes.
+Which entries the listing starts with. Press Ctrl+Tab to cycle through the modes while browsing (Ctrl+Shift+Tab goes back); the footer shows the current one, and Raffi keeps it until it closes. [More on Ctrl+Tab](../../reference/keyboard-shortcuts/#switching-views-with-ctrltab).
 
 - `all`: directories and files
 - `files`: files only

@@ -67,19 +67,19 @@ When `true`, hides the entry from the launcher.
 
 **`show_preview`** `boolean` (default: `false`)
 
-When `true`, the native UI shows the right-hand preview pane for this entry (full command or script, conditions, launch stats) even when `general.show_preview` is off. Set to `false` to never preview it.
+When `true`, Raffi shows the right-hand preview pane for this entry (full command or script, conditions, launch stats) even when `general.show_preview` is off. Set to `false` to never preview it.
 
 
 **`close_on_action`** `boolean` (default: `general.close_on_action`, else `true`)
 
-Whether the native UI closes after launching this entry. Set `close_on_action: false` to keep Raffi open after running this entry, or `true` to close even when `general.close_on_action` is `false` (or `--keep-open` is passed).
+Whether Raffi closes after launching this entry. Set `close_on_action: false` to keep Raffi open after running this entry, or `true` to close even when `general.close_on_action` is `false` (or `--keep-open` is passed).
 
 
-**`alias`** `string` (native UI only)
+**`alias`** `string`
 
 Turns the entry into a shortcut for an internal command. Picking it types the alias into the search box, as if you had entered it yourself, and you carry on from there; nothing runs until you choose a result. Any trigger works: script filters, addons such as `audio`, web searches, snippets, and so on.
 
-  `alias` cannot be combined with `binary`, `script` or `args`; such entries are skipped with a warning. Without a `description`, the alias text is shown. The Fuzzel UI hides alias entries.
+  `alias` cannot be combined with `binary`, `script` or `args`; such entries are skipped with a warning. Without a `description`, the alias text is shown.
 
 
 **`keyword`** `string` (requires `alias`)

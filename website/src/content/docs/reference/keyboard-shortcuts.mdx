@@ -1,0 +1,80 @@
+---
+title: Keyboard Shortcuts
+description: Every key Raffi understands, and how Ctrl+Tab switches views
+---
+
+import { Image } from 'astro:assets';
+import mainSourceScreenshot from '../../../assets/screenshots/main-source.png';
+import keywordHelpScreenshot from '../../../assets/screenshots/keyword-help.png';
+import keywordShortcutScreenshot from '../../../assets/screenshots/keyword-help-shortcuts.png';
+
+You can drive Raffi from the keyboard alone. If you forget a key, press
+**Ctrl+/** or type `?` on its own, and Raffi lists the keywords and shortcuts
+your config turns on. Typing narrows the list.
+
+<Image src={keywordHelpScreenshot} alt="Keyword and shortcut help list" width={800} />
+
+## Everywhere
+
+| Key | What it does |
+| --- | --- |
+| **Up** / **Down** | Move through the results |
+| **Enter** | Launch the selected entry, or start the addon whose keyword is selected |
+| **Ctrl+Enter** | Run the addon's second action, such as typing a password or closing a browser tab |
+| **Tab** | Complete the selected keyword or file path |
+| **Ctrl+Tab** / **Ctrl+Shift+Tab** | Switch to the next or previous view (see below) |
+| **Alt+P** / **Alt+N** | Go back and forth through what you searched before |
+| **Ctrl+P** | Show or hide the preview pane on the right |
+| **Ctrl+J** / **Ctrl+K** | Scroll the preview pane down or up |
+| **Ctrl+R** | Reload the current list |
+| **Ctrl+/**, or `?` typed alone | Open the help list. Escape closes it and puts your search back. If one of your keywords is `?`, use Ctrl+/ |
+| **Escape** | Close the help list, or close Raffi |
+
+## Switching views with Ctrl+Tab
+
+Wherever a list has more than one view, **Ctrl+Tab** moves to the next one
+and **Ctrl+Shift+Tab** goes back. The footer shows the name of the view
+you are on. Raffi uses this one key for every view switch, and no addon
+adds a key of its own for it.
+
+| Where | Views, in order |
+| --- | --- |
+| Main list, when [`main_view`](../../configuration/general-settings/#main-view) is set | All, then each source in the order you listed them (for example Launchers, Windows, Tabs), then All again |
+| [Clipboard history](../../features/clipboard-history/) | All, Images, URLs |
+| [File browser](../../features/file-browser/) | All, Files, Directories |
+| [Slack](../../features/slack/) | Home, Unread, People |
+| [Audio switcher](../../features/audio-switcher/) | All, Outputs, Inputs |
+
+In the help list, Ctrl+Tab completes the selected keyword, like Tab.
+
+<Image src={mainSourceScreenshot} alt="Main list narrowed to Launchers with Ctrl+Tab" width={800} />
+
+With `main_view` set and an empty search, **Left** and **Right** move along
+the row of addon chips at the top, and Enter starts the one you picked.
+
+## File browser
+
+| Key | What it does |
+| --- | --- |
+| **Ctrl+H** | Show or hide dotfiles |
+| **Ctrl+S** | Sort by name, then modified date, then created date |
+| **Ctrl+O** | Open the selection with `xdg-open` |
+| **Ctrl+B** | Open the folder in your file manager with the entry selected |
+| **Ctrl+Y** | Copy the path |
+| **Ctrl+Alt+Y** | Copy the image itself |
+| **Backspace** | When the path ends with `/`, go up one folder |
+| `~/` or `/` after a `/` | Start the path again from your home folder or the root |
+
+The last two rows come from the file browser's
+[`fido_style`](../../features/file-browser/#configuration-options) option,
+which is on by default.
+
+## Clipboard and passwords
+
+| Key | What it does |
+| --- | --- |
+| **Ctrl+D** | Delete the selected item from the clipboard history |
+| **Ctrl+U** | Copy the username of a password entry |
+| **Ctrl+O** | Copy the current one-time code of a password entry |
+
+<Image src={keywordShortcutScreenshot} alt="Help list filtered to the preview shortcuts" width={800} />

@@ -20,7 +20,7 @@ Words after the keyword filter the rows by action or player name, so
 only Spotify.
 
 <Aside type="note">
-Media controls are only available in native mode and need
+Media controls need
 [playerctl](https://github.com/altdesktop/playerctl), which talks to any
 player supporting MPRIS. They are on by default. When `playerctl` is not
 installed the list shows "playerctl not found", and with no player running
@@ -43,7 +43,7 @@ To open the controls from a key binding, pass the keyword as the initial
 query:
 
 ```sh
-raffi -u native -i "media "
+raffi -i "media "
 ```
 
 ## Configuration

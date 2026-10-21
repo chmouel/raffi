@@ -33,7 +33,7 @@ in the main list does the same. A bare number there is left to the
 calculator.
 
 <Aside type="note">
-The audio switcher is only available in native mode and needs `pactl`,
+The audio switcher needs `pactl`,
 which works with PulseAudio and with PipeWire through `pipewire-pulse`. It is
 on by default. When `pactl` is not installed the list shows "pactl not
 found". When the sound server can't be reached, an error row says so.
@@ -45,6 +45,9 @@ found". When the sound server can't be reached, an error row says so.
 | Ctrl+Enter | Mute or unmute the selected device         |
 | Ctrl+Tab   | Show all, only outputs or only inputs      |
 
+Ctrl+Shift+Tab goes the other way, and the footer shows the current view.
+[More on Ctrl+Tab](../../reference/keyboard-shortcuts/#switching-views-with-ctrltab).
+
 Raffi stays open after an action and refreshes the list, keeping the same
 device selected. When an action fails, an error row appears at the top of the
 list. Set `close_on_action: true` to close Raffi after each action instead.
@@ -55,7 +58,7 @@ typed in this mode are not saved in the search history.
 To open the list from a key binding, pass the keyword as the initial query:
 
 ```sh
-raffi -u native -i "audio "
+raffi -i "audio "
 ```
 
 ## Configuration

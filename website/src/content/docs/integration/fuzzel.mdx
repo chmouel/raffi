@@ -1,23 +1,95 @@
 ---
-title: Legacy Fuzzel Integration
-description: Configure the deprecated Fuzzel interface for Raffi
+title: Fuzzel
+description: Show your Raffi entries in Fuzzel instead of Raffi's own window
 ---
 
-Raffi's built-in native interface is the default and recommended UI. The
-external Fuzzel interface is deprecated but remains available as a legacy
-option for existing setups. Select it with `-u fuzzel` or
-`general.ui_type: fuzzel`, then customize its appearance and behavior through
-Fuzzel's configuration file.
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import fuzzelScreenshot from '../../../assets/screenshots/fuzzel-mode.png';
 
-## Configuration File
+Raffi can hand its list of entries to [Fuzzel](https://codeberg.org/dnkl/fuzzel)
+and let Fuzzel draw the menu. This is a legacy option kept for setups that
+already rely on it. Fuzzel shows your launchers with their icons and
+descriptions, and Raffi runs whatever you pick.
 
-Fuzzel is configured via `~/.config/fuzzel/fuzzel.ini`.
+<Image src={fuzzelScreenshot} alt="Fuzzel listing Raffi launchers" width={800} />
 
-For complete configuration options, refer to the [Fuzzel manual](https://man.archlinux.org/man/fuzzel.ini.5.en).
+## Turning it on
 
-## Example Configuration
+<Tabs>
+<TabItem label="Command line">
+```bash
+raffi -u fuzzel
+```
+</TabItem>
+<TabItem label="raffi.yaml">
+```yaml
+general:
+  ui_type: fuzzel
+```
+</TabItem>
+</Tabs>
 
-Here's a complete example configuration optimized for Raffi:
+Fuzzel needs to be installed and in your `PATH`:
+
+```bash
+# Arch Linux
+sudo pacman -S fuzzel
+
+# Debian and Ubuntu
+sudo apt install fuzzel
+
+# Fedora
+sudo dnf install fuzzel
+```
+
+## What you lose
+
+Fuzzel only shows a flat list, so everything that needs Raffi's own window
+is left out:
+
+- the addons (calculator, file browser, clipboard history, passwords, Slack and the rest)
+- the preview pane, keyword help and keyboard shortcuts
+- themes, opacity and font settings from `raffi.yaml`
+- `main_view` and `fallbacks`, which Raffi ignores with a warning
+- launchers that use `alias`, which are hidden
+
+## Which one starts by default
+
+The standard build always opens Raffi's own window, even when Fuzzel is
+installed. Fuzzel is used only when you ask for it, or when you run a
+Fuzzel-only build.
+
+## Fuzzel-only builds
+
+If Fuzzel is all you need, you can use a much smaller binary that leaves out
+Raffi's window and its addons. Linux x86_64 releases include one as
+`raffi-fuzzel-only_<version>_Linux_x86_64.tar.gz`. To build it yourself:
+
+```bash
+cargo build --release --no-default-features
+```
+
+This build starts Fuzzel by default. It stops with an error when Fuzzel is
+missing, or when your config sets `main_view` or `fallbacks`, since Fuzzel
+can't show them. Pass `-u fuzzel` or set `ui_type: fuzzel` to start it anyway
+and ignore those settings. The build also skips config checking: `--check-config` is unavailable and
+unknown keys in your config produce no warning. Add
+`--features config-validation` to the build command to keep the checks.
+
+A minimal `raffi.yaml` for Fuzzel:
+
+```yaml
+general:
+  ui_type: fuzzel
+  no_icons: true
+```
+
+## Styling Fuzzel
+
+Fuzzel reads its look from `~/.config/fuzzel/fuzzel.ini`, and Raffi's theme
+settings have no effect on it. The [fuzzel.ini manual](https://man.archlinux.org/man/fuzzel.ini.5.en)
+lists every option. This example works well with Raffi:
 
 ```ini
 dpi-aware=yes
@@ -39,54 +111,36 @@ selection-text=f8f8f2ff
 border=bd93f9ff
 ```
 
-## Configuration Options
-
-### General Settings
-
-| Option | Description | Example |
-|--------|-------------|----------|
-| `dpi-aware` | Scale UI based on DPI | `yes` or `no` |
+| Option | Effect | Example |
+|--------|--------|---------|
+| `dpi-aware` | Scale with the screen's DPI | `yes` or `no` |
 | `font` | Font family and size | `RobotoMonoNerdFont-Thin:size=16` |
-| `terminal` | Terminal emulator for terminal apps | `kitty`, `alacritty`, `foot` |
-| `width` | Launcher width as percentage of screen | `50` (for 50%) |
-| `layer` | Wayland layer to display on | `overlay`, `top`, `normal` |
-| `exit-on-keyboard-focus-loss` | Close when focus is lost | `yes` or `no` |
-| `inner-pad` | Internal padding in pixels | `15` |
-| `fields` | Search fields for matching | `filename,name` |
+| `terminal` | Terminal for entries that run in one | `kitty`, `alacritty`, `foot` |
+| `width` | Width in characters | `50` |
+| `layer` | Wayland layer to draw on | `overlay`, `top` |
+| `exit-on-keyboard-focus-loss` | Close when another window takes focus | `yes` or `no` |
+| `inner-pad` | Padding inside the window, in pixels | `15` |
+| `fields` | Fields that searching matches | `filename,name` |
 
-### Color Settings
+Colors go in the `[colors]` section as 8-digit hex values (`RRGGBBAA`):
 
-Colors are defined in the `[colors]` section using 8-digit hex values (RRGGBBAA):
+| Option | Colors |
+|--------|--------|
+| `background` | Window background |
+| `text` | Text |
+| `match` | Matched characters |
+| `selection` | Selected row background |
+| `selection-text` | Selected row text |
+| `selection-match` | Matched characters in the selected row |
+| `border` | Window border |
 
-| Option | Description |
-|--------|-------------|
-| `background` | Main background color |
-| `text` | Default text color |
-| `match` | Color for matched search characters |
-| `selection` | Background color of selected item |
-| `selection-text` | Text color of selected item |
-| `selection-match` | Color for matched characters in selection |
-| `border` | Window border color |
+### Color schemes
 
-## Color Schemes
+The example above uses Dracula. Swap in one of these `[colors]` sections for
+another look.
 
-### Dracula Theme
-
-The example above uses the Dracula color scheme:
-
-```ini
-[colors]
-background=282a36ff
-text=f8f8f2ff
-match=8be9fdff
-selection-match=8be9fdff
-selection=44475add
-selection-text=f8f8f2ff
-border=bd93f9ff
-```
-
-### Catppuccin Mocha
-
+<Tabs>
+<TabItem label="Catppuccin Mocha">
 ```ini
 [colors]
 background=1e1e2eff
@@ -97,9 +151,8 @@ selection-text=cdd6f4ff
 selection-match=89dcebff
 border=b4befeff
 ```
-
-### Nord
-
+</TabItem>
+<TabItem label="Nord">
 ```ini
 [colors]
 background=2e3440ff
@@ -110,9 +163,8 @@ selection-text=eceff4ff
 selection-match=8fbcbbff
 border=5e81acff
 ```
-
-### Gruvbox Dark
-
+</TabItem>
+<TabItem label="Gruvbox Dark">
 ```ini
 [colors]
 background=282828ff
@@ -123,41 +175,11 @@ selection-text=fbf1c7ff
 selection-match=fe8019ff
 border=d65d0eff
 ```
+</TabItem>
+</Tabs>
 
-## Tips
-
-### Performance
-
-- Set `exit-on-keyboard-focus-loss=no` to prevent accidental closes
-- Use a monospace font for better alignment of application names
-- Lower `inner-pad` values reduce visual clutter
-
-### Visual Consistency
-
-- Match Fuzzel colors to your terminal or system theme
-- Use Nerd Fonts for icon support in application names
-- Set `layer=overlay` to ensure Fuzzel appears above all windows
-
-### Search Behavior
-
-- `fields=filename,name` searches both the executable name and description
-- Add `fields=filename,name,comment` to also search desktop file comments
-
-## Installation
-
-If you don't have Fuzzel installed:
-
-```bash
-# Arch Linux
-sudo pacman -S fuzzel
-
-# Ubuntu/Debian (may need to add repository)
-sudo apt install fuzzel
-
-# Fedora
-sudo dnf install fuzzel
-```
-
-## Recommended: Native UI
-
-Raffi includes a built-in native interface by default. See the [UI modes guide](../../features/ui-modes/) for details.
+<Aside type="tip">
+`layer=overlay` keeps Fuzzel above fullscreen windows, and
+`exit-on-keyboard-focus-loss=no` keeps it open when it loses focus. Add
+`comment` to `fields` if you also want to search desktop file comments.
+</Aside>

@@ -4,6 +4,9 @@ import starlight from '@astrojs/starlight';
 export default defineConfig({
   site: 'https://chmouel.github.io',
   base: '/raffi',
+  redirects: {
+    '/features/ui-modes': '/raffi/reference/keyboard-shortcuts/',
+  },
   integrations: [
     starlight({
       title: 'Raffi',
@@ -34,7 +37,6 @@ export default defineConfig({
         {
           label: 'Features',
           items: [
-            { label: 'UI Modes', slug: 'features/ui-modes' },
             { label: 'Audio Switcher', slug: 'features/audio-switcher' },
             { label: 'Bitwarden', slug: 'features/bitwarden' },
             { label: 'Bluetooth', slug: 'features/bluetooth' },
@@ -75,6 +77,7 @@ export default defineConfig({
             { label: 'CLI Options', slug: 'reference/cli-options' },
             { label: 'YAML Schema', slug: 'reference/yaml-schema' },
             { label: 'Addon Configuration', slug: 'reference/addon-configuration' },
+            { label: 'Keyboard Shortcuts', slug: 'reference/keyboard-shortcuts' },
           ],
         },
       ],

@@ -46,7 +46,7 @@ Override any YAML configuration setting from the command line.
 
 **`--keep-open`** `boolean` (default: `false`)
 
-Keep the Raffi window open after executing an action (shorthand for `-o general.close_on_action=false`). Individual addons or launchers can still override this via `-o addons.<name>.close_on_action=true`. Native UI only.
+Keep the Raffi window open after executing an action (shorthand for `-o general.close_on_action=false`). Individual addons or launchers can still override this via `-o addons.<name>.close_on_action=true`.
 
   ```bash
   raffi --keep-open
@@ -105,26 +105,21 @@ With `--install-browser-host`, replace manifests Raffi did not install, such as 
 
 ## UI Options
 
-**`-u, --ui-type`** `string` (default: `native` in standard builds; `fuzzel` in Fuzzel-only builds)
+**`-u, --ui-type`** `string`
 
-Select the user interface backend. Native is the default and recommended option
-in standard builds; Fuzzel is a deprecated legacy backend.
-
-  Valid values:
-
-- `fuzzel` - Uses the deprecated external Fuzzel launcher (requires Fuzzel to be installed)
-- `native` - Uses the built-in iced-based graphical interface (requires build with `wayland` feature)
+By default Raffi opens its own window. Pass `fuzzel` to show your entries in
+[Fuzzel](../../integration/fuzzel/) instead, a legacy option with fewer features.
 
   ```bash
-  raffi -u native
+  raffi -u fuzzel
   ```
 
 **`--app-name`** `string` (default: `com.chmouel.raffi`)
 
-Set the application ID reported for the native window on Linux. This is useful for targeting the window with compositor or window-manager rules. It has no effect when using Fuzzel.
+Set the application ID reported for Raffi's window on Linux. This is useful for targeting the window with compositor or window-manager rules.
 
   ```bash
-  raffi -u native --app-name org.example.raffi
+  raffi --app-name org.example.raffi
   ```
 
 
@@ -143,16 +138,16 @@ Disable icon loading for faster startup.
 
 Pre-fill the search field with an initial query.
 
-  Only works in native UI mode. Useful for launching Raffi with a specific search term already entered.
+  Useful for launching Raffi with a specific search term already entered.
 
   Addon keywords need their trailing space here too, so use `-i "sn "` to open a
   snippet source directly.
 
-  In native mode, opening help temporarily clears the initial query so all help
+  Opening help temporarily clears the initial query so all help
   entries are visible. Closing help restores it.
 
   ```bash
-  raffi -u native -i firefox
+  raffi -i firefox
   ```
 
 **`-1, --select-1`** `boolean` (default: `false`)
@@ -160,7 +155,7 @@ Pre-fill the search field with an initial query.
 With a non-empty `--initial-query`, automatically activate the only selectable
 result after its results finish loading. The option applies only to the
 initial query; typing or refining the query later does not trigger automatic
-activation. Native UI only.
+activation.
 
   ```bash
   raffi -1 -i firefox
@@ -169,7 +164,7 @@ activation. Native UI only.
 
 **`-t, --theme`** `string` (default: `dark`)
 
-Select the color theme for the native UI.
+Select the color theme.
 
   Valid values:
 
@@ -184,18 +179,16 @@ Select the color theme for the native UI.
 - `rose-pine` / `rosepine` - Rosé Pine dark theme
 - `kanagawa` - Kanagawa Wave dark theme
 
-  Only affects native UI mode.
-
   ```bash
-  raffi -u native -t tokyo-night
+  raffi -t tokyo-night
   ```
 
 **`--opacity`** `number` (default: `0.95`)
 
-Opacity of the native UI backgrounds, from `0.0` (see-through) to `1.0` (solid). Text and icons stay opaque. Overrides `general.opacity`. Below `1`, the default `renderer: auto` draws on the GPU, which transparency needs. See [Transparency and Blur](../../features/themes/#transparency-and-blur).
+Opacity of the window backgrounds, from `0.0` (see-through) to `1.0` (solid). Text and icons stay opaque. Overrides `general.opacity`. Below `1`, the default `renderer: auto` draws on the GPU, which transparency needs. See [Transparency and Blur](../../features/themes/#transparency-and-blur).
 
   ```bash
-  raffi -u native --opacity 0.7
+  raffi --opacity 0.7
   ```
 
 ## Execution Options
@@ -275,12 +268,12 @@ Use a custom config file:
 raffi --configfile ~/.config/work/raffi.yaml
 ```
 
-### Native UI with Light Theme
+### Light Theme
 
-Launch the native UI with light theme and no icons:
+Launch with the light theme and no icons:
 
 ```bash
-raffi -u native -t light -I
+raffi -t light -I
 ```
 
 ### Print-Only Mode
@@ -296,7 +289,7 @@ raffi -p
 Launch with an initial search query:
 
 ```bash
-raffi -u native -i "screenshot"
+raffi -i "screenshot"
 ```
 
 ### Refresh Icons and Use Custom Shell

@@ -1,78 +1,49 @@
 <img src="assets/logo.png" alt="Raffi logo" width="120" align="right"/>
 
-# Raffi Application Launcher
+# Raffi
 
-Raffi is an application launcher for Wayland. You define commands and scripts in a YAML file, with icons, arguments, conditions for when an entry shows up, and the interpreter each script runs with. Raffi is based on Rust and is fast, lightweight and secure and works without a server or a DB. It has a native interface with fuzzy search, keyboard navigation, themes and a preview pane. It also has a legacy Fuzzel interface for simplier workflow.
+Raffi is an application launcher for Wayland. You list the programs, scripts and commands you use in a YAML file, give them icons and arguments, and Raffi puts them one fuzzy search away. It is written in Rust, starts fast, and needs no daemon or database.
 
-## Documentation
+Beyond launching things, Raffi can do sums, convert currencies, browse files, switch windows, paste from your clipboard history, fill in passwords and a lot more, all from the same search box.
 
-The full documentation is at <https://chmouel.github.io/raffi/>. Good places to start:
+![Raffi with the preview pane open](website/src/assets/screenshots/main.png)
 
-- [Installation](https://chmouel.github.io/raffi/installation/)
-- [Quick start](https://chmouel.github.io/raffi/quickstart/)
-- [Configuration overview](https://chmouel.github.io/raffi/configuration/overview/)
-- [CLI options](https://chmouel.github.io/raffi/reference/cli-options/)
-
-## Screenshot
-
-![Raffi native launcher with right-hand preview pane](website/src/assets/screenshots/main.png)
-
-*See more screenshots [below](#screenshots)*
+The full documentation lives at <https://chmouel.github.io/raffi/>. More screenshots are [further down](#screenshots).
 
 ## Installation
 
-Prebuilt binaries and packages are on the [GitHub releases page](https://github.com/chmouel/raffi/releases). The standard release assets use the native interface. Linux x86_64 releases also include a smaller Fuzzel-only archive; it requires Fuzzel, and config validation is disabled (`--check-config` reports that it is unavailable, and startup warnings about unknown keys are not shown). The deprecated Fuzzel interface remains selectable in the standard build: install Fuzzel and pass `-u fuzzel` or set `ui_type: fuzzel`.
-
-On Arch Linux, install it from the AUR with a helper such as:
+Arch Linux (AUR):
 
 ```sh
 yay -S raffi-bin
 ```
 
-On NixOS or using Nix (unstable channel):
+Nix:
 
 ```sh
 nix-shell -p raffi
 ```
 
-With LinuxBrew or Homebrew:
+Homebrew or Linuxbrew:
 
 ```sh
 brew tap chmouel/raffi https://github.com/chmouel/raffi
 brew install raffi
 ```
 
-From crates.io:
+With Cargo:
 
 ```sh
 cargo install raffi
 ```
 
-To build from source:
+Prebuilt binaries are on the [releases page](https://github.com/chmouel/raffi/releases). The [installation guide](https://chmouel.github.io/raffi/installation/) covers building from source.
 
-```sh
-git clone https://github.com/chmouel/raffi.git
-cd raffi
-cargo build --release
-```
+## Bind it to a key
 
-If you only use Fuzzel, you can build without the native UI:
+Run `raffi` and pick an entry. With no config yet, Raffi lists the applications installed on your system, so you can try it straight away.
 
-```sh
-cargo build --release --no-default-features
-```
-
-The binary drops from about 15 MB to about 2.1 MB. This build also disables config validation: `--check-config` reports that the feature is unavailable, and startup warnings about unknown keys are not shown. Add `--features config-validation` to keep validation, which adds a few MB.
-
-## Usage
-
-Run `raffi` to pick one of your configured entries. Without a config, or with no valid launchers in it, Raffi lists the desktop applications installed on your system.
-
-See the full CLI reference: <https://chmouel.github.io/raffi/reference/cli-options/>
-
-## Window Manager Integration
-
-### Sway
+Most people bind it to a key in their compositor. For Sway:
 
 ```config
 set $menu raffi -p
@@ -80,61 +51,79 @@ set $super Mod4
 bindsym $super+Space exec cmd=$($menu) && [ -n "$cmd" ] && swaymsg exec -- "$cmd"
 ```
 
-### Hyprland
+For Hyprland:
 
 ```conf
 $super = SUPER
 bind = $super, R, exec, (val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val")
 ```
 
-See also: [Sway integration](https://chmouel.github.io/raffi/integration/sway/) · [Hyprland integration](https://chmouel.github.io/raffi/integration/hyprland/) · [Legacy Fuzzel integration](https://chmouel.github.io/raffi/integration/fuzzel/)
+The [Sway](https://chmouel.github.io/raffi/integration/sway/) and [Hyprland](https://chmouel.github.io/raffi/integration/hyprland/) pages have more examples, and the [CLI reference](https://chmouel.github.io/raffi/reference/cli-options/) lists every flag.
 
-## User Interfaces
+## Features
 
-Raffi's built-in native interface is the default and recommended UI, with fuzzy search, keyboard navigation and themes. The external Fuzzel interface is deprecated but remains available as a legacy option for existing setups.
+Type to search your launchers, use the arrow keys to move, and press Enter. A preview pane on the right shows what the selected entry will do, and `Ctrl+P` hides or shows it. Press `Ctrl+/`, or type `?` on its own, to see every keyword and shortcut your config turns on. If you forget a keyword, type what you want, such as `volume` or `password`, and Raffi suggests the right one.
 
-The native interface also comes with addons. Some answer as you type: a calculator, currency and unit conversion, a color converter, a world clock and developer tools (encoders, hashes, UUID and password generators). Others let you search and pick: a file browser, an emoji and Nerd Fonts picker, text snippets, clipboard history (through CopyQ), web searches and script filters. The rest control your desktop: system commands (lock, suspend, hibernate, log out, reboot, shut down), a window switcher for Hyprland, niri and sway, a browser tab switcher (using the Vicinae browser extension), media controls, volume and audio devices, Bluetooth, a way to stop your own processes, and `> command` to run a command in a terminal. Your installed applications can be listed next to your launchers. Two more copy or type passwords from [pass](https://www.passwordstore.org/) and Bitwarden (through [rbw](https://github.com/doy/rbw)), unlocking the vault when needed. An optional Slack addon opens conversations, searches messages, lists unread ones and sets your status.
+Some lists have more than one view, and `Ctrl+Tab` always switches between them, with `Ctrl+Shift+Tab` going back. The footer tells you which view you are on. See [keyboard shortcuts](https://chmouel.github.io/raffi/reference/keyboard-shortcuts/) for the full list.
 
-A preview pane on the right shows details for the selected item, and `Ctrl+P` toggles it. In the file browser it shows PDF pages, video frames, ebook covers, archive contents and highlighted source code when `python3` is installed. `Ctrl+/`, or `?` typed alone, lists every keyword and shortcut your config defines, and typing a word such as `volume` or `password` suggests the addon that handles it.
+Most addons start with a keyword followed by a space. Others answer as soon as your search looks like something they understand.
 
-See: [UI modes](https://chmouel.github.io/raffi/features/ui-modes/) · [Themes](https://chmouel.github.io/raffi/features/themes/) · [Calculator](https://chmouel.github.io/raffi/features/calculator/) · [Currency converter](https://chmouel.github.io/raffi/features/currency-converter/) · [Unit conversion](https://chmouel.github.io/raffi/features/unit-conversion/) · [Color converter](https://chmouel.github.io/raffi/features/color-converter/) · [World clock](https://chmouel.github.io/raffi/features/world-clock/) · [Developer tools](https://chmouel.github.io/raffi/features/developer-tools/) · [File browser](https://chmouel.github.io/raffi/features/file-browser/) · [Script filters](https://chmouel.github.io/raffi/features/script-filters/) · [Web search](https://chmouel.github.io/raffi/features/web-search/) · [Text snippets](https://chmouel.github.io/raffi/features/text-snippets/) · [Clipboard history](https://chmouel.github.io/raffi/features/clipboard-history/) · [System commands](https://chmouel.github.io/raffi/features/system-commands/) · [Window switcher](https://chmouel.github.io/raffi/features/window-switcher/) · [Browser tabs](https://chmouel.github.io/raffi/features/browser-tabs/) · [Media controls](https://chmouel.github.io/raffi/features/media-controls/) · [Audio switcher](https://chmouel.github.io/raffi/features/audio-switcher/) · [Installed apps](https://chmouel.github.io/raffi/features/installed-apps/) · [Run in terminal](https://chmouel.github.io/raffi/features/terminal/) · [Kill process](https://chmouel.github.io/raffi/features/kill-process/) · [Bluetooth](https://chmouel.github.io/raffi/features/bluetooth/) · [Password store](https://chmouel.github.io/raffi/features/password-store/) · [Bitwarden](https://chmouel.github.io/raffi/features/bitwarden/) · [Slack](https://chmouel.github.io/raffi/features/slack/)
+Answers as you type:
+
+- [Calculator](https://chmouel.github.io/raffi/features/calculator/): type a sum like `2*(3+4)`
+- [Currency converter](https://chmouel.github.io/raffi/features/currency-converter/): `$10 to eur`
+- [Unit conversion](https://chmouel.github.io/raffi/features/unit-conversion/): `10 km to mi`, `70f to c`
+- [Color converter](https://chmouel.github.io/raffi/features/color-converter/): `#ff8800` or `rgb(255 136 0)`
+- [World clock](https://chmouel.github.io/raffi/features/world-clock/): `time tokyo`, `15:00 paris to nyc`
+- [Developer tools](https://chmouel.github.io/raffi/features/developer-tools/): `dev ` to encode, decode or hash text, plus UUID and password generators
+
+Search and pick:
+
+- [File browser](https://chmouel.github.io/raffi/features/file-browser/): start with `/` or `~/`, with previews of PDFs, images, videos and source code
+- Emoji and Nerd Font icons: `emoji `
+- [Clipboard history](https://chmouel.github.io/raffi/features/clipboard-history/) from CopyQ: `clip `
+- [Text snippets](https://chmouel.github.io/raffi/features/text-snippets/), [web searches](https://chmouel.github.io/raffi/features/web-search/) and [script filters](https://chmouel.github.io/raffi/features/script-filters/), each under a keyword you choose
+- [Installed apps](https://chmouel.github.io/raffi/features/installed-apps/) listed next to your own launchers
+
+Control your desktop:
+
+- [System commands](https://chmouel.github.io/raffi/features/system-commands/) to lock, suspend, log out or shut down: `sys `
+- [Window switcher](https://chmouel.github.io/raffi/features/window-switcher/) for Hyprland, niri and sway: `win `
+- [Browser tabs](https://chmouel.github.io/raffi/features/browser-tabs/) through the Vicinae browser extension: `tabs `
+- [Media controls](https://chmouel.github.io/raffi/features/media-controls/): `media `
+- [Audio devices and volume](https://chmouel.github.io/raffi/features/audio-switcher/): `audio `
+- [Bluetooth](https://chmouel.github.io/raffi/features/bluetooth/): `bt `
+- [Stop a process](https://chmouel.github.io/raffi/features/kill-process/): `kill `
+- [Run a command in a terminal](https://chmouel.github.io/raffi/features/terminal/): `> htop`
+
+Passwords, copied or typed for you:
+
+- [pass](https://chmouel.github.io/raffi/features/password-store/): `pass `
+- [Bitwarden](https://chmouel.github.io/raffi/features/bitwarden/) through rbw: `bw `
+
+[Slack](https://chmouel.github.io/raffi/features/slack/) is off until you set it up. Then `slack ` opens conversations, searches messages, lists what you haven't read and sets your status.
+
+You can change how Raffi looks with the built-in [themes](https://chmouel.github.io/raffi/features/themes/) or your own colors.
+
+If you already use [Fuzzel](https://codeberg.org/dnkl/fuzzel), Raffi can show your launchers there instead. See the [Fuzzel page](https://chmouel.github.io/raffi/integration/fuzzel/) for what that gives up.
 
 ## Configuration
 
-Raffi reads launcher entries from `$HOME/.config/raffi/launchers.yaml` and settings from `$HOME/.config/raffi/raffi.yaml`. Both are optional. A basic `launchers.yaml`:
+Your launchers go in `~/.config/raffi/launchers.yaml` and your settings in `~/.config/raffi/raffi.yaml`. Neither file is required. A launcher looks like this:
 
 ```yaml
 firefox:
   binary: firefox
   args: [--marionette]
   icon: firefox
-  description: Firefox browser with marionette enabled
+  description: Firefox with marionette enabled
 ```
 
-Entries can also live under a `launchers:` key in `raffi.yaml`; when they do, `launchers.yaml` is ignored. See [`examples/raffi.yaml`](examples/raffi.yaml) and [`examples/launchers.yaml`](examples/launchers.yaml) for fuller examples.
+[`examples/raffi.yaml`](examples/raffi.yaml) shows every setting with a comment, and [`examples/launchers.yaml`](examples/launchers.yaml) has more launchers to copy from. The [configuration guide](https://chmouel.github.io/raffi/configuration/overview/) explains entries, scripts, conditions, icons and addon settings.
 
-The docs cover the rest of the configuration:
+## Contributing
 
-- [Configuration overview](https://chmouel.github.io/raffi/configuration/overview/)
-- [Entries](https://chmouel.github.io/raffi/configuration/entries/)
-- [General settings](https://chmouel.github.io/raffi/configuration/general-settings/)
-- [Scripts](https://chmouel.github.io/raffi/configuration/scripts/)
-- [Conditions](https://chmouel.github.io/raffi/configuration/conditions/)
-- [Icons](https://chmouel.github.io/raffi/configuration/icons/)
-- [Addon configuration](https://chmouel.github.io/raffi/reference/addon-configuration/)
-- [YAML schema reference](https://chmouel.github.io/raffi/reference/yaml-schema/)
-
-## Development
-
-Issues and pull requests are welcome on GitHub.
-
-Install the hooks to check config schema snapshots before commits and run
-formatting, Clippy, and tests before pushes:
-
-```sh
-pip install pre-commit
-pre-commit install
-```
+Bug reports and pull requests are welcome on [GitHub](https://github.com/chmouel/raffi).
 
 ## Screenshots
 
@@ -155,6 +144,8 @@ pre-commit install
 <p><img width="800" alt="Demo Bluetooth devices with connection and battery details" src="website/src/assets/screenshots/bluetooth.png" /></p>
 <p><img width="800" alt="Session and power commands" src="website/src/assets/screenshots/system-commands.png" /></p>
 <p><img width="550" alt="Disposable demo worker's process details and signal actions" src="website/src/assets/screenshots/kill-process.png" /></p>
+<p><img width="800" alt="Calculator with expression preview and number bases" src="website/src/assets/screenshots/calculator.png" /></p>
+<p><img width="800" alt="Currency converter with multi-currency preview" src="website/src/assets/screenshots/currency-converter.png" /></p>
 <p><img width="800" alt="Unit conversion from kilometres per hour to miles per hour" src="website/src/assets/screenshots/unit-conversion.png" /></p>
 <p><img width="800" alt="Color conversion with swatches and CSS formats" src="website/src/assets/screenshots/color-converter.png" /></p>
 <p><img width="800" alt="Developer encoding and hashing tools" src="website/src/assets/screenshots/developer-tools.png" /></p>
@@ -166,12 +157,8 @@ pre-commit install
 <p><img width="800" alt="Fictional password-store entries without decrypted secrets" src="website/src/assets/screenshots/password-store.png" /></p>
 <p><img width="800" alt="Demo Bitwarden logins with public entry details" src="website/src/assets/screenshots/bitwarden.png" /></p>
 
-### Interface Modes
+### Files and Previews
 
-<p><img width="800" alt="Fuzzel dmenu mode populated by Raffi launchers" src="website/src/assets/screenshots/fuzzel-mode.png" /></p>
-<p><img width="800" alt="Native launcher with application preview" src="website/src/assets/screenshots/main.png" /></p>
-<p><img width="800" alt="Calculator with expression preview and number bases" src="website/src/assets/screenshots/calculator.png" /></p>
-<p><img width="800" alt="Currency converter with multi-currency preview" src="website/src/assets/screenshots/currency-converter.png" /></p>
 <p><img width="800" alt="File browser with directory preview" src="website/src/assets/screenshots/file-browser.png" /></p>
 <p><img width="800" alt="File browser source code preview" src="website/src/assets/screenshots/file-browser-code-preview.png" /></p>
 <p><img width="800" alt="File browser image preview" src="website/src/assets/screenshots/file-browser-image-preview.png" /></p>
@@ -180,6 +167,9 @@ pre-commit install
 <p><img width="800" alt="Bundled file previewer highlighting demo Python source" src="website/src/assets/screenshots/file-browser-rich-preview.png" /></p>
 <p><img width="800" alt="File browser rendering a demo PDF page" src="website/src/assets/screenshots/file-browser-pdf.png" /></p>
 <p><img width="800" alt="File-only listing sorted by modification time" src="website/src/assets/screenshots/file-browser-filter.png" /></p>
+
+### Search and Web
+
 <p><img width="800" alt="Text snippets with expanded content preview" src="website/src/assets/screenshots/text-snippets.png" /></p>
 <p><img width="800" alt="Text snippet with expanded dynamic placeholders and raw template" src="website/src/assets/screenshots/text-snippets-placeholders.png" /></p>
 <p><img width="800" alt="Emoji picker with Unicode and glyph preview" src="website/src/assets/screenshots/emoji-picker.png" /></p>

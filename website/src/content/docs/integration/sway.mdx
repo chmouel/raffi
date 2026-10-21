@@ -64,14 +64,11 @@ set $menu raffi -p -I
 
 # Use a custom config file
 set $menu raffi -p -c ~/.config/raffi/custom.yaml
-
-# Use the native UI instead of Fuzzel
-set $menu raffi -p -u native
 ```
 
 ### Transparency and Blur
 
-The native UI is translucent by default (`opacity: 0.95` in `general`). Plain
+Raffi is translucent by default (`opacity: 0.95` in `general`). Plain
 Sway has no blur. [SwayFX](https://github.com/WillPower3309/swayfx) can blur
 behind it:
 
@@ -94,7 +91,6 @@ After adding the configuration:
 ### Launcher doesn't appear
 
 - Ensure Raffi is installed and in your `$PATH`
-- If using Fuzzel mode, verify Fuzzel is installed
 - Check Sway logs: `journalctl --user -u sway`
 
 ### `Invalid exec command (expected at least 1 argument, got 0)`
@@ -107,7 +103,7 @@ command because Raffi printed nothing. Common causes:
 - **You cancelled the menu.** Pressing `Escape` or selecting nothing exits without printing, which
   is normal.
 - **You selected an addon entry.** Emoji, calculator, web search, file browser and text snippet
-  entries perform their action directly in the native UI, so there is no command to print.
+  entries perform their action directly in Raffi, so there is no command to print.
 - **Raffi is not in Sway's `PATH`.** Sway's `exec` runs commands through `sh -c`, which does not read
   `~/.bashrc` or `~/.zshrc`. A `cargo install`ed binary in `~/.cargo/bin` therefore works in a
   terminal but not from a keybinding. Test with an absolute path:

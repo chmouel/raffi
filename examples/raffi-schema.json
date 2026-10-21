@@ -147,7 +147,7 @@
       "additionalProperties": false
     },
     "AudioAddonConfig": {
-      "description": "Configuration for the audio device switcher addon (native UI only)",
+      "description": "Configuration for the audio device switcher addon",
       "type": "object",
       "properties": {
         "close_on_action": {
@@ -194,7 +194,7 @@
       "additionalProperties": false
     },
     "BitwardenAddonConfig": {
-      "description": "Configuration for the Bitwarden addon, backed by rbw (native UI only)",
+      "description": "Configuration for the Bitwarden addon, backed by rbw",
       "type": "object",
       "properties": {
         "clipboard_timeout": {
@@ -241,7 +241,7 @@
       "additionalProperties": false
     },
     "BluetoothAddonConfig": {
-      "description": "Configuration for the Bluetooth addon (native UI only)",
+      "description": "Configuration for the Bluetooth addon",
       "type": "object",
       "properties": {
         "close_on_action": {
@@ -268,7 +268,7 @@
       "additionalProperties": false
     },
     "BrowserTabsAddonConfig": {
-      "description": "Configuration for the browser tabs addon, fed by the Vicinae browser\nextension (native UI only)",
+      "description": "Configuration for the browser tabs addon, fed by the Vicinae browser\nextension",
       "type": "object",
       "properties": {
         "close_on_action": {
@@ -333,7 +333,7 @@
       ]
     },
     "ClipboardAddonConfig": {
-      "description": "Configuration for the clipboard history addon (native UI only)",
+      "description": "Configuration for the clipboard history addon",
       "type": "object",
       "properties": {
         "action": {
@@ -487,7 +487,7 @@
       "additionalProperties": false
     },
     "DevtoolsAddonConfig": {
-      "description": "Configuration for the developer tools addon: the `dev` transform list\nand the inline `uuid` and `pw` generators (native UI only)",
+      "description": "Configuration for the developer tools addon: the `dev` transform list\nand the inline `uuid` and `pw` generators",
       "type": "object",
       "properties": {
         "close_on_action": {
@@ -632,7 +632,7 @@
           "default": null
         },
         "preview_command": {
-          "description": "Command that previews the selected entry in the native preview pane.\nUnset uses the previewer bundled with raffi when python3 is\ninstalled; `none` turns it off. A command runs through `sh -c` with\nthe path appended as the last argument (also in `$RAFFI_VALUE`) and\nprints ANSI text or a Script Filter preview object; no output or a\nnon-zero exit keeps the built-in preview. Killed after 3 seconds.",
+          "description": "Command that previews the selected entry in the preview pane.\nUnset uses the previewer bundled with raffi when python3 is\ninstalled; `none` turns it off. A command runs through `sh -c` with\nthe path appended as the last argument (also in `$RAFFI_VALUE`) and\nprints ANSI text or a Script Filter preview object; no output or a\nnon-zero exit keeps the built-in preview. Killed after 3 seconds.",
           "type": [
             "string",
             "null"
@@ -719,7 +719,7 @@
       "type": "object",
       "properties": {
         "blur": {
-          "description": "Ask the compositor to blur what shows through the native UI window\n(KDE/KWin; other compositors use their own rules). Default: true.",
+          "description": "Ask the compositor to blur what shows through the window\n(KDE/KWin; other compositors use their own rules). Default: true.",
           "type": [
             "boolean",
             "null"
@@ -731,7 +731,7 @@
           "$ref": "#/$defs/ClipboardHistory"
         },
         "close_on_action": {
-          "description": "Close Raffi after executing an action (native UI only, default: true).\nAddon and launcher `close_on_action` settings override this.",
+          "description": "Close Raffi after executing an action (default: true).\nAddon and launcher `close_on_action` settings override this.",
           "type": [
             "boolean",
             "null"
@@ -768,7 +768,7 @@
           "default": null
         },
         "main_view": {
-          "description": "Sources mixed into the main view, in display order, when typing without\nan addon trigger (native UI only). Entries: `launchers`, `browser_tabs`,\n`windows`, `system`, `media`, `audio`, `bluetooth`, `pass`,\n`text_snippets.<name>` and `script_filters.<name>`. When set, launchers\nonly show if `launchers` is listed.",
+          "description": "Sources mixed into the main view, in display order, when typing without\nan addon trigger. Entries: `launchers`, `browser_tabs`,\n`windows`, `system`, `media`, `audio`, `bluetooth`, `pass`,\n`text_snippets.<name>` and `script_filters.<name>`. When set, launchers\nonly show if `launchers` is listed.",
           "type": [
             "array",
             "null"
@@ -779,7 +779,7 @@
           }
         },
         "main_view_chips": {
-          "description": "What the chips row above the apps shows on an empty query when\n`main_view` is set: `name` (default), `keyword` or `off` (native UI only)",
+          "description": "What the chips row above the apps shows on an empty query when\n`main_view` is set: `name` (default), `keyword` or `off`",
           "$ref": "#/$defs/MainViewChips"
         },
         "max_history": {
@@ -799,7 +799,7 @@
           "default": null
         },
         "opacity": {
-          "description": "Opacity of the native UI backgrounds, from 0.0 (see-through) to 1.0\n(the theme as designed). Text and icons stay opaque. Default: 0.95.",
+          "description": "Opacity of the window backgrounds, from 0.0 (see-through) to 1.0\n(the theme as designed). Text and icons stay opaque. Default: 0.95.",
           "type": [
             "number",
             "null"
@@ -822,11 +822,11 @@
           "$ref": "#/$defs/PreviewConfig"
         },
         "renderer": {
-          "description": "Renderer for the native UI: `auto` (default: `gpu` when `opacity` is\nbelow 1, else `cpu`), `cpu` (faster to open, opaque on Wayland) or `gpu`.\nAn `ICED_BACKEND` environment variable takes precedence.",
+          "description": "Renderer for the window: `auto` (default: `gpu` when `opacity` is\nbelow 1, else `cpu`), `cpu` (faster to open, opaque on Wayland) or `gpu`.\nAn `ICED_BACKEND` environment variable takes precedence.",
           "$ref": "#/$defs/Renderer"
         },
         "show_preview": {
-          "description": "Show the Alfred-style right-hand preview pane in native mode.\nBy default, previews are shown automatically for addons (snippets, file browser,\nscript filters, etc.) and hidden for standard launcher entries unless `show_preview: true`\nis set in `general` or on the launcher entry. Can also be toggled at runtime with Ctrl+P.",
+          "description": "Show the Alfred-style right-hand preview pane.\nBy default, previews are shown automatically for addons (snippets, file browser,\nscript filters, etc.) and hidden for standard launcher entries unless `show_preview: true`\nis set in `general` or on the launcher entry. Can also be toggled at runtime with Ctrl+P.",
           "type": [
             "boolean",
             "null"
@@ -834,7 +834,7 @@
           "default": null
         },
         "show_tips": {
-          "description": "Show a tip about a keyword in the empty search box, such as\n`clip for Clipboard history` (native UI only, default: true).",
+          "description": "Show a tip about a keyword in the empty search box, such as\n`clip for Clipboard history` (default: true).",
           "type": [
             "boolean",
             "null"
@@ -896,7 +896,7 @@
       "additionalProperties": false
     },
     "KillAddonConfig": {
-      "description": "Configuration for the kill process addon (native UI only)",
+      "description": "Configuration for the kill process addon",
       "type": "object",
       "properties": {
         "close_on_action": {
@@ -943,7 +943,7 @@
       ]
     },
     "MediaAddonConfig": {
-      "description": "Configuration for the media controls addon (native UI only)",
+      "description": "Configuration for the media controls addon",
       "type": "object",
       "properties": {
         "close_on_action": {
@@ -970,7 +970,7 @@
       "additionalProperties": false
     },
     "PassAddonConfig": {
-      "description": "Configuration for the pass (password-store) addon (native UI only)",
+      "description": "Configuration for the pass (password-store) addon",
       "type": "object",
       "properties": {
         "clipboard_timeout": {
@@ -1104,7 +1104,7 @@
       "additionalProperties": false
     },
     "PreviewConfig": {
-      "description": "Appearance settings for the right-hand preview pane in native mode.",
+      "description": "Appearance settings for the right-hand preview pane.",
       "type": "object",
       "properties": {
         "colors": {
@@ -1160,7 +1160,7 @@
       "type": "object",
       "properties": {
         "alias": {
-          "description": "Route this launcher to an internal command: picking it types this text\nfor you, such as `mp linus/linux` (an addon keyword\nfollowed by its query). Cannot be combined with `binary`, `script` or\n`args` (native UI only).",
+          "description": "Route this launcher to an internal command: picking it types this text\nfor you, such as `mp linus/linux` (an addon keyword\nfollowed by its query). Cannot be combined with `binary`, `script` or\n`args`.",
           "type": [
             "string",
             "null"
@@ -1257,7 +1257,7 @@
       "additionalProperties": false
     },
     "Renderer": {
-      "description": "How the native UI draws its window",
+      "description": "How Raffi draws its window",
       "oneOf": [
         {
           "description": "`gpu` when `opacity` is below 1, since only the GPU renderer shows\ntransparency on Wayland, `cpu` otherwise",
@@ -1353,7 +1353,7 @@
       ]
     },
     "SlackAddonConfig": {
-      "description": "Configuration for the Slack addon (native UI only)",
+      "description": "Configuration for the Slack addon",
       "type": "object",
       "properties": {
         "cache_minutes": {
@@ -1454,7 +1454,7 @@
       ]
     },
     "SystemAddonConfig": {
-      "description": "Configuration for the system commands addon (native UI only)",
+      "description": "Configuration for the system commands addon",
       "type": "object",
       "properties": {
         "close_on_action": {
@@ -1576,7 +1576,7 @@
       "additionalProperties": false
     },
     "TerminalAddonConfig": {
-      "description": "Configuration for the run in terminal addon (native UI only)",
+      "description": "Configuration for the run in terminal addon",
       "type": "object",
       "properties": {
         "close_on_action": {
@@ -1772,7 +1772,7 @@
       ]
     },
     "ThemeColorsConfig": {
-      "description": "Per-colour overrides for the native UI theme.",
+      "description": "Per-colour overrides for the theme.",
       "type": "object",
       "properties": {
         "accent": {
@@ -1881,7 +1881,7 @@
       ]
     },
     "WindowsAddonConfig": {
-      "description": "Configuration for the window switcher addon for Hyprland, niri and sway\n(native UI only)",
+      "description": "Configuration for the window switcher addon for Hyprland, niri and sway",
       "type": "object",
       "properties": {
         "close_on_action": {

@@ -12,10 +12,6 @@ import herdrStatusScreenshot from '../../../assets/screenshots/herdr-status.png'
 
 Script filters allow external commands to provide dynamic results in the launcher using a subset of the Alfred Script Filter JSON format.
 
-<Aside type="note">
-Script filters are only available in **native mode**. They are not available when using Fuzzel mode.
-</Aside>
-
 ## Overview
 
 Script filters execute external commands when a keyword is typed, displaying dynamic results based on the command's JSON output. This enables integration with APIs, databases, custom scripts, and more.
@@ -131,8 +127,8 @@ Value copied to clipboard (falls back to title if omitted)
 
 Raffi extension for tree-style results (Alfred ignores it): indentation
 level of the item, `0` by default. Each level shifts the row further right
-in the result list and adds subtle connector guides in the native UI, so a
-script can return a hierarchy — for example the Herdr filter's workspace /
+in the result list and adds subtle connector guides, so a
+script can return a hierarchy, for example the Herdr filter's workspace /
 tab / pane tree:
 
 ```json

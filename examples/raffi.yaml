@@ -8,8 +8,8 @@ version: 1
 
 # General settings (all fields optional, CLI flags override these)
 # general:
-#   ui_type: native          # Native is the default; fuzzel selects the
-#                            # deprecated legacy external Fuzzel UI
+#   ui_type: fuzzel          # Show entries in Fuzzel instead of Raffi's own
+#                            # window (legacy; leave unset for the default)
 #   default_script_shell: bash  # Shell for script entries
 #   no_icons: false          # Hide icons
 #   max_history: 10          # Max search query history entries (0 to disable, navigate with Alt-P/N)
@@ -53,7 +53,7 @@ version: 1
 #     - addons.web_searches."DuckDuckGo"       # Opens DuckDuckGo search with the current query
 #     - addons.script_filters."Search Google"  # Switches to the script filter mode
 #     - addons.terminal                        # Runs the query in a terminal
-#   main_view:               # Mix addon results into the main list (native UI only); Ctrl+Tab shows one source at a time.
+#   main_view:               # Mix addon results into the main list; Ctrl+Tab shows one source at a time.
 #                            # An empty query shows one row of chips with each detected entry's name
 #                            # (Tabs, System, Clipboard...) above the apps; Left/Right pick one, Enter arms it.
 #                            # With no config file at all, raffi uses launchers, windows, browser_tabs, system,
@@ -76,7 +76,7 @@ version: 1
 #     text_muted: "#6c7086"
 #     selection_bg: "#45475a"
 #     border: "#585b70"
-#   renderer: auto           # Native UI renderer: auto (default: gpu when opacity < 1, else cpu), cpu (opens
+#   renderer: auto           # Window renderer: auto (default: gpu when opacity < 1, else cpu), cpu (opens
 #                            # fastest, opaque on Wayland) or gpu; ICED_BACKEND overrides it
 
 # Launchers live in launchers.yaml next to this file, see examples/launchers.yaml.
@@ -94,7 +94,7 @@ addons:
   # whose help mentions it.
   # keyword_min_chars: 3
   #
-  # Press Ctrl+/ (or type ? alone) in the native UI to see addon keywords/actions and keyboard
+  # Press Ctrl+/ (or type ? alone) to see addon keywords/actions and keyboard
   # shortcuts in separate sections. Typing filters both; opening help clears
   # the current query temporarily, and Escape restores it. Enter or Tab on a
   # keyword row applies its completion.
@@ -315,10 +315,10 @@ addons:
   #   file_manager: thunar
   #   preview_command: "~/.config/raffi/scripts/file-preview.py"
 
-  # Clipboard history browser (native UI only). On by itself when CopyQ is
+  # Clipboard history browser. On by itself when CopyQ is
   # running at startup; set enabled to force it on or off. Reads the
   # history stored by CopyQ, which must be running. Type "clip " to browse,
-  # or bind a key to `raffi -u native -i "clip "`. Enter copies the item with
+  # or bind a key to `raffi -i "clip "`. Enter copies the item with
   # all its formats (text, HTML, images, file lists); Ctrl+Enter pastes it
   # into the previous window on Hyprland. Ctrl+R refreshes the list and
   # Ctrl+Tab cycles between all items, images only and URLs only.
@@ -333,7 +333,7 @@ addons:
   #   action: copy
   #   secondary_action: hypr_paste
 
-  # System commands (native UI only). Type "sys " to list lock, suspend,
+  # System commands. Type "sys " to list lock, suspend,
   # hibernate, log out, reboot and shut down. Everything except lock asks
   # for a second Enter. Commands are argument lists run without a shell;
   # an empty list hides the entry, like `hide`. The "sys " keyword takes
@@ -346,14 +346,14 @@ addons:
   #     lock: [hyprlock]
   #   hide: [hibernate]
 
-  # Window switcher (native UI only, Hyprland, niri or sway). Type "win " to
+  # Window switcher (Hyprland, niri or sway). Type "win " to
   # list open windows, most recently used first. Enter focuses the window,
   # Ctrl+Enter moves it to the current workspace and focuses it.
   # windows:
   #   enabled: true
   #   trigger: win
 
-  # Browser tabs (native UI only). Type "tabs " to list the tabs of your
+  # Browser tabs. Type "tabs " to list the tabs of your
   # browsers, playing ones first. Enter switches to the tab, Ctrl+Enter
   # closes it. Needs the Vicinae browser extension and a one-time
   # `raffi --install-browser-host`. Site icons come from the browser
@@ -366,7 +366,7 @@ addons:
   #   trigger: tabs
   #   favicon_service: twenty
 
-  # Media controls (native UI only, needs playerctl). Type "media " to play,
+  # Media controls (needs playerctl). Type "media " to play,
   # pause, skip or stop any running media player. Raffi stays open and
   # refreshes after each action unless close_on_action is true.
   # media:
@@ -374,9 +374,10 @@ addons:
   #   trigger: media
   #   close_on_action: false
 
-  # Audio switcher (native UI only, needs pactl). Type "audio " to list
+  # Audio switcher (needs pactl). Type "audio " to list
   # volume controls, outputs and inputs. Enter makes a device the default,
-  # Ctrl+Enter mutes or unmutes it. "audio 40" or "vol 40" in main_view sets
+  # Ctrl+Enter mutes or unmutes it, and Ctrl+Tab cycles between all,
+  # outputs only and inputs only. "audio 40" or "vol 40" in main_view sets
   # the output volume. Raffi stays open and refreshes unless close_on_action
   # is true.
   # audio:
@@ -394,7 +395,7 @@ addons:
   #   enabled: false
   #   actions: true       # Also list desktop actions
 
-  # Run in terminal (native UI only). Type "> htop" to run htop in a
+  # Run in terminal. Type "> htop" to run htop in a
   # terminal. The terminal is found automatically (xdg-terminal-exec,
   # $TERMINAL, then kitty, foot, alacritty, wezterm, ghostty, konsole,
   # gnome-terminal, xfce4-terminal, xterm) unless command is set. The command
@@ -411,14 +412,14 @@ addons:
   #   open_in: tab
   #   kitty_socket: unix:${XDG_RUNTIME_DIR}/kitty
 
-  # Kill process (native UI only, needs kill). Type "kill " to list your own
+  # Kill process (needs kill). Type "kill " to list your own
   # processes, biggest memory first. Enter twice sends SIGTERM, Ctrl+Enter
   # twice sends SIGKILL. Raffi stays open and refreshes the list.
   # kill:
   #   enabled: true
   #   trigger: kill
 
-  # Bluetooth (native UI only, needs bluetoothctl). Type "bt " to list your
+  # Bluetooth (needs bluetoothctl). Type "bt " to list your
   # paired devices under a row that turns Bluetooth on or off. Enter
   # connects a device, or disconnects it when pressed twice. Turning
   # Bluetooth off also needs a second Enter. Raffi stays open and refreshes
@@ -428,7 +429,7 @@ addons:
   #   trigger: bt
   #   close_on_action: false
 
-  # Password store (native UI only, needs pass and gpg). Type "pass " to
+  # Password store (needs pass and gpg). Type "pass " to
   # list your entries. Enter copies the password, Ctrl+Enter types it,
   # Ctrl+U copies the username, Ctrl+O the OTP code (pass-otp). When
   # gpg-agent has no cached passphrase Raffi asks for it in a masked prompt;
@@ -443,7 +444,7 @@ addons:
   #   clipboard_timeout: 45          # seconds, 0 = never clear
   #   type_delay_ms: 200
 
-  # Bitwarden (native UI only, through rbw, set up with "rbw login").
+  # Bitwarden (through rbw, set up with "rbw login").
   # Type "bw " to list your logins, same keys as pass. A locked vault is
   # unlocked with rbw's pinentry; the lock timeout is rbw's lock_timeout.
   # Pasting a URL lists that site's logins first, and after a pause rbw also
@@ -454,12 +455,13 @@ addons:
   #   clipboard_timeout: 45
   #   type_delay_ms: 200
 
-  # Slack (native UI only, off by default). Type "slack " to open channels,
+  # Slack (off by default). Type "slack " to open channels,
   # DMs and people, "slack search <words>", "slack people <name>",
   # "slack unread", or
   # "slack status Lunch :pizza: 1h". The token is a user token (xoxp-) from
   # your own Slack app, or a browser session token (xoxc-) with its "d"
-  # cookie. Ctrl+P previews the latest messages.
+  # cookie. Ctrl+P previews the latest messages, and Ctrl+Tab cycles
+  # between Home, Unread and People.
   # slack:
   #   enabled: true
   #   trigger: slack
@@ -469,25 +471,25 @@ addons:
   #   unread_conversations: ["#ops", "@alice"]    # for xoxp- tokens
   #   cache_minutes: 60                           # 0 asks Slack every time
 
-  # Unit conversion (native UI only). Type "10 km to mi", "70f to c" or
+  # Unit conversion. Type "10 km to mi", "70f to c" or
   # "5 GB in MB" without any keyword. Enter copies the number, Ctrl+Enter
   # copies it with the unit.
   # units:
   #   enabled: true
 
-  # Color converter (native UI only). Type "#ff8800", "rgb(255 136 0)" or
+  # Color converter. Type "#ff8800", "rgb(255 136 0)" or
   # "hsl(32 100% 50%)" to see the color as hex, rgb, hsl and the nearest
   # CSS color name. Enter copies the selected format.
   # color:
   #   enabled: true
 
-  # World clock (native UI only, needs tzdata). Type "time tokyo" or
+  # World clock (needs tzdata). Type "time tokyo" or
   # "time in new york" for the current time there, or "15:00 paris to nyc"
   # to convert a time. Enter copies the time, Ctrl+Enter a full timestamp.
   # world_clock:
   #   enabled: true
 
-  # Developer tools (native UI only). Type "dev " followed by text to see it
+  # Developer tools. Type "dev " followed by text to see it
   # base64 and URL encoded or decoded, hashed (sha256sum, sha1sum, md5sum),
   # converted between epoch and date, JSON reformatted or case changed.
   # Typing "uuid", "pw" or "pw 32" shows a random UUID or password. Enter

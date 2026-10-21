@@ -34,16 +34,14 @@ entry_name:
 
 Persistent defaults for UI and behavior. All fields are optional and can be overridden by command-line flags.
 
-**`general.ui_type`** `string` (default: `native` in standard builds; `fuzzel` in Fuzzel-only builds)
+**`general.ui_type`** `string`
 
-Default UI backend to use. Native is the default and recommended option in
-standard builds; Fuzzel is a deprecated legacy backend.
-
-  Valid values: `fuzzel` (deprecated), `native`
+By default Raffi opens its own window. Set `fuzzel` to show your entries in
+[Fuzzel](../../integration/fuzzel/) instead, a legacy option with fewer features.
 
   ```yaml
   general:
-    ui_type: native
+    ui_type: fuzzel
 
 ```
 
@@ -85,7 +83,7 @@ Show the right-hand preview pane for plain launcher entries. Addon results alway
 
 **`general.close_on_action`** `boolean` (default: `true`)
 
-Whether Raffi closes after executing a launcher or addon action in the native UI. Individual launchers and addons can override this with their own `close_on_action` field.
+Whether Raffi closes after executing a launcher or addon action. Individual launchers and addons can override this with their own `close_on_action` field.
 
   ```yaml
   general:
@@ -96,7 +94,7 @@ Whether Raffi closes after executing a launcher or addon action in the native UI
 
 **`general.show_tips`** `boolean` (default: `true`)
 
-Show a keyword tip, picked from your enabled addons, in the empty search box of the native UI.
+Show a keyword tip, picked from your enabled addons, in the empty search box.
 
   ```yaml
   general:
@@ -122,7 +120,7 @@ Appearance of the preview pane: `font_size` (default `16`), `font_family`, `mono
 
 **`general.theme`** `string` (default: `dark`)
 
-Color theme for native UI.
+Color theme.
 
   Valid values: `dark`, `light`
 
@@ -137,7 +135,7 @@ Color theme for native UI.
 
 Maximum number of search query history entries to keep.
 
-  Set to `0` to disable history. Navigate history with Alt+P (previous) and Alt+N (next) in native mode.
+  Set to `0` to disable history. Navigate history with Alt+P (previous) and Alt+N (next).
 
   ```yaml
   general:
@@ -148,7 +146,7 @@ Maximum number of search query history entries to keep.
 
 **`general.font_size`** `number` (default: `20`)
 
-Base font size in pixels for native UI.
+Base font size in pixels.
 
   Other UI elements scale proportionally:
 
@@ -166,7 +164,7 @@ Base font size in pixels for native UI.
 
 **`general.font_family`** `string` (default: `system sans-serif`)
 
-Font family name for native UI.
+Font family name.
 
   ```yaml
   general:
@@ -177,7 +175,7 @@ Font family name for native UI.
 
 **`general.window_width`** `number` (default: `800`)
 
-Window width in pixels for native UI.
+Window width in pixels.
 
   ```yaml
   general:
@@ -188,7 +186,7 @@ Window width in pixels for native UI.
 
 **`general.window_height`** `number` (default: `600`)
 
-Window height in pixels for native UI.
+Window height in pixels.
 
   ```yaml
   general:
@@ -199,7 +197,7 @@ Window height in pixels for native UI.
 
 **`general.padding`** `number` (default: `20`)
 
-Outer window padding in pixels for native UI.
+Outer window padding in pixels.
 
   By default, scales automatically with `font_size`. Set explicitly to override.
 
@@ -227,7 +225,7 @@ Addon entries shown at the bottom of the launcher list when typing a non-empty q
 
 **`general.main_view`** `list of strings` (default: unset)
 
-Sources mixed into the main list when typing without an addon trigger, grouped in this order. Native UI only. When set, launchers only appear if `launchers` is listed. See [Main view](../../configuration/general-settings/#main-view).
+Sources mixed into the main list when typing without an addon trigger, grouped in this order. When set, launchers only appear if `launchers` is listed. See [Main view](../../configuration/general-settings/#main-view).
 
   Entries: `launchers`, `browser_tabs`, `windows`, `system`, `media`, `audio`, `bluetooth`, `pass`, `text_snippets.<name>`, `script_filters.<name>`.
 
@@ -243,7 +241,7 @@ Sources mixed into the main list when typing without an addon trigger, grouped i
 
 **`general.theme_colors`** `object`
 
-Custom color overrides for the native UI theme.
+Custom color overrides for the theme.
 
   Each field accepts a hex color string: `#RGB`, `#RRGGBB`, or `#RRGGBBAA`. Only specified colors are overridden; others use the base theme defaults.
 
@@ -374,7 +372,7 @@ Hide this entry from the launcher.
 
 **`show_preview`** `boolean` (default: `false`)
 
-Show the right-hand preview pane for this entry in the native UI, regardless of `general.show_preview`.
+Show the right-hand preview pane for this entry, regardless of `general.show_preview`.
 
   ```yaml title="launchers.yaml"
   deploy:
@@ -388,7 +386,7 @@ Show the right-hand preview pane for this entry in the native UI, regardless of 
 
 **`close_on_action`** `boolean` (default: `general.close_on_action`, else `true`)
 
-Whether the native UI closes after launching this entry, overriding `general.close_on_action`.
+Whether Raffi closes after launching this entry, overriding `general.close_on_action`.
 
   ```yaml title="launchers.yaml"
    volume_up:
@@ -400,7 +398,7 @@ Whether the native UI closes after launching this entry, overriding `general.clo
 ```
 
 
-**`alias`** `string` (native UI only)
+**`alias`** `string`
 
 Text typed into the search box when the entry is picked, such as an addon keyword followed by its query. Nothing runs until you choose a result. Cannot be combined with `binary`, `script` or `args`. See [Entries](../../configuration/entries/) for details.
 
@@ -478,7 +476,7 @@ Show entry only if the specified binary exists in `$PATH`.
 
 ## Addons Section
 
-The `addons` section configures built-in addons for the native UI. See [Addon Configuration](../addon-configuration/) for detailed documentation.
+The `addons` section configures built-in addons. See [Addon Configuration](../addon-configuration/) for detailed documentation.
 
 ```yaml
 addons:
@@ -546,7 +544,6 @@ myapp:
 version: 1
 
 general:
-  ui_type: native
   theme: dark
   font_size: 20
   font_family: "Inter"

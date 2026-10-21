@@ -17,7 +17,7 @@ found. Words after the keyword filter the list
 by title or application, so `win fire` finds Firefox.
 
 <Aside type="note">
-The window switcher is only available in native mode and needs Hyprland,
+The window switcher needs Hyprland,
 niri or sway. It reads the windows with `hyprctl`, `niri msg` or `swaymsg`,
 and is on by default. In another session the list shows "Window switching
 needs Hyprland, niri or sway", and when the tool is missing it shows, for
@@ -73,7 +73,7 @@ not saved in the search history.
 To open the list from a key binding, pass the keyword as the initial query:
 
 ```sh
-raffi -u native -i "win "
+raffi -i "win "
 ```
 
 ## Configuration

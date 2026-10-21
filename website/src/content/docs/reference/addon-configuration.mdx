@@ -8,7 +8,7 @@ import keywordSuggestionScreenshot from '../../../assets/screenshots/keyword-sug
 import keywordHelpScreenshot from '../../../assets/screenshots/keyword-help.png';
 import emojiScreenshot from '../../../assets/screenshots/emoji-picker.png';
 
-The native UI includes several built-in addons that can be configured under the `addons` section of `raffi.yaml`. All addons except the clipboard history browser are enabled by default; that one turns itself on when CopyQ is running.
+Raffi includes several built-in addons that can be configured under the `addons` section of `raffi.yaml`. All addons except the clipboard history browser are enabled by default; that one turns itself on when CopyQ is running.
 
 Every addon (including individual entries in `script_filters`, `web_searches`, and `text_snippets`) also accepts **`close_on_action`** (`boolean`) to control whether Raffi closes after running an action in that addon, overriding `general.close_on_action`. Addons default to `true` (closing Raffi), except `media`, `audio`, `bluetooth`, and `kill`, which default to `false` so you can run several actions in a row. Actions that type or paste into the previously focused window (`insert`, `hypr_paste`, password typing) always close Raffi first.
 
@@ -44,7 +44,7 @@ longer launcher name. When a query matches nothing at all, Raffi lists the
 keywords whose help text mentions it instead, so `switcher` offers the window
 switcher. If no help text matches either, the empty list points at **Ctrl+/**.
 
-Press **Ctrl+/**, or type `?` on its own, in the native UI to open help, with
+Press **Ctrl+/**, or type `?` on its own, to open help, with
 addon keywords and actions in one section and keyboard shortcuts in another. Typing filters both sections.
 Opening help temporarily clears the current query; Escape or **Ctrl+/** restores
 it. Enter or Tab on a keyword row applies its completion.
@@ -1361,7 +1361,7 @@ addons:
 
 Opens Slack conversations and people, searches messages, lists unread
 conversations, and sets your status, presence and notification snooze, in
-one workspace. Native UI only, off by default.
+one workspace. It is off by default.
 See [Slack](../../features/slack/) for usage and for getting a token.
 
 ### Configuration

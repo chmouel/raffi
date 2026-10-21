@@ -14,7 +14,7 @@ shortcuts, newest first. The remaining conversations and people keep their
 usual usage ordering.
 
 <Aside type="note">
-The Slack addon is only available in native mode, works with one workspace,
+The Slack addon works with one workspace,
 and is off by default: it needs a Slack token, read from a command you
 choose. Raffi does not send messages.
 </Aside>
@@ -26,6 +26,8 @@ choose. Raffi does not send messages.
 | Ctrl+R     | Refresh the current view and preview                      |
 | Ctrl+Tab   | Switch between home, unread and people (Shift goes back)  |
 | Ctrl+P     | Show the preview pane                                     |
+
+The footer shows the current view. [More on Ctrl+Tab](../../reference/keyboard-shortcuts/#switching-views-with-ctrltab).
 
 Opening a person opens your direct conversation with them, or their
 profile when you have none. Clicking a message or thread in the preview pane
@@ -262,5 +264,5 @@ memory only while it runs.
 To open the list from a key binding, pass the keyword as the initial query:
 
 ```sh
-raffi -u native -i "slack "
+raffi -i "slack "
 ```

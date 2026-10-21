@@ -82,7 +82,7 @@ pub struct UISettings {
     pub app_name: Option<String>,
     pub theme: ThemeMode,
     pub theme_colors: Option<ThemeColorsConfig>,
-    /// Multiplier for the alpha of the native UI backgrounds.
+    /// Multiplier for the alpha of the window backgrounds.
     pub opacity: f32,
     pub blur: bool,
     pub renderer: Renderer,

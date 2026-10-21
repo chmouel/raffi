@@ -3,7 +3,7 @@ title: Themes
 description: Dark and light themes with custom color palettes
 ---
 
-import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Tabs, TabItem } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import lightThemeScreenshot from '../../../assets/screenshots/light-theme.png';
 import mainScreenshot from '../../../assets/screenshots/main.png';
@@ -13,11 +13,7 @@ import gruvboxScreenshot from '../../../assets/screenshots/theme-gruvbox.png';
 import solarizedScreenshot from '../../../assets/screenshots/theme-solarized-light.png';
 import tokyoNightScreenshot from '../../../assets/screenshots/theme-tokyonight.png';
 
-The native interface supports dark and light themes with full color customization.
-
-<Aside type="note">
-Themes are only available in **native mode**. Fuzzel mode uses system Fuzzel configuration.
-</Aside>
+Raffi supports dark and light themes with full color customization.
 
 ## Built-in Themes
 
@@ -41,17 +37,17 @@ Raffi includes built-in dark and light theme presets:
 <Tabs>
 <TabItem label="Dark Theme (Default)">
 ```bash
-raffi -u native -t dark
+raffi -t dark
 ```
 </TabItem>
 <TabItem label="Light Theme">
 ```bash
-raffi -u native -t light
+raffi -t light
 ```
 </TabItem>
 <TabItem label="Named Preset">
 ```bash
-raffi -u native -t catppuccin
+raffi -t catppuccin
 ```
 </TabItem>
 </Tabs>
@@ -67,7 +63,6 @@ general:
   <TabItem label="Dark Theme">
     ```yaml
     general:
-      ui_type: native
       theme: dark
     ```
 
@@ -77,7 +72,6 @@ general:
   <TabItem label="Light Theme">
     ```yaml
     general:
-      ui_type: native
       theme: light
     ```
 
@@ -284,7 +278,6 @@ Combine theme customization with font settings:
 
 ```yaml raffi.yaml
 general:
-  ui_type: native
   theme: dark
   theme_colors:
     accent: "#cba6f7"
@@ -330,7 +323,6 @@ Outer window padding in pixels. Scales with font_size if not set.
 <TabItem label="Dark + Catppuccin">
 ```yaml
 general:
-  ui_type: native
   theme: dark
   theme_colors:
     bg_base: "#1e1e2e"
@@ -350,7 +342,6 @@ general:
 <TabItem label="Light + Custom">
 ```yaml
 general:
-  ui_type: native
   theme: light
   theme_colors:
     accent: "#0066cc"
@@ -392,7 +383,7 @@ general:
     Create your own by:
     1. Starting with a base theme (dark or light)
     2. Overriding specific colors
-    3. Testing with `raffi -u native -t [theme]`
+    3. Testing with `raffi -t [theme]`
     4. Adjusting until satisfied
   </details>
 
@@ -429,7 +420,7 @@ Generate custom palettes using these tools:
   <details>
 <summary>Colors not applying</summary>
 
-    1. Ensure you're using native mode: `ui_type: native`
+    1. Make sure `ui_type` is not set to `fuzzel`
     2. Check color format: `#RRGGBB` or `#RGB`
     3. Verify YAML syntax (proper indentation)
     4. Restart Raffi after config changes

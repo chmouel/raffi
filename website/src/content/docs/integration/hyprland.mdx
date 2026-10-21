@@ -47,14 +47,6 @@ If you prefer to use icons (slightly slower startup):
 bind = $super, R, exec, (val=$(raffi -p); [ -n "$val" ] && hyprctl dispatch exec "$val")
 ```
 
-### Use Native UI
-
-To use Raffi's built-in native interface instead of Fuzzel:
-
-```ini
-bind = $super, R, exec, (val=$(raffi -p -u native); [ -n "$val" ] && hyprctl dispatch exec "$val")
-```
-
 ### Use Custom Config
 
 Specify a custom configuration file:
@@ -70,12 +62,12 @@ that opens Raffi straight into it. Ctrl+Enter then pastes the chosen item into
 the window you were using:
 
 ```ini
-bind = $super, V, exec, raffi -u native -i "clip "
+bind = $super, V, exec, raffi -i "clip "
 ```
 
 ### Transparency and Blur
 
-The native UI is translucent by default (`opacity: 0.95`), and Hyprland blurs
+Raffi is translucent by default (`opacity: 0.95`), and Hyprland blurs
 what shows through as long as `decoration:blur:enabled` is on, which is the
 default. Set `opacity` in `general`, or pass `--opacity`, to change it. See
 [Transparency and Blur](../../features/themes/#transparency-and-blur).
@@ -93,7 +85,6 @@ After adding the configuration:
 ### Launcher doesn't appear
 
 - Verify Raffi is installed: `which raffi`
-- If using Fuzzel mode, ensure Fuzzel is installed
 - Check Hyprland logs: `journalctl --user -xe`
 
 ### Applications launch multiple times or don't launch
@@ -101,8 +92,3 @@ After adding the configuration:
 - The `[ -n "$val" ]` check prevents execution when you cancel the launcher
 - Ensure you're using the full command including the conditional check
 - Test manually: `val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val"`
-
-### Command line appears in launcher
-
-- This is normal when using Fuzzel mode with complex shell commands
-- Consider using the native UI with `-u native` for a cleaner experience

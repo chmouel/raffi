@@ -11,7 +11,7 @@
       "type": "object",
       "properties": {
         "alias": {
-          "description": "Route this launcher to an internal command: picking it types this text\nfor you, such as `mp linus/linux` (an addon keyword\nfollowed by its query). Cannot be combined with `binary`, `script` or\n`args` (native UI only).",
+          "description": "Route this launcher to an internal command: picking it types this text\nfor you, such as `mp linus/linux` (an addon keyword\nfollowed by its query). Cannot be combined with `binary`, `script` or\n`args`.",
           "type": [
             "string",
             "null"

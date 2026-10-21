@@ -601,9 +601,7 @@ fn dispatch(action: &str, value: &str, cursor_moves: usize) -> Result<(), String
     match action {
         "insert" => spawn_insert(value, cursor_moves),
         "copy" => try_copy(value),
-        "hypr_paste" => {
-            Err("hypr_paste is only available for text snippets in the native UI".into())
-        }
+        "hypr_paste" => Err("hypr_paste is only available for text snippets".into()),
         _ => spawn_custom_action(action, value, &HashMap::new()),
     }
 }

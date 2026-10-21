@@ -39,7 +39,7 @@ pub struct RaffiConfig {
     /// Route this launcher to an internal command: picking it types this text
     /// for you, such as `mp linus/linux` (an addon keyword
     /// followed by its query). Cannot be combined with `binary`, `script` or
-    /// `args` (native UI only).
+    /// `args`.
     pub alias: Option<String>,
     /// Keyword that stands for `alias` while typing: with keyword `linoux`,
     /// typing `linoux torvalds` searches `mp linus/linux torvalds`
@@ -173,7 +173,7 @@ impl Default for ColorAddonConfig {
 }
 
 /// Configuration for the developer tools addon: the `dev` transform list
-/// and the inline `uuid` and `pw` generators (native UI only)
+/// and the inline `uuid` and `pw` generators
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct DevtoolsAddonConfig {
@@ -272,7 +272,7 @@ pub struct FileBrowserAddonConfig {
     /// Ctrl+Tab cycles through them.
     #[serde(default)]
     pub show: FileBrowserShow,
-    /// Command that previews the selected entry in the native preview pane.
+    /// Command that previews the selected entry in the preview pane.
     /// Unset uses the previewer bundled with raffi when python3 is
     /// installed; `none` turns it off. A command runs through `sh -c` with
     /// the path appended as the last argument (also in `$RAFFI_VALUE`) and
@@ -556,7 +556,7 @@ pub enum ClipboardAction {
     HyprPaste,
 }
 
-/// Configuration for the clipboard history addon (native UI only)
+/// Configuration for the clipboard history addon
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct ClipboardAddonConfig {
@@ -681,7 +681,7 @@ impl SystemCommandsConfig {
     }
 }
 
-/// Configuration for the system commands addon (native UI only)
+/// Configuration for the system commands addon
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct SystemAddonConfig {
@@ -719,7 +719,6 @@ impl Default for SystemAddonConfig {
 }
 
 /// Configuration for the window switcher addon for Hyprland, niri and sway
-/// (native UI only)
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct WindowsAddonConfig {
@@ -750,7 +749,7 @@ impl Default for WindowsAddonConfig {
 }
 
 /// Configuration for the browser tabs addon, fed by the Vicinae browser
-/// extension (native UI only)
+/// extension
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct BrowserTabsAddonConfig {
@@ -800,7 +799,7 @@ impl Default for BrowserTabsAddonConfig {
     }
 }
 
-/// Configuration for the media controls addon (native UI only)
+/// Configuration for the media controls addon
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct MediaAddonConfig {
@@ -835,7 +834,7 @@ impl Default for MediaAddonConfig {
     }
 }
 
-/// Configuration for the audio device switcher addon (native UI only)
+/// Configuration for the audio device switcher addon
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct AudioAddonConfig {
@@ -911,7 +910,7 @@ impl Default for AppsAddonConfig {
     }
 }
 
-/// Configuration for the run in terminal addon (native UI only)
+/// Configuration for the run in terminal addon
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct TerminalAddonConfig {
@@ -973,7 +972,7 @@ impl Default for TerminalAddonConfig {
     }
 }
 
-/// Configuration for the kill process addon (native UI only)
+/// Configuration for the kill process addon
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct KillAddonConfig {
@@ -1008,7 +1007,7 @@ impl Default for KillAddonConfig {
     }
 }
 
-/// Configuration for the Bluetooth addon (native UI only)
+/// Configuration for the Bluetooth addon
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct BluetoothAddonConfig {
@@ -1056,7 +1055,7 @@ pub enum PassPinentry {
     Agent,
 }
 
-/// Configuration for the pass (password-store) addon (native UI only)
+/// Configuration for the pass (password-store) addon
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct PassAddonConfig {
@@ -1123,7 +1122,7 @@ impl Default for PassAddonConfig {
     }
 }
 
-/// Configuration for the Bitwarden addon, backed by rbw (native UI only)
+/// Configuration for the Bitwarden addon, backed by rbw
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct BitwardenAddonConfig {
@@ -1181,7 +1180,7 @@ pub enum SlackOpenIn {
     Browser,
 }
 
-/// Configuration for the Slack addon (native UI only)
+/// Configuration for the Slack addon
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
 pub struct SlackAddonConfig {
@@ -1304,7 +1303,7 @@ fn default_true() -> bool {
     true
 }
 
-/// Per-colour overrides for the native UI theme.
+/// Per-colour overrides for the theme.
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
 pub struct ThemeColorsConfig {
@@ -1336,7 +1335,7 @@ pub struct PreviewColorsConfig {
     pub border: Option<String>,
 }
 
-/// Appearance settings for the right-hand preview pane in native mode.
+/// Appearance settings for the right-hand preview pane.
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default, PartialEq)]
 #[schemars(deny_unknown_fields)]
 pub struct PreviewConfig {
@@ -1386,7 +1385,7 @@ pub enum MainViewChips {
     Off,
 }
 
-/// How the native UI draws its window
+/// How Raffi draws its window
 #[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Renderer {
@@ -1432,16 +1431,16 @@ pub struct GeneralConfig {
     pub theme: Option<String>,
     #[serde(default)]
     pub theme_colors: Option<ThemeColorsConfig>,
-    /// Opacity of the native UI backgrounds, from 0.0 (see-through) to 1.0
+    /// Opacity of the window backgrounds, from 0.0 (see-through) to 1.0
     /// (the theme as designed). Text and icons stay opaque. Default: 0.95.
     #[serde(default)]
     #[schemars(range(min = 0.0, max = 1.0))]
     pub opacity: Option<f32>,
-    /// Ask the compositor to blur what shows through the native UI window
+    /// Ask the compositor to blur what shows through the window
     /// (KDE/KWin; other compositors use their own rules). Default: true.
     #[serde(default)]
     pub blur: Option<bool>,
-    /// Renderer for the native UI: `auto` (default: `gpu` when `opacity` is
+    /// Renderer for the window: `auto` (default: `gpu` when `opacity` is
     /// below 1, else `cpu`), `cpu` (faster to open, opaque on Wayland) or `gpu`.
     /// An `ICED_BACKEND` environment variable takes precedence.
     #[serde(default)]
@@ -1463,14 +1462,14 @@ pub struct GeneralConfig {
     #[serde(default)]
     pub fallbacks: Vec<String>,
     /// Sources mixed into the main view, in display order, when typing without
-    /// an addon trigger (native UI only). Entries: `launchers`, `browser_tabs`,
+    /// an addon trigger. Entries: `launchers`, `browser_tabs`,
     /// `windows`, `system`, `media`, `audio`, `bluetooth`, `pass`,
     /// `text_snippets.<name>` and `script_filters.<name>`. When set, launchers
     /// only show if `launchers` is listed.
     #[serde(default)]
     pub main_view: Option<Vec<String>>,
     /// What the chips row above the apps shows on an empty query when
-    /// `main_view` is set: `name` (default), `keyword` or `off` (native UI only)
+    /// `main_view` is set: `name` (default), `keyword` or `off`
     #[serde(default)]
     pub main_view_chips: MainViewChips,
     /// Clipboard manager for `{clipboard:N}` snippet placeholders
@@ -1480,17 +1479,17 @@ pub struct GeneralConfig {
     /// instead of Ctrl+V). Added to the built-in list; matched case-insensitively.
     #[serde(default)]
     pub terminal_classes: Vec<String>,
-    /// Show the Alfred-style right-hand preview pane in native mode.
+    /// Show the Alfred-style right-hand preview pane.
     /// By default, previews are shown automatically for addons (snippets, file browser,
     /// script filters, etc.) and hidden for standard launcher entries unless `show_preview: true`
     /// is set in `general` or on the launcher entry. Can also be toggled at runtime with Ctrl+P.
     #[serde(default)]
     pub show_preview: Option<bool>,
     /// Show a tip about a keyword in the empty search box, such as
-    /// `clip for Clipboard history` (native UI only, default: true).
+    /// `clip for Clipboard history` (default: true).
     #[serde(default)]
     pub show_tips: Option<bool>,
-    /// Close Raffi after executing an action (native UI only, default: true).
+    /// Close Raffi after executing an action (default: true).
     /// Addon and launcher `close_on_action` settings override this.
     #[serde(default)]
     pub close_on_action: Option<bool>,
@@ -1635,14 +1634,14 @@ impl std::str::FromStr for UIType {
             "native" | "wayland" | "iced" => Ok(UIType::Native),
             #[cfg(not(feature = "wayland"))]
             "native" | "wayland" | "iced" => Err(
-                "Native UI is not available. Build with the 'wayland' feature to enable it."
+                "This build only supports Fuzzel. Build with the 'wayland' feature for Raffi's own window."
                     .to_string(),
             ),
             _ => {
                 #[cfg(feature = "wayland")]
                 {
                     Err(format!(
-                        "Invalid UI type: {}. Valid options are: fuzzel, native",
+                        "Invalid UI type: {}. Use fuzzel, or leave it unset for Raffi's own window",
                         s
                     ))
                 }
@@ -1673,13 +1672,13 @@ pub struct Args {
     #[options(help = "default shell when using scripts", short = "P")]
     pub default_script_shell: Option<String>,
     #[options(
-        help = "UI type to use: fuzzel, native (default: native; fuzzel-only builds use fuzzel)",
+        help = "show entries in fuzzel instead of Raffi's own window",
         short = "u"
     )]
     pub ui_type: Option<String>,
-    #[options(help = "application ID for the native Linux window", no_short)]
+    #[options(help = "application ID for the Raffi window on Linux", no_short)]
     pub app_name: Option<String>,
-    #[options(help = "initial search query (native mode only)", short = "i")]
+    #[options(help = "initial search query", short = "i")]
     pub initial_query: Option<String>,
     #[options(
         help = "activate the only selectable result for a non-empty initial query",
@@ -1692,7 +1691,7 @@ pub struct Args {
     )]
     pub theme: Option<String>,
     #[options(
-        help = "native UI background opacity, 0.0 to 1.0 (default: 0.95)",
+        help = "window background opacity, 0.0 to 1.0 (default: 0.95)",
         no_short,
         meta = "OPACITY"
     )]
@@ -1747,7 +1746,7 @@ fn resolve_window_dimensions(general: &GeneralConfig) -> (f32, f32) {
 
 const DEFAULT_OPACITY: f32 = 0.95;
 
-/// Background opacity for the native UI: `--opacity` wins over `general.opacity`.
+/// Background opacity for the window: `--opacity` wins over `general.opacity`.
 fn resolve_opacity(args: &Args, general: &GeneralConfig) -> f32 {
     args.opacity
         .or(general.opacity)
@@ -3883,10 +3882,10 @@ pub fn run(args: Args) -> Result<()> {
     };
 
     if ui_type == UIType::Fuzzel && !general.fallbacks.is_empty() {
-        eprintln!("Warning: fallbacks are configured but ui_type is fuzzel — fallbacks require the native UI. Set ui_type: native to use fallbacks.");
+        eprintln!("Warning: fallbacks are configured but Fuzzel ignores them.");
     }
     if ui_type == UIType::Fuzzel && general.main_view.is_some() {
-        eprintln!("Warning: main_view is configured but ui_type is fuzzel — main_view requires the native UI. Set ui_type: native to use main_view.");
+        eprintln!("Warning: main_view is configured but Fuzzel ignores it.");
     }
     let fuzzel_drops_aliases =
         ui_type == UIType::Fuzzel && parsed_config.entries.iter().any(|e| e.alias.is_some());
@@ -3952,7 +3951,7 @@ pub fn run(args: Args) -> Result<()> {
 
     // Get the appropriate UI implementation
     if fuzzel_drops_aliases {
-        eprintln!("Warning: launchers with alias require the native UI and are hidden with ui_type fuzzel.");
+        eprintln!("Warning: launchers with alias are hidden with ui_type: fuzzel.");
         parsed_config.entries.retain(|entry| entry.alias.is_none());
     }
     let ui = ui::get_ui(ui_type);

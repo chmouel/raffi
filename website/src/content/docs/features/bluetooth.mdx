@@ -19,7 +19,7 @@ Words after the keyword filter the devices, so `bt buds` or `bt keyboard`
 narrows the list. The first row stays in place whatever you type.
 
 <Aside type="note">
-The Bluetooth addon is only available in native mode and needs
+The Bluetooth addon needs
 `bluetoothctl` from BlueZ. It is on by default. When `bluetoothctl` is not
 installed the list shows "bluetoothctl not found". It says so as well when
 there is no Bluetooth adapter, when the Bluetooth service can't be reached,
@@ -45,7 +45,7 @@ search history.
 To open the list from a key binding, pass the keyword as the initial query:
 
 ```sh
-raffi -u native -i "bt "
+raffi -i "bt "
 ```
 
 ## Configuration

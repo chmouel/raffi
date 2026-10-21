@@ -23,19 +23,17 @@ Command-line flags always override settings from the configuration file.
 
 All fields in the `general` section are optional.
 
-**`ui_type`** `string` (default: `native` in standard builds; `fuzzel` in Fuzzel-only builds)
+**`ui_type`** `string`
 
-Select the UI backend. The native interface is the default and recommended option
-in standard builds; Fuzzel is a deprecated legacy backend. Valid options:
-  - `native` - Uses built-in iced-based GUI (default in standard builds)
-  - `fuzzel` - Uses the deprecated external Fuzzel launcher
+By default Raffi opens its own window. Set it to `fuzzel` to show your entries
+in [Fuzzel](../../integration/fuzzel/) instead, a legacy option with fewer features.
 
   Equivalent to `-u` or `--ui-type` flag.
 
 
 **`theme`** `string` (default: `dark`)
 
-Color theme for the native interface. Valid options:
+Color theme for the launcher. Valid options:
   - `dark` - Sleek Obsidian dark palette (default)
   - `light` - Rose Pine Dawn light palette
   - `catppuccin` / `catppuccin-mocha` - Catppuccin Mocha dark palette
@@ -47,12 +45,12 @@ Color theme for the native interface. Valid options:
   - `rose-pine` / `rosepine` - Rosé Pine dark palette
   - `kanagawa` - Kanagawa Wave dark palette
 
-  Equivalent to `-t` or `--theme` flag. Only applies to native UI.
+  Equivalent to `-t` or `--theme` flag.
 
 
 **`opacity`** `number` (default: `0.95`)
 
-Opacity of the native UI backgrounds, from `0.0` (see-through) to `1.0` (the theme as designed). Text and icons stay opaque. Set `1` for a solid window. Transparency needs the GPU renderer, which `renderer: auto` picks when `opacity` is below `1`.
+Opacity of the window backgrounds, from `0.0` (see-through) to `1.0` (the theme as designed). Text and icons stay opaque. Set `1` for a solid window. Transparency needs the GPU renderer, which `renderer: auto` picks when `opacity` is below `1`.
 
   Equivalent to `--opacity` flag. See [Transparency and Blur](../../features/themes/#transparency-and-blur).
 
@@ -71,7 +69,7 @@ Disables icon loading for faster startup.
 
 **`renderer`** `string` (default: `auto`)
 
-How the native UI draws its window. Valid options:
+How Raffi draws its window. Valid options:
   - `auto` - `gpu` when `opacity` is below `1`, otherwise `cpu` (default).
   - `cpu` - Software rendering. Skips GPU driver setup, so the window opens sooner. The window stays opaque on Wayland and `opacity` is ignored.
   - `gpu` - Vulkan/OpenGL rendering through wgpu. Needed for a translucent window.
@@ -81,19 +79,19 @@ How the native UI draws its window. Valid options:
 
 **`show_preview`** `boolean` (default: `false` for launchers, automatic for addons)
 
-Controls the Alfred-style right-hand preview and details pane in the native UI.
+Controls the Alfred-style right-hand preview and details pane.
 
   Addon results (text snippets, file browser, script filters, emoji, calculator, currency, web searches) always show a preview. Plain launcher entries only show one when this is `true`, or when the entry itself sets `show_preview: true`. Press **Ctrl+P** to toggle the pane at runtime; when nothing is shown for a launcher, the first press turns launcher previews on.
 
 **`close_on_action`** `boolean` (default: `true`)
 
-Whether Raffi closes its window after executing an action in the native UI.
+Whether Raffi closes its window after executing an action.
 
   Set `close_on_action: false` (or pass `--keep-open` / `-o general.close_on_action=false`) to keep Raffi open with your current search query and selection after launching an app, copying an inline result, or running an addon action. Individual launcher entries and addons can override this with their own `close_on_action: true | false` setting (`media`, `audio`, `bluetooth`, and `kill` stay open by default unless set to `true`). Actions that must type or paste into the previously focused window (`insert`, `hypr_paste`, password typing) or end the desktop session still close Raffi first.
 
 **`show_tips`** `boolean` (default: `true`)
 
-Shows a tip in the empty search box of the native UI, such as `Type to search... (tip: clip for Clipboard history)`, picked from your enabled addons and changed on each launch. Set it to `false` to keep the plain `Type to search...`.
+Shows a tip in the empty search box, such as `Type to search... (tip: clip for Clipboard history)`, picked from your enabled addons and changed on each launch. Set it to `false` to keep the plain `Type to search...`.
 
 
 ## Preview Pane
@@ -142,7 +140,7 @@ general:
       bg_block: "#1e1e2e"
 ```
 
-<Image src={mainScreenshot} alt="Native launcher showing a standard entry in the preview pane" width={800} />
+<Image src={mainScreenshot} alt="Raffi showing a standard entry in the preview pane" width={800} />
 
 **`default_script_shell`** `string` (default: `bash`)
 
@@ -158,7 +156,7 @@ Default interpreter for inline scripts. Common values:
 
 Maximum number of search query history entries.
 
-  Set to `0` to disable history. Navigate history with Alt+P (previous) and Alt+N (next) in native mode.
+  Set to `0` to disable history. Navigate history with Alt+P (previous) and Alt+N (next).
 
 
 <a id="sort_mode"></a>
@@ -237,7 +235,7 @@ Fallbacks work best with search-type addons. The referenced addon must be define
 
 **`main_view`** `list of strings` (default: unset)
 
-Mixes addon results into the main list, so typing `gmail` shows the matching browser tabs without typing the `tabs` trigger first. Native UI only.
+Mixes addon results into the main list, so typing `gmail` shows the matching browser tabs without typing the `tabs` trigger first.
 
 Accepted entries:
 
@@ -280,7 +278,7 @@ general:
 
 Typing a trigger (`tabs gmail`) still opens the addon's full list, and fallbacks still show below the main list.
 
-Ctrl+Tab narrows the main list to one source at a time, in the order of `main_view`, and comes back to all of them after the last one. Ctrl+Shift+Tab goes the other way. The footer shows which one is current, for instance `Ctrl+Tab Tabs` or `Ctrl+Tab All`. A single source lists all of its matches with no 5-row limit, and shows its rows before you type anything, except script filters, which still need a query. Fallbacks, keyword suggestions and inline results such as the calculator only show when all sources are listed. The choice stays while you type and lasts until Raffi closes.
+Ctrl+Tab narrows the main list to one source at a time, in the order of `main_view`, and comes back to all of them after the last one. Ctrl+Shift+Tab goes the other way. The footer shows which one is current, for instance `Ctrl+Tab Tabs` or `Ctrl+Tab All`. A single source lists all of its matches with no 5-row limit, and shows its rows before you type anything, except script filters, which still need a query. Fallbacks, keyword suggestions and inline results such as the calculator only show when all sources are listed. The choice stays while you type and lasts until Raffi closes. [More on Ctrl+Tab](../../reference/keyboard-shortcuts/#switching-views-with-ctrltab).
 
 ## Font and Typography
 
@@ -304,12 +302,12 @@ Font family name (e.g., `"Inter"`, `"Fira Sans"`, `"Roboto"`).
 
 **`window_width`** `number` (default: `800`)
 
-Launcher window width in pixels (native mode only).
+Launcher window width in pixels.
 
 
 **`window_height`** `number` (default: `600`)
 
-Launcher window height in pixels (native mode only).
+Launcher window height in pixels.
 
 
 **`padding`** `number` (default: `20`)
@@ -384,11 +382,10 @@ in Raffi's environment skips them.
 
 ## Example Configurations
 
-### Native UI with Light Theme
+### Light Theme
 
 ```yaml
 general:
-  ui_type: native
   theme: light
   font_size: 18
   font_family: "Inter"
@@ -412,23 +409,11 @@ general:
     border: "#585b70"
 ```
 
-### Minimal Fuzzel Configuration
-
-```yaml
-general:
-  ui_type: fuzzel
-  no_icons: true
-  default_script_shell: /bin/zsh
-```
-
 ## Command-Line Override
 
 Dedicated flags exist for common settings, and any setting in `raffi.yaml` or `launchers.yaml` can be overridden from the command line with `-o KEY=VALUE` (`--option KEY=VALUE`).
 
 ```bash
-# Override UI type
-raffi --ui-type native
-
 # Override theme
 raffi --theme light
 
