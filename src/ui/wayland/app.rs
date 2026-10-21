@@ -4379,9 +4379,9 @@ impl LauncherApp {
     }
 
     /// Ctrl+Tab in Slack: rewrite the view word after the keyword, going
-    /// Home, Unread, People, keeping the rest of the text. The typed keyword
-    /// stays when it still routes there; a launcher alias carrying its own
-    /// view or text falls back to the Slack trigger. Nothing changes when a
+    /// Home, Unread, Threads, Activity, People, Actions, keeping the rest of the
+    /// text. The typed keyword stays when it still routes there; a launcher
+    /// alias carrying its own view or text falls back to the Slack trigger. Nothing changes when a
     /// launcher keyword shadowing the trigger makes the view unreachable.
     fn handle_slack_cycle_view(&mut self, backwards: bool) -> Task<Message> {
         let slack_query = |input: &str| match route_query(

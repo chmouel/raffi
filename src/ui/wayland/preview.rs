@@ -2296,13 +2296,19 @@ fn describe_addon_by_keyword(
                 ),
                 ("People".to_string(), format!("{trigger} people <name>")),
                 ("Unread".to_string(), format!("{trigger} unread")),
+                ("Threads".to_string(), format!("{trigger} threads")),
+                ("Activity".to_string(), format!("{trigger} activity")),
+                (
+                    "Actions".to_string(),
+                    format!("{trigger} actions: search, people, status, presence and snooze"),
+                ),
                 (
                     "Status".to_string(),
                     format!("{trigger} status <text> [:emoji:] [30m|2h|today]"),
                 ),
                 (
                     "Ctrl+Enter".to_string(),
-                    "Open in the other app (browser or desktop), or mark an unread conversation read".to_string(),
+                    "Open in the other app (browser or desktop), or mark an unread conversation or thread read".to_string(),
                 ),
             ],
         );

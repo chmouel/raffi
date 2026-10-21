@@ -37,8 +37,10 @@ const DIRECTORY_FILE: &str = "directory.json";
 pub(super) const LIVE_FILE: &str = "live.json";
 pub(super) const UNREAD_FILE: &str = "unread.json";
 pub(super) const MUTED_FILE: &str = "muted.json";
+pub(super) const THREADS_FILE: &str = "threads.json";
+pub(super) const ACTIVITY_FILE: &str = "activity.json";
 pub(super) const PREVIEW_DIR: &str = "previews";
-const DIRECTORY_VERSION: u32 = 2;
+const DIRECTORY_VERSION: u32 = 3;
 /// People looked up one by one when the directory cannot list them all.
 const MAX_LOOKUPS: usize = 200;
 const LOOKUP_THREADS: usize = 8;
@@ -538,6 +540,9 @@ pub(super) struct User {
     /// Offset from UTC in seconds.
     pub tz_offset: i64,
     pub avatar: String,
+    /// An app or Slackbot rather than a person.
+    #[serde(default)]
+    pub is_bot: bool,
 }
 
 impl User {
@@ -580,10 +585,11 @@ struct RawProfile {
 
 fn parse_user(value: Value) -> Option<User> {
     let raw: RawUser = serde_json::from_value(value).ok()?;
-    if raw.deleted || raw.is_bot || raw.id.is_empty() || raw.id == "USLACKBOT" {
+    if raw.deleted || raw.id.is_empty() {
         return None;
     }
     Some(User {
+        is_bot: raw.is_bot || raw.id == "USLACKBOT",
         id: raw.id,
         name: raw.name,
         real_name: if raw.profile.real_name.is_empty() {
@@ -1515,7 +1521,12 @@ pub(super) mod tests {
         );
         assert_eq!(directory.conversation("C1").unwrap().members, Some(4));
         assert_eq!(directory.conversation("G1").unwrap().name, "alice, bob");
-        assert_eq!(directory.users.len(), 1);
+        let users: Vec<_> = directory
+            .users
+            .iter()
+            .map(|user| (user.id.as_str(), user.is_bot))
+            .collect();
+        assert_eq!(users, [("U2", false), ("B1", true), ("USLACKBOT", true)]);
         assert_eq!(directory.user("U2").unwrap().label(), "Alice A");
         assert_eq!(directory.direct_with("U2").unwrap().id, "D1");
         let calls = fake.calls.lock().unwrap();

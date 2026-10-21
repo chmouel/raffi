@@ -177,6 +177,7 @@ pub(super) fn media_items(players: &[Player], keep_open: bool) -> Vec<CommandIte
                 domains: Vec::new(),
                 dimmed: false,
                 sort_priority: 0,
+                typed_only: false,
             });
         }
     }
@@ -227,6 +228,7 @@ fn header_item(player: &Player) -> CommandItem {
         domains: Vec::new(),
         dimmed: false,
         sort_priority: 0,
+        typed_only: false,
     }
 }
 

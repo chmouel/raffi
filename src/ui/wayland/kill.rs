@@ -259,6 +259,7 @@ fn process_item(process: &Process, keep_open: bool) -> CommandItem {
         domains: Vec::new(),
         dimmed: false,
         sort_priority: 0,
+        typed_only: false,
     }
 }
 

@@ -149,6 +149,7 @@ pub(super) fn parse_items(
                 domains: domains_of(uris.iter().map(String::as_str)),
                 dimmed: false,
                 sort_priority: 0,
+                typed_only: false,
             }
         })
         .collect();

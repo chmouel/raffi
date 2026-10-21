@@ -1,6 +1,6 @@
-//! The Slack keyword list: switches between the home, search and unread
-//! views as the query changes, debounces searches, loads previews and keeps
-//! usage counts.
+//! The Slack keyword list: switches between the home, search, unread,
+//! threads, activity, actions and people views as the query changes,
+//! debounces searches, loads previews and keeps usage counts.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -84,7 +84,7 @@ impl LauncherApp {
             return Task::none();
         }
         self.slack.view = Some(view.clone());
-        if view == View::Home {
+        if matches!(view, View::Home | View::Actions) {
             let icon = self.resolve_icon_name(slack::SLACK_ICON);
             let action_keep_open = self.addons.slack.close_on_action != Some(true);
             self.command_list.query_row = Some(std::sync::Arc::new(move |query: &str| {
@@ -97,9 +97,12 @@ impl LauncherApp {
                 }
                 Some(item)
             }));
-            self.command_list.usage = self.slack_usage();
         } else {
             self.command_list.query_row = None;
+        }
+        if view == View::Home {
+            self.command_list.usage = self.slack_usage();
+        } else {
             self.command_list.usage.clear();
         }
         self.command_list.set_query(filter);
@@ -141,7 +144,9 @@ impl LauncherApp {
                     move |terms| Message::SlackSearchDue(session, terms),
                 )
             }
-            View::Home | View::Unread => self.load_slack(false),
+            View::Home | View::Unread | View::Threads | View::Activity | View::Actions => {
+                self.load_slack(false)
+            }
         }
     }
 
@@ -168,6 +173,26 @@ impl LauncherApp {
             Some(View::Unread) => {
                 let cached = (!refresh).then(|| slack::cached_unread(&config)).flatten();
                 self.load_slack_cached(cached, refresh, move || slack::load_unread(config, refresh))
+            }
+            Some(View::Threads) => {
+                let cached = (!refresh).then(|| slack::cached_threads(&config)).flatten();
+                self.load_slack_cached(cached, refresh, move || {
+                    slack::load_threads(config, refresh)
+                })
+            }
+            Some(View::Activity) => {
+                let cached = (!refresh)
+                    .then(|| slack::cached_activity(&config))
+                    .flatten();
+                self.load_slack_cached(cached, refresh, move || {
+                    slack::load_activity(config, refresh)
+                })
+            }
+            Some(View::Actions) => {
+                let cached = (!refresh).then(slack::cached_actions).flatten();
+                self.load_slack_cached(cached, refresh, move || {
+                    slack::load_actions(config, refresh)
+                })
             }
             Some(View::Search(terms)) if terms.chars().count() >= MIN_SEARCH_CHARS => {
                 self.load_command_list(move || slack::load_search(config, terms), refresh)
@@ -235,12 +260,19 @@ impl LauncherApp {
     }
 
     /// Count a conversation or person opened from the list, so it sorts
-    /// higher next time, and drop an unread row from the disk cache at once.
+    /// higher next time, and drop an unread conversation or thread row from
+    /// the disk cache at once.
     pub(super) fn record_slack_pick(&mut self, identity: &str) {
         if let Some(rest) = identity.strip_prefix("slack:unread:") {
             let channel = rest.split(':').next().unwrap_or_default();
             if !channel.is_empty() {
                 slack::forget_cached_unread(channel);
+            }
+            return;
+        }
+        if let Some(rest) = identity.strip_prefix("slack:thread:") {
+            if let [channel, _, thread_ts] = rest.split(':').collect::<Vec<_>>()[..] {
+                slack::forget_cached_thread(channel, thread_ts);
             }
             return;
         }

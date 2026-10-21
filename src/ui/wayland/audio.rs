@@ -414,6 +414,7 @@ fn control_item(
         domains: Vec::new(),
         dimmed: false,
         sort_priority: 0,
+        typed_only: false,
     }
 }
 
@@ -619,6 +620,7 @@ fn device_item(kind: Kind, device: &Device, is_default: bool, keep_open: bool) -
         domains: Vec::new(),
         dimmed: false,
         sort_priority: 0,
+        typed_only: false,
     }
 }
 

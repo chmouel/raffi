@@ -1,5 +1,5 @@
-//! Slack addon: open conversations, search messages, read unread ones, and
-//! set the status, presence and notification snooze, with a user (`xoxp-`)
+//! Slack addon: open conversations, people and bots, search messages, read
+//! unread conversations, threads and activity, and set the status, presence and notification snooze, with a user (`xoxp-`)
 //! or browser session (`xoxc-`) token. Web API calls live in `slack_api`.
 
 use std::collections::{HashMap, HashSet};
@@ -39,6 +39,16 @@ const PREVIEW_SETTLE: std::time::Duration = std::time::Duration::from_millis(150
 const MAX_CACHED_PREVIEWS: usize = 500;
 /// Searches kept in memory, at most.
 const MAX_CACHED_SEARCHES: usize = 50;
+/// Threads in a page of the threads view; Slack gives no more.
+const THREAD_PAGE: &str = "10";
+/// Pages of the threads view looked through for unread replies, at most.
+const MAX_THREAD_PAGES: usize = 5;
+/// Activity items asked for, at most.
+const ACTIVITY_COUNT: &str = "50";
+/// The Activity tab items listed: mentions, reactions, thread replies and
+/// new messages.
+const ACTIVITY_TYPES: &str = "at_user,at_user_group,at_channel,at_everyone,keyword,\
+                              message_reaction,thread_v2,dm,bot_dm_bundle,channel";
 
 /// What the text after the keyword asks for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,8 +59,14 @@ pub(super) enum View {
     Search(String),
     /// Conversations with unread messages.
     Unread,
+    /// Followed threads with unread replies.
+    Threads,
+    /// Unread mentions, reactions and other activity.
+    Activity,
     /// People matching the name.
     People(String),
+    /// Search, people, status, presence and snooze.
+    Actions,
 }
 
 impl View {
@@ -60,7 +76,10 @@ impl View {
             Self::Home => "Home",
             Self::Search(_) => "Search",
             Self::Unread => "Unread",
+            Self::Threads => "Threads",
+            Self::Activity => "Activity",
             Self::People(_) => "People",
+            Self::Actions => "Actions",
         }
     }
 
@@ -68,7 +87,7 @@ impl View {
     pub fn terms(&self) -> Option<&str> {
         match self {
             Self::Search(terms) | Self::People(terms) => Some(terms),
-            Self::Home | Self::Unread => None,
+            Self::Home | Self::Unread | Self::Threads | Self::Activity | Self::Actions => None,
         }
     }
 }
@@ -82,23 +101,29 @@ pub(super) fn parse_view(query: &str) -> (View, String) {
     match word {
         "search" => (View::Search(rest.trim().to_string()), String::new()),
         "unread" => (View::Unread, rest.to_string()),
+        "threads" => (View::Threads, rest.to_string()),
+        "activity" => (View::Activity, rest.to_string()),
         "people" => (View::People(rest.trim().to_string()), String::new()),
+        "actions" => (View::Actions, rest.to_string()),
         _ => (View::Home, query.to_string()),
     }
 }
 
-/// `query` switched to the next view Ctrl+Tab cycles through, Home, Unread
-/// then People, or the previous one when `backwards`, keeping the text typed
-/// after the view word. A search counts as Home. Home is skipped when the
+/// `query` switched to the next view Ctrl+Tab cycles through, Home, Unread,
+/// Threads, Activity, People then Actions, or the previous one when
+/// `backwards`, keeping the text typed after the view word. A search counts as Home. Home is skipped when the
 /// text would read as another view, such as `search errors`.
 pub(super) fn cycle_view(query: &str, backwards: bool) -> String {
-    const STOPS: [&str; 3] = ["", "unread", "people"];
+    const STOPS: [&str; 6] = ["", "unread", "threads", "activity", "people", "actions"];
     let (view, filter) = parse_view(query);
     let (at, text) = match view {
         View::Home => (0, filter),
         View::Search(terms) => (0, terms),
         View::Unread => (1, filter),
-        View::People(terms) => (2, terms),
+        View::Threads => (2, filter),
+        View::Activity => (3, filter),
+        View::People(terms) => (4, terms),
+        View::Actions => (5, filter),
     };
     let home_fits = matches!(parse_view(&text).0, View::Home);
     let step = if backwards { STOPS.len() - 1 } else { 1 };
@@ -539,6 +564,19 @@ pub(super) enum SlackAction {
         channel: String,
         ts: String,
     },
+    /// Mark the replies of a followed thread up to `ts` as read.
+    MarkThreadRead {
+        channel: String,
+        thread_ts: String,
+        ts: String,
+    },
+    /// Open a thread with unread replies and mark them as read.
+    OpenThread {
+        url: String,
+        channel: String,
+        thread_ts: String,
+        ts: String,
+    },
 }
 
 /// Run `action` against Slack. Blocking: run it off the UI thread.
@@ -556,6 +594,21 @@ pub(super) fn run_action(action: &SlackAction) -> Result<(), String> {
                 }) {
                     crate::debug_log!("slack: cannot mark {channel} as read: {error}");
                 }
+            }
+            return opened;
+        }
+        SlackAction::OpenThread {
+            url,
+            channel,
+            thread_ts,
+            ts,
+        } => {
+            forget_cached_thread(channel, thread_ts);
+            let opened = open_url(url);
+            if let Err(error) = slack_api::current_client()
+                .and_then(|client| mark_thread(&client, channel, thread_ts, ts))
+            {
+                crate::debug_log!("slack: cannot mark thread {thread_ts} as read: {error}");
             }
             return opened;
         }
@@ -584,9 +637,53 @@ pub(super) fn forget_cached_unread(channel: &str) {
     }
 }
 
+/// Drop the thread from the threads cache at once, as
+/// [`forget_cached_unread`] does for conversations.
+pub(super) fn forget_cached_thread(channel: &str, thread_ts: &str) {
+    if let Some(account) = slack_api::cached_account() {
+        slack_api::update_cache(
+            slack_api::THREADS_FILE,
+            &account,
+            |threads: &mut Vec<UnreadThread>| {
+                threads
+                    .retain(|thread| !(thread.channel == channel && thread.thread_ts == thread_ts));
+            },
+        );
+    }
+}
+
+fn mark_thread(client: &Client, channel: &str, thread_ts: &str, ts: &str) -> Result<(), String> {
+    client
+        .call(
+            "subscriptions.thread.mark",
+            &[
+                ("channel", channel),
+                ("thread_ts", thread_ts),
+                ("ts", ts),
+                ("read", "1"),
+            ],
+        )
+        .map(drop)
+}
+
 /// Bring the cached state in line with what `action` did, so a list shown
 /// from the cache before Slack answers does not show the old state.
 fn remember_action(action: &SlackAction, account: &Workspace, now: DateTime<Local>) {
+    if let SlackAction::MarkThreadRead {
+        channel, thread_ts, ..
+    } = action
+    {
+        slack_api::update_cache(
+            slack_api::THREADS_FILE,
+            account,
+            |threads: &mut Vec<UnreadThread>| {
+                threads.retain(|thread| {
+                    !(&thread.channel == channel && &thread.thread_ts == thread_ts)
+                });
+            },
+        );
+        return;
+    }
     if matches!(
         action,
         SlackAction::MarkRead { .. } | SlackAction::OpenUnread { .. }
@@ -669,8 +766,13 @@ fn call_action(client: &Client, action: &SlackAction, now: DateTime<Local>) -> R
                 .call("conversations.mark", &[("channel", channel), ("ts", ts)])
                 .map(drop)
         }
+        SlackAction::MarkThreadRead {
+            channel,
+            thread_ts,
+            ts,
+        } => mark_thread(client, channel, thread_ts, ts),
         SlackAction::ReloadDirectory => slack_api::directory(client, true).map(drop),
-        SlackAction::Open(_) => Ok(()),
+        SlackAction::Open(_) | SlackAction::OpenThread { .. } => Ok(()),
     }
 }
 
@@ -695,6 +797,12 @@ pub(super) struct Live {
     pub status: Option<(String, String, i64)>,
     pub snoozed_until: Option<i64>,
     pub away: Option<bool>,
+    /// Whether Slack has unread threads and unread activity; None until it
+    /// says, which keeps their action rows.
+    #[serde(default)]
+    pub unread_threads: Option<bool>,
+    #[serde(default)]
+    pub unread_activity: Option<bool>,
 }
 
 /// The replies of the live state calls, made in parallel; None for those
@@ -735,6 +843,7 @@ pub(super) fn merge_live(previous: Option<Live>, (profile, dnd, presence): LiveR
         } else {
             previous.away
         },
+        ..previous
     }
 }
 
@@ -758,7 +867,19 @@ pub(super) fn parse_live(
             .filter(|dnd| dnd["snooze_enabled"].as_bool() == Some(true))
             .map(|dnd| dnd["snooze_endtime"].as_i64().unwrap_or(0)),
         away: presence.and_then(|presence| presence["presence"].as_str().map(|p| p == "away")),
+        ..Live::default()
     }
+}
+
+/// Whether `client.counts` reports unread threads and unread activity.
+fn parse_counts_badges(reply: &Value) -> (Option<bool>, Option<bool>) {
+    let threads = reply["threads"]["has_unreads"].as_bool();
+    let activity = reply["activity_v2"].as_object().map(|counts| {
+        ACTIVITY_TYPES
+            .split(',')
+            .any(|kind| counts.get(kind).and_then(Value::as_u64).unwrap_or(0) > 0)
+    });
+    (threads, activity)
 }
 
 fn row(identity: &str, title: impl Into<String>, icons: &[&str]) -> CommandItem {
@@ -814,16 +935,78 @@ const SNOOZE_ICONS: [&str; 3] = [
     SLACK_ICON,
 ];
 
-fn action_rows(live: &Live, now: DateTime<Local>) -> Vec<CommandItem> {
+/// The rows that lead to the other views, listed first on Home.
+fn shortcut_rows(live: &Live, now: DateTime<Local>) -> Vec<CommandItem> {
+    let mut rows = vec![action_row(
+        "unread",
+        "Unread messages",
+        "Conversations with unread messages".to_string(),
+        "new",
+        &["mail-unread", "mail-message-new", SLACK_ICON],
+        fill("unread "),
+    )];
+    if live.unread_threads != Some(false) {
+        rows.push(action_row(
+            "threads",
+            "Unread threads",
+            "Threads you follow with unread replies".to_string(),
+            "replies",
+            &["mail-reply-all", "mail-replied", SLACK_ICON],
+            fill("threads "),
+        ));
+    }
+    if live.unread_activity != Some(false) {
+        rows.push(action_row(
+            "activity",
+            "Activity",
+            "Mentions, reactions and replies you have not seen".to_string(),
+            "mentions reactions",
+            &[
+                "preferences-system-notifications",
+                "notifications",
+                SLACK_ICON,
+            ],
+            fill("activity "),
+        ));
+    }
+    rows.push(action_row(
+        "actions",
+        "Actions",
+        actions_summary(live, now),
+        "search find people status presence away active snooze dnd do not disturb notifications",
+        &["preferences-system", "emblem-system", SLACK_ICON],
+        fill("actions "),
+    ));
+    rows
+}
+
+/// The current status, presence and snooze, for the Actions row.
+fn actions_summary(live: &Live, now: DateTime<Local>) -> String {
+    let mut parts = Vec::new();
+    if let Some((emoji, text, expiry)) = &live.status {
+        if !emoji.is_empty() || !text.is_empty() {
+            parts.push(describe_status(emoji, text, *expiry, now));
+        }
+    }
+    match live.away {
+        Some(true) => parts.push("Away".to_string()),
+        Some(false) => parts.push("Active".to_string()),
+        None => {}
+    }
+    if let Some(until) = live.snoozed_until.filter(|until| *until > now.timestamp()) {
+        parts.push(format!("Snoozed until {}", time_of(until, now)));
+    }
+    if parts.is_empty() {
+        "Search, people, status, presence and snooze".to_string()
+    } else {
+        parts.join(" · ")
+    }
+}
+
+/// Search, people, status, presence and snooze rows, listed by the Actions
+/// view.
+pub(super) fn account_rows(live: &Live, now: DateTime<Local>) -> Vec<CommandItem> {
     let mut rows = vec![
-        action_row(
-            "unread",
-            "Unread messages",
-            "Conversations with unread messages".to_string(),
-            "new",
-            &["mail-unread", "mail-message-new", SLACK_ICON],
-            fill("unread "),
-        ),
         action_row(
             "search",
             "Search messages",
@@ -1080,7 +1263,7 @@ fn user_row(
     .collect::<Vec<_>>()
     .join(" · ");
     item.match_text = format!("{} {} {}", user.label(), user.real_name, user.name);
-    item.badge = Some("Person".to_string());
+    item.badge = Some(if user.is_bot { "Bot" } else { "Person" }.to_string());
     let mut details = vec![("Handle".to_string(), format!("@{}", user.name))];
     if user.real_name != user.label() && !user.real_name.is_empty() {
         details.push(("Name".to_string(), user.real_name.clone()));
@@ -1091,7 +1274,8 @@ fn user_row(
     if !status.is_empty() {
         details.push(("Status".to_string(), status));
     }
-    if let Some(offset) = chrono::FixedOffset::east_opt(user.tz_offset as i32) {
+    let offset = chrono::FixedOffset::east_opt(user.tz_offset as i32).filter(|_| !user.is_bot);
+    if let Some(offset) = offset {
         let local = now.with_timezone(&offset).format("%H:%M").to_string();
         let zone = if user.tz_label.is_empty() {
             String::new()
@@ -1118,7 +1302,11 @@ pub(super) fn home_rows(
     open_in: SlackOpenIn,
     now: DateTime<Local>,
 ) -> Vec<CommandItem> {
-    let mut rows = action_rows(live, now);
+    let mut rows = shortcut_rows(live, now);
+    rows.extend(account_rows(live, now).into_iter().map(|mut row| {
+        row.typed_only = true;
+        row
+    }));
     for row in &mut rows {
         row.sort_priority = 2;
     }
@@ -1151,8 +1339,13 @@ pub(super) fn home_rows(
             remaining_conversations.push(item);
         }
     }
-    let mut users: Vec<&User> = directory.users.iter().collect();
-    users.sort_by_key(|user| user.label().to_lowercase());
+    // Only the bots the user talks to, after the people.
+    let mut users: Vec<&User> = directory
+        .users
+        .iter()
+        .filter(|user| !user.is_bot || directory.direct_with(&user.id).is_some())
+        .collect();
+    users.sort_by_key(|user| (user.is_bot, user.label().to_lowercase()));
     let mut remaining_users = Vec::new();
     for user in users {
         let item = user_row(user, directory, open_in, now);
@@ -1253,7 +1446,7 @@ pub(super) fn image_key(identity: &str, directory: Option<&Directory>) -> Option
     let parts: Vec<&str> = identity.split(':').collect();
     let channel = match parts.as_slice() {
         ["slack", "user", user] => return Some(user.to_string()),
-        ["slack", "conv" | "unread" | "msg", channel, ..] => *channel,
+        ["slack", "conv" | "unread" | "msg" | "thread" | "activity", channel, ..] => *channel,
         _ => return None,
     };
     let directory = directory?;
@@ -1566,6 +1759,12 @@ pub(super) fn load_home(
     if let Some(error) = client.rejection() {
         return Err(error);
     }
+    let badges = match &counts {
+        Ok(reply) => Some(parse_counts_badges(reply)),
+        // Both lists need a session token, so hide them for any other.
+        Err(_) if !client.is_session() => Some((Some(false), Some(false))),
+        Err(_) => None,
+    };
     let unread = match counts {
         Ok(reply) => match muted {
             Some(muted) => Some(parse_counts_unread(&reply, &muted)),
@@ -1584,8 +1783,12 @@ pub(super) fn load_home(
     let previous = account
         .and_then(|account| slack_api::read_cache(slack_api::LIVE_FILE, account))
         .map(|(live, _)| live);
-    let live = merge_live(previous, replies);
-    if let Some(account) = account.filter(|_| answered) {
+    let mut live = merge_live(previous, replies);
+    if let Some((threads, activity)) = badges {
+        live.unread_threads = threads.or(live.unread_threads);
+        live.unread_activity = activity.or(live.unread_activity);
+    }
+    if let Some(account) = account.filter(|_| answered || badges.is_some()) {
         slack_api::write_cache(slack_api::LIVE_FILE, account, &live);
     }
     Ok(home_list(
@@ -1604,6 +1807,35 @@ pub(super) fn cached_home(config: &crate::SlackAddonConfig) -> Option<Vec<Comman
         .map(|(live, _)| live)
         .unwrap_or_default();
     Some(home_list(&directory, &live, None, config.open_in))
+}
+
+/// The Actions rows. Blocking.
+pub(super) fn load_actions(
+    config: crate::SlackAddonConfig,
+    refresh: bool,
+) -> Result<Vec<CommandItem>, String> {
+    let (client, _) = connect(&config, refresh)?;
+    let replies = fetch_live(&client);
+    if let Some(error) = client.rejection() {
+        return Err(error);
+    }
+    let answered = replies.0.is_some() || replies.1.is_some() || replies.2.is_some();
+    let account = client.known_identity();
+    let previous = account
+        .and_then(|account| slack_api::read_cache(slack_api::LIVE_FILE, account))
+        .map(|(live, _)| live);
+    let live = merge_live(previous, replies);
+    if let Some(account) = account.filter(|_| answered) {
+        slack_api::write_cache(slack_api::LIVE_FILE, account, &live);
+    }
+    Ok(account_rows(&live, Local::now()))
+}
+
+/// The Actions rows from the cache, to show until [`load_actions`] lands.
+pub(super) fn cached_actions() -> Option<Vec<CommandItem>> {
+    let directory = slack_api::cached_directory()?;
+    let (live, _) = slack_api::read_cache(slack_api::LIVE_FILE, &directory.workspace)?;
+    Some(account_rows(&live, Local::now()))
 }
 
 fn home_list(
@@ -1818,10 +2050,7 @@ pub(super) fn load_people(
 ) -> Result<Vec<CommandItem>, String> {
     let (client, directory) = connect(&config, refresh)?;
     let found: Vec<User> = if directory.workspace.enterprise && client.is_session() {
-        let mut found = slack_api::search_people(&client, &directory.workspace, &query)?;
-        // People you have a conversation with first.
-        found.sort_by_key(|user| directory.direct_with(&user.id).is_none());
-        found
+        slack_api::search_people(&client, &directory.workspace, &query)?
     } else {
         let query = query.to_lowercase();
         directory
@@ -1835,6 +2064,9 @@ pub(super) fn load_people(
             .cloned()
             .collect()
     };
+    let mut found = found;
+    // People before bots, those you have a conversation with first.
+    found.sort_by_key(|user| (user.is_bot, directory.direct_with(&user.id).is_none()));
     let now = Local::now();
     let mut rows: Vec<CommandItem> = found
         .iter()
@@ -2266,14 +2498,506 @@ fn unread_list(unread: &[Unread], directory: &Directory, open_in: SlackOpenIn) -
     unread_rows(unread, directory, open_in, Local::now())
 }
 
+/// Shown when Slack refuses a web client list to a user token.
+fn session_only(what: &str) -> String {
+    format!("Slack only lists {what} for a browser session (xoxc-) token")
+}
+
+/// The link to `ts` inside the thread `thread_ts`, for the browser.
+fn thread_permalink(workspace: &Workspace, channel: &str, ts: &str, thread_ts: &str) -> String {
+    let message = format!(
+        "{}archives/{channel}/p{}",
+        workspace.url,
+        ts.replace('.', "")
+    );
+    if thread_ts.is_empty() || thread_ts == ts {
+        return message;
+    }
+    format!("{message}?thread_ts={thread_ts}&cid={channel}")
+}
+
+/// The link to `ts` inside the thread `thread_ts`, carrying the thread on the
+/// desktop path too; `permalink` is the browser link as built by
+/// `thread_permalink`.
+fn thread_message_url(
+    open_in: SlackOpenIn,
+    workspace: &Workspace,
+    channel: &str,
+    ts: &str,
+    thread_ts: &str,
+    permalink: &str,
+) -> String {
+    let mut url = message_url(open_in, workspace, channel, ts, permalink);
+    if open_in == SlackOpenIn::Desktop && !thread_ts.is_empty() && thread_ts != ts {
+        url.push_str(&format!("&thread_ts={thread_ts}"));
+    }
+    url
+}
+
+/// A followed thread with unread replies.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) struct UnreadThread {
+    pub channel: String,
+    pub thread_ts: String,
+    /// The parent message as plain text.
+    pub text: String,
+    /// Who wrote the parent message.
+    pub author: String,
+    /// Timestamp of the newest unread reply.
+    pub latest: String,
+    pub unread: usize,
+}
+
+/// The threads with unread replies in a `subscriptions.thread.getView`
+/// page.
+pub(super) fn parse_threads(reply: &Value, directory: &Directory) -> Vec<UnreadThread> {
+    reply["threads"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|thread| {
+            let root = &thread["root_msg"];
+            let replies = thread["unread_replies"]
+                .as_array()
+                .filter(|replies| !replies.is_empty())?;
+            let channel = root["channel"].as_str()?;
+            let thread_ts = root["thread_ts"].as_str().or(root["ts"].as_str())?;
+            let latest = replies.iter().filter_map(|r| r["ts"].as_str()).max()?;
+            Some(UnreadThread {
+                channel: channel.to_string(),
+                thread_ts: thread_ts.to_string(),
+                text: message_text(root, directory),
+                author: author(root, directory),
+                latest: latest.to_string(),
+                unread: replies.len(),
+            })
+        })
+        .collect()
+}
+
+/// The followed threads with unread replies, newest first, paging through
+/// the threads view until Slack's count of unread replies is reached.
+/// Blocking.
+fn fetch_threads(
+    client: &Client,
+    directory: &std::sync::Arc<Directory>,
+) -> Result<Vec<UnreadThread>, String> {
+    let mut directory = directory.clone();
+    let mut found: Vec<UnreadThread> = Vec::new();
+    let mut cursor: Option<String> = None;
+    for _ in 0..MAX_THREAD_PAGES {
+        let mut params = vec![("limit", THREAD_PAGE)];
+        if let Some(cursor) = &cursor {
+            params.push(("current_ts", cursor));
+        }
+        let reply = client.call("subscriptions.thread.getView", &params)?;
+        let threads = reply["threads"].as_array().cloned().unwrap_or_default();
+        let messages: Vec<Value> = threads
+            .iter()
+            .flat_map(|thread| {
+                std::iter::once(thread["root_msg"].clone()).chain(
+                    thread["unread_replies"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default(),
+                )
+            })
+            .collect();
+        directory = slack_api::learn_users(client, &directory, &message_users(&messages));
+        found.extend(parse_threads(&reply, &directory));
+        let total = reply["total_unread_replies"].as_u64().unwrap_or(0) as usize;
+        let seen: usize = found.iter().map(|thread| thread.unread).sum();
+        // Threads come newest reply first; the next page starts below the
+        // oldest one.
+        cursor = threads
+            .iter()
+            .filter_map(|thread| thread["root_msg"]["latest_reply"].as_str())
+            .min()
+            .map(str::to_string);
+        if reply["has_more"].as_bool() != Some(true) || seen >= total || cursor.is_none() {
+            break;
+        }
+    }
+    found.sort_by(|a, b| b.latest.cmp(&a.latest));
+    found.dedup_by(|a, b| a.channel == b.channel && a.thread_ts == b.thread_ts);
+    found.truncate(MAX_UNREAD);
+    Ok(found)
+}
+
+pub(super) fn thread_rows(
+    threads: &[UnreadThread],
+    directory: &Directory,
+    open_in: SlackOpenIn,
+    now: DateTime<Local>,
+) -> Vec<CommandItem> {
+    let workspace = &directory.workspace;
+    threads
+        .iter()
+        .map(|thread| {
+            let where_ = channel_label(&thread.channel, "", directory);
+            let title = match first_line(&thread.text) {
+                line if line.trim().is_empty() => format!("Thread in {where_}"),
+                line => line,
+            };
+            let mut item = row(
+                &format!(
+                    "slack:thread:{}:{}:{}",
+                    thread.channel, thread.latest, thread.thread_ts
+                ),
+                title,
+                &["mail-unread", SLACK_ICON],
+            );
+            let replies = if thread.unread == 1 {
+                "reply"
+            } else {
+                "replies"
+            };
+            item.subtitle = format!(
+                "{where_} · {} · {} unread {replies} · latest {}",
+                thread.author,
+                thread.unread,
+                format_ts(&thread.latest, now)
+            );
+            item.match_text = format!("{} {}", where_.trim_start_matches(['#', '@']), thread.text);
+            item.badge = Some("Thread".to_string());
+            item.details = vec![
+                ("Conversation".to_string(), where_),
+                ("Started by".to_string(), thread.author.clone()),
+                ("Enter".to_string(), target_name(open_in).to_string()),
+                ("Ctrl+Enter".to_string(), "Mark as read".to_string()),
+            ];
+            let permalink = thread_permalink(
+                workspace,
+                &thread.channel,
+                &thread.latest,
+                &thread.thread_ts,
+            );
+            item.primary = Some(CommandAction {
+                action: DeferredAction::Slack(SlackAction::OpenThread {
+                    url: thread_message_url(
+                        open_in,
+                        workspace,
+                        &thread.channel,
+                        &thread.latest,
+                        &thread.thread_ts,
+                        &permalink,
+                    ),
+                    channel: thread.channel.clone(),
+                    thread_ts: thread.thread_ts.clone(),
+                    ts: thread.latest.clone(),
+                }),
+                confirm: None,
+                keep_open: false,
+                progress: None,
+            });
+            item.secondary = Some(run(
+                SlackAction::MarkThreadRead {
+                    channel: thread.channel.clone(),
+                    thread_ts: thread.thread_ts.clone(),
+                    ts: thread.latest.clone(),
+                },
+                "Marking as read...",
+            ));
+            item
+        })
+        .collect()
+}
+
+fn threads_list(
+    threads: &[UnreadThread],
+    directory: &Directory,
+    open_in: SlackOpenIn,
+) -> Vec<CommandItem> {
+    if threads.is_empty() {
+        return vec![row(
+            "slack:none",
+            "No unread threads",
+            &["mail-read", SLACK_ICON],
+        )];
+    }
+    thread_rows(threads, directory, open_in, Local::now())
+}
+
+/// Followed threads with unread replies. Blocking.
+pub(super) fn load_threads(
+    config: crate::SlackAddonConfig,
+    refresh: bool,
+) -> Result<Vec<CommandItem>, String> {
+    let (client, directory) = connect(&config, refresh)?;
+    let threads = fetch_threads(&client, &directory)
+        .map_err(|error| web_client_error(&client, error, "unread threads"))?;
+    if let Some(account) = client.known_identity() {
+        slack_api::write_cache(slack_api::THREADS_FILE, account, &threads);
+    }
+    let directory = slack_api::cached_directory().unwrap_or(directory);
+    Ok(threads_list(&threads, &directory, config.open_in))
+}
+
+/// The thread rows from the cache, to show until [`load_threads`] lands.
+pub(super) fn cached_threads(config: &crate::SlackAddonConfig) -> Option<Vec<CommandItem>> {
+    let directory = slack_api::cached_directory()?;
+    let (threads, _): (Vec<UnreadThread>, _) =
+        slack_api::read_cache(slack_api::THREADS_FILE, &directory.workspace)?;
+    Some(threads_list(&threads, &directory, config.open_in))
+}
+
+/// The error to show for a failed web client list: a logged out session,
+/// a token that cannot ask, or Slack's own error.
+fn web_client_error(client: &Client, error: String, what: &str) -> String {
+    if let Some(rejection) = client.rejection() {
+        return rejection;
+    }
+    crate::debug_log!("slack: cannot list {what}: {error}");
+    if client.is_session() {
+        error
+    } else {
+        session_only(what)
+    }
+}
+
+/// An unread item of the Activity tab.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) struct Activity {
+    /// The `activity.feed` item type, such as `at_user` or
+    /// `message_reaction`.
+    pub kind: String,
+    pub key: String,
+    pub channel: String,
+    /// The message, or the newest one of a bundle.
+    pub ts: String,
+    /// The thread the message is in, if any.
+    #[serde(default)]
+    pub thread_ts: String,
+    /// Who mentioned or reacted.
+    #[serde(default)]
+    pub actor: String,
+    #[serde(default)]
+    pub reaction: String,
+    /// Unread messages the item bundles, when Slack says.
+    #[serde(default)]
+    pub count: u64,
+    pub feed_ts: String,
+}
+
+impl Activity {
+    fn badge(&self) -> &'static str {
+        match self.kind.as_str() {
+            "message_reaction" => "Reaction",
+            "thread_v2" => "Thread",
+            "dm" | "bot_dm_bundle" | "channel" => "Message",
+            _ => "Mention",
+        }
+    }
+}
+
+/// The unread items of an `activity.feed` reply that point at a message.
+pub(super) fn parse_activity(reply: &Value) -> Vec<Activity> {
+    let text = |value: &Value| value.as_str().unwrap_or_default().to_string();
+    reply["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|entry| entry["is_unread"].as_bool() != Some(false))
+        .filter_map(|entry| {
+            let item = &entry["item"];
+            let kind = item["type"].as_str()?;
+            let bundle = &item["bundle_info"];
+            let payload = &bundle["payload"];
+            let mut activity = Activity {
+                kind: kind.to_string(),
+                key: text(&entry["key"]),
+                feed_ts: text(&entry["feed_ts"]),
+                ..Default::default()
+            };
+            let (message, count) = match kind {
+                "thread_v2" => {
+                    let thread = &payload["thread_entry"];
+                    activity.channel = text(&thread["channel_id"]);
+                    activity.ts = text(&thread["latest_ts"]);
+                    activity.thread_ts = text(&thread["thread_ts"]);
+                    activity.count = thread["unread_msg_count"].as_u64().unwrap_or(0);
+                    return (!activity.channel.is_empty() && !activity.ts.is_empty())
+                        .then_some(activity);
+                }
+                "dm" => (
+                    &payload["dm_entry"]["latest_message"],
+                    &payload["dm_entry"]["unread_msg_count"],
+                ),
+                "channel" => (
+                    &payload["channel_entry"]["latest_message"],
+                    &payload["channel_entry"]["unread_msg_count"],
+                ),
+                "bot_dm_bundle" => (&payload["message"], &bundle["unread_count"]),
+                "at_user" | "at_user_group" | "at_channel" | "at_everyone" | "keyword"
+                | "message_reaction" => (&item["message"], &Value::Null),
+                _ => return None,
+            };
+            activity.channel = text(&message["channel"]);
+            activity.ts = text(&message["ts"]);
+            activity.thread_ts = text(&message["thread_ts"]);
+            activity.actor = text(&message["author_user_id"]);
+            activity.count = count.as_u64().unwrap_or(0);
+            if kind == "message_reaction" {
+                activity.actor = text(&item["reaction"]["user"]);
+                activity.reaction = text(&item["reaction"]["name"]);
+            }
+            (!activity.channel.is_empty() && !activity.ts.is_empty()).then_some(activity)
+        })
+        .collect()
+}
+
+fn activity_title(activity: &Activity, where_: &str, directory: &Directory) -> String {
+    let actor = directory
+        .user(&activity.actor)
+        .map(|user| user.label().to_string())
+        .or_else(|| (!activity.actor.is_empty()).then(|| activity.actor.clone()))
+        .unwrap_or_else(|| "Someone".to_string());
+    let plural = |one: &str, many: &str| if activity.count == 1 { one } else { many }.to_string();
+    match activity.kind.as_str() {
+        "at_user" => format!("{actor} mentioned you in {where_}"),
+        "at_user_group" => format!("{actor} mentioned your group in {where_}"),
+        "at_channel" => format!("{actor} mentioned @channel in {where_}"),
+        "at_everyone" => format!("{actor} mentioned @everyone in {where_}"),
+        "keyword" => format!("A keyword you follow in {where_}"),
+        "message_reaction" => {
+            let emoji = replace_emoji_shortcodes(&format!(":{}:", activity.reaction));
+            format!("{actor} reacted {emoji} to your message in {where_}")
+        }
+        "thread_v2" if activity.count > 0 => format!(
+            "{} new {} in a thread in {where_}",
+            activity.count,
+            plural("reply", "replies")
+        ),
+        "thread_v2" => format!("New replies in a thread in {where_}"),
+        "channel" if activity.count > 0 => format!(
+            "{} new {} in {where_}",
+            activity.count,
+            plural("message", "messages")
+        ),
+        _ => format!("New messages in {where_}"),
+    }
+}
+
+pub(super) fn activity_rows(
+    activity: &[Activity],
+    directory: &Directory,
+    open_in: SlackOpenIn,
+    now: DateTime<Local>,
+) -> Vec<CommandItem> {
+    let workspace = &directory.workspace;
+    activity
+        .iter()
+        .map(|entry| {
+            let where_ = channel_label(&entry.channel, "", directory);
+            let thread = if entry.thread_ts == entry.ts {
+                ""
+            } else {
+                entry.thread_ts.as_str()
+            };
+            let identity = format!(
+                "slack:activity:{}:{}:{thread}:{}",
+                entry.channel,
+                entry.ts,
+                entry.key.replace(':', "-")
+            );
+            let title = activity_title(entry, &where_, directory);
+            let mut item = row(&identity, title.clone(), &["mail-unread", SLACK_ICON]);
+            let when = if entry.feed_ts.is_empty() {
+                &entry.ts
+            } else {
+                &entry.feed_ts
+            };
+            item.subtitle = format_ts(when, now);
+            item.match_text = title;
+            item.badge = Some(entry.badge().to_string());
+            item.details = vec![("Conversation".to_string(), where_)];
+            item.details.extend(open_details(open_in));
+            let permalink = thread_permalink(workspace, &entry.channel, &entry.ts, thread);
+            item.primary = Some(open(thread_message_url(
+                open_in,
+                workspace,
+                &entry.channel,
+                &entry.ts,
+                thread,
+                &permalink,
+            )));
+            item.secondary = Some(open(thread_message_url(
+                other(open_in),
+                workspace,
+                &entry.channel,
+                &entry.ts,
+                thread,
+                &permalink,
+            )));
+            item
+        })
+        .collect()
+}
+
+fn activity_list(
+    activity: &[Activity],
+    directory: &Directory,
+    open_in: SlackOpenIn,
+) -> Vec<CommandItem> {
+    if activity.is_empty() {
+        return vec![row(
+            "slack:none",
+            "No unread activity",
+            &["mail-read", SLACK_ICON],
+        )];
+    }
+    activity_rows(activity, directory, open_in, Local::now())
+}
+
+/// The unread items of the Activity tab, newest first. Blocking.
+pub(super) fn load_activity(
+    config: crate::SlackAddonConfig,
+    refresh: bool,
+) -> Result<Vec<CommandItem>, String> {
+    let (client, directory) = connect(&config, refresh)?;
+    let reply = client
+        .call(
+            "activity.feed",
+            &[
+                ("types", ACTIVITY_TYPES),
+                ("mode", "chrono_reads_and_unreads"),
+                ("unread_only", "true"),
+                ("limit", ACTIVITY_COUNT),
+            ],
+        )
+        .map_err(|error| web_client_error(&client, error, "activity"))?;
+    let activity = parse_activity(&reply);
+    let actors: Vec<String> = activity.iter().map(|entry| entry.actor.clone()).collect();
+    let directory = slack_api::learn_users(&client, &directory, &actors);
+    if let Some(account) = client.known_identity() {
+        slack_api::write_cache(slack_api::ACTIVITY_FILE, account, &activity);
+    }
+    Ok(activity_list(&activity, &directory, config.open_in))
+}
+
+/// The activity rows from the cache, to show until [`load_activity`] lands.
+pub(super) fn cached_activity(config: &crate::SlackAddonConfig) -> Option<Vec<CommandItem>> {
+    let directory = slack_api::cached_directory()?;
+    let (activity, _): (Vec<Activity>, _) =
+        slack_api::read_cache(slack_api::ACTIVITY_FILE, &directory.workspace)?;
+    Some(activity_list(&activity, &directory, config.open_in))
+}
+
 /// Preview bodies and, for a person, the avatar file.
 pub(super) type Preview = (Vec<PreviewBody>, Option<String>);
 
 /// Whether rows with `identity` have a preview to load.
 pub(super) fn has_preview(identity: &str) -> bool {
-    ["slack:conv:", "slack:user:", "slack:msg:", "slack:unread:"]
-        .iter()
-        .any(|prefix| identity.starts_with(prefix))
+    [
+        "slack:conv:",
+        "slack:user:",
+        "slack:msg:",
+        "slack:unread:",
+        "slack:thread:",
+        "slack:activity:",
+    ]
+    .iter()
+    .any(|prefix| identity.starts_with(prefix))
 }
 
 /// Maximum gap in seconds between consecutive messages from the same sender
@@ -2741,7 +3465,11 @@ fn preview_bodies(
                 None => Ok(Vec::new()),
             }
         }
-        ["slack", "msg", channel, ts, thread @ ..] => match thread.first() {
+        ["slack", "msg" | "thread", channel, ts, thread @ ..]
+        | ["slack", "activity", channel, ts, thread @ .., _] => match thread
+            .first()
+            .filter(|thread| !thread.is_empty())
+        {
             Some(thread) => {
                 let limit = (PREVIEW_MESSAGES * 4).to_string();
                 client
@@ -2867,16 +3595,21 @@ mod tests {
         let cycle = |query: &str, backwards| cycle_view(query, backwards);
         assert_eq!(cycle("ops", false), "unread ops");
         assert_eq!(cycle("search deploy", false), "unread deploy");
-        assert_eq!(cycle("people ada", false), "ada");
-        assert_eq!(cycle("ops", true), "people ops");
+        assert_eq!(cycle("people ada", false), "actions ada");
+        assert_eq!(cycle("unread ops", false), "threads ops");
+        assert_eq!(cycle("threads ops", false), "activity ops");
+        assert_eq!(cycle("activity ops", false), "people ops");
+        assert_eq!(cycle("activity ops", true), "threads ops");
+        assert_eq!(cycle("actions ops", false), "ops");
+        assert_eq!(cycle("ops", true), "actions ops");
         // Home can't hold text starting with a view word, so it is skipped
         // rather than turning into that view.
-        assert_eq!(cycle("people search errors", false), "unread search errors");
-        assert_eq!(cycle("unread people x", true), "people people x");
         assert_eq!(
-            parse_view(&cycle("unread people x", true)).0,
-            View::People("people x".into())
+            cycle("actions search errors", false),
+            "unread search errors"
         );
+        assert_eq!(cycle("unread people x", true), "actions people x");
+        assert_eq!(parse_view(&cycle("unread people x", true)).0, View::Actions);
     }
 
     #[test]
@@ -2888,10 +3621,256 @@ mod tests {
             (View::Search("deploy failed".to_string()), String::new())
         );
         assert_eq!(parse_view("unread ops"), (View::Unread, "ops".to_string()));
+        assert_eq!(parse_view("threads"), (View::Threads, String::new()));
+        assert_eq!(
+            parse_view("actions snooze"),
+            (View::Actions, "snooze".to_string())
+        );
+        assert_eq!(
+            parse_view("activity ops"),
+            (View::Activity, "ops".to_string())
+        );
         assert_eq!(parse_view("searchy"), (View::Home, "searchy".to_string()));
         assert_eq!(
             parse_view("people  ada l"),
             (View::People("ada l".to_string()), String::new())
+        );
+    }
+
+    #[test]
+    fn test_bots_show_after_people_only_when_you_talk_to_them() {
+        let base = directory();
+        let bot = |id: &str, name: &str| User {
+            is_bot: true,
+            tz_offset: 3600,
+            ..user(id, name, "")
+        };
+        let directory = Directory::new(
+            base.workspace.clone(),
+            [
+                base.users.clone(),
+                vec![bot("B1", "jirabot"), bot("B2", "webhook")],
+            ]
+            .concat(),
+            [
+                base.conversations.clone(),
+                vec![conversation(
+                    "D2",
+                    ConversationKind::Direct,
+                    "B1",
+                    Some("B1"),
+                )],
+            ]
+            .concat(),
+            0,
+        );
+        let rows = home_rows(
+            &directory,
+            &Live::default(),
+            None,
+            SlackOpenIn::Desktop,
+            now(),
+        );
+        let users: Vec<&CommandItem> = rows
+            .iter()
+            .filter(|row| row.identity.starts_with("slack:user:"))
+            .collect();
+        let ids: Vec<&str> = users.iter().map(|row| row.identity.as_str()).collect();
+        assert_eq!(ids, ["slack:user:U1", "slack:user:U2", "slack:user:B1"]);
+        let bot_row = users[2];
+        assert_eq!(bot_row.badge.as_deref(), Some("Bot"));
+        assert!(!bot_row.details.iter().any(|(key, _)| key == "Local time"));
+        assert_eq!(
+            command(&bot_row.primary).as_deref(),
+            Some("slack://channel?team=T1&id=D2")
+        );
+    }
+
+    #[test]
+    fn test_threads_page_until_every_unread_reply_is_found() {
+        let fake = FakeHttp::with(vec![
+            (
+                200,
+                None,
+                json!({"ok": true, "has_more": true, "total_unread_replies": 3, "threads": [
+                    {
+                        "root_msg": {"channel": "C1", "ts": "1.0", "thread_ts": "1.0",
+                                     "user": "U1", "text": "deploy?", "latest_reply": "5.0"},
+                        "unread_replies": [{"ts": "4.0"}, {"ts": "5.0"}]
+                    },
+                    {
+                        "root_msg": {"channel": "C1", "ts": "2.0", "thread_ts": "2.0",
+                                     "user": "U2", "text": "read", "latest_reply": "3.0"},
+                        "latest_replies": [{"ts": "3.0"}]
+                    }
+                ]}),
+            ),
+            (
+                200,
+                None,
+                json!({"ok": true, "has_more": true, "total_unread_replies": 3, "threads": [
+                    {
+                        "root_msg": {"channel": "G1", "ts": "0.5", "thread_ts": "0.5",
+                                     "user": "U2", "text": "", "latest_reply": "2.5"},
+                        "unread_replies": [{"ts": "2.5"}]
+                    }
+                ]}),
+            ),
+        ]);
+        let client = Client::fake(Box::new(fake.clone()));
+        let directory = std::sync::Arc::new(directory());
+        let threads = fetch_threads(&client, &directory).unwrap();
+        let calls = fake.calls.lock().unwrap().clone();
+        assert_eq!(calls.len(), 2, "stops once every unread reply is found");
+        assert!(calls[1]
+            .1
+            .contains(&("current_ts".to_string(), "3.0".to_string())));
+
+        let rows = thread_rows(&threads, &directory, SlackOpenIn::Browser, now());
+        let summary: Vec<(&str, &str)> = rows
+            .iter()
+            .map(|row| (row.identity.as_str(), row.title.as_str()))
+            .collect();
+        assert_eq!(
+            summary,
+            [
+                ("slack:thread:C1:5.0:1.0", "deploy?"),
+                ("slack:thread:G1:2.5:0.5", "Thread in #secret"),
+            ]
+        );
+        assert!(rows[0]
+            .subtitle
+            .starts_with("#general · Alice · 2 unread replies · latest"));
+        assert!(rows[1].subtitle.contains("1 unread reply"));
+        assert_eq!(
+            slack_action(&rows[0].primary),
+            Some(SlackAction::OpenThread {
+                url: "https://acme.slack.com/archives/C1/p50?thread_ts=1.0&cid=C1".to_string(),
+                channel: "C1".to_string(),
+                thread_ts: "1.0".to_string(),
+                ts: "5.0".to_string(),
+            })
+        );
+        assert_eq!(
+            slack_action(&rows[0].secondary),
+            Some(SlackAction::MarkThreadRead {
+                channel: "C1".to_string(),
+                thread_ts: "1.0".to_string(),
+                ts: "5.0".to_string(),
+            })
+        );
+        let desktop_rows = thread_rows(&threads, &directory, SlackOpenIn::Desktop, now());
+        assert_eq!(
+            slack_action(&desktop_rows[0].primary),
+            Some(SlackAction::OpenThread {
+                url: "slack://channel?team=T1&id=C1&message=5.0&thread_ts=1.0".to_string(),
+                channel: "C1".to_string(),
+                thread_ts: "1.0".to_string(),
+                ts: "5.0".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn test_activity_reads_each_kind_and_skips_read_items() {
+        let reply = json!({"ok": true, "items": [
+            {"is_unread": true, "feed_ts": "3.0", "key": "k1", "item": {
+                "type": "at_user",
+                "message": {"channel": "C1", "ts": "3.0", "thread_ts": "1.0", "author_user_id": "U1"}
+            }},
+            {"is_unread": true, "feed_ts": "2.0", "key": "k2", "item": {
+                "type": "message_reaction",
+                "message": {"channel": "C1", "ts": "2.0"},
+                "reaction": {"user": "U2", "name": "tada"}
+            }},
+            {"is_unread": true, "feed_ts": "6.0", "key": "k3", "item": {
+                "type": "thread_v2",
+                "bundle_info": {"payload": {"thread_entry": {
+                    "channel_id": "G1", "latest_ts": "6.0", "thread_ts": "5.0", "unread_msg_count": 2
+                }}}
+            }},
+            {"is_unread": true, "feed_ts": "7.0", "key": "k4", "item": {
+                "type": "dm",
+                "bundle_info": {"payload": {"dm_entry": {"latest_message": {"channel": "D1", "ts": "7.0"}}}}
+            }},
+            {"is_unread": true, "feed_ts": "8.0", "key": "k5", "item": {
+                "type": "list_record_assigned", "message": {"channel": "C1", "ts": "8.0"}
+            }},
+            {"is_unread": false, "feed_ts": "9.0", "key": "k6", "item": {
+                "type": "at_user", "message": {"channel": "C1", "ts": "9.0"}
+            }}
+        ]});
+        let activity = parse_activity(&reply);
+        let rows = activity_rows(&activity, &directory(), SlackOpenIn::Desktop, now());
+        let summary: Vec<(&str, &str, &str)> = rows
+            .iter()
+            .map(|row| {
+                (
+                    row.identity.as_str(),
+                    row.title.as_str(),
+                    row.badge.as_deref().unwrap_or_default(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            summary,
+            [
+                (
+                    "slack:activity:C1:3.0:1.0:k1",
+                    "Alice mentioned you in #general",
+                    "Mention"
+                ),
+                (
+                    "slack:activity:C1:2.0::k2",
+                    "bob reacted 🎉 to your message in #general",
+                    "Reaction"
+                ),
+                (
+                    "slack:activity:G1:6.0:5.0:k3",
+                    "2 new replies in a thread in #secret",
+                    "Thread"
+                ),
+                (
+                    "slack:activity:D1:7.0::k4",
+                    "New messages in @Alice",
+                    "Message"
+                ),
+            ]
+        );
+        assert_eq!(
+            command(&rows[0].primary).as_deref(),
+            Some("slack://channel?team=T1&id=C1&message=3.0&thread_ts=1.0")
+        );
+    }
+
+    #[test]
+    fn test_activity_and_thread_previews_open_the_thread_or_the_conversation() {
+        let reply = || {
+            (
+                200,
+                None,
+                json!({"ok": true, "messages": [{"ts": "1.0", "user": "U1", "text": "hi"}]}),
+            )
+        };
+        let fake = FakeHttp::with(vec![reply(), reply(), reply()]);
+        let client = Client::fake(Box::new(fake.clone()));
+        let directory = std::sync::Arc::new(directory());
+        for identity in [
+            "slack:activity:C1:3.0:1.0:k1",
+            "slack:activity:C1:2.0::k2",
+            "slack:thread:C1:5.0:1.0",
+        ] {
+            assert!(has_preview(identity));
+            let (bodies, _) = preview_bodies(identity, &client, directory.clone());
+            assert!(bodies.is_ok_and(|bodies| bodies.len() == 1), "{identity}");
+        }
+        assert_eq!(
+            fake.methods(),
+            [
+                "conversations.replies",
+                "conversations.history",
+                "conversations.replies"
+            ]
         );
     }
 
@@ -2998,6 +3977,7 @@ mod tests {
             status: Some((":pizza:".to_string(), "Lunch".to_string(), 0)),
             snoozed_until: Some(now().timestamp() + 600),
             away: Some(true),
+            ..Live::default()
         };
         let rows = home_rows(&directory, &live, None, SlackOpenIn::Desktop, now());
         let ids: Vec<&str> = rows.iter().map(|row| row.identity.as_str()).collect();
@@ -3005,6 +3985,34 @@ mod tests {
         assert!(ids.contains(&"slack:do:active"));
         assert!(!ids.contains(&"slack:do:away"));
         assert!(ids.contains(&"slack:do:resume"));
+        assert!(ids.contains(&"slack:do:threads"), "kept until Slack says");
+        let account: Vec<&CommandItem> = rows
+            .iter()
+            .filter(|row| {
+                [
+                    "slack:do:search",
+                    "slack:do:people",
+                    "slack:do:clear-status",
+                    "slack:do:active",
+                    "slack:do:resume",
+                ]
+                .contains(&row.identity.as_str())
+            })
+            .collect();
+        assert_eq!(account.len(), 5);
+        assert!(
+            account.iter().all(|row| row.typed_only),
+            "listed under Actions"
+        );
+        let actions = rows
+            .iter()
+            .find(|row| row.identity == "slack:do:actions")
+            .unwrap();
+        assert!(!actions.typed_only);
+        assert!(actions
+            .subtitle
+            .starts_with(":pizza: Lunch · Away · Snoozed until"));
+        assert!(ids.contains(&"slack:do:activity"));
         // Direct conversations are reached through their person.
         assert!(!ids.contains(&"slack:conv:D1"));
         let tail = &ids[ids.len() - 4..];
@@ -3612,11 +4620,41 @@ mod tests {
     }
 
     #[test]
+    fn test_thread_and_activity_rows_hide_when_nothing_is_unread() {
+        let counts = json!({
+            "threads": {"has_unreads": false},
+            "activity_v2": {"at_user": 0, "thread_v2": 0, "list_record_edited": 4}
+        });
+        assert_eq!(parse_counts_badges(&counts), (Some(false), Some(false)));
+        let counts = json!({
+            "threads": {"has_unreads": true},
+            "activity_v2": {"message_reaction": 2}
+        });
+        assert_eq!(parse_counts_badges(&counts), (Some(true), Some(true)));
+
+        let live = Live {
+            unread_threads: Some(false),
+            unread_activity: Some(true),
+            ..Live::default()
+        };
+        let ids: Vec<String> = shortcut_rows(&live, now())
+            .into_iter()
+            .map(|row| row.identity)
+            .collect();
+        assert_eq!(
+            &ids[..3],
+            ["slack:do:unread", "slack:do:activity", "slack:do:actions"]
+        );
+    }
+
+    #[test]
     fn test_failed_live_calls_keep_the_last_known_state() {
         let previous = Live {
             status: Some(("🍕".into(), "Lunch".into(), 0)),
             snoozed_until: Some(1_900),
             away: Some(true),
+            unread_threads: Some(true),
+            unread_activity: Some(false),
         };
         let fresh = merge_live(
             Some(previous.clone()),
@@ -3625,6 +4663,11 @@ mod tests {
         assert_eq!(fresh.status, previous.status, "profile call failed");
         assert_eq!(fresh.snoozed_until, None, "snooze ended");
         assert_eq!(fresh.away, Some(true), "presence call failed");
+        assert_eq!(
+            (fresh.unread_threads, fresh.unread_activity),
+            (Some(true), Some(false)),
+            "counts are kept"
+        );
     }
 
     #[test]
@@ -3645,6 +4688,7 @@ mod tests {
                 status: Some((":pizza:".into(), "Lunch".into(), at + 30 * 60)),
                 snoozed_until: Some(at + 10 * 60),
                 away: Some(true),
+                ..Live::default()
             }
         );
         apply_to_live(&mut live, &SlackAction::EndSnooze, now());

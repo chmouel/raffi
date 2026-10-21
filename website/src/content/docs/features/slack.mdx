@@ -1,16 +1,17 @@
 ---
 title: Slack
-description: Open Slack conversations, search messages, read unread ones and set your status
+description: Open Slack conversations, search messages, follow unread messages, threads and activity, and set your status
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
 Type `slack ` (with the trailing space) to list your Slack channels, group
-conversations and the people of your workspace, under a few actions: unread
-messages, message search, status, presence and notification snooze. Words
-after the keyword filter the list. With no filter, unmuted unread channels,
-group conversations and direct-message people appear just after the action
-shortcuts, newest first. The remaining conversations and people keep their
+conversations and the people of your workspace, under a few shortcuts:
+unread messages and Actions, plus unread threads and activity when Slack
+has some. Actions holds message search, people search, status, presence
+and snooze. Words after the keyword filter the list. With no filter,
+unmuted unread channels, group conversations and direct-message people
+appear just after the shortcuts, newest first. The remaining conversations and people keep their
 usual usage ordering.
 
 <Aside type="note">
@@ -22,9 +23,9 @@ choose. Raffi does not send messages.
 | Key        | Action                                                    |
 |------------|-----------------------------------------------------------|
 | Enter      | Open the conversation, person or message                  |
-| Ctrl+Enter | Open it in the other app (browser or desktop)             |
+| Ctrl+Enter | Open it in the other app (browser or desktop), or mark an unread conversation or thread read |
 | Ctrl+R     | Refresh the current view and preview                      |
-| Ctrl+Tab   | Switch between home, unread and people (Shift goes back)  |
+| Ctrl+Tab   | Switch between home, unread, threads, activity, people and actions (Shift goes back) |
 | Ctrl+P     | Show the preview pane                                     |
 
 The footer shows the current view. [More on Ctrl+Tab](../../reference/keyboard-shortcuts/#switching-views-with-ctrltab).
@@ -140,8 +141,11 @@ every field.
 
 ## Status, presence and snooze
 
-The action rows show your current status, presence and snooze. Set status
-fills in `slack status `; type the status after it:
+`slack actions`, or the Actions row on the home list, lists Search
+messages, Find people and the rows that change your status, presence and
+snooze. The Actions row shows their current state. The home list keeps
+them out of the way, but typing a word such as `slack snooze` or
+`slack away` brings the matching ones up there too. Set status fills in `slack status `; type the status after it:
 
 ```text
 slack status Lunch :pizza: 1h
@@ -170,6 +174,10 @@ Replies show a Thread pill. Enter opens the message in its conversation.
 `slack people <name>` finds people by name once you stop typing, the ones
 you have a conversation with first. Enter opens your direct conversation
 with them, or their profile.
+
+Bots and apps show up too, after the people, with a Bot badge. The home
+list only shows the bots you already have a direct conversation with, such
+as Slackbot or a Jira bot. Enter opens that conversation in Slack.
 
 ## Enterprise Grid
 
@@ -202,6 +210,24 @@ addons:
     unread_conversations: ["#ops", "#releases", "@alice"]
 ```
 
+## Unread threads
+
+`slack threads` lists the threads you follow that have unread replies,
+newest first. Each row shows the first line of the thread, its channel,
+who started it and how many replies you have not read. Enter opens the
+thread and marks it read; Ctrl+Enter marks it read without leaving Raffi.
+
+## Activity
+
+`slack activity` lists the unread items of Slack's Activity tab: mentions,
+reactions to your messages, new replies in your threads, and new messages
+in direct conversations and bot conversations. Enter opens the message,
+and Ctrl+Enter opens it in the other app. Opening it in Slack clears it
+from the list.
+
+Both lists need a browser session token. Slack refuses them for a user
+token, and Raffi says so in the list.
+
 ## Previews
 
 With the preview pane open (Ctrl+P), the selected row shows:
@@ -212,6 +238,8 @@ With the preview pane open (Ctrl+P), the selected row shows:
 | Person            | Their avatar and your latest direct messages         |
 | Search result     | The messages around it, or its thread up to it       |
 | Unread            | The unread messages                                  |
+| Thread            | The thread                                           |
+| Activity          | The thread of the message, or the messages around it |
 
 Previews load after a short pause on a row. Errors, such as a missing
 scope, show in the pane.
@@ -236,6 +264,8 @@ at once, then replaces it when Slack answers again:
 - `live.json` and `unread.json`: your status, presence and snooze, and the
   conversations with unread messages, asked again every time the list
   opens.
+- `threads.json` and `activity.json`: your unread threads and activity,
+  asked again every time you open those lists.
 - `muted.json`: your muted conversations, asked again once older than
   `cache_minutes`.
 - `previews/`: the text of the last 500 previews, so a preview you saw

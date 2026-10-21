@@ -354,6 +354,7 @@ fn tab_item(
         domains: domains_of([tab.url.as_str()]),
         dimmed: false,
         sort_priority: 0,
+        typed_only: false,
         title,
     }
 }

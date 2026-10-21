@@ -235,7 +235,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             trigger: trigger.to_string(),
             title: "Slack".to_string(),
             usage: format!(
-                "{trigger} <name>, {trigger} search <words>, {trigger} people <name>, {trigger} unread, {trigger} status <text>"
+                "{trigger} <name>, {trigger} search <words>, {trigger} people <name>, {trigger} unread, {trigger} threads, {trigger} activity, {trigger} actions, {trigger} status <text>"
             ),
             icon: Some(super::slack::SLACK_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
@@ -502,7 +502,10 @@ pub(super) fn add_cycle_view_shortcut(
             addons.file_browser.enabled,
             "file browser: all, files, directories",
         ),
-        (addons.slack.enabled, "Slack: home, unread, people"),
+        (
+            addons.slack.enabled,
+            "Slack: home, unread, threads, activity, people, actions",
+        ),
         (addons.audio.enabled, "audio: all, outputs, inputs"),
     ]
     .into_iter()

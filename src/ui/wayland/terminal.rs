@@ -103,6 +103,7 @@ pub(super) fn run_item_with(
         domains: Vec::new(),
         dimmed: false,
         sort_priority: 0,
+        typed_only: false,
     }
 }
 

@@ -126,6 +126,7 @@ fn entry_item(name: &str) -> CommandItem {
         domains: entry_domains(name),
         dimmed: false,
         sort_priority: 0,
+        typed_only: false,
     }
 }
 
@@ -151,6 +152,7 @@ pub(super) fn command_item(identity: &str, title: &str, subtitle: &str, icon: &s
         domains: Vec::new(),
         dimmed: false,
         sort_priority: 0,
+        typed_only: false,
     }
 }
 

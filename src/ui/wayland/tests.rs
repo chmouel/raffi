@@ -8527,9 +8527,15 @@ fn test_slack_ctrl_tab_rewrites_the_view_word() {
     assert_eq!(app.cycle_view_label().as_deref(), Some("Home"));
     for (backwards, query, label) in [
         (false, "slack unread ops", "Unread"),
+        (false, "slack threads ops", "Threads"),
+        (false, "slack activity ops", "Activity"),
         (false, "slack people ops", "People"),
+        (false, "slack actions ops", "Actions"),
         (false, "slack ops", "Home"),
+        (true, "slack actions ops", "Actions"),
         (true, "slack people ops", "People"),
+        (true, "slack activity ops", "Activity"),
+        (true, "slack threads ops", "Threads"),
         (true, "slack unread ops", "Unread"),
         (true, "slack ops", "Home"),
     ] {
@@ -8553,9 +8559,9 @@ fn test_slack_ctrl_tab_rewrites_the_view_word() {
     assert_eq!(app.search_query, "sk unread ops");
     let _ = app.update(Message::SearchChanged("su ops".into()));
     let _ = app.update(Message::CycleView(false));
-    assert_eq!(app.search_query, "slack people ops");
-    let _ = app.update(Message::SearchChanged("slack people ops".into()));
-    assert_eq!(app.cycle_view_label().as_deref(), Some("People"));
+    assert_eq!(app.search_query, "slack threads ops");
+    let _ = app.update(Message::SearchChanged("slack threads ops".into()));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Threads"));
 
     // When a launcher keyword shadows the trigger, no typed query reaches
     // the other views, so Ctrl+Tab leaves the query alone.
@@ -8955,6 +8961,24 @@ fn test_command_list_lists_dimmed_rows_last_until_a_filter_is_typed() {
     assert_eq!(out, [1, 2, 0], "muted last even when used most");
     filter_items_into(&items, "muted", &matcher, &usage, false, &mut out);
     assert_eq!(out, [0], "filtering still finds muted rows");
+}
+
+#[test]
+fn test_command_list_hides_typed_only_rows_until_the_query_matches() {
+    use super::command_list::{filter_items_into, CommandItem};
+    let item = |id: &str, typed_only: bool| CommandItem {
+        match_text: id.into(),
+        typed_only,
+        ..CommandItem::info(id, id.into(), "icon")
+    };
+    let items = [item("snooze", true), item("ops", false)];
+    let matcher = fuzzy_matcher::skim::SkimMatcherV2::default();
+    let usage = std::collections::HashMap::new();
+    let mut out = Vec::new();
+    filter_items_into(&items, "", &matcher, &usage, false, &mut out);
+    assert_eq!(out, [1]);
+    filter_items_into(&items, "snoo", &matcher, &usage, false, &mut out);
+    assert_eq!(out, [0]);
 }
 
 #[test]

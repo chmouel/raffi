@@ -122,6 +122,8 @@ pub(super) struct CommandItem {
     pub dimmed: bool,
     /// Nonzero groups sort before ordinary rows in the unfiltered list.
     pub sort_priority: u8,
+    /// Left out of the unfiltered list, shown once the query matches it.
+    pub typed_only: bool,
 }
 
 impl CommandItem {
@@ -150,6 +152,7 @@ impl CommandItem {
             domains: Vec::new(),
             dimmed: false,
             sort_priority: 0,
+            typed_only: false,
         }
     }
 }
@@ -516,7 +519,7 @@ pub(super) fn filter_items_into(
     out.clear();
     let used = |item: &CommandItem| usage.get(&item.identity).copied().unwrap_or(0);
     if query.is_empty() {
-        out.extend(0..items.len());
+        out.extend((0..items.len()).filter(|&index| !items[index].typed_only));
         if !usage.is_empty()
             || items
                 .iter()
