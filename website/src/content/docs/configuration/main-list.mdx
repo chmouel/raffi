@@ -27,6 +27,8 @@ general:
     - launchers
     - browser_tabs
     - windows
+    - kill
+    - slack
     - text_snippets."Emails"
     - script_filters."GitHub Issues"
 ```
@@ -47,7 +49,16 @@ list if you still want your apps.
 These sources are accepted:
 
 - `launchers`: installed apps and your [custom entries](../entries/)
-- `browser_tabs`, `bookmarks`, `windows`, `system`, `media`, `audio`, `bluetooth` and `pass`
+- `browser_tabs`, `bookmarks`, `windows`, `system`, `media`, `audio`,
+  `bluetooth`, `kill`, `pass` and `slack`
+- `slack` shows your unread or recently opened channels and direct messages on
+  an empty query (muted and unused channels stay hidden until you type or focus
+  Slack with Ctrl+Tab) and searches Slack messages when you type. You can also
+  list specific Slack sub-views directly: `slack.unread`, `slack.threads` (or
+  `slack.unread_threads`), `slack.activity`, `slack.actions`, `slack.directs`
+  (or `slack.dms`), and `slack.channels`. Sub-views filter their loaded rows as
+  you type instead of running message search. Enable and configure the Slack
+  addon under `addons.slack`.
 - `text_snippets.<name>` and `script_filters.<name>`, where `<name>` is the
   source's `name` field. The `addons.<type>."<name>"` form used by
   [fallbacks](#fallbacks) works too.
@@ -100,16 +111,16 @@ What the chips show: short names, the keywords (`tabs`, `sys`, `clip`), or
 the chip-only sources (`clipboard`, `bitwarden`, `terminal`, `emoji`) show
 nothing.
 
-Below the chips come your apps, plus the 5 things you picked most recently
-from `browser_tabs`, `bookmarks`, `windows`, `pass`, text snippets and
-script filters.
+Below the chips come your apps, Slack Home rows if listed, and the 5 things
+you picked most recently from `browser_tabs`, `bookmarks`, `windows`, `pass`,
+text snippets and script filters.
 Each sits with its own source, newest first. A tab or window that has been
 closed since is skipped, and so are windows from before you last logged in.
 A tab is found again by its address after a browser restart. Picks count
 whether you made them from the main list or the addon itself, but only for
 sources listed in `main_view`. Closing a tab with Ctrl+Enter doesn't count
-as a pick. Rows from `system`, `media`, `audio` and
-`bluetooth` only appear once you type.
+as a pick. Rows from `system`, `media`, `audio`, `bluetooth` and `kill` only
+appear once you type.
 
 ## One source at a time with Ctrl+Tab
 

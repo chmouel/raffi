@@ -22,6 +22,25 @@ and is off by default: it needs a Slack token, read from a command you
 choose. Raffi does not send messages.
 </Aside>
 
+To mix Slack into the main list without typing its keyword, add it under
+`general.main_view`. An empty query shows your unread or recently opened
+channels and direct messages (muted and unused channels stay hidden until you
+type or focus Slack with Ctrl+Tab); after two characters, typing searches
+messages. You can also list specific sub-views directly: `slack.unread`,
+`slack.threads` (or `slack.unread_threads`), `slack.activity`,
+`slack.actions`, `slack.directs` (or `slack.dms`), and `slack.channels`.
+Sub-views filter their loaded rows as you type instead of searching messages.
+Slack still needs to be enabled and configured with a token command as
+described below.
+
+```yaml
+general:
+  main_view:
+    - slack
+    - slack.threads
+    - slack.directs
+```
+
 | Key        | Action                                                    |
 |------------|-----------------------------------------------------------|
 | Enter      | Open the conversation, person or message                  |
