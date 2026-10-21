@@ -1774,8 +1774,8 @@ pub(super) fn load_home(
         Err(_) => None,
     };
     let unread = match counts {
-        Ok(reply) => match muted {
-            Some(muted) => Some(parse_counts_unread(&reply, &muted)),
+        Ok(reply) => match &muted {
+            Some(muted) => Some(parse_counts_unread(&reply, muted)),
             None => {
                 crate::debug_log!("slack: mute state unavailable; keeping the Home order");
                 None
@@ -1799,12 +1799,11 @@ pub(super) fn load_home(
     if let Some(account) = account.filter(|_| answered || badges.is_some()) {
         slack_api::write_cache(slack_api::LIVE_FILE, account, &live);
     }
-    Ok(home_list(
-        &directory,
-        &live,
-        unread.as_deref(),
-        config.open_in,
-    ))
+    let mut rows = home_list(&directory, &live, unread.as_deref(), config.open_in);
+    if let Some(muted) = muted {
+        dim_muted_home_rows(&mut rows, &directory, &muted);
+    }
+    Ok(rows)
 }
 
 /// The home rows from the cache, without asking Slack, to show until
@@ -1814,7 +1813,36 @@ pub(super) fn cached_home(config: &crate::SlackAddonConfig) -> Option<Vec<Comman
     let live = slack_api::read_cache(slack_api::LIVE_FILE, &directory.workspace)
         .map(|(live, _)| live)
         .unwrap_or_default();
-    Some(home_list(&directory, &live, None, config.open_in))
+    let unread: Option<Vec<Unread>> =
+        slack_api::read_cache(slack_api::UNREAD_FILE, &directory.workspace)
+            .map(|(unread, _)| unread);
+    let muted: Option<HashSet<String>> =
+        slack_api::read_cache(slack_api::MUTED_FILE, &directory.workspace).map(|(muted, _)| muted);
+    let mut rows = home_list(&directory, &live, unread.as_deref(), config.open_in);
+    if let Some(muted) = muted {
+        dim_muted_home_rows(&mut rows, &directory, &muted);
+    }
+    Some(rows)
+}
+
+fn dim_muted_home_rows(rows: &mut [CommandItem], directory: &Directory, muted: &HashSet<String>) {
+    if muted.is_empty() {
+        return;
+    }
+    for row in rows {
+        let is_muted = if let Some(channel) = row.identity.strip_prefix("slack:conv:") {
+            muted.contains(channel)
+        } else if let Some(user) = row.identity.strip_prefix("slack:user:") {
+            directory
+                .direct_with(user)
+                .is_some_and(|direct| muted.contains(&direct.id))
+        } else {
+            false
+        };
+        if is_muted {
+            row.dimmed = true;
+        }
+    }
 }
 
 /// The Actions rows. Blocking.
