@@ -1620,6 +1620,9 @@ impl LauncherApp {
             Message::MainViewLoaded(source, generation, result) => {
                 self.handle_main_view_loaded(source, generation, result)
             }
+            Message::MainViewSlackSearchDue(source, generation, query) => {
+                self.handle_main_view_slack_search_due(source, generation, query)
+            }
             Message::MainViewSnippetsLoaded(source, result) => {
                 self.handle_main_view_snippets_loaded(source, result)
             }

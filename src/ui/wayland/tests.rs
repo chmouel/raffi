@@ -7377,6 +7377,339 @@ fn main_view_app(entries: &[&str], configs: Vec<RaffiConfig>, addons: AddonsConf
     app
 }
 
+#[test]
+fn test_main_view_resolves_kill_and_enabled_slack_in_order() {
+    use super::main_view::{Entry, SlackSource};
+
+    let mut addons = AddonsConfig::default();
+    addons.kill.enabled = true;
+    addons.slack.enabled = true;
+    let entries = [
+        "kill",
+        "slack",
+        "slack.unread",
+        "slack.threads",
+        "slack.unread_threads",
+        "slack.activity",
+        "slack.actions",
+        "slack.directs",
+        "slack.dms",
+        "slack.channels",
+    ]
+    .map(String::from);
+    let resolved = super::main_view::resolve(&entries, &addons);
+    assert_eq!(
+        resolved,
+        vec![
+            Entry::List(CommandListAddon::Kill),
+            Entry::Slack(SlackSource::Default),
+            Entry::Slack(SlackSource::Unread),
+            Entry::Slack(SlackSource::Threads),
+            Entry::Slack(SlackSource::Activity),
+            Entry::Slack(SlackSource::Actions),
+            Entry::Slack(SlackSource::Directs),
+            Entry::Slack(SlackSource::Channels),
+        ]
+    );
+
+    addons.slack.enabled = false;
+    let resolved = super::main_view::resolve(&entries, &addons);
+    assert_eq!(resolved, vec![Entry::List(CommandListAddon::Kill)]);
+}
+
+#[test]
+fn test_main_view_lists_kill_processes_for_a_query() {
+    let mut addons = AddonsConfig::default();
+    addons.kill.enabled = true;
+    let mut app = main_view_app(&["kill"], Vec::new(), addons);
+    let generation = match &app.main_view.sources[0] {
+        super::main_view::Source::List(list) => {
+            assert!(list.loading, "Kill starts its main-view loader");
+            list.generation
+        }
+        _ => panic!("Kill command list source"),
+    };
+    let items = super::kill::fixture_items();
+    let query = items[0]
+        .title
+        .split_whitespace()
+        .next()
+        .expect("a process title")
+        .to_string();
+    let _ = app.update(Message::MainViewLoaded(0, generation, Ok(items)));
+    let _ = app.update(Message::SearchChanged(query));
+
+    assert!(app.main_view.source_rows(0) > 0);
+}
+
+#[test]
+fn test_main_view_shows_slack_home_rows_without_a_query() {
+    let mut addons = AddonsConfig::default();
+    addons.slack.enabled = true;
+    let mut app = main_view_app(&["slack"], Vec::new(), addons);
+    let generation = match &app.main_view.sources[0] {
+        super::main_view::Source::List(list) => list.generation,
+        _ => panic!("Slack command list source"),
+    };
+
+    let _ = app.update(Message::MainViewLoaded(
+        0,
+        generation,
+        Ok(super::browser_tabs::fixture_items()),
+    ));
+
+    assert!(app.main_view.shows(0));
+    assert_eq!(app.main_view.source_rows(0), 2);
+}
+
+#[test]
+fn test_main_view_slack_search_is_debounced_and_drops_stale_searches() {
+    let mut addons = AddonsConfig::default();
+    addons.slack.enabled = true;
+    let mut app = main_view_app(&["slack"], Vec::new(), addons);
+    let home_generation = match &app.main_view.sources[0] {
+        super::main_view::Source::List(list) => list.generation,
+        _ => panic!("Slack command list source"),
+    };
+
+    let _ = app.update(Message::SearchChanged("d".into()));
+    let short_query_generation = match &app.main_view.sources[0] {
+        super::main_view::Source::List(list) => list.generation,
+        _ => panic!("Slack command list source"),
+    };
+    assert_eq!(short_query_generation, home_generation);
+
+    let _ = app.update(Message::SearchChanged("deploy".into()));
+    let search_generation = match &app.main_view.sources[0] {
+        super::main_view::Source::List(list) => list.generation,
+        _ => panic!("Slack command list source"),
+    };
+    assert_ne!(search_generation, home_generation);
+
+    assert_eq!(
+        app.update(Message::MainViewSlackSearchDue(
+            0,
+            home_generation,
+            "deploy".into(),
+        ))
+        .units(),
+        0,
+        "a stale source generation is ignored"
+    );
+    assert!(
+        app.update(Message::MainViewSlackSearchDue(
+            0,
+            search_generation,
+            "deploy".into(),
+        ))
+        .units()
+            > 0,
+        "the current query starts the Slack search"
+    );
+}
+
+#[test]
+fn test_main_view_slack_search_hands_off_in_search_view() {
+    let mut addons = AddonsConfig::default();
+    addons.slack.enabled = true;
+    let mut app = main_view_app(&["slack"], Vec::new(), addons);
+    let _ = app.update(Message::SearchChanged("deploy".into()));
+    let generation = match &app.main_view.sources[0] {
+        super::main_view::Source::List(list) => list.generation,
+        _ => panic!("Slack command list source"),
+    };
+    let mut item = super::command_list::CommandItem::info(
+        "slack:message:fixture",
+        "Deployment update".into(),
+        "mail-message-new",
+    );
+    item.match_text = "deployment deploy".into();
+    item.primary = Some(super::command_list::CommandAction {
+        action: super::actions::DeferredAction::Slack(super::slack::SlackAction::Open(
+            "slack://channel?team=T1&id=C1".into(),
+        )),
+        confirm: None,
+        keep_open: false,
+        progress: None,
+    });
+    let _ = app.update(Message::MainViewLoaded(0, generation, Ok(vec![item])));
+
+    let _ = app.activate_main_view(super::main_view::Block::BeforeLaunchers, 0);
+
+    assert_eq!(app.search_query, "slack search deploy");
+    assert_eq!(app.command_list.addon, Some(CommandListAddon::Slack));
+}
+
+fn slack_fixture_item(
+    identity: &str,
+    title: &str,
+    sort_priority: u8,
+    dimmed: bool,
+) -> super::command_list::CommandItem {
+    let mut item =
+        super::command_list::CommandItem::info(identity, title.into(), "mail-message-new");
+    item.match_text = title.to_lowercase();
+    item.sort_priority = sort_priority;
+    item.dimmed = dimmed;
+    item.primary = Some(super::command_list::CommandAction {
+        action: super::actions::DeferredAction::Slack(super::slack::SlackAction::Open(
+            "slack://channel?team=T1&id=C1".into(),
+        )),
+        confirm: None,
+        keep_open: false,
+        progress: None,
+    });
+    item
+}
+
+#[test]
+fn test_main_view_slack_hides_muted_and_cold_channels_until_queried_or_focused() {
+    let mut addons = AddonsConfig::default();
+    addons.slack.enabled = true;
+    let mut app = main_view_app(&["slack"], Vec::new(), addons);
+    app.slack.usage_loaded = true;
+    app.slack.usage.insert(
+        "slack:conv:C_RECENT".into(),
+        super::support::MruEntry {
+            count: 3,
+            last_used: 100,
+        },
+    );
+    app.slack.usage.insert(
+        "slack:conv:C_MUTED_RECENT".into(),
+        super::support::MruEntry {
+            count: 10,
+            last_used: 200,
+        },
+    );
+
+    let generation = match &app.main_view.sources[0] {
+        super::main_view::Source::List(list) => list.generation,
+        _ => panic!("Slack command list source"),
+    };
+    let items = vec![
+        slack_fixture_item("slack:conv:C_COLD", "#cold-channel", 0, false),
+        slack_fixture_item("slack:conv:C_MUTED_RECENT", "#muted-recent", 0, true),
+        slack_fixture_item("slack:conv:C_RECENT", "#recent-channel", 0, false),
+        slack_fixture_item("slack:conv:C_UNREAD", "#unread-channel", 1, false),
+        slack_fixture_item("slack:user:U_ALICE", "Alice", 0, false),
+    ];
+    let _ = app.update(Message::MainViewLoaded(0, generation, Ok(items)));
+
+    let visible_titles = |app: &LauncherApp| -> Vec<String> {
+        let super::main_view::Source::List(list) = &app.main_view.sources[0] else {
+            panic!("Slack list source");
+        };
+        (0..app.main_view.source_rows(0))
+            .filter_map(|row| list.item(row).map(|item| item.title.clone()))
+            .collect()
+    };
+
+    assert_eq!(
+        visible_titles(&app),
+        vec!["#unread-channel", "#recent-channel", "Alice"],
+        "cold and muted channels are hidden on an empty query in All"
+    );
+
+    let _ = app.update(Message::CycleView(false));
+    assert_eq!(app.main_view_focus_label(), "Slack");
+    assert_eq!(
+        visible_titles(&app),
+        vec![
+            "#unread-channel",
+            "#recent-channel",
+            "#cold-channel",
+            "Alice",
+            "#muted-recent",
+        ],
+        "focusing Slack via Ctrl+Tab reveals cold and muted channels, with muted demoted"
+    );
+}
+
+#[test]
+fn test_main_view_slack_subviews_filter_locally_and_hand_off_to_matching_subview() {
+    let mut addons = AddonsConfig::default();
+    addons.slack.enabled = true;
+    let mut app = main_view_app(
+        &["slack.threads", "slack.directs", "slack.channels"],
+        Vec::new(),
+        addons,
+    );
+    app.slack.usage_loaded = true;
+    app.slack.usage.insert(
+        "slack:conv:C_GENERAL".into(),
+        super::support::MruEntry {
+            count: 2,
+            last_used: 100,
+        },
+    );
+
+    for (source, rows) in [
+        (
+            0,
+            vec![slack_fixture_item(
+                "slack:thread:C1:1",
+                "Release thread",
+                0,
+                false,
+            )],
+        ),
+        (
+            1,
+            vec![
+                slack_fixture_item("slack:user:U1", "Alice Direct", 0, false),
+                slack_fixture_item("slack:conv:C_GENERAL", "#general", 0, false),
+            ],
+        ),
+        (
+            2,
+            vec![
+                slack_fixture_item("slack:user:U1", "Alice Direct", 0, false),
+                slack_fixture_item("slack:conv:C_GENERAL", "#general", 0, false),
+                slack_fixture_item("slack:conv:C_COLD", "#cold", 0, false),
+            ],
+        ),
+    ] {
+        let generation = match &app.main_view.sources[source] {
+            super::main_view::Source::List(list) => list.generation,
+            _ => panic!("Slack command list source"),
+        };
+        let _ = app.update(Message::MainViewLoaded(source, generation, Ok(rows)));
+    }
+
+    assert_eq!(app.main_view.source_rows(0), 1);
+    assert_eq!(
+        app.main_view.source_rows(1),
+        1,
+        "slack.directs keeps only users"
+    );
+    assert_eq!(
+        app.main_view.source_rows(2),
+        1,
+        "slack.channels keeps only non-cold channels on empty query"
+    );
+
+    let threads_gen = match &app.main_view.sources[0] {
+        super::main_view::Source::List(list) => list.generation,
+        _ => panic!("Slack threads source"),
+    };
+    let _ = app.update(Message::SearchChanged("release".into()));
+    let after_gen = match &app.main_view.sources[0] {
+        super::main_view::Source::List(list) => list.generation,
+        _ => panic!("Slack threads source"),
+    };
+    assert_eq!(
+        after_gen, threads_gen,
+        "sub-views filter locally instead of scheduling message search"
+    );
+    assert_eq!(app.main_view.source_rows(0), 1);
+    assert_eq!(app.main_view.source_rows(1), 0);
+
+    let _ = app.activate_main_view(super::main_view::Block::BeforeLaunchers, 0);
+    assert_eq!(app.search_query, "slack threads release");
+    assert_eq!(app.command_list.addon, Some(CommandListAddon::Slack));
+}
+
 /// Deliver the browser tabs fixture to main view source 0.
 fn load_main_view_tabs(app: &mut LauncherApp) {
     let super::main_view::Source::List(list) = &app.main_view.sources[0] else {
@@ -7462,8 +7795,8 @@ fn test_main_view_groups_sources_in_config_order_and_caps_them() {
     );
     assert_eq!(
         app.main_view.sources.len(),
-        2,
-        "unsupported entries are skipped"
+        3,
+        "Kill is supported and unsupported entries are skipped"
     );
     assert_eq!(app.filtered_configs, vec![0], "launchers are listed");
     load_main_view_tabs(&mut app);

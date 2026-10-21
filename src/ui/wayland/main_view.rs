@@ -41,12 +41,76 @@ pub(super) const MAIN_VIEW_SESSION: u64 = 1 << 63;
 pub(super) enum Entry {
     Launchers,
     List(CommandListAddon),
+    Slack(SlackSource),
     /// Text snippet source by config index.
     Snippets(usize),
     /// Script filter by config index.
     ScriptFilter(usize),
     /// Addon only offered by its keyword on an empty query.
     Keyword(KeywordAddon),
+}
+
+/// Which Slack view or slice a `main_view` entry lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SlackSource {
+    /// Home on an empty query, message search when typing.
+    Default,
+    Unread,
+    Threads,
+    Activity,
+    Actions,
+    Directs,
+    Channels,
+}
+
+impl SlackSource {
+    fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "slack" => Some(Self::Default),
+            "slack.unread" => Some(Self::Unread),
+            "slack.threads" | "slack.unread_threads" => Some(Self::Threads),
+            "slack.activity" => Some(Self::Activity),
+            "slack.actions" => Some(Self::Actions),
+            "slack.directs" | "slack.dms" => Some(Self::Directs),
+            "slack.channels" => Some(Self::Channels),
+            _ => None,
+        }
+    }
+
+    pub fn focus_label(self) -> &'static str {
+        match self {
+            Self::Default => "Slack",
+            Self::Unread => "Slack Unread",
+            Self::Threads => "Slack Threads",
+            Self::Activity => "Slack Activity",
+            Self::Actions => "Slack Actions",
+            Self::Directs => "Slack Directs",
+            Self::Channels => "Slack Channels",
+        }
+    }
+
+    pub fn uses_home_usage(self) -> bool {
+        matches!(self, Self::Default | Self::Directs | Self::Channels)
+    }
+
+    fn keeps_item(self, item: &CommandItem) -> bool {
+        match self {
+            Self::Directs => item.identity.starts_with("slack:user:"),
+            Self::Channels => item.identity.starts_with("slack:conv:"),
+            _ => true,
+        }
+    }
+
+    fn handoff_query(self, trigger: &str, query: &str, searching: bool) -> String {
+        match self {
+            Self::Default if searching => format!("{trigger} search {query}"),
+            Self::Default | Self::Directs | Self::Channels => format!("{trigger} {query}"),
+            Self::Unread => format!("{trigger} unread {query}"),
+            Self::Threads => format!("{trigger} threads {query}"),
+            Self::Activity => format!("{trigger} activity {query}"),
+            Self::Actions => format!("{trigger} actions {query}"),
+        }
+    }
 }
 
 /// Addons a `main_view` entry can offer by keyword without mixing rows in.
@@ -101,11 +165,16 @@ pub(super) fn resolve(entries: &[String], addons: &AddonsConfig) -> Vec<Entry> {
             "media" => list(addons.media.enabled, CommandListAddon::Media),
             "audio" => list(addons.audio.enabled, CommandListAddon::Audio),
             "bluetooth" => list(addons.bluetooth.enabled, CommandListAddon::Bluetooth),
+            "kill" => list(addons.kill.enabled, CommandListAddon::Kill),
             "pass" => list(addons.pass.enabled, CommandListAddon::Pass),
             "clipboard" => keyword(addons.clipboard.is_enabled(), KeywordAddon::Clipboard),
             "bitwarden" => keyword(addons.bitwarden.enabled, KeywordAddon::Bitwarden),
             "terminal" => keyword(addons.terminal.enabled, KeywordAddon::Terminal),
             "emoji" => keyword(addons.emoji.enabled, KeywordAddon::Emoji),
+            _ if SlackSource::from_name(name).is_some() => enabled(
+                addons.slack.enabled,
+                Entry::Slack(SlackSource::from_name(name).unwrap()),
+            ),
             _ => {
                 if let Some(source) = name.strip_prefix("text_snippets.") {
                     let source = source.trim_matches('"');
@@ -156,12 +225,29 @@ pub(super) fn list_trigger(addon: CommandListAddon, addons: &AddonsConfig) -> Op
         CommandListAddon::Media => addons.media.trigger(),
         CommandListAddon::Audio => addons.audio.trigger(),
         CommandListAddon::Bluetooth => addons.bluetooth.trigger(),
+        CommandListAddon::Kill => addons.kill.trigger(),
         CommandListAddon::Pass => addons.pass.trigger(),
-        CommandListAddon::Kill
-        | CommandListAddon::Bitwarden
-        | CommandListAddon::Terminal
-        | CommandListAddon::Slack => return None,
+        CommandListAddon::Slack => addons.slack.trigger(),
+        CommandListAddon::Bitwarden | CommandListAddon::Terminal => return None,
     })
+}
+
+fn list_handoff_query(
+    addon: CommandListAddon,
+    slack_source: Option<SlackSource>,
+    trigger: &str,
+    query: &str,
+    slack_search_active: bool,
+) -> String {
+    if let Some(slack) = slack_source {
+        slack.handoff_query(trigger, query, slack_search_active)
+    } else if addon == CommandListAddon::Slack
+        && query.chars().count() >= super::slack_mode::MIN_SEARCH_CHARS
+    {
+        format!("{trigger} search {query}")
+    } else {
+        format!("{trigger} {query}")
+    }
 }
 
 /// The `main_view` name a command list addon's picks are kept under, for
@@ -250,6 +336,7 @@ pub(super) struct MainViewState {
     /// Command list sources acted on in their addon's mode, reloaded when
     /// they show again.
     pub stale: HashSet<usize>,
+    slack_search_active: bool,
     /// Name each source's picks are kept under, None for sources whose
     /// picks are not kept.
     pub names: Vec<Option<String>>,
@@ -295,6 +382,16 @@ impl MainViewState {
                     list.strict = true;
                     Source::List(Box::new(list))
                 }
+                Entry::Slack(slack_source) => {
+                    let mut list = CommandListState::default();
+                    list.enter(CommandListAddon::Slack);
+                    list.session = MAIN_VIEW_SESSION | state.sources.len() as u64;
+                    list.loading = true;
+                    list.strict = true;
+                    list.slack_source = Some(slack_source);
+                    list.slack_hide_cold_channels = slack_source.uses_home_usage();
+                    Source::List(Box::new(list))
+                }
                 Entry::Snippets(config_index) => Source::Snippets {
                     config_index,
                     loading: false,
@@ -336,6 +433,24 @@ impl MainViewState {
             (at + 1) % (all + 1)
         };
         self.focus = self.stops.get(next).copied();
+        self.sync_slack_channel_filter();
+    }
+
+    pub fn sync_slack_channel_filter(&mut self) {
+        for (index, source) in self.sources.iter_mut().enumerate() {
+            let Source::List(list) = source else {
+                continue;
+            };
+            let Some(slack_source) = list.slack_source else {
+                continue;
+            };
+            let hide = slack_source.uses_home_usage() && self.focus != Some(Focus::Source(index));
+            if list.slack_hide_cold_channels != hide {
+                list.slack_hide_cold_channels = hide;
+                let query = list.query.clone();
+                list.set_query(query);
+            }
+        }
     }
 
     /// The focus while the standard mode shows.
@@ -344,12 +459,20 @@ impl MainViewState {
     }
 
     /// Whether `source` lists rows now: on its own whatever the query,
-    /// mixed with the others once there is one, or its recent picks when
-    /// there is none.
+    /// mixed with the others once there is one, or recent picks when empty,
+    /// except for Slack Home.
     pub fn shows(&self, source: usize) -> bool {
         self.active
             && match self.focus {
-                None => !self.query.is_empty() || self.has_picks(source),
+                None => {
+                    !self.query.is_empty()
+                        || self.has_picks(source)
+                        || matches!(
+                            self.sources.get(source),
+                            Some(Source::List(list))
+                                if list.addon == Some(CommandListAddon::Slack)
+                        )
+                }
                 Some(focus) => focus == Focus::Source(source),
             }
     }
@@ -388,8 +511,8 @@ impl MainViewState {
 
     /// With an empty query and no focus, list the newest picks that can
     /// still be found as the rows of their sources, at most `MAX_ROWS` in
-    /// all; otherwise give the sources back their matches. Call after the
-    /// sources were filtered.
+    /// all, while leaving Slack Home visible; otherwise give sources back
+    /// their matches. Call after the sources were filtered.
     pub fn apply_recent(&mut self) {
         if !self.recent_mode() {
             if std::mem::take(&mut self.recent_applied) {
@@ -750,6 +873,7 @@ impl LauncherApp {
             .filter_map(|entry| match *entry {
                 Entry::Launchers | Entry::Keyword(_) => None,
                 Entry::List(addon) => Some(recent_list_name(addon).map(str::to_string)),
+                Entry::Slack(_) => Some(None),
                 Entry::Snippets(index) => Some(
                     self.addons
                         .text_snippets
@@ -799,7 +923,8 @@ impl LauncherApp {
 
     /// Keyword rows for the main view sources that can list something
     /// here, offered above the launchers while the query is empty. A
-    /// command list counts while it loads and stays once it found rows.
+    /// command list chip stays while it loads or has rows; Slack also stays
+    /// for its Home view.
     pub(super) fn main_view_plugin_suggestions(&self) -> Vec<KeywordSuggestion> {
         let main_view = &self.main_view;
         if self.view.help_active
@@ -819,9 +944,14 @@ impl LauncherApp {
                 }
             };
             let keyword = match source {
-                Source::List(list) if list.loading || !list.items.is_empty() => list
-                    .addon
-                    .and_then(|addon| list_trigger(addon, &self.addons)),
+                Source::List(list)
+                    if list.loading
+                        || !list.items.is_empty()
+                        || list.addon == Some(CommandListAddon::Slack) =>
+                {
+                    list.addon
+                        .and_then(|addon| list_trigger(addon, &self.addons))
+                }
                 Source::List(_) => None,
                 Source::Snippets { config_index, .. } => self
                     .addons
@@ -936,7 +1066,7 @@ impl LauncherApp {
         addon: CommandListAddon,
         fetch_favicons: bool,
     ) -> Task<Message> {
-        let generation = {
+        let (generation, slack_source) = {
             let Source::List(list) = &mut self.main_view.sources[source] else {
                 return Task::none();
             };
@@ -946,7 +1076,7 @@ impl LauncherApp {
             } else {
                 list.refreshing = true;
             }
-            list.generation
+            (list.generation, list.slack_source)
         };
         let exists = self.program_exists;
         let missing = |this: &mut Self, tool: &str| {
@@ -955,6 +1085,64 @@ impl LauncherApp {
             Task::none()
         };
         let load: ListLoad = match addon {
+            CommandListAddon::Slack => {
+                super::slack_api::set_cache_fresh(self.addons.slack.cache_fresh());
+                let slack_source = slack_source.unwrap_or(SlackSource::Default);
+                if slack_source.uses_home_usage() {
+                    self.load_slack_usage();
+                    let usage = self.slack_usage();
+                    if let Some(Source::List(list)) = self.main_view.sources.get_mut(source) {
+                        list.usage = usage;
+                    }
+                }
+                let query = self.main_view.query.clone();
+                if slack_source == SlackSource::Default {
+                    self.main_view.slack_search_active =
+                        query.chars().count() >= super::slack_mode::MIN_SEARCH_CHARS;
+                    if self.main_view.slack_search_active {
+                        let view = super::slack::View::Search(query.clone());
+                        if let Some(items) = super::slack::cached_search(&view) {
+                            return self.handle_main_view_loaded(source, generation, Ok(items));
+                        }
+                        return Self::schedule_main_view_slack_search(source, generation, query);
+                    }
+                }
+
+                let config = self.addons.slack.clone();
+                let cached = match slack_source {
+                    SlackSource::Default | SlackSource::Directs | SlackSource::Channels => {
+                        super::slack::cached_home(&config)
+                    }
+                    SlackSource::Unread => super::slack::cached_unread(&config),
+                    SlackSource::Threads => super::slack::cached_threads(&config),
+                    SlackSource::Activity => super::slack::cached_activity(&config),
+                    SlackSource::Actions => super::slack::cached_actions(),
+                };
+                if let Some(items) = cached {
+                    let _ = self.handle_main_view_loaded(source, generation, Ok(items));
+                    if let Some(Source::List(list)) = self.main_view.sources.get_mut(source) {
+                        list.refreshing = true;
+                    }
+                }
+                return Task::perform(
+                    off_thread(move || match slack_source {
+                        SlackSource::Default | SlackSource::Directs | SlackSource::Channels => {
+                            super::slack::load_home(config, false)
+                        }
+                        SlackSource::Unread => super::slack::load_unread(config, false),
+                        SlackSource::Threads => super::slack::load_threads(config, false),
+                        SlackSource::Activity => super::slack::load_activity(config, false),
+                        SlackSource::Actions => super::slack::load_actions(config, false),
+                    }),
+                    move |result| {
+                        Message::MainViewLoaded(
+                            source,
+                            generation,
+                            result.unwrap_or_else(|| Err("loading stopped unexpectedly".into())),
+                        )
+                    },
+                );
+            }
             CommandListAddon::System => {
                 let session_id = std::env::var("XDG_SESSION_ID").ok();
                 let keep_open = !self.should_close(self.addons.system.close_on_action);
@@ -1037,10 +1225,14 @@ impl LauncherApp {
                 let ctx = super::pass::PassContext::new(&self.addons.pass);
                 Box::new(move || super::pass::load_entries(&ctx))
             }
-            CommandListAddon::Kill
-            | CommandListAddon::Bitwarden
-            | CommandListAddon::Terminal
-            | CommandListAddon::Slack => {
+            CommandListAddon::Kill => {
+                if !exists("kill") {
+                    return missing(self, "kill");
+                }
+                let keep_open = !self.addons.kill.close_on_action(self.close_on_action);
+                Box::new(move || super::kill::load_processes(keep_open))
+            }
+            CommandListAddon::Bitwarden | CommandListAddon::Terminal => {
                 self.update_main_view(|main_view| main_view.loaded_nothing(source));
                 return Task::none();
             }
@@ -1083,6 +1275,7 @@ impl LauncherApp {
         let Some(addon) = list.addon else {
             return Task::none();
         };
+        let slack_source = list.slack_source;
         let mut items = match result {
             Ok(items) => items,
             Err(error) => {
@@ -1091,22 +1284,98 @@ impl LauncherApp {
                 return Task::none();
             }
         };
-        items.retain(|item| is_mixable(addon, item));
+        items.retain(|item| {
+            is_mixable(addon, item) && slack_source.is_none_or(|slack| slack.keeps_item(item))
+        });
         for item in &mut items {
             item.icon = item
                 .icon_names
                 .iter()
                 .find_map(|name| self.resolve_icon_name(name));
         }
-        let query = self.main_view.query.clone();
+        if addon == CommandListAddon::Slack {
+            self.apply_slack_keep_open(&mut items);
+            self.apply_slack_images(&mut items);
+        }
+        let usage = (addon == CommandListAddon::Slack
+            && slack_source.is_some_and(SlackSource::uses_home_usage))
+        .then(|| {
+            self.load_slack_usage();
+            self.slack_usage()
+        });
+        let query = if addon == CommandListAddon::Slack
+            && slack_source == Some(SlackSource::Default)
+            && self.main_view.slack_search_active
+        {
+            String::new()
+        } else {
+            self.main_view.query.clone()
+        };
         self.update_main_view(|main_view| {
             if let Some(Source::List(list)) = main_view.sources.get_mut(source) {
+                if let Some(usage) = usage {
+                    list.usage = usage;
+                }
                 list.set_items(items);
                 list.set_query(query);
             }
             main_view.apply_recent();
         });
         Task::none()
+    }
+
+    fn schedule_main_view_slack_search(
+        source: usize,
+        generation: u64,
+        query: String,
+    ) -> Task<Message> {
+        Task::perform(
+            async move {
+                let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                std::thread::spawn(move || {
+                    std::thread::sleep(super::slack_mode::SEARCH_DEBOUNCE);
+                    let _ = sender.send(());
+                });
+                let _ = receiver.await;
+            },
+            move |_| Message::MainViewSlackSearchDue(source, generation, query),
+        )
+    }
+
+    pub(super) fn handle_main_view_slack_search_due(
+        &mut self,
+        source: usize,
+        generation: u64,
+        query: String,
+    ) -> Task<Message> {
+        let current = self.main_view.query == query
+            && self.main_view.slack_search_active
+            && matches!(
+                self.main_view.sources.get(source),
+                Some(Source::List(list))
+                    if list.addon == Some(CommandListAddon::Slack)
+                        && list.slack_source == Some(SlackSource::Default)
+                        && list.generation == generation
+            );
+        if !current {
+            return Task::none();
+        }
+        if !self.main_view.shows(source) {
+            self.main_view.stale.insert(source);
+            return Task::none();
+        }
+
+        let config = self.addons.slack.clone();
+        Task::perform(
+            off_thread(move || super::slack::load_search(config, query)),
+            move |result| {
+                Message::MainViewLoaded(
+                    source,
+                    generation,
+                    result.unwrap_or_else(|| Err("loading stopped unexpectedly".into())),
+                )
+            },
+        )
     }
 
     /// Change the main view with `update`, keeping the selection on the row
@@ -1228,17 +1497,30 @@ impl LauncherApp {
         identity: &str,
         error: String,
     ) -> Task<Message> {
-        let Some(source) = self
-            .main_view
-            .sources
-            .iter()
-            .position(|src| matches!(src, Source::List(list) if list.addon == Some(addon)))
+        let Some(source) =
+            self.main_view
+                .sources
+                .iter()
+                .position(|src| {
+                    matches!(
+                        src,
+                        Source::List(list)
+                            if list.addon == Some(addon)
+                                && list.items.iter().any(|item| item.identity == identity)
+                    )
+                })
+                .or_else(|| {
+                    self.main_view.sources.iter().position(
+                        |src| matches!(src, Source::List(list) if list.addon == Some(addon)),
+                    )
+                })
         else {
             return Task::none();
         };
         let Some(Source::List(list)) = self.main_view.sources.get(source) else {
             return Task::none();
         };
+        let slack_source = list.slack_source;
         let items = list.items.clone();
         let usage = list.usage.clone();
         let previews = list.previews.clone();
@@ -1252,11 +1534,18 @@ impl LauncherApp {
         };
         let trigger = trigger.to_string();
         let query = self.main_view.query.clone();
+        let slack_search_active = self.main_view.slack_search_active;
         self.command_list.enter(addon);
         self.command_list.usage = usage;
         self.command_list.previews = previews;
         self.command_list.set_items(items);
-        let task = self.handle_search_changed(format!("{trigger} {query}"));
+        let task = self.handle_search_changed(list_handoff_query(
+            addon,
+            slack_source,
+            &trigger,
+            &query,
+            slack_search_active,
+        ));
         self.set_command_list_front(super::command_list::CommandItem::info(
             "error",
             title,
@@ -1427,10 +1716,47 @@ impl LauncherApp {
     /// Filter every source with `query`, the trimmed standard mode query.
     /// Sources load and script filters run only while they show.
     pub(super) fn refresh_main_view(&mut self, query: &str) -> Task<Message> {
+        let query_changed = self.main_view.query != query;
         self.main_view.query = query.to_string();
+        self.main_view.sync_slack_channel_filter();
         let mut tasks = Vec::new();
         for source in 0..self.main_view.sources.len() {
             let shows = self.main_view.shows(source);
+            let slack_source = match self.main_view.sources.get(source) {
+                Some(Source::List(list)) if list.addon == Some(CommandListAddon::Slack) => {
+                    Some(list.slack_source.unwrap_or(SlackSource::Default))
+                }
+                _ => None,
+            };
+            if let Some(slack_source) = slack_source {
+                if let Some(Source::List(list)) = self.main_view.sources.get_mut(source) {
+                    if query_changed {
+                        list.set_query(query.to_string());
+                    }
+                    if !shows && query_changed {
+                        list.generation = list.generation.wrapping_add(1);
+                        list.loading = false;
+                        list.refreshing = false;
+                    }
+                }
+                if !shows {
+                    if query_changed {
+                        self.main_view.stale.insert(source);
+                    }
+                    continue;
+                }
+                let stale = self.main_view.stale.remove(&source);
+                let searching = slack_source == SlackSource::Default
+                    && query.chars().count() >= super::slack_mode::MIN_SEARCH_CHARS;
+                if stale
+                    || (slack_source == SlackSource::Default
+                        && query_changed
+                        && (searching || self.main_view.slack_search_active))
+                {
+                    tasks.push(self.load_main_view_source(source, false));
+                }
+                continue;
+            }
             match &mut self.main_view.sources[source] {
                 Source::List(list) => {
                     if list.query != query {
@@ -1623,13 +1949,14 @@ impl LauncherApp {
             return label.to_string();
         };
         match &self.main_view.sources[source] {
-            Source::List(list) => match list.addon {
-                Some(CommandListAddon::BrowserTabs) => "Tabs",
-                Some(CommandListAddon::Bookmarks) => "Bookmarks",
-                Some(CommandListAddon::Windows) => "Windows",
-                Some(CommandListAddon::Pass) => "Passwords",
-                Some(addon) => addon.badge(),
-                None => "",
+            Source::List(list) => match (list.addon, list.slack_source) {
+                (Some(CommandListAddon::Slack), Some(slack)) => slack.focus_label(),
+                (Some(CommandListAddon::BrowserTabs), _) => "Tabs",
+                (Some(CommandListAddon::Bookmarks), _) => "Bookmarks",
+                (Some(CommandListAddon::Windows), _) => "Windows",
+                (Some(CommandListAddon::Pass), _) => "Passwords",
+                (Some(addon), _) => addon.badge(),
+                (None, _) => "",
             }
             .to_string(),
             Source::Snippets { config_index, .. } => self
@@ -1841,6 +2168,8 @@ impl LauncherApp {
                 let Some(item) = list.item(row) else {
                     return Task::none();
                 };
+                let slack_source = list.slack_source;
+                let slack_search_active = self.main_view.slack_search_active;
                 let identity = item.identity.clone();
                 let items = list.items.clone();
                 let usage = list.usage.clone();
@@ -1873,7 +2202,13 @@ impl LauncherApp {
                 self.command_list.usage = usage;
                 self.command_list.previews = previews;
                 self.command_list.set_items(items);
-                let task = self.handle_search_changed(format!("{trigger} {query}"));
+                let task = self.handle_search_changed(list_handoff_query(
+                    addon,
+                    slack_source,
+                    &trigger,
+                    &query,
+                    slack_search_active,
+                ));
                 if self.command_list.addon != Some(addon) {
                     return task;
                 }

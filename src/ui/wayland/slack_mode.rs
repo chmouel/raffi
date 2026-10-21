@@ -19,8 +19,8 @@ use super::types::Message;
 
 /// Wait after the last key before searching, so typing does not send one
 /// search per key.
-const SEARCH_DEBOUNCE: Duration = Duration::from_millis(350);
-const MIN_SEARCH_CHARS: usize = 2;
+pub(super) const SEARCH_DEBOUNCE: Duration = Duration::from_millis(350);
+pub(super) const MIN_SEARCH_CHARS: usize = 2;
 /// Wait for the rows in view to settle before downloading their pictures.
 const IMAGES_SETTLE: Duration = Duration::from_millis(150);
 /// Rows around the scroll position and the selection whose pictures are
@@ -36,9 +36,9 @@ pub(super) struct SlackState {
     /// The view of the list session `session`, None until it loads.
     pub view: Option<View>,
     pub session: u64,
-    usage: HashMap<String, MruEntry>,
+    pub usage: HashMap<String, MruEntry>,
     usage_path: Option<PathBuf>,
-    usage_loaded: bool,
+    pub usage_loaded: bool,
     /// Rows whose preview came from the disk cache and is being refreshed.
     stale_previews: HashSet<String>,
     /// The account epoch the previews shown belong to.
@@ -72,11 +72,7 @@ impl LauncherApp {
             self.reset_slack_images();
         }
         if !self.slack.usage_loaded {
-            self.slack.usage_loaded = true;
-            self.slack.usage_path = crate::ui::get_slack_cache_dir()
-                .ok()
-                .map(|dir| dir.join("usage.cache"));
-            self.slack.usage = load_mru_map(self.slack.usage_path.as_deref());
+            self.load_slack_usage();
         }
         let (view, filter) = slack::parse_view(&query);
         if self.slack.view.as_ref() == Some(&view) {
@@ -195,9 +191,11 @@ impl LauncherApp {
                 })
             }
             Some(View::Search(terms)) if terms.chars().count() >= MIN_SEARCH_CHARS => {
+                let refresh = refresh || !self.command_list.items.is_empty();
                 self.load_command_list(move || slack::load_search(config, terms), refresh)
             }
             Some(View::People(name)) if name.chars().count() >= MIN_SEARCH_CHARS => {
+                let refresh = refresh || !self.command_list.items.is_empty();
                 self.load_command_list(move || slack::load_people(config, name, refresh), refresh)
             }
             _ => Task::none(),
@@ -226,7 +224,7 @@ impl LauncherApp {
                 self.set_command_list_items(rows);
                 true
             }
-            None => refresh,
+            None => refresh || !self.command_list.items.is_empty(),
         };
         self.load_command_list(load, refresh)
     }
@@ -288,7 +286,18 @@ impl LauncherApp {
         save_mru_map(self.slack.usage_path.as_deref(), &self.slack.usage);
     }
 
-    fn slack_usage(&self) -> HashMap<String, u64> {
+    pub(super) fn load_slack_usage(&mut self) {
+        if self.slack.usage_loaded {
+            return;
+        }
+        self.slack.usage_loaded = true;
+        self.slack.usage_path = crate::ui::get_slack_cache_dir()
+            .ok()
+            .map(|dir| dir.join("usage.cache"));
+        self.slack.usage = load_mru_map(self.slack.usage_path.as_deref());
+    }
+
+    pub(super) fn slack_usage(&self) -> HashMap<String, u64> {
         let map = &self.slack.usage;
         let (max_count, min_ts, max_ts) = mru_bounds(map);
         map.keys()

@@ -1581,8 +1581,11 @@ pub struct GeneralConfig {
     /// Sources mixed into the main view, in display order, when typing without
     /// an addon trigger. Entries: `launchers`, `browser_tabs`,
     /// `bookmarks`, `windows`, `system`, `media`, `audio`, `bluetooth`, `pass`,
-    /// `text_snippets.<name>` and `script_filters.<name>`. When set, launchers
-    /// only show if `launchers` is listed.
+    /// `kill`, `slack`, `slack.unread`, `slack.threads` (`slack.unread_threads`),
+    /// `slack.activity`, `slack.actions`, `slack.directs` (`slack.dms`),
+    /// `slack.channels`, `text_snippets.<name>` and `script_filters.<name>`.
+    /// Slack shows its Home rows on an empty query and searches messages when
+    /// typing. When set, launchers only show if `launchers` is listed.
     #[serde(default)]
     pub main_view: Option<Vec<String>>,
     /// What the chips row above the apps shows on an empty query when

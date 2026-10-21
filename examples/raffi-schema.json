@@ -914,7 +914,7 @@
           "default": null
         },
         "main_view": {
-          "description": "Sources mixed into the main view, in display order, when typing without\nan addon trigger. Entries: `launchers`, `browser_tabs`,\n`bookmarks`, `windows`, `system`, `media`, `audio`, `bluetooth`, `pass`,\n`text_snippets.<name>` and `script_filters.<name>`. When set, launchers\nonly show if `launchers` is listed.",
+          "description": "Sources mixed into the main view, in display order, when typing without\nan addon trigger. Entries: `launchers`, `browser_tabs`,\n`bookmarks`, `windows`, `system`, `media`, `audio`, `bluetooth`, `pass`,\n`kill`, `slack`, `slack.unread`, `slack.threads` (`slack.unread_threads`),\n`slack.activity`, `slack.actions`, `slack.directs` (`slack.dms`),\n`slack.channels`, `text_snippets.<name>` and `script_filters.<name>`.\nSlack shows its Home rows on an empty query and searches messages when\ntyping. When set, launchers only show if `launchers` is listed.",
           "type": [
             "array",
             "null"

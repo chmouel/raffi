@@ -229,6 +229,10 @@ pub(super) struct CommandListState {
     pub strict: bool,
     /// Devices the audio list shows; All for every other list.
     pub audio_view: super::audio::View,
+    /// Which Slack slice this list shows when used as a `main_view` source.
+    pub slack_source: Option<super::main_view::SlackSource>,
+    /// Hide muted or zero-usage unpromoted Slack channels when the query is empty.
+    pub slack_hide_cold_channels: bool,
 }
 
 /// Identity of the row `CommandListState::query_row` builds.
@@ -257,6 +261,8 @@ impl CommandListState {
         self.preview_wanted.clear();
         self.query_row = None;
         self.audio_view = super::audio::View::All;
+        self.slack_source = None;
+        self.slack_hide_cold_channels = false;
         self.generation = self.generation.wrapping_add(1);
         self.session = self.session.wrapping_add(1);
     }
@@ -429,6 +435,19 @@ impl CommandListState {
             let items = &self.items;
             self.filtered
                 .retain(|&index| view.keeps(&items[index].identity));
+        }
+        if self.slack_hide_cold_channels && self.query.is_empty() {
+            let items = &self.items;
+            let usage = &self.usage;
+            self.filtered.retain(|&index| {
+                let item = &items[index];
+                if !item.identity.starts_with("slack:conv:") {
+                    return true;
+                }
+                !item.dimmed
+                    && (item.sort_priority > 0
+                        || usage.get(&item.identity).copied().unwrap_or(0) > 0)
+            });
         }
         self.extra_start = self.filtered.len();
         let Some((_, identities)) = &self.extra else {

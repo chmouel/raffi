@@ -552,6 +552,8 @@ pub(crate) enum Message {
         u64,
         std::result::Result<Vec<super::command_list::CommandItem>, String>,
     ),
+    /// Debounced Slack message search for a main-view source.
+    MainViewSlackSearchDue(usize, u64, String),
     /// Snippets of the main view snippet source at this index.
     MainViewSnippetsLoaded(usize, std::result::Result<Vec<TextSnippet>, String>),
     /// A main view script filter run of this source and generation; None

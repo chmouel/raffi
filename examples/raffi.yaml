@@ -63,7 +63,10 @@ version: 1
 #     - browser_tabs         # Typing "gmail" lists matching tabs, up to 5 per addon;
 #                            # with no query, your 5 latest addon picks are listed;
 #                            # groups with a title starting with the query come first
-#     - windows              # Also: bookmarks, system, media, audio, bluetooth, pass
+#     - windows              # Also: bookmarks, system, media, audio, bluetooth, kill, pass, slack
+#     - slack                # Home rows when empty; searches messages as you type (enable and configure below)
+#                            # Sub-views: slack.unread, slack.threads, slack.activity, slack.actions,
+#                            # slack.directs (or slack.dms), slack.channels
 #     - clipboard            # Keyword chip only, no rows: also bitwarden, terminal, emoji
 #     - text_snippets."Emails"       # A snippet source, by name
 #     - script_filters."Bookmarks"   # A script filter, run when typing pauses
