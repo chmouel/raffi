@@ -26,8 +26,8 @@ such as `2026-10-17T05:00:00+09:00`. Copying needs `wl-copy`, `xclip` or `xsel`.
 <Aside type="note">
 The world clock reads the system time
 zone database, so the `tzdata` package must be installed. Without it Raffi
-shows "Time zone data not found (install tzdata)". It is on by default; set
-`addons.world_clock.enabled: false` to turn it off.
+shows "Time zone data not found (install tzdata)". It is on by default; see
+[Configuration](#configuration) to turn it off.
 </Aside>
 
 ## Places
@@ -61,3 +61,20 @@ when clocks go back uses the first one.
 
 The current time is worked out as you type and does not keep ticking while the
 query stays the same.
+
+## Configuration
+
+**`addons.world_clock.enabled`** `boolean` (default: `true`)
+
+Enable or disable the world clock.
+
+**`addons.world_clock.close_on_action`** `boolean` (default: `true`)
+
+Close Raffi after copying a time. Leave it unset to follow
+`general.close_on_action`.
+
+```yaml raffi.yaml
+addons:
+  world_clock:
+    enabled: false
+```

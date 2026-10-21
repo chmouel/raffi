@@ -42,9 +42,8 @@ Start the file browser by typing one of these prefixes:
 
 ### Directory Structure
 
-- **Directories** are listed first in accent color
-- **Files** are listed after directories
-- Current path shows in the input field
+Directories come first, in the accent color, followed by files. The
+current path stays in the search field.
 
 ### Keyboard Shortcuts
 
@@ -279,7 +278,7 @@ This is the default `secondary_action`; see [Configuration](#configuration) to c
 Files and directories can be dragged **out of raffi** into any application that accepts drops (file managers, editors, terminals, browsers, email clients...):
 
 1. Press and hold the left mouse button on a file browser row
-2. Move the pointer — the drag starts once the pointer moves a few pixels (~8 logical px, typically while still inside the row)
+2. Move the pointer a little; the drag starts after a few pixels, usually while you are still on the row
 3. Release over the target application to drop
 
 ```text Example
@@ -371,7 +370,7 @@ Which entries the listing starts with. Press Ctrl+Tab to cycle through the modes
 
 - `all`: directories and files
 - `files`: files only
-- `directories` (or `dirs`): directories only
+- `directories` (or `dirs`, `directory`): directories only
 
 When directories are hidden you can still type a path such as `~/src/` to enter one, and Tab completes the best hidden match when no visible row matches what you typed. Symlinks count as files, so `directories` hides a link to a directory.
 
@@ -427,6 +426,19 @@ Command that previews the selected entry in the preview pane, replacing the plai
 addons:
   file_browser:
     preview_command: "~/.config/raffi/scripts/file-preview.py"
+```
+
+**`close_on_action`** `boolean` (default: `true`)
+
+Close Raffi after running `action` or `secondary_action` on an entry, or
+after dropping a dragged file. Leave it unset to follow
+`general.close_on_action`. `insert` always closes Raffi first, so it can type
+into the app you came from.
+
+```yaml raffi.yaml
+addons:
+  file_browser:
+    close_on_action: false
 ```
 
 
@@ -486,11 +498,6 @@ addons:
     ```
   </details>
 
-
-## Visual Indicators
-
-- **Directories** — Listed first in accent color
-- **Files** — Listed after directories in normal text
 
 ## Requirements
 

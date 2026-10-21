@@ -78,11 +78,22 @@ raffi -i "win "
 
 ## Configuration
 
+**`addons.windows.enabled`** `boolean` (default: `true`)
+
+Enable or disable the window switcher.
+
+**`addons.windows.trigger`** `string` (default: `win`)
+
+Keyword that opens the list. Type it followed by a space. Web searches with
+the same keyword take precedence.
+
+**`addons.windows.close_on_action`** `boolean` (default: `true`)
+
+Close Raffi before focusing or moving a window. Leave it unset to follow
+`general.close_on_action`.
+
 ```yaml
 addons:
   windows:
     trigger: "w"
 ```
-
-See the [addon reference](../../reference/addon-configuration/#window-switcher)
-for every field.

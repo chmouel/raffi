@@ -3,24 +3,27 @@ title: Script Filters
 description: Dynamic results from external commands using Alfred JSON format
 ---
 
-import { Aside, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import scriptFilterTzScreenshot from '../../../assets/screenshots/script-filter-tz.png';
 import scriptFilterPrScreenshot from '../../../assets/screenshots/script-filter-pr.png';
 import herdrTreeScreenshot from '../../../assets/screenshots/herdr-tree.png';
 import herdrStatusScreenshot from '../../../assets/screenshots/herdr-status.png';
 
-Script filters allow external commands to provide dynamic results in the launcher using a subset of the Alfred Script Filter JSON format.
-
-## Overview
-
-Script filters execute external commands when a keyword is typed, displaying dynamic results based on the command's JSON output. This enables integration with APIs, databases, custom scripts, and more.
+A script filter runs a command of yours when you type its keyword, passes it
+what you type after the keyword, and lists the items it prints. The command
+prints JSON in a subset of the
+[Alfred Script Filter format](https://www.alfredapp.com/help/workflows/inputs/script-filter/json/),
+so any language works, and Raffi adds a few extensions of its own: tree-style
+indentation, informational rows and rich previews. Use it to bring in APIs,
+bookmarks, databases or any script that can print a list.
 
 <Image src={scriptFilterTzScreenshot} alt="Script filter timezone converter example" width={800} />
 
-## Configuration
+## Quick start
 
-Configure script filters in your `raffi.yaml`:
+This filter uses [batz](https://github.com/chmouel/batzconverter) to convert
+times between timezones:
 
 ```yaml raffi.yaml
 addons:
@@ -30,106 +33,496 @@ addons:
       command: "batz"
       args: ["-j"]
       icon: "clock"
+```
 
+Type `tz` followed by a space, then a place, such as `tz new york`. Raffi runs
+`batz -j "new york"` and lists the items it prints. Press Enter to copy the
+selected item.
+
+Until you type the space after the keyword, Raffi keeps searching the main
+list and shows a row describing the filter; Enter or Tab on that row enters
+it. The command runs again each time the text after the keyword changes.
+
+## Actions
+
+| Key        | Action                                                    |
+|------------|-----------------------------------------------------------|
+| Enter      | Run `action` on the selected item (copy by default)       |
+| Ctrl+Enter | Run `secondary_action`, or `action` when it is not set    |
+| Up / Down  | Move through the results                                  |
+| Escape     | Close Raffi                                               |
+
+Actions use the item's `arg`, or its title when it has no `arg`. An action is
+one of:
+
+- `copy`, the default, to copy the value with `wl-copy`, `xclip` or `xsel`
+- `insert`, to close Raffi and type the value into the focused app with
+  `wtype` or `ydotool`
+- any other text, run with `sh -c` after replacing `{value}` with the value
+
+The value is also exported as `$RAFFI_VALUE`, and so are the item's
+[`variables`](#item-fields), so a script can pass structured data to its
+actions:
+
+```yaml raffi.yaml
+addons:
+  script_filters:
     - name: "Bookmarks"
       keyword: "bm"
       command: "my-bookmark-script"
-      args: ["-j"]
-      action: "echo -n {value}|wl-copy"
-      secondary_action: "xdg-open {value}"
+      args: ["--json"]
+      icon: "bookmark"
+      action: "copy"                       # Enter: copy the URL
+      secondary_action: "xdg-open {value}" # Ctrl+Enter: open it
 ```
 
-### Configuration Fields
+`{value}` is pasted into the command as raw text, so quotes or `$(...)` in it
+are read by the shell. Prefer `"$RAFFI_VALUE"` when the value comes from
+somewhere you do not control.
+
+## Examples
+
+### GitHub pull requests
+
+<Image src={scriptFilterPrScreenshot} alt="GitHub PR browser" width={800} />
+
+The [`scripts/github/pr.py`](https://github.com/chmouel/raffi/blob/main/scripts/github/pr.py)
+script lists open pull requests with their CI status, review decision,
+conflicts, unresolved threads and size, using the
+[GitHub CLI](https://cli.github.com). Install it:
+
+```bash
+mkdir -p ~/.config/raffi/scripts/github
+cp scripts/github/pr.py ~/.config/raffi/scripts/github/pr.py
+chmod +x ~/.config/raffi/scripts/github/pr.py
+```
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Pull Requests"
+      keyword: "pr"
+      command: "~/.config/raffi/scripts/github/pr.py"
+      icon: "github"
+      action: "xdg-open {value}"
+      secondary_action: "copy"
+```
+
+```text
+pr                   your open pull requests across all repositories
+pr review            pull requests waiting for your review (also: assigned, involved)
+pr owner/repo login  open pull requests of owner/repo matching "login"
+```
+
+Enter opens the pull request in the browser and Ctrl+Enter copies its URL.
+When results span several owners (organizations or user accounts), they are
+grouped under owner headings that cannot be selected, with the pull requests
+indented beneath. Results from a single owner, or from a fixed `owner/repo`
+query, stay flat.
+
+Add `args: ["--repo", "owner/repo"]` to give a repository its own keyword,
+and `ALIAS_<name>` variables in `env` for short repository names. Each row
+exports `PR_URL`, `PR_REPO`, `PR_NUMBER` and `PR_BRANCH` to the actions.
+
+Each pull request shows the avatar of its repository owner, or of its author
+when every listed pull request comes from the same repository, cached under
+`~/.cache/raffi/github-avatars/`. With the preview pane open, the selected
+pull request shows its branches, each reviewer's verdict, merge state,
+unresolved threads, checks, the issues it closes, its description with the
+markdown rendered in colour, the latest comments from people and the changed
+files. It refreshes every 20 seconds while a check is still running. See the
+script's [README](https://github.com/chmouel/raffi/blob/main/scripts/github/README.md)
+for all options.
+
+### Web search with autocomplete
+
+The [`scripts/search/search.py`](https://github.com/chmouel/raffi/blob/main/scripts/search/search.py)
+script shows live DuckDuckGo autocomplete suggestions and opens the result in
+the search engine of your choice: `google`, `duckduckgo`, `bing` or `brave`.
+Install it:
+
+```bash
+mkdir -p ~/.config/raffi/scripts/search
+cp scripts/search/search.py ~/.config/raffi/scripts/search/search.py
+chmod +x ~/.config/raffi/scripts/search/search.py
+```
+
+Then add one entry per engine:
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Search DuckDuckGo"
+      keyword: "ddg"
+      command: "~/.config/raffi/scripts/search/search.py"
+      args: ["duckduckgo"]
+      icon: "web-browser"
+      action: "xdg-open {value}"
+      secondary_action: "copy"
+
+    - name: "Search Google"
+      keyword: "sg"
+      command: "~/.config/raffi/scripts/search/search.py"
+      args: ["google"]
+      icon: "google"
+      action: "xdg-open {value}"
+      secondary_action: "copy"
+```
+
+Typing `ddg rust async` lists the query itself first, which opens a
+DuckDuckGo search, then the autocomplete suggestions. Enter opens the
+selected one in the browser and Ctrl+Enter copies its URL. With the preview
+pane open, a suggestion shows its DuckDuckGo Instant Answer (summary, source
+link and image) when there is one. The suggestions need no API key; on a
+timeout or network error the script only shows the query.
+
+The [`web_searches`](../web-search/) addon opens a URL directly, without
+suggestions. Use it for instant access and this script when you want live
+suggestions.
+
+### Herdr sessions
+
+The [Herdr filter script](https://github.com/chmouel/raffi/tree/main/scripts/herdr)
+browses a [Herdr](https://herdr.dev) session as an indented
+[tree](#tree-results) of workspaces, tabs and panes. A tab with a single pane,
+shells included, appears once as the tab row and keeps its terminal preview;
+tabs with several panes list them underneath. The query matches tab and pane
+details and keeps the ancestors of each match. Select a workspace or a tab to
+focus it, or an agent pane to focus the agent.
+
+<Image src={herdrTreeScreenshot} alt="Herdr demo workspace tree with connected session and pane rows and the selected split session's details" width={800} />
+
+Install the script and its icons, and copy the icon directory again when
+upgrading, license notices included:
+
+```bash
+mkdir -p ~/.config/raffi/scripts/herdr
+cp scripts/herdr/herdr_filter.py ~/.config/raffi/scripts/herdr/herdr_filter.py
+cp -R scripts/herdr/icons ~/.config/raffi/scripts/herdr/
+chmod +x ~/.config/raffi/scripts/herdr/herdr_filter.py
+```
+
+Every item exports `HERDR_KIND` (`workspace`, `tab`, `agent` or `pane`) and
+`HERDR_FOCUS`, the id to focus, so one action handles every kind:
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Herdr"
+      keyword: "herdr"
+      command: "~/.config/raffi/scripts/herdr/herdr_filter.py"
+      icon: "utilities-terminal"
+      env:
+        HERDR_ICON_SET: color
+      action: >-
+        case "$HERDR_KIND" in
+          workspace) herdr workspace focus "$HERDR_FOCUS" ;;
+          tab) herdr tab focus "$HERDR_FOCUS" ;;
+          agent) herdr agent focus "$HERDR_FOCUS" ;;
+          *) herdr tab focus "$HERDR_FOCUS" ;;
+        esac
+```
+
+The default `color` icons tell workspaces, sessions, shells and agents apart,
+and preview headers use them too. Set `HERDR_ICON_SET` to `mono-dark` (pale
+marks for dark themes) or `mono-light` (dark marks for light themes) for
+monochrome icons. No icon font is needed.
+
+<Image src={herdrStatusScreenshot} alt="Herdr demo agents grouped under Working, Waiting and Idle, with terminal output for the selected agent" width={800} />
+
+For an agent status tree, set `HERDR_VIEW: status` in `env` or add
+`args: ["--status"]`. Agents from every workspace are grouped under Working,
+Waiting (Herdr's `blocked`), Idle, Done and Unknown, and empty groups are
+hidden. Each agent appears once, agents in split tabs included, with its
+workspace in the subtitle. Plain shells stay in the workspace view. Group
+headings show their counts and a summary preview but have no action, while
+agent rows keep their focus action and terminal preview. Search `waiting` or
+`blocked` to find the agents that need you. The workspace tree stays the
+default (`HERDR_VIEW: workspace` or `--tree`).
+
+For a flat list of recognised agents only, add `args: ["--agents"]` and focus
+them directly:
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Herdr Agents"
+      keyword: "hagents"
+      command: "~/.config/raffi/scripts/herdr/herdr_filter.py"
+      args: ["--agents"]
+      icon: "utilities-terminal"
+      action: 'herdr agent focus "$HERDR_FOCUS"'
+```
+
+To raise the terminal window before focusing, start the action with the line
+for your compositor, changing `kitty` to your terminal's class or app id:
+
+```sh
+# Hyprland
+hyprctl dispatch focuswindow class:kitty;
+# Sway
+swaymsg '[app_id="kitty"] focus';
+# niri (needs jq)
+id=$(niri msg -j windows | jq -r '.[] | select(.app_id == "kitty") | .id' | head -n1);
+[ -z "$id" ] || niri msg action focus-window --id "$id";
+```
+
+For example, on Hyprland:
+
+```yaml
+action: >-
+  hyprctl dispatch focuswindow class:kitty;
+  case "$HERDR_KIND" in
+    workspace) herdr workspace focus "$HERDR_FOCUS" ;;
+    tab) herdr tab focus "$HERDR_FOCUS" ;;
+    agent) herdr agent focus "$HERDR_FOCUS" ;;
+    *) herdr tab focus "$HERDR_FOCUS" ;;
+  esac
+```
+
+With the preview pane open, the selected row shows a live preview refreshed
+every 2 seconds: agent panes show their status, directory and recent
+terminal output, tabs show their pane list (and the terminal of single-pane
+tabs), and workspaces show their tab list and active tab. See the script's
+[README](https://github.com/chmouel/raffi/blob/main/scripts/herdr/README.md)
+for more.
+
+### In the main list
+
+A script filter listed in
+[`general.main_view`](../../configuration/main-list/#choosing-what-it-shows)
+as `script_filters."<name>"` also runs without its keyword: its first five
+items show in the main list each time you pause typing, once the query is at
+least `min_query_length` long. It can also be one of the
+[fallbacks](../../configuration/main-list/#fallbacks) shown at the bottom of
+every search.
+
+## Configuration
+
+Script filters are a list under `addons.script_filters`, one entry per
+keyword.
 
 **`name`** `string` (required)
 
-Display name shown during loading
-
+Name shown while the command runs, and used to refer to the filter in
+`main_view`, `fallbacks` and `-o addons.script_filters.<name>.<key>=...`.
 
 **`keyword`** `string` (required)
 
-Text that activates the script filter
-
+Text that enters the filter. Type it followed by a space: `tz ` enters the
+filter while `tz` keeps searching the main list. When sources share a
+keyword, the first script filter with it wins, and script filters come
+before text snippets, web searches and the other addons.
 
 **`command`** `string` (required)
 
-Executable to run
+Program to run. It is started directly, without a shell, with `args` and
+then the text typed after the keyword as its last argument (empty when
+nothing is typed). A leading `~/` and `${VAR}` references are expanded.
 
+**`args`** `list of strings` (default: `[]`)
 
-**`args`** `array`
-
-Arguments passed before the query
-
+Arguments passed before the query. They are passed as written, so use a full
+path rather than `~`.
 
 **`icon`** `string`
 
-Fallback icon name for results without their own icon
-
+Icon name or image path for items without an icon of their own. A leading
+`~/` and `${VAR}` references are expanded.
 
 **`action`** `string` (default: `copy`)
 
-Action on Enter. Options:
-  - `"copy"`: Copy to clipboard
-  - `"insert"`: Type into focused app via wtype/ydotool
-  - Command template with `{value}` placeholder (executed via `sh -c`)
+What Enter does with the selected item: `copy`, `insert`, or a shell command,
+as described in [Actions](#actions). A leading `~/` and `${VAR}` references
+are expanded when the config loads, so write `$VAR` without braces for the
+variables an item exports.
 
+**`secondary_action`** `string` (default: same as `action`)
 
-**`secondary_action`** `string`
+What Ctrl+Enter does. It takes the same values as `action` and is expanded
+the same way.
 
-Action on Ctrl+Enter. Accepts same values as `action`. If omitted, Ctrl+Enter behaves same as Enter.
+**`env`** `map of strings` (default: `{}`)
 
+Environment variables passed to the command, including its
+[preview](#dynamic-previews) runs. They are not passed to actions.
+
+**`min_query_length`** `integer` (default: `0`)
+
+Number of characters to type after the keyword before the command runs.
+Until then the list is empty and a row says how many more characters to
+type. Useful for scripts that are slow or return too much on short queries.
 
 **`dynamic_preview`** `boolean` (default: `true`)
 
-Ask the script for a preview of the selected item. See [Dynamic previews](#dynamic-previews). Set to `false` to only use the `preview` field from the item list.
+Run the command again for the selected item to fill the preview pane, as
+described in [Dynamic previews](#dynamic-previews). Set it to `false` to
+only use the items' `preview` field.
 
+**`close_on_action`** `boolean` (default: `true`)
 
-## JSON Format
+Close Raffi after running an action. When unset, `general.close_on_action`
+applies. `insert` always closes Raffi first.
 
-Script filters must output JSON matching this structure (subset of [Alfred's format](https://www.alfredapp.com/help/workflows/inputs/script-filter/json/)):
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Timezones"
+      keyword: "tz"
+      command: "batz"
+      args: ["-j"]
+      icon: "clock"
+      action: "copy"
+      secondary_action: 'notify-send "$RAFFI_VALUE"'
+      env:
+        TZ_FORMAT: "short"
+      min_query_length: 2
+      dynamic_preview: false
+      close_on_action: false
+```
+
+## Output format
+
+The command prints a JSON object with an `items` list on its standard
+output. Anything it writes on standard error is ignored. When the command
+fails or prints something that is not valid JSON, the list stays empty, so
+try a script in a terminal first, such as `my-script -j "test query"`.
+
+A minimal script:
+
+```python my-filter.py
+#!/usr/bin/env python3
+import json
+import sys
+
+query = sys.argv[1] if len(sys.argv) > 1 else ""
+
+print(json.dumps({"items": [
+    {
+        "title": f"Result for: {query}",
+        "subtitle": "This is a subtitle",
+        "arg": f"https://example.com/search?q={query}",
+        "icon": {"path": "/usr/share/icons/search.png"},
+    }
+]}))
+```
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "My Filter"
+      keyword: "mf"
+      command: "~/bin/my-filter.py"
+      action: "xdg-open {value}"
+```
+
+A fuller output:
 
 ```json
 {
   "items": [
     {
       "title": "New York",
-      "subtitle": "EST (UTC-5) — 14:30",
+      "subtitle": "EST (UTC-5), 14:30",
       "arg": "America/New_York",
       "icon": { "path": "/usr/share/icons/clock.png" }
     },
     {
       "title": "London",
-      "subtitle": "GMT (UTC+0) — 19:30",
+      "subtitle": "GMT (UTC+0), 19:30",
       "arg": "Europe/London"
     }
   ]
 }
 ```
 
-### JSON Fields
+Raffi lists the items in the order the script prints them. Filtering and
+sorting are the script's job.
+
+### Item fields
 
 **`title`** `string` (required)
 
-Main text displayed for the item
-
+Main text of the row. [ANSI colours](#colours) are supported.
 
 **`subtitle`** `string`
 
-Secondary text shown below the title
-
+Second line of the row, with ANSI colours too.
 
 **`arg`** `string`
 
-Value copied to clipboard (falls back to title if omitted)
+Value the actions use. The title is used when it is missing.
 
+**`icon.path`** `string`
 
-**`indent`** `integer`
+Absolute path to a PNG or SVG icon. Without it, the filter's `icon` is used.
 
-Raffi extension for tree-style results (Alfred ignores it): indentation
-level of the item, `0` by default. Each level shifts the row further right
-in the result list and adds subtle connector guides, so a
-script can return a hierarchy, for example the Herdr filter's workspace /
-tab / pane tree:
+**`valid`** `boolean` (default: `true`)
+
+Set it to `false` for informational rows or headings. They can be selected
+to read their preview, but Enter, Ctrl+Enter and clicks do nothing and do
+not close Raffi. These rows are not recorded as recent picks and do not
+count as results for `--select-1`.
+
+**`indent`** `integer` (default: `0`)
+
+Raffi extension, ignored by Alfred: the tree level of the item. See
+[Tree results](#tree-results).
+
+**`preview`** `string` or `object`
+
+What the preview pane shows for the item: multiline text with ANSI colours,
+a local file or image path, or a [preview object](#preview-object). Add
+`"dynamic": false` to a preview object to keep that item out of
+[dynamic previews](#dynamic-previews).
+
+**`variables`** `map of strings`
+
+Alfred variables. Each one is exported as an environment variable to the
+preview run and to the `action` and `secondary_action` commands, so the
+script can pass data along without packing it into `arg`.
+
+**`quicklookurl`** `string`
+
+Alfred QuickLook URL or local file path (`file://`, `/path` or `~/path`).
+Local files and images show in the preview pane.
+
+**`text.largetype`** `string`
+
+Alfred large-type text, shown in the preview pane when `preview` is not set.
+
+**`text.copy`** `string`
+
+Alfred copy text, shown in the preview pane.
+
+### Colours
+
+Titles, subtitles and preview text understand ANSI escape codes: 16, 256
+and 24-bit colours, plus bold, dim, italic and underline. The 16 basic
+colours come from the [theme's palette](../themes/#terminal-colours). Other
+escape sequences, such as cursor movement or terminal hyperlinks, are
+removed, and tabs are expanded to 8 columns, so output captured from tools
+like `bat` or `eza` displays cleanly.
+
+```json
+{
+  "items": [
+    {
+      "title": "\u001b[32mSuccess\u001b[0m",
+      "subtitle": "\u001b[90mCompleted at 14:30\u001b[0m"
+    }
+  ]
+}
+```
+
+The [GitHub pull requests](#github-pull-requests) script uses colours for
+the CI state of each pull request.
+
+### Tree results
+
+`indent` shifts a row further right for each level and draws connector
+guides, so a script can return a hierarchy, such as the
+[Herdr](#herdr-sessions) workspace, tab and pane tree:
 
 ```json
 {
@@ -142,159 +535,22 @@ tab / pane tree:
 }
 ```
 
-Filtering stays the script's job: it receives the query as its last
-argument and can return only the matching nodes plus their ancestors.
+Print parents before their children and keep each subtree together. A row's
+parent is the nearest row above it with a smaller `indent`; skipped levels do
+not add rows. A row without a parent keeps its offset but draws no branch.
+Offsets stop growing after ten levels, while deeper rows keep their
+relationships; connections that would overlap at that limit are left out.
+Guides only link rows that are shown, and stop at the edge of a source,
+including results cut short in the main list.
 
-<Image src={herdrTreeScreenshot} alt="Herdr demo workspace tree with connected session and pane rows and the selected split session's details" width={800} />
+The script still does the filtering: it receives the query and can return
+only the matching rows plus their ancestors.
 
-<Image src={herdrStatusScreenshot} alt="Herdr demo agents grouped under Working, Waiting and Idle, with terminal output for the selected agent" width={800} />
+## Dynamic previews
 
-Return parents before their children, with each subtree kept together.
-The nearest preceding row with a smaller `indent` is the parent; skipped
-levels do not create extra rows. A row without a parent keeps its offset
-without drawing a branch to a missing ancestor. Offsets stop growing at ten
-levels, but deeper rows keep their original relationships. Connections that
-would overlap at that limit are omitted. Guides describe only displayed
-rows and stop at source boundaries, including truncated main-view results.
-
-**`valid`** `boolean`
-
-Defaults to `true`. Set `false` for informational rows or tree headings.
-They can be highlighted to read their preview, but Enter, Ctrl+Enter, and
-click activation do not run an action or close Raffi. These rows are not
-recorded as recent picks and do not count as selectable results for `--select-1`.
-
-**`icon.path`** `string`
-
-Absolute path to a PNG or SVG icon
-
-
-**`preview`** `string` or `object`
-
-Optional multiline preview text (supports ANSI escape codes) or local file/image path rendered in the right-hand preview pane. It can also be a [preview object](#preview-object), with `"dynamic": false` added to skip the dynamic preview call for this item
-
-
-**`variables`** `object`
-
-Optional Alfred string map. Each entry is exported as an environment variable to the preview call and to the `action` and `secondary_action` commands, so the script can pass structured data along without packing it into `arg`
-
-
-**`quicklookurl`** `string`
-
-Optional Alfred QuickLook URL or local file path (`file://`, `/path`, or `~/path`). Local files and images are previewed in the right-hand pane
-
-
-**`text.largetype`** `string`
-
-Optional Alfred large-type text shown in the right-hand preview pane when `preview` is omitted
-
-
-**`text.copy`** `string`
-
-Optional Alfred copy text metadata shown in the right-hand preview pane
-
-
-## How It Works
-
-<Steps>
-1. **Type Keyword**
-
-   User types the configured keyword followed by a space (e.g., `tz `). Until
-   that space is typed, Raffi keeps searching launchers and offers a row
-   describing the filter, which Enter or Tab activates.
-
-2. **Execute Command**
-
-   Script is executed with remaining input as final argument:
-       ```bash
-       batz -j "New York"
-       ```
-
-3. **Parse JSON**
-
-   Raffi parses the JSON output from stdout
-
-4. **Display Results**
-
-   Items are displayed in the launcher
-
-5. **Handle Selection**
-
-   On Enter, the item's `arg` value (or `title`) is used with the configured action
-
-</Steps>
-
-A script filter listed in
-[`general.main_view`](../../configuration/general-settings/#main-view) also runs
-without its keyword: its first five items show in the main list each time
-you pause typing, once the query reaches `min_query_length`.
-
-## Actions
-
-### Default Action (Copy)
-
-By default, selecting an item copies its value to the clipboard:
-
-```yaml
-script_filters:
-  - name: "Timezones"
-    keyword: "tz"
-    command: "batz"
-    # Default action is "copy"
-```
-
-### Custom Actions
-
-Define custom actions using command templates:
-
-<Tabs>
-<TabItem label="Copy to Clipboard">
-```yaml
-action: "echo -n {value}|wl-copy"
-```
-</TabItem>
-<TabItem label="Open in Browser">
-```yaml
-action: "xdg-open {value}"
-```
-</TabItem>
-<TabItem label="Type into App">
-```yaml
-action: "insert"
-```
-</TabItem>
-<TabItem label="Custom Command">
-```yaml
-action: "my-command --input {value}"
-```
-</TabItem>
-</Tabs>
-
-### Primary and Secondary Actions
-
-```yaml raffi.yaml
-script_filters:
-  - name: "Bookmarks"
-    keyword: "bm"
-    command: "bookmark-script"
-    action: "echo -n {value}|wl-copy"  # Enter: Copy URL
-    secondary_action: "xdg-open {value}"  # Ctrl+Enter: Open URL
-```
-
-<Tabs>
-  <TabItem label="Primary (Enter)">
-    Copies bookmark URL to clipboard
-  </TabItem>
-  <TabItem label="Secondary (Ctrl+Enter)">
-    Opens bookmark URL in browser
-  </TabItem>
-</Tabs>
-
-## Dynamic Previews
-
-When the preview pane is open (`Ctrl+P`), Raffi runs the script filter again
-for the selected item and shows the preview object it prints. The command, args,
-and query are the same as for the item list, with these environment variables
+When the preview pane is open (Ctrl+P), Raffi runs the command again for the
+selected item and shows the preview object it prints. The command, args and
+query are the same as for the item list, with these environment variables
 added:
 
 | Variable | Value |
@@ -306,8 +562,8 @@ added:
 | `RAFFI_PREVIEW_WIDTH`, `RAFFI_PREVIEW_HEIGHT` | preview pane size in pixels |
 | `RAFFI_THEME`, `RAFFI_THEME_MODE`, `RAFFI_THEME_FG`, ... | the current theme, see [Terminal Colours](../themes/#terminal-colours) |
 
-The config `env` and the item's `variables` are exported too. The call is
-debounced while you move through the list, killed after 3 seconds, and its
+The filter's `env` and the item's `variables` are exported too. The run waits
+until you stop moving through the list, is killed after 3 seconds, and its
 output is capped at 8 MiB.
 
 A script supports this by checking `RAFFI_PREVIEW` before building its list:
@@ -322,26 +578,26 @@ if os.environ.get("RAFFI_PREVIEW") == "1":
 ```
 
 <Aside type="caution">
-Previews run the script filter command again, so a command that changes
-something each time it runs (sends a request with side effects, writes state)
-must check `RAFFI_PREVIEW` first, or the filter needs `dynamic_preview: false`.
+Previews run the command again, so a command that changes something each time
+it runs (sends a request with side effects, writes state) must check
+`RAFFI_PREVIEW` first, or the filter needs `dynamic_preview: false`.
 </Aside>
 
 Scripts that ignore `RAFFI_PREVIEW` keep working. Raffi waits for the first
-preview run of a script filter to answer before starting another. Any JSON
-object without an `items` key is a preview object, so `{}` is an empty
-preview. If the first run fails, times out, or prints something other than a
-preview object (for example the usual `{"items": [...]}` or text that is not
-JSON), Raffi stops asking that script filter for the rest of the session and
-uses the item's `preview` field.
+preview run of a filter to answer before starting another. Any JSON object
+without an `items` key is a preview object, so `{}` is an empty preview. If
+the first run fails, times out, or prints something other than a preview
+object (the usual `{"items": [...]}`, or text that is not JSON), Raffi stops
+asking that filter for the rest of the session and uses the items' `preview`
+field.
 
-Once a script filter has printed a preview object, even one Raffi cannot read
-(such as a field with the wrong type), errors are shown instead: a failed run
+Once a filter has printed a preview object, even one Raffi cannot read (such
+as a field with the wrong type), errors are shown instead: a failed run
 (non-zero exit or timeout) or an unreadable preview object keeps the last
 preview on screen, adds a `Preview` row with the error, and is retried the
 next time the item is selected.
 
-### Preview Object
+### Preview object
 
 Every field is optional:
 
@@ -363,439 +619,31 @@ Every field is optional:
 }
 ```
 
-**`title`**, **`subtitle`**, **`badge`**: replace the header of the preview pane.
+`title`, `subtitle` and `badge` replace the header of the preview pane.
 
-**`icon`**: icon theme name, image path, or emoji.
+`icon` is an icon theme name, an image path or an emoji.
 
-**`text`**: body text, ANSI colours supported (16, 256, and 24-bit).
+`text` is the body text, with ANSI colours (16, 256 and 24-bit).
 
-**`image`**: a local image path, or `{"path": "..."}`, or `{"base64": "..."}`.
+`image` is a local image path, `{"path": "..."}` or `{"base64": "..."}`.
 Base64 data may also be a `data:image/...;base64,` URL. Use
 `RAFFI_PREVIEW_WIDTH` and `RAFFI_PREVIEW_HEIGHT` to size generated images.
 
-**`sections`**: ordered body blocks. `text` takes `content` and an optional
-`heading`, `image` takes `path` or `base64`, and `file` takes a `path` shown
-with the same viewer as the file browser (text, images, directories). When
-`sections` is set, `text` and `image` are ignored, and an empty list clears the
-body. Without it the image comes first, then the text. A preview with no
-`sections`, `text`, or `image` keeps the item's own preview body and only
-changes the header and metadata.
-
-**`metadata`**: `[label, value]` rows shown above Raffi's own Enter and
-Ctrl+Enter rows.
-
-**`refresh`**: seconds after which Raffi asks again while the item stays
-selected, between 0.5 and 3600. Use it for live data such as logs or
-progress. A `file` section is read again on every refresh.
-
-The same object can be used as an item's static `preview` field (`refresh` has
-no effect there). Add `"dynamic": false` to it to keep that item out of the
-dynamic preview calls.
-
-## ANSI Color Support
-
-The `title` and `subtitle` fields support ANSI color codes for colored text:
-
-```json
-{
-  "items": [
-    {
-      "title": "\u001b[32mSuccess\u001b[0m",
-      "subtitle": "\u001b[90mCompleted at 14:30\u001b[0m"
-    }
-  ]
-}
-```
-
-<Aside type="tip">
-The [GitHub pull requests script](#github-pull-requests) uses colors to display the CI state of each pull request.
-</Aside>
-
-Titles, subtitles and preview text understand 16, 256 and 24-bit colours plus
-bold, dim, italic and underline. The 16 basic colours come from the
-[theme's palette](../themes/#terminal-colours). Other escape sequences, such as cursor
-movement or terminal hyperlinks, are removed, and tabs are expanded to 8
-columns, so output captured from tools like `bat` or `eza` displays cleanly.
-
-## Examples
-
-### Timezone Converter
-
-Using [batz](https://github.com/chmouel/batzconverter) time converter:
-
-```yaml raffi.yaml
-script_filters:
-  - name: "Timezones"
-    keyword: "tz"
-    command: "batz"
-    args: ["-j"]
-    icon: "clock"
-```
-
-Usage:
-
-```text
-tz New York
-# Shows current time in New York
-# Press Enter to copy timezone info
-```
-
-### GitHub Pull Requests
-
-<Image src={scriptFilterPrScreenshot} alt="GitHub PR browser" width={800} />
-
-The [`scripts/github/pr.py`](https://github.com/chmouel/raffi/blob/main/scripts/github/pr.py) script in the repository lists open pull requests with their CI status, review decision, conflicts,
-unresolved threads and size, using the [GitHub CLI](https://cli.github.com).
-
-Install the script:
-
-```bash
-mkdir -p ~/.config/raffi/scripts/github
-cp scripts/github/pr.py ~/.config/raffi/scripts/github/pr.py
-chmod +x ~/.config/raffi/scripts/github/pr.py
-```
-
-Configure the filter:
-
-```yaml raffi.yaml
-script_filters:
-  - name: "Pull Requests"
-    keyword: "pr"
-    command: "~/.config/raffi/scripts/github/pr.py"
-    icon: "github"
-    action: "xdg-open {value}"
-    secondary_action: "copy"
-```
-
-Usage:
-
-```text
-pr
-# Lists your open pull requests across all repositories
-pr review
-# Pull requests waiting for your review (also: assigned, involved)
-pr owner/repo login
-# Lists open pull requests of owner/repo matching "login"
-# Enter: open the pull request in the browser
-# Ctrl+Enter: copy its URL
-```
-
-Cross-repository modes group results under non-actionable repository-owner
-headings (organizations or user accounts) when the filtered results span
-multiple owners. Pull requests are indented beneath each heading; single-owner
-results and fixed `owner/repo` queries stay flat.
-
-Add `args: ["--repo", "owner/repo"]` to give a repository its own keyword, and
-`ALIAS_<name>` variables in `env` for short repository names. Each row exports
-`PR_URL`, `PR_REPO`, `PR_NUMBER` and `PR_BRANCH` to the actions.
-
-Each pull request shows the avatar of its repository owner, or of its author
-when every listed pull request comes from the same repository, cached under
-`~/.cache/raffi/github-avatars/`. With the preview pane open, the selected pull
-request shows its branches, each reviewer's verdict, merge state, unresolved
-threads, checks, the issues it closes, its description with the markdown
-rendered in colour, the latest comments from people and the changed files. It
-refreshes every 20 seconds while a check is still running.
-
-See the script's
-[README](https://github.com/chmouel/raffi/blob/main/scripts/github/README.md)
-for all options.
-
-### Bookmark Manager
-
-```yaml raffi.yaml
-script_filters:
-  - name: "Bookmarks"
-    keyword: "bm"
-    command: "bookmark-manager"
-    args: ["--json"]
-    icon: "bookmark"
-    action: "echo -n {value}|wl-copy"
-    secondary_action: "xdg-open {value}"
-```
-
-Usage:
-
-```text
-bm documentation
-# Filters bookmarks by "documentation"
-# Enter: Copy URL
-# Ctrl+Enter: Open in browser
-```
-
-### Password Manager
-
-```yaml raffi.yaml
-script_filters:
-  - name: "Passwords"
-    keyword: "pw"
-    command: "pass-json"
-    icon: "lock"
-    action: "copy"
-```
-
-Usage:
-
-```text
-pw github
-# Shows password entries matching "github"
-# Press Enter to copy password
-```
-
-### Herdr Sessions
-
-The [Herdr filter script](https://github.com/chmouel/raffi/tree/main/scripts/herdr)
-browses a [Herdr](https://herdr.dev) session as an indented tree of workspaces,
-tabs, and panes, using the `indent` field. Single-pane tabs, including
-shells, appear once as the tab/session row; tabs with multiple panes show
-their pane children. The query matches tab and pane details and keeps the
-ancestors of each match. Single-pane tabs retain their terminal preview.
-Select a workspace to focus it, a tab to focus it, or an agent pane to focus
-the agent.
-
-Install the script:
-
-```bash
-mkdir -p ~/.config/raffi/scripts/herdr
-cp scripts/herdr/herdr_filter.py ~/.config/raffi/scripts/herdr/herdr_filter.py
-cp -R scripts/herdr/icons ~/.config/raffi/scripts/herdr/
-chmod +x ~/.config/raffi/scripts/herdr/herdr_filter.py
-```
-
-Copy the icon directory when upgrading too, including its license notices.
-The default `color` icons distinguish workspaces, sessions, shells, and
-agents. Preview headers use the same icons. Set `HERDR_ICON_SET` in the
-filter's `env` to choose `color`, `mono-dark` (pale marks for dark themes),
-or `mono-light` (dark marks for light themes). No icon font is required.
-
-For an agent-only status tree, set `HERDR_VIEW: status` in the same `env`
-block or add `args: ["--status"]`. Agents across workspaces appear under
-Working, Waiting (Herdr's `blocked`), Idle, Done, and Unknown; empty groups
-are hidden. Each agent appears once, including agents in split tabs, with
-workspace context in its subtitle. Plain shells stay in the workspace view.
-Group headings show matching counts and summary previews without an action.
-Agent rows retain focus actions and terminal previews. Search `waiting`
-or `blocked` to find agents needing attention. The workspace tree remains
-the default (`HERDR_VIEW: workspace` or `--tree`), and `--agents` stays flat.
-
-Configure the filter. Every item exports `HERDR_KIND` (`workspace`, `tab`,
-`agent`, or `pane`) and `HERDR_FOCUS`, the ID to focus, so the action
-dispatches on the kind:
-
-```yaml raffi.yaml
-addons:
-  script_filters:
-    - name: "Herdr"
-      keyword: "herdr"
-      command: "~/.config/raffi/scripts/herdr/herdr_filter.py"
-      icon: "utilities-terminal"
-      env:
-        HERDR_ICON_SET: color
-      action: >-
-        case "$HERDR_KIND" in
-          workspace) herdr workspace focus "$HERDR_FOCUS" ;;
-          tab) herdr tab focus "$HERDR_FOCUS" ;;
-          agent) herdr agent focus "$HERDR_FOCUS" ;;
-          *) herdr tab focus "$HERDR_FOCUS" ;;
-        esac
-```
-
-To list only recognized agents instead of the whole tree, add
-`args: ["--agents"]` and focus agents directly:
-
-```yaml raffi.yaml
-addons:
-  script_filters:
-    - name: "Herdr Agents"
-      keyword: "hagents"
-      command: "~/.config/raffi/scripts/herdr/herdr_filter.py"
-      args: ["--agents"]
-      icon: "utilities-terminal"
-      action: 'herdr agent focus "$HERDR_FOCUS"'
-```
-
-To raise the terminal window before focusing, prepend the matching command
-below to the action above. Change `kitty` to your terminal's class or app ID:
-
-Hyprland:
-
-```yaml
-action: >-
-  hyprctl dispatch focuswindow class:kitty;
-  case "$HERDR_KIND" in
-    workspace) herdr workspace focus "$HERDR_FOCUS" ;;
-    tab) herdr tab focus "$HERDR_FOCUS" ;;
-    agent) herdr agent focus "$HERDR_FOCUS" ;;
-    *) herdr tab focus "$HERDR_FOCUS" ;;
-  esac
-```
-
-Sway:
-
-```yaml
-action: >-
-  swaymsg '[app_id="kitty"] focus';
-  case "$HERDR_KIND" in
-    workspace) herdr workspace focus "$HERDR_FOCUS" ;;
-    tab) herdr tab focus "$HERDR_FOCUS" ;;
-    agent) herdr agent focus "$HERDR_FOCUS" ;;
-    *) herdr tab focus "$HERDR_FOCUS" ;;
-  esac
-```
-
-niri (requires `jq`):
-
-```yaml
-action: >-
-  id=$(niri msg -j windows | jq -r '.[] | select(.app_id == "kitty") | .id' | head -n1);
-  [ -z "$id" ] || niri msg action focus-window --id "$id";
-  case "$HERDR_KIND" in
-    workspace) herdr workspace focus "$HERDR_FOCUS" ;;
-    tab) herdr tab focus "$HERDR_FOCUS" ;;
-    agent) herdr agent focus "$HERDR_FOCUS" ;;
-    *) herdr tab focus "$HERDR_FOCUS" ;;
-  esac
-```
-
-With the preview pane open, the selected row shows a live preview refreshed
-every 2 seconds: agent panes show their status, directory, and recent
-terminal output; tabs show their pane list (and the terminal of single-pane
-tabs); workspaces show their tab list and active tab.
-
-See the script's
-[README](https://github.com/chmouel/raffi/blob/main/scripts/herdr/README.md) for
-installation and usage.
-
-### Web Search with Autocomplete
-
-The [`scripts/search/search.py`](https://github.com/chmouel/raffi/blob/main/scripts/search/search.py) script in the repository provides live DuckDuckGo autocomplete suggestions while opening results in any configured search engine.
-
-Install it first:
-
-```bash
-mkdir -p ~/.config/raffi/scripts/search
-cp scripts/search/search.py ~/.config/raffi/scripts/search/search.py
-chmod +x ~/.config/raffi/scripts/search/search.py
-```
-
-Then configure one entry per engine:
-
-```yaml raffi.yaml
-script_filters:
-  - name: "Search DuckDuckGo"
-    keyword: "ddg"
-    command: "python3"
-    args: ["~/.config/raffi/scripts/search/search.py", "duckduckgo"]
-    icon: "web-browser"
-    action: "xdg-open {value}"
-    secondary_action: "copy"
-
-  - name: "Search Google"
-    keyword: "sg"
-    command: "python3"
-    args: ["~/.config/raffi/scripts/search/search.py", "google"]
-    icon: "google"
-    action: "xdg-open {value}"
-    secondary_action: "copy"
-```
-
-Supported engines: `google`, `duckduckgo`, `bing`, `brave`.
-
-Usage:
-
-```text
-ddg rust async
-# First item: raw query "rust async" → opens DuckDuckGo search
-# Remaining items: DDG autocomplete suggestions
-# Enter: open in browser
-# Ctrl+Enter: copy URL to clipboard
-```
-
-With the preview pane open, the selected suggestion shows the DuckDuckGo Instant Answer for it (summary, source link, and image) when there is one.
-
-<Aside type="note">
-Suggestions are fetched from the DuckDuckGo autocomplete API (no API key required). On timeout or network error the script falls back to showing the raw query only.
-</Aside>
-
-<Aside type="tip">
-This is different from the `web_searches` addon, which opens a URL directly without autocomplete. Use `web_searches` for instant access to a URL, and this script filter when you want live suggestions.
-</Aside>
-
-## Creating a Script Filter
-
-Here's a simple example script in Python:
-
-```python my-filter.py
-#!/usr/bin/env python3
-import json
-import sys
-
-query = sys.argv[1] if len(sys.argv) > 1 else ""
-
-items = [
-    {
-        "title": f"Result for: {query}",
-        "subtitle": "This is a subtitle",
-        "arg": f"https://example.com/search?q={query}",
-        "icon": {"path": "/usr/share/icons/search.png"}
-    }
-]
-
-print(json.dumps({"items": items}))
-```
-
-Make it executable and configure:
-
-```bash
-chmod +x my-filter.py
-```
-
-```yaml raffi.yaml
-script_filters:
-  - name: "My Filter"
-    keyword: "mf"
-    command: "./my-filter.py"
-    action: "xdg-open {value}"
-```
-
-## Keyboard Shortcuts
-
-- **Enter**: Execute primary action
-- **Ctrl+Enter**: Execute secondary action (if configured)
-- **Esc**: Cancel and return to normal mode
-- **↑/↓**: Navigate through results
-
-## Requirements
-
-<Aside type="caution">
-Your script must output valid JSON to stdout. Any errors should go to stderr.
-</Aside>
-
-<Aside type="note">
-Clipboard actions require `wl-copy`, `xclip`, or `xsel`
-</Aside>
-
-<Aside type="note">
-Insert/type actions require `wtype` or `ydotool`
-</Aside>
-
-## Tips
-
-<Aside type="tip">
-Test your script manually before adding to Raffi:
-```bash
-my-script -j "test query"
-```
-</Aside>
-
-<Aside type="tip">
-Use colors in output to highlight important information (ANSI codes are rendered)
-</Aside>
-
-<Aside type="tip">
-Cache expensive operations in your script to improve performance
-</Aside>
-
-<Aside type="tip">
-Set both `action` and `secondary_action` for maximum flexibility (e.g., copy vs. open)
-</Aside>
+`sections` is a list of body blocks, shown in order. A `text` block takes
+`content` and an optional `heading`, an `image` block takes `path` or
+`base64`, and a `file` block takes a `path` shown with the same viewer as the
+file browser (text, images, directories). When `sections` is set, `text` and
+`image` are ignored, and an empty list clears the body. Without it the image
+comes first, then the text. A preview with no `sections`, `text` or `image`
+keeps the item's own preview body and only changes the header and metadata.
+
+`metadata` is a list of `[label, value]` rows shown above Raffi's own Enter
+and Ctrl+Enter rows.
+
+`refresh` is the number of seconds after which Raffi asks again while the
+item stays selected, between 0.5 and 3600. Use it for live data such as logs
+or progress. A `file` section is read again on every refresh.
+
+The same object can be an item's static `preview` field, where `refresh` has
+no effect. Add `"dynamic": false` to it to keep that item out of the dynamic
+preview runs.

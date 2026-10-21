@@ -3,20 +3,18 @@ title: Web Search
 description: Quick web searches with URL templates and keywords
 ---
 
-import { Aside, Tabs, TabItem, Card, CardGrid, Steps } from '@astrojs/starlight/components';
+import { Tabs, TabItem } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import webSearchScreenshot from '../../../assets/screenshots/web-search.png';
 import fallbackScreenshot from '../../../assets/screenshots/fallbacks.png';
 
-Raffi supports quick web searches via URL templates. Type a keyword followed by your query to open search results in your default browser.
+Web searches open a search page in your browser from Raffi. Each one pairs a
+keyword with a URL template: type the keyword, a space and your query, press
+Enter, and Raffi opens the URL with your query filled in.
 
-## Overview
+<Image src={webSearchScreenshot} alt="GitHub web search with a resolved URL in the preview pane" width={800} />
 
-Define custom search engines with keywords and URL templates. When you type a keyword and query, Raffi opens your browser with the search results.
-
-## Configuration
-
-Configure web searches in your `raffi.yaml`:
+## Quick start
 
 ```yaml raffi.yaml
 addons:
@@ -25,109 +23,36 @@ addons:
       keyword: "g"
       url: "https://google.com/search?q={query}"
       icon: "google"
-
-    - name: "DuckDuckGo"
-      keyword: "ddg"
-      url: "https://duckduckgo.com/?q={query}"
-      icon: "duckduckgo"
-
-    - name: "GitHub"
-      keyword: "gh"
-      url: "https://github.com/search?q={query}"
-      icon: "github"
-
-    - name: "Wikipedia"
-      keyword: "wiki"
-      url: "https://en.wikipedia.org/wiki/Special:Search?search={query}"
-      icon: "wikipedia"
 ```
 
-### Configuration Fields
+Type `g rust traits`. Raffi shows a row reading "Search Google for 'rust
+traits'" and the resolved URL in the preview pane. Press Enter to open
+`https://google.com/search?q=rust%20traits`.
 
-**`name`** `string` (required)
+While you are still typing the keyword, a row naming the search appears;
+Enter or Tab on it jumps into the search. Esc closes Raffi.
 
-Display name shown in the search row (e.g., "Search Google for...")
+### URL encoding
 
-
-**`keyword`** `string` (required)
-
-Text that activates the web search (e.g., "g", "ddg")
-
-
-**`url`** `string` (required)
-
-URL template with `{query}` placeholder for search terms
-
-
-**`icon`** `string`
-
-Icon name from your icon cache to display next to the search row
-
-
-## Usage
-
-Type a keyword followed by your search query:
-
-```text
-g rust traits
-# Opens: https://google.com/search?q=rust%20traits
-
-ddg wayland compositor
-# Opens: https://duckduckgo.com/?q=wayland%20compositor
-
-gh iced-rs
-# Opens: https://github.com/search?q=iced-rs
-
-wiki functional programming
-# Opens: https://en.wikipedia.org/wiki/Special:Search?search=functional%20programming
-```
-
-<Image src={webSearchScreenshot} alt="GitHub web search with a resolved URL in the preview pane" width={800} />
-
-## How It Works
-
-<Steps>
-1. **Type Keyword**
-
-   Type the configured keyword followed by a space (e.g., `g `). A row naming
-   the search appears while you type the keyword; Enter or Tab jumps into it.
-
-2. **Add Query**
-
-   Type your search query after the keyword
-
-3. **See Preview**
-
-   Raffi displays "Search [Name] for [query]"
-
-4. **Execute Search**
-
-   Press Enter to open browser with search results
-
-</Steps>
-
-### URL Encoding
-
-The `{query}` placeholder is automatically percent-encoded for safe URL use:
-
-- Spaces become `%20`
-- Special characters are encoded (e.g., `&` → `%26`)
-- Unreserved characters remain unchanged (A-Z, a-z, 0-9, `-`, `.`, `_`, `~`)
+The query replaces every `{query}` in the template and is percent-encoded
+first. Spaces become `%20`, other special characters are encoded (`&` becomes
+`%26`), and the unreserved characters A to Z, a to z, 0 to 9, `-`, `.`, `_`
+and `~` stay as they are.
 
 <Tabs>
-<TabItem label="Simple Query">
+<TabItem label="Simple query">
 ```text
 g hello world
 → https://google.com/search?q=hello%20world
 ```
 </TabItem>
-<TabItem label="Special Characters">
+<TabItem label="Special characters">
 ```text
 g rust + traits
 → https://google.com/search?q=rust%20%2B%20traits
 ```
 </TabItem>
-<TabItem label="Complex Query">
+<TabItem label="Quoted phrase">
 ```text
 g "exact phrase" -exclude
 → https://google.com/search?q=%22exact%20phrase%22%20-exclude
@@ -253,38 +178,25 @@ Common search engines you can add:
 
 ## Custom Search Engines
 
-You can add any search engine that accepts a query parameter:
+Any site that puts the search terms in its URL works. Search the site for
+`test`, copy the address from the browser, and replace `test` with `{query}`:
 
-### Finding the URL Template
+```text
+https://example.com/search?q=test
+https://example.com/search?q={query}
+```
 
-<Steps>
-1. **Perform a Search**
+The parameter does not have to be `q`, and `{query}` can sit anywhere in the
+URL, as in `https://example.com/find?search={query}`. Then add it to your
+config:
 
-   Go to the website and search for "test"
-
-2. **Copy URL**
-
-   Look at the browser address bar:
-       ```
-       https://example.com/search?q=test
-       ```
-
-3. **Replace Query**
-
-   Replace "test" with `{query}`:
-       ```
-       https://example.com/search?q={query}
-       ```
-
-4. **Add to Config**
-
-   ```yaml
-       - name: "Example"
-         keyword: "ex"
-         url: "https://example.com/search?q={query}"
-       ```
-
-</Steps>
+```yaml raffi.yaml
+addons:
+  web_searches:
+    - name: "Example"
+      keyword: "ex"
+      url: "https://example.com/search?q={query}"
+```
 
 ### Examples
 
@@ -315,161 +227,63 @@ You can add any search engine that accepts a query parameter:
 </TabItem>
 </Tabs>
 
-## Use Cases
+## Fallbacks
 
-<div class="nav-cards">
-  <CardGrid>
-    <Card title="Quick Research" icon="magnifier">
-      ```text
-      wiki quantum computing
-      ```
-    </Card>
-
-    <Card title="Code Search" icon="pencil">
-      ```text
-      gh iced-rs
-      so rust async error
-      ```
-    </Card>
-
-    <Card title="Package Lookup" icon="puzzle">
-      ```text
-      crate serde
-      npm express
-      ```
-    </Card>
-
-    <Card title="Documentation" icon="document">
-      ```text
-      mdn fetch api
-      rdoc hashmap
-      ```
-    </Card>
-  </CardGrid>
-</div>
-
-<style>
-{`
-  .nav-cards a {
-    text-decoration: none !important;
-    color: inherit;
-    display: flex;
-    height: 100%;
-  }
-  .nav-cards article {
-    flex: 1;
-    transition: all 0.2s ease-in-out;
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    border: 1px solid var(--sl-color-gray-5);
-    background-color: var(--sl-color-black);
-  }
-  .nav-cards a article {
-    cursor: pointer;
-  }
-  .nav-cards article .title {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 1rem;
-    font-size: 1.2rem;
-  }
-  .nav-cards article .title .icon {
-    font-size: 2.5rem !important; /* Huge icons */
-    color: var(--sl-color-purple);
-    background: var(--sl-color-purple-low);
-    padding: 0.5rem;
-    border-radius: 0.5rem;
-    border: 1px solid var(--sl-color-purple);
-  }
-  .nav-cards article:hover, .nav-cards a:hover article {
-    border-color: var(--sl-color-text-accent);
-    background-color: var(--sl-color-gray-6);
-  }
-`}
-</style>
-
-### Search Fallbacks
-
-Configure search addons as [fallbacks](../../configuration/general-settings/#fallbacks) to keep them available for arbitrary queries without typing their keyword.
+Add a search to [`general.fallbacks`](../../configuration/main-list/#fallbacks)
+as `addons.web_searches."<name>"` to offer it below the main list for any
+query, without typing its keyword.
 
 <Image src={fallbackScreenshot} alt="Fallback search entries shown for a query with the selected URL preview" width={800} />
 
-## Keyboard Shortcuts
+## Configuration
 
-- **Enter**: Open search in default browser
-- **Esc**: Cancel and return to normal mode
+Web searches are a list under `addons.web_searches` (default: `[]`).
 
-## Requirements
+**`name`** `string` (required)
 
-<Aside type="caution">
-Requires `xdg-open` to open URLs in your default browser (standard on most Linux distributions)
-</Aside>
+Name shown in the search row, as in "Search Google for 'rust traits'".
 
-## Tips
+**`keyword`** `string` (required)
 
-<Aside type="tip">
-Use short, memorable keywords like `g` for Google, `gh` for GitHub, etc.
-</Aside>
+Text that starts the search. Type it followed by a space: `g ` enters the
+search, while `g` alone keeps searching the main list. Script filters, text
+snippet sources and the emoji and clipboard triggers are checked first, so
+they win over a web search with the same keyword.
 
-<Aside type="tip">
-Add site-specific searches for frequently visited websites (e.g., your company's internal docs)
-</Aside>
+**`url`** `string` (required)
 
-<Aside type="tip">
-You can override the query parameter name if a site uses something other than `q`: `url: "https://example.com/find?search={query}"`
-</Aside>
+URL template. Every `{query}` is replaced with the percent-encoded query, as
+described in [URL encoding](#url-encoding). A leading `~/` and `${VAR}`
+references are expanded when the config loads, which lets you keep part of a
+URL, such as an internal host name, in an environment variable.
 
-<Aside type="tip">
-Common search engines are often pre-configured in example configs. Check the Raffi repository for ready-to-use templates.
-</Aside>
+**`icon`** `string`
 
-## Example Configuration
+Icon name from your icon cache, shown next to the search row.
 
-Here's a complete example with popular search engines:
+**`close_on_action`** `boolean` (default: `true`)
+
+Close Raffi after opening the URL. When unset, `general.close_on_action`
+applies.
 
 ```yaml raffi.yaml
 addons:
   web_searches:
-    # General
     - name: "Google"
       keyword: "g"
       url: "https://google.com/search?q={query}"
       icon: "google"
-
-    - name: "DuckDuckGo"
-      keyword: "ddg"
-      url: "https://duckduckgo.com/?q={query}"
-
-    # Development
     - name: "GitHub"
       keyword: "gh"
-      url: "https://github.com/search?q={query}"
+      url: "https://github.com/search?q={query}&type=repositories"
       icon: "github"
-
-    - name: "Stack Overflow"
-      keyword: "so"
-      url: "https://stackoverflow.com/search?q={query}"
-
-    - name: "Crates.io"
-      keyword: "crate"
-      url: "https://crates.io/search?q={query}"
-      icon: "rust"
-
-    # Reference
     - name: "Wikipedia"
       keyword: "wiki"
       url: "https://en.wikipedia.org/wiki/Special:Search?search={query}"
       icon: "wikipedia"
-
-    - name: "MDN"
-      keyword: "mdn"
-      url: "https://developer.mozilla.org/en-US/search?q={query}"
-
-    # Media
-    - name: "YouTube"
-      keyword: "yt"
-      url: "https://www.youtube.com/results?search_query={query}"
-      icon: "youtube"
+      close_on_action: false
 ```
+
+## Requirements
+
+Raffi opens URLs with `xdg-open`, which uses your default browser.

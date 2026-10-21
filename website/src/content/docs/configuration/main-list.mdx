@@ -1,0 +1,175 @@
+---
+title: The Main List
+description: Choose what shows up when you type in Raffi without a keyword
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import mainSearchScreenshot from '../../../assets/screenshots/main-search.png';
+import mainRecentScreenshot from '../../../assets/screenshots/main-recent.png';
+import mainSourceScreenshot from '../../../assets/screenshots/main-source.png';
+import fallbacksScreenshot from '../../../assets/screenshots/fallbacks.png';
+
+The main list is what you see when you open Raffi and type without a keyword.
+It can hold your apps and entries, and also open windows, browser tabs,
+passwords, snippets and other addon results, so typing `gmail` finds a
+matching browser tab or bookmark without typing its keyword first.
+
+<Image src={mainSearchScreenshot} alt="One search listing an app and matching demo windows, each marked with where it comes from" width={800} />
+
+## Choosing what it shows
+
+The `main_view` setting lists the sources, in the order you want them:
+
+```yaml title="raffi.yaml"
+general:
+  main_view:
+    - launchers
+    - browser_tabs
+    - windows
+    - text_snippets."Emails"
+    - script_filters."GitHub Issues"
+```
+
+With no config file at all, Raffi picks a set for you: `launchers`,
+`windows`, `browser_tabs`, `bookmarks`, `system`, `media`, `audio`,
+`bluetooth`, `pass`,
+`clipboard`, `bitwarden`, `terminal` and `emoji`. Each one stays hidden when
+its compositor or tool is missing.
+
+<Aside type="caution">
+Once a config file exists, even an empty one, that automatic set goes away.
+Without `main_view` the main list then shows only your apps and entries. When
+you do set it, only the sources you list appear, so keep `launchers` in the
+list if you still want your apps.
+</Aside>
+
+These sources are accepted:
+
+- `launchers`: installed apps and your [custom entries](../entries/)
+- `browser_tabs`, `bookmarks`, `windows`, `system`, `media`, `audio`, `bluetooth` and `pass`
+- `text_snippets.<name>` and `script_filters.<name>`, where `<name>` is the
+  source's `name` field. The `addons.<type>."<name>"` form used by
+  [fallbacks](#fallbacks) works too.
+- `clipboard`, `bitwarden`, `terminal` and `emoji`, which only add a shortcut
+  chip to the empty search (see below) and never add rows to your results.
+  `clipboard` shows while the clipboard addon is on, `bitwarden` when `rbw` is
+  installed, and `terminal` when a terminal is found.
+
+Typing a keyword (`tabs gmail`) still opens the addon's full list, and
+fallbacks still show below the main list. Unknown or disabled sources print a
+warning when Raffi starts.
+
+## How results are arranged
+
+Results are grouped by source in the order you listed them, and each addon
+row has a small badge saying where it comes from. Each addon adds at most 5
+rows. An addon row only shows when every word you typed appears in it, so
+typing `brave` doesn't bring up a tab whose title just happens to contain
+those letters. A tab for the site in a pasted URL, and a snippet whose
+keyword starts with what you typed, still show. Script filters do their own
+matching and are left alone.
+
+A group whose row title starts with what you typed, or has a word that does,
+moves ahead of groups that only match further in. Typing `brave` lists your
+Brave Browser app before tabs and snippets that only mention Brave in their
+text, even when `browser_tabs` comes first in `main_view`. Otherwise groups
+keep the order you gave them.
+
+Pressing Enter on an addon row switches to that addon with your query (the
+input becomes `tabs gmail`, for instance) and runs the row there.
+Confirmations, lists that stay open after an action, and usage ranking work
+the same as in the addon itself.
+
+## The empty search
+
+<Image src={mainRecentScreenshot} alt="An empty search showing apps and a recently picked demo snippet" width={800} />
+
+Before you type, the top of the list is a row of chips, one for each source
+in `main_view` that works on this machine, such as Tabs, System, Clipboard or
+Emoji. Left and Right pick a chip, and Enter, Tab or a click types its
+keyword. Because of that, Enter on an empty search arms the first chip instead
+of opening the first app; press Down or start typing for that. When the chips
+don't all fit, `‹` and `›` at the ends show there are more. `browser_tabs`,
+`bookmarks`, `windows` and `media` drop their chip when there is nothing to show.
+
+**`main_view_chips`** `name | keyword | off` (default: `name`)
+
+What the chips show: short names, the keywords (`tabs`, `sys`, `clip`), or
+`off` to hide the row so an empty search starts with your apps. With `off`,
+the chip-only sources (`clipboard`, `bitwarden`, `terminal`, `emoji`) show
+nothing.
+
+Below the chips come your apps, plus the 5 things you picked most recently
+from `browser_tabs`, `bookmarks`, `windows`, `pass`, text snippets and
+script filters.
+Each sits with its own source, newest first. A tab or window that has been
+closed since is skipped, and so are windows from before you last logged in.
+A tab is found again by its address after a browser restart. Picks count
+whether you made them from the main list or the addon itself, but only for
+sources listed in `main_view`. Closing a tab with Ctrl+Enter doesn't count
+as a pick. Rows from `system`, `media`, `audio` and
+`bluetooth` only appear once you type.
+
+## One source at a time with Ctrl+Tab
+
+<Image src={mainSourceScreenshot} alt="The same search narrowed to one source with Ctrl+Tab, as shown in the footer" width={800} />
+
+Ctrl+Tab narrows the main list to one source at a time, in the order of
+`main_view`, and comes back to all of them after the last one. Ctrl+Shift+Tab
+goes the other way, and the footer shows where you are, for instance
+`Ctrl+Tab Tabs` or `Ctrl+Tab All`.
+
+A single source lists all its matches with no 5-row limit, and shows its rows
+before you type anything (script filters still need a query). Fallbacks,
+keyword suggestions and instant answers such as the calculator only show when
+all sources are listed. Your choice holds while you type and lasts until Raffi
+closes. See [keyboard shortcuts](../../reference/keyboard-shortcuts/#switching-views-with-ctrltab)
+for the other lists that switch views this way.
+
+## Fallbacks
+
+**`fallbacks`** `list of strings` (default: `[]`)
+
+Rows added at the bottom of the main list whenever you type something, so a
+web search or script filter is always one Down away without its keyword.
+
+Each entry is written `addons.<type>."<name>"`, where `<type>` is
+`web_searches` or `script_filters` and `<name>` matches the source's `name`
+field. `addons.terminal` takes no name and adds a row that runs your query in
+a terminal, see [Run in Terminal](../../features/terminal/).
+
+```yaml title="raffi.yaml"
+general:
+  fallbacks:
+    - addons.web_searches."Google"
+    - addons.web_searches."DuckDuckGo"
+    - addons.script_filters."Search Google"
+    - addons.terminal
+```
+
+Fallbacks only show when the search isn't empty, and not while you are inside
+an addon. A web search fallback opens the search with your query, a script
+filter fallback switches to that filter with your query, and the terminal
+fallback runs the query in a terminal. The source you name must be defined in
+your `addons` section.
+
+<Image src={fallbacksScreenshot} alt="Fallback search rows below the results, with a URL preview" width={800} />
+
+## Things to keep in mind
+
+Addon data loads in the background when Raffi starts. Sources that can't run
+on this machine, such as windows without a supported compositor or tabs
+without a connected browser, are skipped quietly.
+
+Script filters listed in `main_view` run each time you pause typing. Set their
+`min_query_length` so they don't run for one or two characters. Only one runs
+at a time, and a run that takes longer than 10 seconds is stopped. A listed
+filter receives everything you type in the main list, so avoid listing one
+that sends its query to an online service you wouldn't otherwise search with.
+Live previews from a filter only show inside the filter itself.
+
+Recent picks are saved in `~/.cache/raffi/recent.cache`, readable only by you.
+It holds tab addresses, password entry names, and the values passed by script
+filter rows, so avoid listing a script filter whose values carry secrets, and
+delete the file if you'd rather not keep that history.

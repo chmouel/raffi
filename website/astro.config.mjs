@@ -21,6 +21,7 @@ export default defineConfig({
             { label: 'Introduction', slug: '' },
             { label: 'Installation', slug: 'installation' },
             { label: 'Quick Start', slug: 'quickstart' },
+            { label: 'Recipes', slug: 'recipes' },
           ],
         },
         {
@@ -28,6 +29,7 @@ export default defineConfig({
           items: [
             { label: 'Overview', slug: 'configuration/overview' },
             { label: 'General Settings', slug: 'configuration/general-settings' },
+            { label: 'The Main List', slug: 'configuration/main-list' },
             { label: 'Custom Entries', slug: 'configuration/entries' },
             { label: 'Scripts', slug: 'configuration/scripts' },
             { label: 'Conditions', slug: 'configuration/conditions' },

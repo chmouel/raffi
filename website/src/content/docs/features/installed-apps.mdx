@@ -50,10 +50,26 @@ Apps marked `Terminal=true`, such as htop, open in the terminal found by the
 found or when `addons.terminal.enabled` is false.
 
 <Aside type="note">
-With [`main_view`](../../configuration/general-settings/#main-view) set, apps
-show only when `launchers` is in the list, since they are part of the
+With [`main_view`](../../configuration/main-list/#choosing-what-it-shows) set,
+apps show only when `launchers` is in the list, since they are part of the
 launchers.
 </Aside>
 
-See the [addon reference](../../reference/addon-configuration/#installed-apps)
-for every field.
+## Configuration
+
+**`addons.apps.enabled`** `boolean` (default: `false`)
+
+List the installed `.desktop` applications after your launchers. When no
+launcher is configured at all, the apps are listed whatever this is set to.
+
+**`addons.apps.actions`** `boolean` (default: `true`)
+
+Also list each app's desktop actions as their own rows, such as
+"Firefox: New Private Window".
+
+```yaml raffi.yaml
+addons:
+  apps:
+    enabled: true
+    actions: false
+```

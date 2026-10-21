@@ -9,14 +9,14 @@ import launcherScriptScreenshot from '../../../assets/screenshots/launcher-scrip
 
 ## Overview
 
-Raffi entries can execute inline scripts instead of launching binaries directly. Scripts are useful for:
+A [custom entry](../entries/) can run an inline script instead of starting a program directly. Scripts are useful for:
 
 - Running shell commands
 - Executing Python/Ruby/Perl code
 - Chaining multiple commands
 - Setting up environments before launching applications
 
-<Image src={launcherScriptScreenshot} alt="Launcher script source and interpreter shown in the preview pane" width={800} />
+<Image src={launcherScriptScreenshot} alt="Entry script source and interpreter shown in the preview pane" width={800} />
 
 ## Script Configuration
 
@@ -286,4 +286,4 @@ Script entries are validated on startup:
 2. **Conditional checks**: If `ifexist`, `ifenvset`, or `ifenveq` are present, they must pass
 3. **Disabled check**: If `disabled: true`, the entry is hidden
 
-If validation fails, the entry is automatically hidden from the launcher.
+If validation fails, the entry is hidden from the list.

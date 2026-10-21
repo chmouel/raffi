@@ -7,13 +7,13 @@ import { Aside } from '@astrojs/starlight/components';
 
 ## Overview
 
-Raffi supports conditional visibility for launcher entries. Use conditions to:
+A [custom entry](../entries/) can stay hidden until a condition holds. Use conditions to:
 
 - Show entries only in specific desktop environments
 - Display entries only when certain binaries are installed
 - Conditionally show entries based on environment variables
 
-Multiple conditions can be specified per entry. When multiple conditions are present, they are AND-ed together — all conditions must pass for the entry to be shown.
+Multiple conditions can be specified per entry. When an entry has several, all of them must pass for it to show.
 
 ## Condition Types
 
@@ -298,7 +298,7 @@ firefox:
 
 ## Multiple Conditions
 
-Multiple conditions can be specified on a single entry. When present, they are AND-ed together — all conditions must pass for the entry to be shown.
+An entry can have several conditions, and all of them must pass for it to show.
 
 ```yaml title="launchers.yaml"
 # Entry shown only on GNOME Wayland sessions

@@ -50,12 +50,24 @@ raffi -i "bt "
 
 ## Configuration
 
-```yaml
+**`addons.bluetooth.enabled`** `boolean` (default: `true`)
+
+Set it to `false` to turn the Bluetooth list off.
+
+**`addons.bluetooth.trigger`** `string` (default: `bt`)
+
+Keyword that opens the Bluetooth list. Type it followed by a space.
+A script filter, text snippet source or web search with the same keyword
+takes precedence.
+
+**`addons.bluetooth.close_on_action`** `boolean` (default: `false`)
+
+Close Raffi after an action. When unset, `general.close_on_action` applies,
+and Raffi stays open and refreshes the list if that is unset too.
+
+```yaml raffi.yaml
 addons:
   bluetooth:
     trigger: "blue"
     close_on_action: true
 ```
-
-See the [addon reference](../../reference/addon-configuration/#bluetooth) for
-every field.

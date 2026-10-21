@@ -27,8 +27,8 @@ are copied exactly.
 Copying needs `wl-copy`, `xclip` or `xsel`.
 
 <Aside type="note">
-Unit conversion is on by default; set
-`addons.units.enabled: false` to turn it off.
+Unit conversion is on by default; see [Configuration](#configuration) to
+turn it off.
 </Aside>
 
 Both units must measure the same thing, so `10 km to kg` shows nothing. A
@@ -60,3 +60,20 @@ Data symbols are case-sensitive: a lowercase `b` means bits and an uppercase
 `B` means bytes, so `Mb` is a megabit and `MB` a megabyte. `KB` and `kB` are
 1000 bytes, while `KiB` is 1024. Spelled-out names such as `megabytes` work in
 any case.
+
+## Configuration
+
+**`addons.units.enabled`** `boolean` (default: `true`)
+
+Enable or disable unit conversion.
+
+**`addons.units.close_on_action`** `boolean` (default: `true`)
+
+Close Raffi after copying a converted value. Leave it unset to follow
+`general.close_on_action`.
+
+```yaml raffi.yaml
+addons:
+  units:
+    enabled: false
+```

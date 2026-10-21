@@ -3,7 +3,7 @@ title: YAML Configuration Schema
 description: Complete reference for raffi.yaml and launchers.yaml
 ---
 
-Raffi reads settings from `~/.config/raffi/raffi.yaml` and launcher entries from `~/.config/raffi/launchers.yaml`.
+Raffi reads settings and addons from `~/.config/raffi/raffi.yaml`, and your own entries from `~/.config/raffi/launchers.yaml`.
 
 ## Top-Level Structure
 
@@ -70,9 +70,9 @@ Disable icon loading globally.
 ```
 
 
-**`general.show_preview`** `boolean` (default: `false` for launchers)
+**`general.show_preview`** `boolean` (default: `false` for apps and entries)
 
-Show the right-hand preview pane for plain launcher entries. Addon results always preview. Toggle at runtime with `Ctrl+P`.
+Show the right-hand preview pane for apps and custom entries. Addon results always preview. Toggle at runtime with `Ctrl+P`.
 
   ```yaml
   general:
@@ -83,7 +83,7 @@ Show the right-hand preview pane for plain launcher entries. Addon results alway
 
 **`general.close_on_action`** `boolean` (default: `true`)
 
-Whether Raffi closes after executing a launcher or addon action. Individual launchers and addons can override this with their own `close_on_action` field.
+Whether Raffi closes after running an entry or addon action. Individual entries and addons can override this with their own `close_on_action` field.
 
   ```yaml
   general:
@@ -210,7 +210,7 @@ Outer window padding in pixels.
 
 **`general.fallbacks`** `list of strings` (default: `[]`)
 
-Addon entries shown at the bottom of the launcher list when typing a non-empty query. Useful for search-type addons (web searches, script filters).
+Addon rows shown at the bottom of the main list when typing a non-empty query. Useful for search-type addons (web searches, script filters).
 
   Format: `addons.<type>."<name>"` where `<type>` is `web_searches` or `script_filters`.
 
@@ -225,7 +225,7 @@ Addon entries shown at the bottom of the launcher list when typing a non-empty q
 
 **`general.main_view`** `list of strings` (default: unset)
 
-Sources mixed into the main list when typing without an addon trigger, grouped in this order. When set, launchers only appear if `launchers` is listed. See [Main view](../../configuration/general-settings/#main-view).
+Sources mixed into the main list when typing without an addon trigger, grouped in this order. When set, apps and entries only appear if `launchers` is listed. See [The Main List](../../configuration/main-list/).
 
   Entries: `launchers`, `browser_tabs`, `bookmarks`, `windows`, `system`, `media`, `audio`, `bluetooth`, `pass`, `text_snippets.<name>`, `script_filters.<name>`.
 
@@ -274,7 +274,7 @@ Custom color overrides for the theme.
 
 ## Entry Fields
 
-Each top-level key in `launchers.yaml` (or each key under `launchers` in `raffi.yaml`) defines a launcher entry.
+Each top-level key in `launchers.yaml` (or each key under `launchers` in `raffi.yaml`) defines a custom entry.
 
 **`binary`** `string` (optional)
 
@@ -292,7 +292,7 @@ The executable command to run.
 
 **`description`** `string`
 
-Display name shown in the launcher.
+Display name shown in the list.
 
   If omitted, the entry key or binary name is used.
 
@@ -359,7 +359,7 @@ Inline script content to execute.
 
 **`disabled`** `boolean` (default: `false`)
 
-Hide this entry from the launcher.
+Hide this entry from the list.
 
   ```yaml title="launchers.yaml"
   experimental_feature:
@@ -418,7 +418,7 @@ Word that stands for the alias while typing: `linoux torvalds` searches like `mp
 
 ### Conditional Display
 
-Entries can be conditionally shown based on environment variables or file existence. Multiple conditions can be specified per entry — when present, they are AND-ed together (all must pass).
+Entries can be conditionally shown based on environment variables or file existence. An entry can have several conditions, and all of them must pass.
 
 **`ifenveq`** `array[string]`
 

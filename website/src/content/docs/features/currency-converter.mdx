@@ -74,24 +74,39 @@ addons:
 
 ### Configuration Options
 
-**`enabled`** `boolean` (default: `true`)
+**`addons.currency.enabled`** `boolean` (default: `true`)
 
-Enable or disable the currency converter addon
-
-
-**`trigger`** `string` (default: `$`)
-
-Character that activates currency conversion. Common options: `$`, `€`, `£`, `¥`
+Enable or disable the currency converter.
 
 
-**`default_currency`** `string` (default: `USD`)
+**`addons.currency.trigger`** `string` (default: `$`)
 
-Source currency when none is specified (e.g., `$10 to EUR` assumes USD)
+Character that starts a conversion. Common options: `$`, `€`, `£`, `¥`.
 
 
-**`currencies`** `array`
+**`addons.currency.default_currency`** `string` (default: `USD`)
 
-List of currency codes available for conversion. If omitted, all currencies from Frankfurter API are available.
+Source currency when the query names none, so `$10 to eur` converts from USD. Use a 3-letter ISO code such as `EUR`, `GBP` or `JPY`.
+
+
+**`addons.currency.currencies`** `array[string]` (default: `[USD, EUR, GBP]`)
+
+Currencies to convert into when you type an amount with no target. With the
+default source currency, `$100` lists 100 USD in every currency of this list
+except USD, and `$100 gbp` does the same from GBP. A conversion with a target, such as `$10 to jpy`,
+works for any supported currency whether or not it is in the list.
+
+
+**`addons.currency.close_on_action`** `boolean` (default: `true`)
+
+Close Raffi after Enter copies a result. Leave it unset to follow
+`general.close_on_action`.
+
+```yaml raffi.yaml
+addons:
+  currency:
+    close_on_action: false
+```
 
 
 ### Custom Trigger
@@ -131,9 +146,9 @@ List of currency codes available for conversion. If omitted, all currencies from
   </TabItem>
 </Tabs>
 
-### Supported Currencies
+### Target Currencies
 
-You can specify which currencies are available:
+Choose which currencies an amount alone is converted into:
 
 ```yaml raffi.yaml
 addons:
@@ -153,7 +168,7 @@ addons:
 ```
 
 <Aside type="tip">
-Leave the `currencies` field empty to allow conversion between all currencies supported by the Frankfurter API.
+Without a `currencies` list, an amount alone is converted into USD, EUR and GBP. Typing a target, as in `$10 to chf`, works for any supported currency either way.
 </Aside>
 
 ## Exchange Rate API
@@ -223,8 +238,7 @@ Raffi uses the [Frankfurter API](https://www.frankfurter.app/) for exchange rate
 
 ## Keyboard Shortcuts
 
-- **Enter**: Copy conversion result to clipboard
-- **Esc**: Clear input and return to normal mode
+Enter copies the converted amount. Escape closes Raffi.
 
 ## Disable Currency Converter
 

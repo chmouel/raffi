@@ -32,16 +32,16 @@ addons:
   script_filters:
     - name: "Search DuckDuckGo"
       keyword: "ddg"
-      command: "python3"
-      args: ["~/.config/raffi/scripts/search/search.py", "duckduckgo"]
+      command: "~/.config/raffi/scripts/search/search.py"
+      args: ["duckduckgo"]
       icon: "web-browser"
       action: "xdg-open {value}"
       secondary_action: "copy"
 
     - name: "Search Google"
       keyword: "g"
-      command: "python3"
-      args: ["~/.config/raffi/scripts/search/search.py", "google"]
+      command: "~/.config/raffi/scripts/search/search.py"
+      args: ["google"]
       icon: "google"
       action: "xdg-open {value}"
       secondary_action: "copy"

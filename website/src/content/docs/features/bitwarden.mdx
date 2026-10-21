@@ -32,14 +32,15 @@ The addon is on by default. When `rbw` is not installed the list says
 | Ctrl+O     | Copy the TOTP code                            |
 
 Escape stops a slow read and returns to the list. Raffi closes before it
-copies or types anything, so typing goes to the window you were in. Copies
-are cleared from the clipboard after 45 seconds, unless something else was
-copied meanwhile.
+types, so typing goes to the window you were in. After a copy it closes too,
+unless [`close_on_action`](#configuration) is off. Copies are cleared from
+the clipboard after 45 seconds (`clipboard_timeout`), unless something else
+was copied meanwhile.
 
 ## Searching
 
 The logins you copy or type most come first, ordered by the
-[`sort_mode`](../../configuration/general-settings/) used for launchers
+[`sort_mode`](../../configuration/general-settings/#sort_mode) used for your apps and entries
 (`hybrid` by default, `recency` for most recent first). While you type,
 past use only decides between equally good matches.
 
@@ -149,12 +150,39 @@ raffi -i "bw "
 
 ## Configuration
 
-```yaml
+The vault lock timeout is set in rbw, as shown in [Unlocking](#unlocking).
+
+**`addons.bitwarden.enabled`** `boolean` (default: `true`)
+
+Set it to `false` to turn the vault list off.
+
+**`addons.bitwarden.trigger`** `string` (default: `bw`)
+
+Keyword that opens the vault list. Type it followed by a space.
+A script filter, text snippet source or web search with the same keyword
+takes precedence.
+
+**`addons.bitwarden.clipboard_timeout`** `integer` (default: `45`)
+
+Seconds before a copied secret is cleared from the clipboard, unless
+something else was copied meanwhile. `0` never clears it.
+
+**`addons.bitwarden.type_delay_ms`** `integer` (default: `200`)
+
+Milliseconds to wait after Raffi closes before typing, so the previous
+window has the focus back.
+
+**`addons.bitwarden.close_on_action`** `boolean` (default: `true`)
+
+Close Raffi after copying a password, username or TOTP code. When unset,
+`general.close_on_action` applies. With `false`, Raffi stays open after a
+copy. Typing always closes Raffi.
+
+```yaml raffi.yaml
 addons:
   bitwarden:
-    clipboard_timeout: 45
-    type_delay_ms: 200
+    trigger: vault
+    clipboard_timeout: 20
+    type_delay_ms: 300
+    close_on_action: false
 ```
-
-See the [addon reference](../../reference/addon-configuration/#bitwarden) for
-every field.

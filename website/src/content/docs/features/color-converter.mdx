@@ -24,8 +24,8 @@ closest CSS color name, or the name itself when the color matches one exactly.
 Copying needs `wl-copy`, `xclip` or `xsel`.
 
 <Aside type="note">
-The color converter is on by default; set
-`addons.color.enabled: false` to turn it off.
+The color converter is on by default; see [Configuration](#configuration)
+to turn it off.
 </Aside>
 
 ## Accepted formats
@@ -44,3 +44,20 @@ nothing. A color with transparency is shown as `#rrggbbaa`, `rgba()` and
 
 Plain color names like `red` do not trigger the converter, so typing an app
 name never gets in the way.
+
+## Configuration
+
+**`addons.color.enabled`** `boolean` (default: `true`)
+
+Enable or disable the color converter.
+
+**`addons.color.close_on_action`** `boolean` (default: `true`)
+
+Close Raffi after copying a color. Leave it unset to follow
+`general.close_on_action`.
+
+```yaml raffi.yaml
+addons:
+  color:
+    enabled: false
+```

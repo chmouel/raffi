@@ -132,6 +132,41 @@ window closes.
 
 ## Configuration
 
+**`addons.clipboard.enabled`** `boolean` (default: unset)
+
+Turns the clipboard browser on or off. When unset, it is on if CopyQ is
+running as Raffi starts.
+
+**`addons.clipboard.trigger`** `string` (default: `clip`)
+
+Keyword that opens the history. Type it followed by a space.
+
+**`addons.clipboard.min_chars`** `integer` (default: `3`)
+
+Hide text entries shorter than this many characters, not counting
+surrounding spaces and newlines. `0` lists everything. Images and files are
+always listed.
+
+**`addons.clipboard.backend`** `string` (default: `copyq`)
+
+Clipboard manager to read from. `copyq` is the only supported value.
+
+**`addons.clipboard.action`** `copy | hypr_paste` (default: `copy`)
+
+What Enter does: `copy` puts the item back on the clipboard with all its
+formats, and `hypr_paste` also pastes it into the window you came from on
+Hyprland.
+
+**`addons.clipboard.secondary_action`** `copy | hypr_paste` (default: `hypr_paste`)
+
+What Ctrl+Enter does. Accepts the same values as `action`. Outside Hyprland
+a `hypr_paste` action shows an error and does not copy.
+
+**`addons.clipboard.close_on_action`** `boolean` (default: `true`)
+
+Close Raffi after copying an item. Leave it unset to follow
+`general.close_on_action`. `hypr_paste` always closes Raffi so it can paste.
+
 ```yaml
 addons:
   clipboard:
@@ -142,9 +177,6 @@ addons:
     action: copy
     secondary_action: hypr_paste
 ```
-
-See the [addon reference](../../reference/addon-configuration/#clipboard-history)
-for every field.
 
 ## Troubleshooting
 

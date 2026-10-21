@@ -42,7 +42,8 @@ first press shows "Press Enter again to send SIGTERM to ..." on the row.
 Moving the selection, typing, changing the modifier or a list refresh cancels
 it, and holding Enter down does not count as a second press.
 
-Raffi stays open after a signal and refreshes the list. When a process is
+Raffi stays open after a signal and refreshes the list, unless
+[`close_on_action`](#configuration) is on. When a process is
 gone, was replaced, or can't be signalled, an error row appears at the top of
 the list and the list refreshes. Queries typed in this mode are not saved in
 the search history.
@@ -55,11 +56,24 @@ raffi -i "kill "
 
 ## Configuration
 
-```yaml
+**`addons.kill.enabled`** `boolean` (default: `true`)
+
+Set it to `false` to turn the process list off.
+
+**`addons.kill.trigger`** `string` (default: `kill`)
+
+Keyword that opens the process list. Type it followed by a space.
+A script filter, text snippet source or web search with the same keyword
+takes precedence.
+
+**`addons.kill.close_on_action`** `boolean` (default: `false`)
+
+Close Raffi after sending a signal. When unset, `general.close_on_action`
+applies, and Raffi stays open if that is unset too.
+
+```yaml raffi.yaml
 addons:
   kill:
     trigger: "pk"
+    close_on_action: true
 ```
-
-See the [addon reference](../../reference/addon-configuration/#kill-process)
-for every field.

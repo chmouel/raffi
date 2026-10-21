@@ -28,7 +28,7 @@ Words after the keyword filter the devices, so `audio headphones` or
 Type a number to set the output volume directly: `audio 40`, `audio vol 40`
 or `audio volume 40%` adds a "Set output volume to 40%" row at the top. The
 volume never goes above `max_volume`. When the audio addon is in
-[`main_view`](../../configuration/general-settings/#main-view), typing `vol 40`
+[`main_view`](../../configuration/main-list/), typing `vol 40`
 in the main list does the same. A bare number there is left to the
 calculator.
 
@@ -63,6 +63,31 @@ raffi -i "audio "
 
 ## Configuration
 
+**`addons.audio.enabled`** `boolean` (default: `true`)
+
+Enable or disable the audio switcher.
+
+**`addons.audio.trigger`** `string` (default: `audio`)
+
+Keyword that opens the device list. Type it followed by a space. Web
+searches with the same keyword take precedence.
+
+**`addons.audio.close_on_action`** `boolean` (default: `false`)
+
+Close Raffi after an action. By default Raffi stays open and refreshes the
+list. When unset, Raffi follows `general.close_on_action` if you have set
+it.
+
+**`addons.audio.volume_step`** `integer` (default: `5`)
+
+Percent "Volume up" and "Volume down" change the output volume by. At
+least 1.
+
+**`addons.audio.max_volume`** `integer` (default: `100`)
+
+Highest output volume "Volume up" and a typed volume such as `vol 40` will
+set. Raise it above 100 to allow boosting.
+
 ```yaml
 addons:
   audio:
@@ -71,6 +96,3 @@ addons:
     volume_step: 10   # Volume up and down change it by 10% (default: 5)
     max_volume: 150   # Allow boosting past 100% (default: 100)
 ```
-
-See the [addon reference](../../reference/addon-configuration/#audio-switcher)
-for every field.

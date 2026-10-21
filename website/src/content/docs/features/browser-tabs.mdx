@@ -150,16 +150,38 @@ raffi -i "tabs "
 ## In the main list
 
 To find tabs without typing `tabs` first, add `browser_tabs` to
-[`general.main_view`](../../configuration/general-settings/#main-view). Typing
+[`general.main_view`](../../configuration/main-list/). Typing
 `gmail` then lists the matching tabs next to your launchers.
 
 ## Configuration
+
+**`addons.browser_tabs.enabled`** `boolean` (default: `true`)
+
+Enable or disable the browser tabs list.
+
+**`addons.browser_tabs.trigger`** `string` (default: `tabs`)
+
+Keyword that opens the list. Type it followed by a space. Web searches with
+the same keyword take precedence.
+
+**`addons.browser_tabs.favicon_service`** `twenty | google | none` (default: `twenty`)
+
+Where to download site icons the browser has not stored itself. `twenty`
+uses twenty-icons.com and `google` uses Google's favicon service, so the
+domains of your open tabs are sent to that service. `none` keeps Raffi
+offline: it uses only the icons found in the browser profiles, and the page
+preview of the selected tab is not fetched from the site either. See
+[Site icons](#site-icons) and [Page preview](#page-preview).
+
+**`addons.browser_tabs.close_on_action`** `boolean` (default: `true`)
+
+Close Raffi after switching to a tab. Leave it unset to follow
+`general.close_on_action`. Closing a tab with Ctrl+Enter keeps Raffi open
+unless this is set to `true` here.
 
 ```yaml
 addons:
   browser_tabs:
     trigger: "t"
+    favicon_service: none
 ```
-
-See the [addon reference](../../reference/addon-configuration/#browser-tabs) for
-every field.

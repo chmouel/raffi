@@ -117,17 +117,23 @@ exp(ln(10))
 
 ### Keyboard Shortcuts
 
-- **Enter**: Copy result to clipboard
-- **Esc**: Clear input and return to normal mode
+Enter copies the result. Escape closes Raffi.
 
 ## Configuration
 
-The calculator is enabled by default. To disable it:
+**`addons.calculator.enabled`** `boolean` (default: `true`)
+
+Enable or disable the calculator.
+
+**`addons.calculator.close_on_action`** `boolean` (default: `true`)
+
+Close Raffi after Enter copies a result. Leave it unset to follow
+`general.close_on_action`.
 
 ```yaml raffi.yaml
 addons:
   calculator:
-    enabled: false
+    close_on_action: false
 ```
 
 ### Enable Calculator

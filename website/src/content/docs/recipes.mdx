@@ -1,0 +1,153 @@
+---
+title: Recipes
+description: Small, complete setups you can copy into your config
+---
+
+Each recipe is a complete piece of config or a key binding you can paste and
+adjust. Settings go in `~/.config/raffi/raffi.yaml` unless a recipe says
+otherwise. Key bindings are written for Sway. In Hyprland the first one would be
+`bind = $super, V, exec, raffi -i "clip "`.
+
+## Everything in one search
+
+Search apps, windows, tabs and passwords at once, and keep a web search and a
+terminal one Down away for anything else:
+
+```yaml title="raffi.yaml"
+general:
+  main_view: [launchers, windows, browser_tabs, pass, system, clipboard, emoji]
+  fallbacks:
+    - addons.web_searches."Google"
+    - addons.terminal
+addons:
+  apps:
+    enabled: true
+  web_searches:
+    - name: Google
+      keyword: g
+      url: "https://google.com/search?q={query}"
+```
+
+[The Main List](../configuration/main-list/) explains the order of the
+results and the chips shown before you type.
+
+## A key for your clipboard history
+
+Open Raffi straight into clipboard history. Enter copies the item. It needs
+CopyQ running, see [Clipboard History](../features/clipboard-history/).
+
+```ini title="~/.config/sway/config"
+bindsym $super+v exec raffi -i "clip "
+```
+
+The same works for any keyword: `raffi -i "pass "` for passwords,
+`raffi -i "win "` for windows, `raffi -i "emoji "` for emoji.
+
+## Media and volume without closing
+
+Media controls and the audio switcher stay open after each action, so you
+can skip a few tracks or step the volume in a row:
+
+```ini title="~/.config/sway/config"
+bindsym $super+m exec raffi -i "media "
+bindsym $super+a exec raffi -i "audio "
+```
+
+## Email addresses and replies you type often
+
+Type `em ` to pick one. Enter types it into the window you were in:
+
+```yaml title="raffi.yaml"
+addons:
+  text_snippets:
+    - name: Emails
+      keyword: em
+      icon: mail
+      action: insert
+      snippets:
+        - name: Personal email
+          value: "me@example.com"
+        - name: Work email
+          value: "me@company.com"
+        - name: Follow-up
+          value: "Following up on this, any news? {cursor}"
+```
+
+[Text Snippets](../features/text-snippets/) covers placeholders such as
+`{date}` and `{clipboard}`, and loading snippets from a file or command.
+
+## A separate work profile
+
+Keep a second set of settings and entries in their own folder, and open it
+with its own key:
+
+```
+~/.config/raffi/work/raffi.yaml
+~/.config/raffi/work/launchers.yaml
+```
+
+```ini title="~/.config/sway/config"
+bindsym $super+Shift+Space exec raffi -c ~/.config/raffi/work/raffi.yaml
+```
+
+Raffi reads `launchers.yaml` from the same folder as the config you pass.
+
+## A see-through window
+
+```yaml title="raffi.yaml"
+general:
+  theme: catppuccin
+  opacity: 0.8
+  blur: true
+```
+
+Blur depends on your compositor; [Themes](../features/themes/#transparency-and-blur)
+has the settings for Hyprland, niri and SwayFX.
+
+## A quiet setup
+
+Just your apps, no tips in the search box and no chips before you type:
+
+```yaml title="raffi.yaml"
+general:
+  show_tips: false
+  main_view_chips: off
+```
+
+Addons you never use can be turned off one by one, for example:
+
+```yaml title="raffi.yaml"
+addons:
+  currency:
+    enabled: false
+  world_clock:
+    enabled: false
+```
+
+## A few entries of your own
+
+Commands Raffi can't find by itself go in `launchers.yaml`:
+
+```yaml title="launchers.yaml"
+notes:
+  binary: kitty
+  args: [nvim, ~/notes/todo.md]
+  icon: kitty
+  description: Open my todo list
+
+backup:
+  script: |
+    rsync -a ~/Documents /mnt/backup/
+    notify-send "Raffi" "Backup done"
+  icon: drive-harddisk
+  description: Back up my documents
+  ifexist: /mnt/backup/.raffi-backup
+```
+
+The `ifexist` line hides the backup entry while the drive isn't mounted. It
+points at a marker file on the drive, because the empty `/mnt/backup` folder
+exists even when nothing is mounted there. Create it once with
+`touch /mnt/backup/.raffi-backup` while the drive is mounted. Set
+`addons.apps.enabled: true` in `raffi.yaml` to keep your installed apps
+listed next to these. See [Custom Entries](../configuration/entries/) and
+[Conditions](../configuration/conditions/).

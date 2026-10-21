@@ -23,7 +23,7 @@ firefox:
 
 Raffi searches for icons in system icon directories and uses the icon name to look up the full path.
 
-If `icon` is omitted, Raffi first tries likely launcher candidates such as the configured binary name and non-option arguments. This helps wrapper launchers still pick up a matching system icon.
+If `icon` is omitted, Raffi tries the entry's program name and its non-option arguments, so an entry that wraps another program still picks up a matching system icon.
 
 ## Icon Discovery
 
@@ -61,10 +61,10 @@ Raffi selects the scalable SVG for best quality.
 
 ## Automatic Fallbacks
 
-When a launcher icon is missing, Raffi resolves icons in this order:
+When an entry has no icon, Raffi looks for one in this order:
 
-1. Explicit icon path or theme icon name from the launcher config
-2. Binary name or other likely launcher arguments
+1. The icon path or theme icon name set on the entry
+2. The program name or its other arguments
 3. Matching `Icon=` metadata from installed XDG `.desktop` files
 4. Bundled generic fallback icon
 

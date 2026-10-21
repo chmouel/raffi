@@ -2,9 +2,10 @@
 # Validate this file with: raffi --check-config
 version: 1
 
-# Raffi can auto-detect installed desktop applications when your config does not
-# contain any valid launchers yet, but keeping explicit entries in launchers.yaml gives you
-# stable names, icons, and arguments across systems.
+# Every setting below is optional and commented out. This file holds
+# settings and addons. Your own commands and scripts go in launchers.yaml next
+# to it (see examples/launchers.yaml). Installed applications are listed
+# automatically; once you add entries, set addons.apps.enabled to keep them.
 
 # General settings (all fields optional, CLI flags override these)
 # general:
@@ -27,7 +28,7 @@ version: 1
 #   show_preview: true       # Right-hand preview pane. Addons (snippets, files, script filters...)
 #                            # preview automatically; plain launchers only when this is true or the
 #                            # launcher sets show_preview: true. Toggle at runtime with Ctrl+P.
-#   close_on_action: true    # Close Raffi after executing a launcher or addon action (default: true;
+#   close_on_action: true    # Close Raffi after running an entry or addon action (default: true;
 #                            # media, audio, bluetooth, and kill default to false). Individual launchers
 #                            # and addons can override this with their own close_on_action setting, or
 #                            # pass --keep-open / -o general.close_on_action=false on the CLI.
@@ -131,29 +132,29 @@ addons:
     # See scripts/search/README.md for full setup instructions.
     # - name: "Search DuckDuckGo"
     #   keyword: "ddg"
-    #   command: "python3"
-    #   args: ["~/.config/raffi/scripts/search/search.py", "duckduckgo"]
+    #   command: "~/.config/raffi/scripts/search/search.py"
+    #   args: ["duckduckgo"]
     #   icon: "web-browser"
     #   action: "xdg-open {value}"
     #   secondary_action: "copy"
     # - name: "Search Google"
     #   keyword: "sg"
-    #   command: "python3"
-    #   args: ["~/.config/raffi/scripts/search/search.py", "google"]
+    #   command: "~/.config/raffi/scripts/search/search.py"
+    #   args: ["google"]
     #   icon: "google"
     #   action: "xdg-open {value}"
     #   secondary_action: "copy"
     # - name: "Search Bing"
     #   keyword: "sb"
-    #   command: "python3"
-    #   args: ["~/.config/raffi/scripts/search/search.py", "bing"]
+    #   command: "~/.config/raffi/scripts/search/search.py"
+    #   args: ["bing"]
     #   icon: "web-browser"
     #   action: "xdg-open {value}"
     #   secondary_action: "copy"
     # - name: "Search Brave"
     #   keyword: "sbr"
-    #   command: "python3"
-    #   args: ["~/.config/raffi/scripts/search/search.py", "brave"]
+    #   command: "~/.config/raffi/scripts/search/search.py"
+    #   args: ["brave"]
     #   icon: "web-browser"
     #   action: "xdg-open {value}"
     #   secondary_action: "copy"

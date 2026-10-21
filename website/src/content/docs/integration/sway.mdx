@@ -1,9 +1,9 @@
 ---
 title: Sway Integration
-description: Configure Raffi as your application launcher in Sway
+description: Open Raffi with a key in Sway
 ---
 
-Raffi integrates seamlessly with the Sway window manager, allowing you to launch applications with a simple keybinding.
+Bind Raffi to a key in Sway and open it from anywhere.
 
 ## Configuration
 
@@ -27,11 +27,11 @@ bindsym $super+Space exec cmd=$($menu) && [ -n "$cmd" ] && swaymsg exec -- "$cmd
 
 - `raffi -p` runs Raffi in print-only mode, which prints the selected command instead of executing it
 - `cmd=$(...)` captures that output; Sway runs the whole binding through `sh -c`
-- `[ -n "$cmd" ]` skips `swaymsg` when nothing was selected — without this guard `swaymsg` is called
+- `[ -n "$cmd" ]` skips `swaymsg` when nothing was selected. Without this guard `swaymsg` is called
   with no command and fails (see [Troubleshooting](#invalid-exec-command-expected-at-least-1-argument-got-0))
 - `swaymsg exec -- "$cmd"` passes the command as a **single quoted argument**, which preserves
   arguments containing spaces as well as multi-line `script` entries
-- `$super+Space` binds the launcher to Super (Windows/Command key) + Space
+- `$super+Space` binds Raffi to Super (Windows/Command key) + Space
 
 :::caution[Do not pipe through `xargs`]
 Older versions of this documentation suggested `raffi -p | xargs swaymsg exec --`. Avoid it:
@@ -88,7 +88,7 @@ After adding the configuration:
 
 ## Troubleshooting
 
-### Launcher doesn't appear
+### Raffi doesn't appear
 
 - Ensure Raffi is installed and in your `$PATH`
 - Check Sway logs: `journalctl --user -u sway`
@@ -98,13 +98,13 @@ After adding the configuration:
 This error comes from `swaymsg`, not from Raffi: it means `swaymsg exec` was called without a
 command because Raffi printed nothing. Common causes:
 
-- **No guard on an empty selection.** `raffi -p | xargs swaymsg exec --` runs `swaymsg` even when
-  its input is empty. Use the `[ -n "$cmd" ]` form shown above.
-- **You cancelled the menu.** Pressing `Escape` or selecting nothing exits without printing, which
-  is normal.
-- **You selected an addon entry.** Emoji, calculator, web search, file browser and text snippet
+- Nothing guards against an empty selection. `raffi -p | xargs swaymsg exec --` runs `swaymsg`
+  even when its input is empty. Use the `[ -n "$cmd" ]` form shown above.
+- You closed Raffi. Pressing `Escape` or picking nothing exits without printing, which is
+  normal.
+- You picked an addon result. Emoji, calculator, web search, file browser and text snippet
   entries perform their action directly in Raffi, so there is no command to print.
-- **Raffi is not in Sway's `PATH`.** Sway's `exec` runs commands through `sh -c`, which does not read
+- Raffi is not in Sway's `PATH`. Sway's `exec` runs commands through `sh -c`, which does not read
   `~/.bashrc` or `~/.zshrc`. A `cargo install`ed binary in `~/.cargo/bin` therefore works in a
   terminal but not from a keybinding. Test with an absolute path:
 

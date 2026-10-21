@@ -10,7 +10,8 @@ import terminalScreenshot from '../../../assets/screenshots/terminal.png';
 <Image src={terminalScreenshot} alt="Typing a cargo test command after the greater-than keyword offers to run it in kitty, with shell and target details" width={800} />
 
 Type `>` followed by a space and a command, such as `> htop` or
-`> journalctl -f`, then press Enter. Raffi closes and runs the command in a
+`> journalctl -f`, then press Enter. Raffi closes (unless
+[`close_on_action`](#configuration) is off) and runs the command in a
 terminal window, or in a new tab of a running kitty or WezTerm (see
 [below](#tabs-in-kitty-and-wezterm)). While the command is empty, the row
 says which terminal will be used.
@@ -106,14 +107,56 @@ general:
 
 ## Configuration
 
-```yaml
+**`addons.terminal.enabled`** `boolean` (default: `true`)
+
+Set it to `false` to turn off the trigger. [Installed apps](../installed-apps/)
+marked `Terminal=true` are then left out too.
+
+**`addons.terminal.trigger`** `string` (default: `>`)
+
+Keyword that starts a command. Type it followed by a space, then the
+command. A script filter, text snippet source or web search with the same
+keyword takes precedence.
+
+**`addons.terminal.command`** `list of strings` (default: found automatically)
+
+Terminal command line the shell command is added to, such as
+`[alacritty, -e]` or `[wezterm, start, --]`. When unset, Raffi picks one as
+described in [Which terminal](#which-terminal). The same terminal opens
+desktop apps marked `Terminal=true`.
+
+**`addons.terminal.hold`** `boolean` (default: `true`)
+
+Keep the window open after the command exits, showing its exit status, until
+you press Enter.
+
+**`addons.terminal.open_in`** `tab | window` (default: `tab`)
+
+`tab` opens the command in a new tab of a running kitty or WezTerm when that
+is the terminal used, and a new window when none is running. `window` always
+opens a new window. Desktop apps marked `Terminal=true` always open a window.
+See [Tabs in kitty and WezTerm](#tabs-in-kitty-and-wezterm).
+
+**`addons.terminal.kitty_socket`** `string` (default: `listen_on` from `kitty.conf`)
+
+kitty remote control address, written as for kitty's `listen_on`, such as
+`unix:${XDG_RUNTIME_DIR}/kitty`. kitty adds its process id to the address,
+unless it contains `{kitty_pid}`, and Raffi picks the newest of your kitty
+processes listening there. Only Unix sockets are used; a `tcp:` address
+opens a window.
+
+**`addons.terminal.close_on_action`** `boolean` (default: `true`)
+
+Close Raffi after starting the command. When unset, `general.close_on_action`
+applies.
+
+```yaml raffi.yaml
 addons:
   terminal:
     trigger: "!"
+    command: [foot]
     hold: false
-    open_in: tab                  # tab or window
+    open_in: window               # tab or window
     kitty_socket: unix:/tmp/mykitty
+    close_on_action: false
 ```
-
-See the [addon reference](../../reference/addon-configuration/#run-in-terminal)
-for every field.

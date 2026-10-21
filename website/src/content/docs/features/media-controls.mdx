@@ -48,12 +48,24 @@ raffi -i "media "
 
 ## Configuration
 
+**`addons.media.enabled`** `boolean` (default: `true`)
+
+Enable or disable the media controls.
+
+**`addons.media.trigger`** `string` (default: `media`)
+
+Keyword that opens the controls. Type it followed by a space. Web searches
+with the same keyword take precedence.
+
+**`addons.media.close_on_action`** `boolean` (default: `false`)
+
+Close Raffi after an action. By default Raffi stays open and refreshes the
+list, so you can press Next several times in a row. When unset, Raffi
+follows `general.close_on_action` if you have set it.
+
 ```yaml
 addons:
   media:
     trigger: "mu"
     close_on_action: true
 ```
-
-See the [addon reference](../../reference/addon-configuration/#media-controls)
-for every field.

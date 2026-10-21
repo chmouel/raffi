@@ -21,7 +21,7 @@ Print version information and exit.
 
 **`-c, --configfile`** `string` (default: `~/.config/raffi/raffi.yaml`)
 
-Path to the YAML configuration file. Launcher entries are read from `launchers.yaml` in the same directory when this file has no `launchers:` section.
+Path to the YAML configuration file. Custom entries are read from `launchers.yaml` in the same directory when this file has no `launchers:` section.
 
   Supports tilde expansion (`~/`) and environment variable expansion (`${VAR}`).
 
@@ -46,7 +46,7 @@ Override any YAML configuration setting from the command line.
 
 **`--keep-open`** `boolean` (default: `false`)
 
-Keep the Raffi window open after executing an action (shorthand for `-o general.close_on_action=false`). Individual addons or launchers can still override this via `-o addons.<name>.close_on_action=true`.
+Keep the Raffi window open after executing an action (shorthand for `-o general.close_on_action=false`). Individual addons or entries can still override this via `-o addons.<name>.close_on_action=true`.
 
   ```bash
   raffi --keep-open
@@ -127,7 +127,7 @@ Set the application ID reported for Raffi's window on Linux. This is useful for 
 
 Disable icon loading for faster startup.
 
-  When enabled, no icons will be displayed in the launcher interface. This can significantly speed up startup time, especially on first launch.
+  When enabled, no icons are shown. This can significantly speed up startup time, especially on first launch.
 
   ```bash
   raffi -I

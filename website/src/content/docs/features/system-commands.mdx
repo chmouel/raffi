@@ -53,25 +53,46 @@ own confirmation dialog, and on sway it runs `swaymsg exit`. Elsewhere, the
 default Log out needs
 `XDG_SESSION_ID`; without it the row says so.
 
-Raffi closes before running the command. If it fails, Raffi reports the error
-as a notification (a Hyprland notification on Hyprland, `notify-send`
-elsewhere).
+Raffi closes before running the command, unless
+[`close_on_action`](#configuration) keeps it open. If the command fails, Raffi
+reports the error as a notification (a Hyprland notification on Hyprland,
+`notify-send` elsewhere).
 
-## Custom commands
+Queries typed in this mode are not saved in the search history.
 
-Replace any command with an argument list. Commands run directly, without a
-shell. Use `hide` to remove entries, or give an entry an empty list:
+## Configuration
+
+**`addons.system.enabled`** `boolean` (default: `true`)
+
+Enable or disable the system commands.
+
+**`addons.system.trigger`** `string` (default: `sys`)
+
+Keyword that opens the list. Type it followed by a space. Web searches with
+the same keyword take precedence.
+
+**`addons.system.commands`** `object`
+
+Replaces built-in commands. Keys are `lock`, `suspend`, `hibernate`,
+`logout`, `reboot` and `shutdown`. Each value is an argument list, run
+directly without a shell. An empty list hides the entry.
+
+**`addons.system.hide`** `list` (default: `[]`)
+
+Entries to leave out, using the same names as `commands`.
+
+**`addons.system.close_on_action`** `boolean` (default: `true`)
+
+Close Raffi before running a command. Leave it unset to follow
+`general.close_on_action`. Setting it to `false` keeps Raffi open after
+Lock, Suspend and Hibernate; Log out, Reboot and Shut down always close it.
 
 ```yaml
 addons:
   system:
+    trigger: "power"
     commands:
       lock: ["hyprlock"]
       logout: ["uwsm", "stop"]
     hide: [hibernate]
 ```
-
-Queries typed in this mode are not saved in the search history.
-
-See the [addon reference](../../reference/addon-configuration/#system-commands) for
-every field.

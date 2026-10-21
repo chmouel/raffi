@@ -127,17 +127,66 @@ the next `slack` query picks them up.
 
 ## Configuration
 
-```yaml
+**`addons.slack.enabled`** `boolean` (default: `false`)
+
+Turn the Slack list on. It stays off until you set this and a
+`token_command`.
+
+**`addons.slack.trigger`** `string` (default: `slack`)
+
+Keyword that opens the Slack list. Type it followed by a space. A script
+filter, text snippet source or web search with the same keyword takes
+precedence.
+
+**`addons.slack.token_command`** `string` (required)
+
+Shell command printing the Slack token on its first line: a user token
+(`xoxp-`) from your own Slack app, or the session token (`xoxc-`) of a
+logged-in browser. See [Getting a token](#getting-a-token). It runs the
+first time the Slack list asks Slack for something in a run.
+
+**`addons.slack.cookie_command`** `string`
+
+Shell command printing the value of the browser's `d` cookie. Required with
+a session (`xoxc-`) token, ignored with a user token.
+
+**`addons.slack.open_in`** `desktop | browser` (default: `desktop`)
+
+Where Enter opens conversations and messages: the Slack desktop app
+(`slack://` links) or `app.slack.com`. Ctrl+Enter uses the other one.
+
+**`addons.slack.unread_conversations`** `list of strings` (default: `[]`)
+
+Conversations checked by `slack unread` when Slack does not say which
+conversations have unread messages, as with user tokens: `#channel`,
+`@handle` for the direct conversation, or a conversation id. At most 30. See
+[Unread messages](#unread-messages).
+
+**`addons.slack.cache_minutes`** `integer` (default: `60`)
+
+How long the cached conversations, people, muted conversations and search
+results count as fresh before Raffi asks Slack again. `0` asks every time.
+The last home rows, unread conversations and previews show right away
+whatever this is set to, and are replaced when Slack answers. See
+[Caching and privacy](#caching-and-privacy).
+
+**`addons.slack.close_on_action`** `boolean` (default: `true`)
+
+Close Raffi after opening a conversation, person or message. When unset,
+`general.close_on_action` applies. Status, presence, snooze and mark-read
+actions keep Raffi open unless this is set to `true`.
+
+```yaml raffi.yaml
 addons:
   slack:
     enabled: true
     token_command: "pass show slack/token"
     cookie_command: "pass show slack/cookie"   # session tokens only
-    open_in: desktop                            # or browser
+    open_in: browser                            # or desktop
+    unread_conversations: ["#ops", "@alice"]
+    cache_minutes: 30
+    close_on_action: false
 ```
-
-See the [addon reference](../../reference/addon-configuration/#slack) for
-every field.
 
 ## Status, presence and snooze
 
@@ -161,7 +210,7 @@ status removes it.
 Snooze rows pause notifications for 30 minutes, 1 hour, 2 hours or until
 9:00 tomorrow, and `slack snooze 45m` for any other duration. Resume
 notifications ends the snooze. Raffi stays open after these actions and
-updates the rows.
+updates the rows, unless `close_on_action` is set to `true`.
 
 ## Search
 
