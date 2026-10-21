@@ -128,44 +128,51 @@ impl Compositor {
 }
 
 /// The windows in the output of `hyprctl clients -j`, `niri msg --json
-/// windows` or `swaymsg -t get_tree -r`.
+/// windows` or `swaymsg -t get_tree -r`, the most recently focused first
+/// where the compositor tells.
 pub(super) fn process_windows(
     compositor: Compositor,
     output: &[u8],
 ) -> Result<Vec<ProcessWindow>, String> {
     let invalid = |_| format!("{} returned invalid window data", compositor.program());
     Ok(match compositor {
-        Compositor::Hyprland => serde_json::from_slice::<Vec<Client>>(output)
-            .map_err(invalid)?
-            .into_iter()
-            .filter(|client| client.mapped && valid_address(&client.address))
-            .map(|client| ProcessWindow {
-                pid: Some(client.pid),
-                title: client.title,
-                app: if client.class.is_empty() {
-                    client.initial_class
-                } else {
-                    client.class
-                },
-                focus: DeferredAction::Hypr(HyprAction::Focus {
-                    address: client.address,
-                }),
-            })
-            .collect(),
-        Compositor::Niri => serde_json::from_slice::<Vec<NiriWindow>>(output)
-            .map_err(invalid)?
-            .into_iter()
-            .map(|window| ProcessWindow {
-                pid: window.pid,
-                title: window.title.unwrap_or_default(),
-                app: window.app_id.unwrap_or_default(),
-                focus: DeferredAction::Command(niri_action(&[
-                    "focus-window",
-                    "--id",
-                    &window.id.to_string(),
-                ])),
-            })
-            .collect(),
+        Compositor::Hyprland => {
+            let mut clients = serde_json::from_slice::<Vec<Client>>(output).map_err(invalid)?;
+            clients.sort_by_key(|client| (client.focus_history_id < 0, client.focus_history_id));
+            clients
+                .into_iter()
+                .filter(|client| client.mapped && valid_address(&client.address))
+                .map(|client| ProcessWindow {
+                    pid: Some(client.pid),
+                    title: client.title,
+                    app: if client.class.is_empty() {
+                        client.initial_class
+                    } else {
+                        client.class
+                    },
+                    focus: DeferredAction::Hypr(HyprAction::Focus {
+                        address: client.address,
+                    }),
+                })
+                .collect()
+        }
+        Compositor::Niri => {
+            let mut windows = serde_json::from_slice::<Vec<NiriWindow>>(output).map_err(invalid)?;
+            windows.sort_by_key(|window| Reverse((window.is_focused, window.focus_timestamp)));
+            windows
+                .into_iter()
+                .map(|window| ProcessWindow {
+                    pid: window.pid,
+                    title: window.title.unwrap_or_default(),
+                    app: window.app_id.unwrap_or_default(),
+                    focus: DeferredAction::Command(niri_action(&[
+                        "focus-window",
+                        "--id",
+                        &window.id.to_string(),
+                    ])),
+                })
+                .collect()
+        }
         Compositor::Sway => {
             let tree: SwayNode = serde_json::from_slice(output).map_err(invalid)?;
             let mut windows = Vec::new();
@@ -232,38 +239,42 @@ pub(super) fn raise_process_window(pid: u32, title: &str) -> Result<(), String> 
     }
 }
 
-/// The window of `app`, matched without case and also as the last part of
-/// a reverse-DNS app ID, so `slack` finds `Slack` and `com.slack.Slack`.
+/// The first window of one of `apps`, matched without case and also as the
+/// last part of a reverse-DNS app ID, so `slack` finds `Slack` and
+/// `com.slack.Slack`.
 pub(super) fn pick_app_window<'a>(
     windows: &'a [ProcessWindow],
-    app: &str,
+    apps: &[&str],
 ) -> Option<&'a DeferredAction> {
-    let app = app.to_lowercase();
-    let suffix = format!(".{app}");
+    let apps: Vec<(String, String)> = apps
+        .iter()
+        .map(|app| (app.to_lowercase(), format!(".{}", app.to_lowercase())))
+        .collect();
     windows
         .iter()
         .find(|window| {
             let name = window.app.to_lowercase();
-            name == app || name.ends_with(&suffix)
+            apps.iter()
+                .any(|(app, suffix)| name == *app || name.ends_with(suffix.as_str()))
         })
         .map(|window| &window.focus)
 }
 
-/// Focus the window of `app`, waiting up to `wait` for it to appear, as
-/// when the app is starting. Does nothing outside Hyprland, niri and sway.
-/// Blocking: run it off the UI thread.
-pub(super) fn raise_app_window(app: &str, wait: Duration) -> Result<(), String> {
+/// Focus the most recent window of one of `apps`, waiting up to `wait` for
+/// it to appear, as when the app is starting. Does nothing outside
+/// Hyprland, niri and sway. Blocking: run it off the UI thread.
+pub(super) fn raise_app_window(apps: &[&str], wait: Duration) -> Result<(), String> {
     let Some(compositor) = Compositor::current() else {
         return Ok(());
     };
     let deadline = Instant::now() + wait;
     loop {
         let windows = compositor.process_windows()?;
-        if let Some(focus) = pick_app_window(&windows, app) {
+        if let Some(focus) = pick_app_window(&windows, apps) {
             return focus.run();
         }
         if Instant::now() >= deadline {
-            crate::debug_log!("windows: no {app} window to raise");
+            crate::debug_log!("windows: no {apps:?} window to raise");
             return Ok(());
         }
         std::thread::sleep(RAISE_POLL);
@@ -1027,12 +1038,24 @@ mod tests {
             {"address":"0x3","workspace":{"id":8,"name":"8"},"class":"com.slack.Slack","pid":3}]"#;
         let windows = process_windows(Compositor::Hyprland, clients.as_bytes()).unwrap();
         assert!(matches!(
-            pick_app_window(&windows, "slack"),
+            pick_app_window(&windows, &["slack"]),
             Some(DeferredAction::Hypr(HyprAction::Focus { address })) if address == "0x2"
         ));
         assert!(matches!(
-            pick_app_window(&windows[2..], "slack"),
+            pick_app_window(&windows[2..], &["slack"]),
             Some(DeferredAction::Hypr(HyprAction::Focus { address })) if address == "0x3"
+        ));
+
+        // The most recently focused window of any of the names wins.
+        let browsers = r#"[
+            {"address":"0x4","workspace":{"id":1,"name":"1"},"class":"google-chrome","pid":4,"focusHistoryID":3},
+            {"address":"0x5","workspace":{"id":2,"name":"2"},"class":"firefox","pid":5,"focusHistoryID":1},
+            {"address":"0x6","workspace":{"id":3,"name":"3"},"class":"google-chrome","pid":6,"focusHistoryID":2},
+            {"address":"0x7","workspace":{"id":4,"name":"4"},"class":"google-chrome","pid":7,"focusHistoryID":-1}]"#;
+        let windows = process_windows(Compositor::Hyprland, browsers.as_bytes()).unwrap();
+        assert!(matches!(
+            pick_app_window(&windows, &["google-chrome", "google-chrome-stable"]),
+            Some(DeferredAction::Hypr(HyprAction::Focus { address })) if address == "0x6"
         ));
     }
 
@@ -1052,11 +1075,11 @@ mod tests {
 
         assert!(process_windows(Compositor::Sway, b"nope").is_err());
 
-        let focus = pick_app_window(&niri_windows, "KITTY").unwrap();
+        let focus = pick_app_window(&niri_windows, &["KITTY"]).unwrap();
         assert!(
             matches!(focus, DeferredAction::Command(argv) if argv.contains(&"--id".to_string()))
         );
-        assert!(pick_app_window(&sway_windows, "no-such-app").is_none());
+        assert!(pick_app_window(&sway_windows, &["no-such-app"]).is_none());
     }
 
     #[test]

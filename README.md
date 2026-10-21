@@ -90,6 +90,7 @@ Control your desktop:
 - [System commands](https://chmouel.github.io/raffi/features/system-commands/) to lock, suspend, log out or shut down: `sys `
 - [Window switcher](https://chmouel.github.io/raffi/features/window-switcher/) for Hyprland, niri and sway: `win `
 - [Browser tabs](https://chmouel.github.io/raffi/features/browser-tabs/) through the Vicinae browser extension: `tabs `
+- [Bookmarks](https://chmouel.github.io/raffi/features/bookmarks/): search and open browser bookmarks: `bm `
 - [Media controls](https://chmouel.github.io/raffi/features/media-controls/): `media `
 - [Audio devices and volume](https://chmouel.github.io/raffi/features/audio-switcher/): `audio `
 - [Bluetooth](https://chmouel.github.io/raffi/features/bluetooth/): `bt `
@@ -193,6 +194,7 @@ Bug reports and pull requests are welcome on [GitHub](https://github.com/chmouel
 <p><img width="800" alt="Web search with resolved URL preview" src="website/src/assets/screenshots/web-search.png" /></p>
 <p><img width="800" alt="Browser tabs with site icons and a page preview" src="website/src/assets/screenshots/browser-tabs.png" /></p>
 <p><img width="800" alt="Browser tabs setup steps when no browser is connected" src="website/src/assets/screenshots/browser-tabs-setup.png" /></p>
+<p><img width="800" alt="Bookmarks toolbar folder with a bookmark's details in the preview" src="website/src/assets/screenshots/bookmarks.png" /></p>
 <p><img width="800" alt="Configured fallback search results and preview" src="website/src/assets/screenshots/fallbacks.png" /></p>
 
 ### Search, Help, and Scripts

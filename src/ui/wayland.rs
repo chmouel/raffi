@@ -4,6 +4,8 @@ mod app;
 mod audio;
 mod bitwarden;
 mod bluetooth;
+mod bookmarks;
+mod bookmarks_mode;
 mod browser;
 mod browser_tabs;
 mod clipboard;

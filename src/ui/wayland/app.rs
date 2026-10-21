@@ -431,6 +431,7 @@ pub(super) const CLIPBOARD_ICON: &str = "copyq";
 pub(super) const SYSTEM_ICON: &str = "system-shutdown";
 pub(super) const WINDOWS_ICON: &str = "preferences-system-windows";
 pub(super) const BROWSER_TABS_ICON: &str = "web-browser";
+pub(super) const BOOKMARKS_ICON: &str = "user-bookmarks";
 pub(super) const MEDIA_ICON: &str = "multimedia-player";
 pub(super) const AUDIO_ICON: &str = "audio-speakers";
 pub(super) const KILL_ICON: &str = "utilities-system-monitor";
@@ -628,6 +629,15 @@ pub(super) fn route_query(query: &str, addons: &AddonsConfig) -> QueryMode {
         if let Some(query) = extract_keyword_query(input, addons.browser_tabs.trigger()) {
             return QueryMode::CommandList {
                 addon: CommandListAddon::BrowserTabs,
+                query,
+            };
+        }
+    }
+
+    if addons.bookmarks.enabled {
+        if let Some(query) = extract_keyword_query(input, addons.bookmarks.trigger()) {
+            return QueryMode::CommandList {
+                addon: CommandListAddon::Bookmarks,
                 query,
             };
         }
@@ -849,6 +859,16 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
             keyword: addons.browser_tabs.trigger().to_string(),
             subtitle: "Switch to or close a browser tab".to_string(),
             icon: Some(BROWSER_TABS_ICON.to_string()),
+        });
+    }
+
+    if addons.bookmarks.enabled
+        && (matches(addons.bookmarks.trigger()) || intent(&["bookmark", "bookmarks"]))
+    {
+        suggestions.push(KeywordSuggestion {
+            keyword: addons.bookmarks.trigger().to_string(),
+            subtitle: "Open a browser bookmark".to_string(),
+            icon: Some(BOOKMARKS_ICON.to_string()),
         });
     }
 
@@ -1123,6 +1143,8 @@ impl LauncherApp {
                 },
                 devtools: DevtoolsState::default(),
                 slack: Default::default(),
+                bookmarks: Default::default(),
+                bookmark_searches: Default::default(),
                 clipboard: ClipboardState::default(),
                 fallbacks,
                 main_view: Default::default(),
@@ -1407,6 +1429,14 @@ impl LauncherApp {
                 _ => {}
             }
         }
+        if self.bookmarks.prompt.is_some() && !self.view.help_active {
+            match message {
+                Message::SearchChanged(term) => return self.handle_search_prompt_input(term),
+                Message::Cancel => return self.leave_search_prompt(),
+                Message::CycleView(_) => return Task::none(),
+                _ => {}
+            }
+        }
         match message {
             Message::SearchChanged(query) => self.handle_search_changed(query),
             Message::MoveUp => self.move_selection(-1),
@@ -1631,6 +1661,17 @@ impl LauncherApp {
             Message::FaviconsFetched(session, fetched) if session & MAIN_VIEW_SESSION != 0 => {
                 self.handle_main_view_favicons(session, fetched)
             }
+            Message::BookmarksLoaded(generation, library) => {
+                self.handle_bookmarks_loaded(generation, library)
+            }
+            Message::BookmarkIconsLoaded(session, icons, fetch) => {
+                self.handle_bookmark_icons_loaded(session, icons, fetch)
+            }
+            Message::FaviconsFetched(session, true)
+                if self.command_list.addon == Some(CommandListAddon::Bookmarks) =>
+            {
+                self.handle_bookmark_favicons_fetched(session)
+            }
             Message::FaviconsFetched(session, fetched) => {
                 if fetched
                     && self.command_list.addon == Some(CommandListAddon::BrowserTabs)
@@ -1694,6 +1735,8 @@ impl LauncherApp {
         if let Some(addon) = self.command_list.addon {
             return match addon {
                 CommandListAddon::Slack => self.refresh_slack(),
+                CommandListAddon::Bookmarks if self.command_list.loading => Task::none(),
+                CommandListAddon::Bookmarks => self.load_bookmarks(true),
                 CommandListAddon::Pass | CommandListAddon::Bitwarden => {
                     let Some(vault) = self.vault_addon() else {
                         return Task::none();
@@ -1791,6 +1834,10 @@ impl LauncherApp {
             && !self.history.search_in_progress
             && !self.view.help_active;
         let mut restarted = false;
+        let (query, left_bookmark_folder) = match self.bookmarks_updir(&query) {
+            Some((parent, left)) if !self.view.help_active => (parent, Some(left)),
+            _ => (query, None),
+        };
         let (query, left_dir) = if !fido {
             (query, None)
         } else if let Some((parent, left)) = fido_updir(
@@ -1830,6 +1877,11 @@ impl LauncherApp {
         }
 
         let class = classify_query(&query, &self.addons);
+        if matches!(class.mode, QueryMode::Standard) {
+            if let Some(task) = self.open_main_view_bookmark_keyword(&query) {
+                return task;
+            }
+        }
         let log_query = class.loggable_query(&query, &self.addons);
         self.search_query = query.clone();
         // The input keeps what was typed; everything below sees the expansion.
@@ -1987,6 +2039,10 @@ impl LauncherApp {
                     drag.disarm();
                 }
                 tasks.push(self.handle_command_list_query(addon, query));
+                if let Some(left) = left_bookmark_folder {
+                    self.reselect_bookmark_folder(&left);
+                    tasks.push(move_cursor_to_end(self.view.search_input_id.clone()));
+                }
                 tasks.push(self.snap_to_selection());
                 return Task::batch(tasks);
             }
@@ -2503,6 +2559,9 @@ impl LauncherApp {
         if addon == CommandListAddon::Slack {
             return self.handle_slack_query(query);
         }
+        if addon == CommandListAddon::Bookmarks {
+            return self.handle_bookmarks_query(query);
+        }
         let entered = self.command_list.enter(addon);
         self.command_list.set_query(query);
         match addon {
@@ -2625,7 +2684,7 @@ impl LauncherApp {
                 Task::none()
             }
             // Handled above.
-            CommandListAddon::Slack => Task::none(),
+            CommandListAddon::Slack | CommandListAddon::Bookmarks => Task::none(),
             CommandListAddon::Bitwarden if !entered => self.search_vault_notes(),
             CommandListAddon::Pass if !entered => Task::none(),
             CommandListAddon::Pass | CommandListAddon::Bitwarden => {
@@ -3169,6 +3228,7 @@ impl LauncherApp {
         }
         let task = match result {
             Ok(()) => match addon {
+                CommandListAddon::Bookmarks => Task::none(),
                 CommandListAddon::Media => self.load_media(true),
                 CommandListAddon::Audio => self.load_audio(true),
                 CommandListAddon::Kill => {
@@ -4335,6 +4395,9 @@ impl LauncherApp {
         }
         match self.command_list.addon {
             Some(CommandListAddon::Slack) => return self.handle_slack_cycle_view(backwards),
+            Some(CommandListAddon::Bookmarks) if self.bookmarks.view_label().is_some() => {
+                return self.handle_bookmarks_cycle_view(backwards);
+            }
             Some(CommandListAddon::Audio) => {
                 let view = self.command_list.audio_view.cycle(backwards);
                 self.command_list.set_audio_view(view);
@@ -4372,6 +4435,8 @@ impl LauncherApp {
             Some(CommandListAddon::Audio) => {
                 return Some(self.command_list.audio_view.label().to_string());
             }
+            Some(CommandListAddon::Bookmarks) if self.bookmarks.prompt.is_some() => return None,
+            Some(CommandListAddon::Bookmarks) => return self.bookmarks.view_label(),
             _ => {}
         }
         (self.main_view.active && !self.main_view.stops.is_empty())
@@ -4423,6 +4488,17 @@ impl LauncherApp {
 
         if self.selected_index < self.keyword_rows() {
             return self.update(Message::KeywordSuggestionSelected(self.selected_index));
+        }
+
+        if let Some(task) = self
+            .selected_index
+            .checked_sub(self.command_list_offset())
+            .and_then(|row| {
+                self.open_bookmark_folder(row)
+                    .or_else(|| self.open_bookmark_search(row))
+            })
+        {
+            return task;
         }
 
         if !self.file_browser.active {
@@ -4652,6 +4728,12 @@ impl LauncherApp {
         if let Some(vault) = VaultAddon::of(addon) {
             return self.select_vault_row(vault, row, None);
         }
+        if let Some(task) = self
+            .open_bookmark_folder(row)
+            .or_else(|| self.open_bookmark_search(row))
+        {
+            return task;
+        }
         match self.command_list.select(row, self.view.current_modifiers) {
             Selection::Ignore => Task::none(),
             Selection::Armed => {
@@ -4694,7 +4776,9 @@ impl LauncherApp {
                     std::thread::spawn(move || {
                         let result = if matches!(
                             addon,
-                            CommandListAddon::Terminal | CommandListAddon::System
+                            CommandListAddon::Terminal
+                                | CommandListAddon::System
+                                | CommandListAddon::Bookmarks
                         ) {
                             action.run()
                         } else {
@@ -5125,6 +5209,7 @@ impl LauncherApp {
         self.emoji.clear();
         self.clipboard.clear();
         self.command_list.clear();
+        self.bookmarks.prompt = None;
         self.devtools.clear();
         self.web_search.clear();
         self.file_browser.clear();

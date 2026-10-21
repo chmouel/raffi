@@ -154,6 +154,20 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         });
     }
 
+    if addons.bookmarks.enabled {
+        let trigger = addons.bookmarks.trigger();
+        entries.push(HelpEntry {
+            section: HelpSection::KeywordsAndActions,
+            trigger: trigger.to_string(),
+            title: "Bookmarks".to_string(),
+            usage: format!(
+                "{trigger} <folder/>… <title or URL>, Enter opens, Tab enters a folder, Ctrl+Enter copies the link. {trigger} <keyword> <term> or Enter on a search bookmark searches"
+            ),
+            icon: Some(super::app::BOOKMARKS_ICON.to_string()),
+            completion: Some(format!("{trigger} ")),
+        });
+    }
+
     if addons.media.enabled {
         let trigger = addons.media.trigger();
         entries.push(HelpEntry {
@@ -507,6 +521,10 @@ pub(super) fn add_cycle_view_shortcut(
             "Slack: home, unread, threads, activity, people, actions",
         ),
         (addons.audio.enabled, "audio: all, outputs, inputs"),
+        (
+            addons.bookmarks.enabled,
+            "bookmarks: all browsers, then each one",
+        ),
     ]
     .into_iter()
     .filter_map(|(enabled, views)| enabled.then_some(views))

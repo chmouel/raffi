@@ -1008,9 +1008,15 @@ impl LauncherApp {
         // The master password or passphrase prompt reuses the search field,
         // masked, and its text never goes through `SearchChanged`.
         let prompt = self.vault.prompt.as_ref();
-        let (placeholder, value) = match prompt {
-            Some(prompt) => (prompt.purpose.placeholder(), prompt.buffer.expose()),
-            None => (placeholder, self.search_query.as_str()),
+        let search = self
+            .bookmarks
+            .prompt
+            .as_ref()
+            .filter(|_| !self.view.help_active);
+        let (placeholder, value) = match (prompt, search) {
+            (Some(prompt), _) => (prompt.purpose.placeholder(), prompt.buffer.expose()),
+            (None, Some(search)) => (search.placeholder.as_str(), search.term.as_str()),
+            (None, None) => (placeholder, self.search_query.as_str()),
         };
         let secure = prompt.is_some();
         let search_input = text_input(placeholder, value)

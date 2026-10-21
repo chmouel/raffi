@@ -2205,6 +2205,28 @@ fn describe_addon_by_keyword(
         );
     }
 
+    if addons.bookmarks.enabled && keyword == addons.bookmarks.trigger() {
+        return (
+            "Bookmarks".to_string(),
+            vec![
+                (
+                    "Enter".to_string(),
+                    "Open the bookmark, or show the folder".to_string(),
+                ),
+                ("Tab".to_string(), "Show the folder".to_string()),
+                (
+                    "Backspace".to_string(),
+                    "After a folder's /, go up to its parent".to_string(),
+                ),
+                ("Ctrl+Enter".to_string(), "Copy the link".to_string()),
+                (
+                    "Ctrl+Tab".to_string(),
+                    "Show one browser profile at a time".to_string(),
+                ),
+            ],
+        );
+    }
+
     if addons.media.enabled && keyword == addons.media.trigger() {
         return (
             "Media Controls".to_string(),

@@ -1052,6 +1052,7 @@ enum ProfileRoot {
 }
 
 struct KnownBrowser {
+    key: crate::BookmarkBrowser,
     name: &'static str,
     icon: &'static str,
     programs: &'static [&'static str],
@@ -1060,10 +1061,12 @@ struct KnownBrowser {
 }
 
 const KNOWN_BROWSERS: [KnownBrowser; 14] = {
+    use crate::BookmarkBrowser as Key;
     use ManifestKind::{Chromium, Gecko};
     use ProfileRoot::{Config, Home};
     [
         KnownBrowser {
+            key: Key::Firefox,
             name: "Firefox",
             icon: "firefox",
             programs: &["firefox", "firefox-esr"],
@@ -1071,6 +1074,7 @@ const KNOWN_BROWSERS: [KnownBrowser; 14] = {
             kind: Gecko,
         },
         KnownBrowser {
+            key: Key::Librewolf,
             name: "LibreWolf",
             icon: "librewolf",
             programs: &["librewolf"],
@@ -1078,6 +1082,7 @@ const KNOWN_BROWSERS: [KnownBrowser; 14] = {
             kind: Gecko,
         },
         KnownBrowser {
+            key: Key::Zen,
             name: "Zen",
             icon: "zen-browser",
             programs: &["zen-browser", "zen"],
@@ -1085,6 +1090,7 @@ const KNOWN_BROWSERS: [KnownBrowser; 14] = {
             kind: Gecko,
         },
         KnownBrowser {
+            key: Key::Floorp,
             name: "Floorp",
             icon: "floorp",
             programs: &["floorp"],
@@ -1092,6 +1098,7 @@ const KNOWN_BROWSERS: [KnownBrowser; 14] = {
             kind: Gecko,
         },
         KnownBrowser {
+            key: Key::Waterfox,
             name: "Waterfox",
             icon: "waterfox",
             programs: &["waterfox"],
@@ -1099,6 +1106,7 @@ const KNOWN_BROWSERS: [KnownBrowser; 14] = {
             kind: Gecko,
         },
         KnownBrowser {
+            key: Key::Chrome,
             name: "Google Chrome",
             icon: "google-chrome",
             programs: &["google-chrome-stable", "google-chrome"],
@@ -1106,6 +1114,7 @@ const KNOWN_BROWSERS: [KnownBrowser; 14] = {
             kind: Chromium,
         },
         KnownBrowser {
+            key: Key::ChromeBeta,
             name: "Google Chrome Beta",
             icon: "google-chrome-beta",
             programs: &["google-chrome-beta"],
@@ -1113,6 +1122,7 @@ const KNOWN_BROWSERS: [KnownBrowser; 14] = {
             kind: Chromium,
         },
         KnownBrowser {
+            key: Key::ChromeDev,
             name: "Google Chrome Dev",
             icon: "google-chrome-unstable",
             programs: &["google-chrome-unstable"],
@@ -1120,6 +1130,7 @@ const KNOWN_BROWSERS: [KnownBrowser; 14] = {
             kind: Chromium,
         },
         KnownBrowser {
+            key: Key::Chromium,
             name: "Chromium",
             icon: "chromium",
             programs: &["chromium", "chromium-browser"],
@@ -1127,6 +1138,7 @@ const KNOWN_BROWSERS: [KnownBrowser; 14] = {
             kind: Chromium,
         },
         KnownBrowser {
+            key: Key::Brave,
             name: "Brave",
             icon: "brave-browser",
             programs: &["brave", "brave-browser"],
@@ -1134,6 +1146,7 @@ const KNOWN_BROWSERS: [KnownBrowser; 14] = {
             kind: Chromium,
         },
         KnownBrowser {
+            key: Key::Edge,
             name: "Microsoft Edge",
             icon: "microsoft-edge",
             programs: &["microsoft-edge-stable", "microsoft-edge"],
@@ -1141,6 +1154,7 @@ const KNOWN_BROWSERS: [KnownBrowser; 14] = {
             kind: Chromium,
         },
         KnownBrowser {
+            key: Key::Vivaldi,
             name: "Vivaldi",
             icon: "vivaldi",
             programs: &["vivaldi-stable", "vivaldi"],
@@ -1148,6 +1162,7 @@ const KNOWN_BROWSERS: [KnownBrowser; 14] = {
             kind: Chromium,
         },
         KnownBrowser {
+            key: Key::Opera,
             name: "Opera",
             icon: "opera",
             programs: &["opera"],
@@ -1155,6 +1170,7 @@ const KNOWN_BROWSERS: [KnownBrowser; 14] = {
             kind: Chromium,
         },
         KnownBrowser {
+            key: Key::Thorium,
             name: "Thorium",
             icon: "thorium-browser",
             programs: &["thorium-browser", "thorium"],
@@ -1164,7 +1180,7 @@ const KNOWN_BROWSERS: [KnownBrowser; 14] = {
     ]
 };
 
-fn find_program(programs: &[&str], path: &OsStr) -> Option<PathBuf> {
+pub fn find_program(programs: &[&str], path: &OsStr) -> Option<PathBuf> {
     std::env::split_paths(path).find_map(|dir| {
         programs
             .iter()
@@ -1259,6 +1275,160 @@ pub fn profile_favicon_databases(id: &str, home: &Path, config: &Path) -> Vec<(P
         .collect()
 }
 
+fn known_browser(browser: crate::BookmarkBrowser) -> Option<&'static KnownBrowser> {
+    KNOWN_BROWSERS.iter().find(|known| known.key == browser)
+}
+
+/// The display name and icon of `browser`, and whether it is a Firefox-style
+/// browser.
+pub fn browser_details(
+    browser: crate::BookmarkBrowser,
+) -> Option<(&'static str, &'static str, bool)> {
+    known_browser(browser).map(|known| (known.name, known.icon, known.kind == ManifestKind::Gecko))
+}
+
+/// The window app IDs `browser` may use: its icon and program names.
+pub fn browser_window_apps(browser: crate::BookmarkBrowser) -> Vec<String> {
+    let Some(known) = known_browser(browser) else {
+        return Vec::new();
+    };
+    let mut apps = vec![known.icon.to_string()];
+    for program in known.programs {
+        if !apps.iter().any(|app| app == program) {
+            apps.push(program.to_string());
+        }
+    }
+    apps
+}
+
+/// The executable of `browser` found on `path`.
+pub fn browser_program(browser: crate::BookmarkBrowser, path: &OsStr) -> Option<PathBuf> {
+    find_program(known_browser(browser)?.programs, path)
+}
+
+/// A browser profile that has bookmarks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrowserProfile {
+    pub browser: crate::BookmarkBrowser,
+    pub dir: PathBuf,
+    /// The name the browser shows for it, else the directory name.
+    pub name: String,
+}
+
+/// The profiles with bookmarks of `browser`, or of every supported browser.
+pub fn bookmark_profiles(
+    browser: Option<crate::BookmarkBrowser>,
+    home: &Path,
+    config: &Path,
+) -> Vec<BrowserProfile> {
+    let mut profiles: Vec<BrowserProfile> = Vec::new();
+    for known in KNOWN_BROWSERS
+        .iter()
+        .filter(|known| browser.is_none_or(|browser| known.key == browser))
+    {
+        let file = match known.kind {
+            ManifestKind::Gecko => "places.sqlite",
+            ManifestKind::Chromium => "Bookmarks",
+        };
+        let mut found: Vec<BrowserProfile> = Vec::new();
+        for root in known.roots.iter().map(|root| match root {
+            ProfileRoot::Home(dir) => home.join(dir),
+            ProfileRoot::Config(dir) => config.join(dir),
+        }) {
+            let names = match known.kind {
+                ManifestKind::Gecko => gecko_profile_names(&root),
+                ManifestKind::Chromium => chromium_profile_names(&root),
+            };
+            let entries = fs::read_dir(&root)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|entry| entry.path());
+            // Opera keeps its only profile in the root itself.
+            let own = (known.kind == ManifestKind::Chromium).then(|| root.clone());
+            for dir in own.into_iter().chain(entries) {
+                if !dir.join(file).is_file() || found.iter().any(|profile| profile.dir == dir) {
+                    continue;
+                }
+                let dir_name = dir
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let name = names
+                    .iter()
+                    .find(|(path, _)| *path == dir)
+                    .map(|(_, name)| name.clone())
+                    .unwrap_or(dir_name);
+                found.push(BrowserProfile {
+                    browser: known.key,
+                    dir,
+                    name,
+                });
+            }
+        }
+        found.sort_by(|a, b| a.name.cmp(&b.name));
+        profiles.extend(found);
+    }
+    profiles
+}
+
+/// Profile directories and names from Firefox's `profiles.ini`.
+fn gecko_profile_names(root: &Path) -> Vec<(PathBuf, String)> {
+    let Ok(ini) = fs::read_to_string(root.join("profiles.ini")) else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    let mut section: (Option<String>, Option<String>, bool) = (None, None, true);
+    let mut flush = |section: &mut (Option<String>, Option<String>, bool)| {
+        if let (Some(name), Some(path)) = (section.0.take(), section.1.take()) {
+            let dir = if section.2 {
+                root.join(path)
+            } else {
+                PathBuf::from(path)
+            };
+            names.push((dir, name));
+        }
+        section.2 = true;
+    };
+    for line in ini.lines().map(str::trim) {
+        if line.starts_with('[') {
+            flush(&mut section);
+        } else if let Some((key, value)) = line.split_once('=') {
+            match key.trim() {
+                "Name" => section.0 = Some(value.trim().to_string()),
+                "Path" => section.1 = Some(value.trim().to_string()),
+                "IsRelative" => section.2 = value.trim() != "0",
+                _ => {}
+            }
+        }
+    }
+    flush(&mut section);
+    names
+}
+
+/// Profile directories and names from a Chromium browser's `Local State`.
+fn chromium_profile_names(root: &Path) -> Vec<(PathBuf, String)> {
+    let Ok(text) = fs::read_to_string(root.join("Local State")) else {
+        return Vec::new();
+    };
+    let Ok(state) = serde_json::from_str::<Value>(&text) else {
+        return Vec::new();
+    };
+    let Some(cache) = state
+        .pointer("/profile/info_cache")
+        .and_then(Value::as_object)
+    else {
+        return Vec::new();
+    };
+    cache
+        .iter()
+        .filter_map(|(dir, info)| {
+            let name = info.get("name")?.as_str()?;
+            Some((root.join(dir), name.to_string()))
+        })
+        .collect()
+}
+
 /// Write the manifests for this Raffi binary, as `--install-browser-host`
 /// does, and describe the result in one line.
 pub fn install_current(force: bool) -> std::result::Result<String, String> {
@@ -1350,6 +1520,34 @@ pub fn manifest_command(uninstall: bool, force: bool) -> Result<()> {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn test_every_bookmark_browser_is_one_known_browser() {
+        let names = [
+            "firefox",
+            "librewolf",
+            "zen",
+            "floorp",
+            "waterfox",
+            "chrome",
+            "chrome-beta",
+            "chrome-dev",
+            "chromium",
+            "brave",
+            "edge",
+            "vivaldi",
+            "opera",
+            "thorium",
+        ];
+        let keys: std::collections::HashSet<_> =
+            KNOWN_BROWSERS.iter().map(|known| known.key).collect();
+        assert_eq!(keys.len(), KNOWN_BROWSERS.len());
+        assert_eq!(names.len(), KNOWN_BROWSERS.len());
+        for name in names {
+            let browser: crate::BookmarkBrowser = serde_yaml::from_str(name).unwrap();
+            assert!(keys.contains(&browser), "{name}");
+        }
+    }
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir(name: &str) -> PathBuf {

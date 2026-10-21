@@ -168,6 +168,11 @@ Native-only addons are configured under `addons` and activated from the search b
 - Emoji picker:
   - loads cached emoji data or downloads it into the cache directory
   - supports primary and secondary actions such as copy or insert
+- Bookmarks (`bookmarks.rs`, `bookmarks_mode.rs`):
+  - read Chromium `Bookmarks` JSON and a private copy of Firefox
+    `places.sqlite` (with its WAL) once per entry, off the UI thread
+  - the folder path is part of the query; rows are rebuilt from the cached
+    tree only when the path or the source view changes
 
 The design pattern is consistent across addons:
 

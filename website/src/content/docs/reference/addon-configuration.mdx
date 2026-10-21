@@ -1077,6 +1077,61 @@ addons:
     favicon_service: none
 ```
 
+## Bookmarks
+
+Lists the bookmarks of your Firefox and Chromium browser profiles, with
+their folders, and opens or copies the one you pick. See
+[Bookmarks](../../features/bookmarks/) for usage.
+
+### Configuration
+
+**`addons.bookmarks.enabled`** `boolean` (default: `true`)
+
+**`addons.bookmarks.trigger`** `string` (default: `bm`)
+
+Keyword that opens the list. Type it followed by a space.
+
+**`addons.bookmarks.close_on_action`** `boolean` (default: `general.close_on_action`)
+
+Whether Raffi closes after opening or copying a bookmark.
+
+**`addons.bookmarks.open_with`** `browser | list of strings` (default: unset)
+
+What opens the links of every source that has no `open_with` of its own: a
+browser (`firefox`, `librewolf`, `zen`, `floorp`, `waterfox`, `chrome`,
+`chrome-beta`, `chrome-dev`, `chromium`, `brave`, `edge`, `vivaldi`, `opera`,
+`thorium`) or a command whose `{url}` arguments are replaced by the link.
+Unset, each bookmark opens in the browser and profile it comes from, or with
+`xdg-open` when that browser's program is not found.
+
+**`addons.bookmarks.sources`** `list` (default: every profile found)
+
+The bookmarks to read. Listing sources turns off the detection. Each source
+takes:
+
+- `browser`: read every profile of this browser. With `path`, only picks the
+  browser whose profile opens the links.
+- `profile`: the profile to read, by name or directory.
+- `path`: a Chromium `Bookmarks` file, a Firefox `places.sqlite`, or the
+  profile directory holding one. `~` and environment variables are expanded.
+- `folder`: only list this folder, such as `Bookmarks Toolbar/Work`.
+- `name`: the label of the source in the list and the Ctrl+Tab footer.
+- `open_with`: as above, for this source only.
+
+### Example
+
+```yaml
+addons:
+  bookmarks:
+    trigger: "b"
+    sources:
+      - browser: firefox
+        folder: Bookmarks Toolbar
+      - browser: brave
+        profile: Work
+        open_with: ["qutebrowser", "{url}"]
+```
+
 ## Media Controls
 
 Plays, pauses, skips or stops the running media players through `playerctl`.
@@ -1478,6 +1533,10 @@ addons:
     enabled: true
     trigger: "tabs"
     favicon_service: twenty
+
+  bookmarks:
+    enabled: true
+    trigger: "bm"
 
   media:
     enabled: true

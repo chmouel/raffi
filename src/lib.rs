@@ -799,6 +799,102 @@ impl Default for BrowserTabsAddonConfig {
     }
 }
 
+/// A browser the bookmarks addon reads from or opens links with
+#[derive(Deserialize, JsonSchema, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum BookmarkBrowser {
+    Firefox,
+    Librewolf,
+    Zen,
+    Floorp,
+    Waterfox,
+    Chrome,
+    ChromeBeta,
+    ChromeDev,
+    Chromium,
+    Brave,
+    Edge,
+    Vivaldi,
+    Opera,
+    Thorium,
+}
+
+/// What opens a bookmark: a browser name, or a command whose `{url}`
+/// arguments are replaced by the link
+#[derive(Deserialize, JsonSchema, Debug, Clone, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum BookmarkOpener {
+    Browser(BookmarkBrowser),
+    Command(Vec<String>),
+}
+
+/// One place bookmarks are read from
+#[derive(Deserialize, JsonSchema, Debug, Clone, Default, PartialEq, Eq)]
+#[schemars(deny_unknown_fields)]
+pub struct BookmarkSourceConfig {
+    /// Browser whose profiles hold the bookmarks. Optional with `path`,
+    /// where it only picks the browser that opens the links.
+    #[serde(default)]
+    pub browser: Option<BookmarkBrowser>,
+    /// Profile to read, by name or directory (default: every profile).
+    #[serde(default)]
+    pub profile: Option<String>,
+    /// A bookmarks file read directly: Chromium's `Bookmarks`, Firefox's
+    /// `places.sqlite`, or the profile directory holding one.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Only list this folder, such as `Bookmarks Toolbar/Work`.
+    #[serde(default)]
+    pub folder: Option<String>,
+    /// Label of the source in the list (default: the browser and profile).
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Opens this source's bookmarks (default: `addons.bookmarks.open_with`,
+    /// else the browser and profile they come from).
+    #[serde(default)]
+    pub open_with: Option<BookmarkOpener>,
+}
+
+/// Configuration for the browser bookmarks addon (native UI only)
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
+pub struct BookmarksAddonConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Keyword that opens the bookmarks (default: `bm`).
+    #[serde(default)]
+    pub trigger: Option<String>,
+    /// Opens bookmarks of every source without its own `open_with`
+    /// (default: the browser and profile they come from).
+    #[serde(default)]
+    pub open_with: Option<BookmarkOpener>,
+    /// Where bookmarks come from (default: every profile of every supported
+    /// browser found).
+    #[serde(default)]
+    pub sources: Option<Vec<BookmarkSourceConfig>>,
+    /// Close Raffi after opening a bookmark (default: `general.close_on_action`, else true).
+    #[serde(default)]
+    pub close_on_action: Option<bool>,
+}
+
+impl BookmarksAddonConfig {
+    pub fn trigger(&self) -> &str {
+        self.trigger.as_deref().unwrap_or("bm")
+    }
+}
+
+impl Default for BookmarksAddonConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            trigger: None,
+            open_with: None,
+            sources: None,
+            close_on_action: None,
+        }
+    }
+}
+
 /// Configuration for the media controls addon
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
@@ -1258,6 +1354,8 @@ pub struct AddonsConfig {
     #[serde(default)]
     pub browser_tabs: BrowserTabsAddonConfig,
     #[serde(default)]
+    pub bookmarks: BookmarksAddonConfig,
+    #[serde(default)]
     pub media: MediaAddonConfig,
     #[serde(default)]
     pub audio: AudioAddonConfig,
@@ -1463,7 +1561,7 @@ pub struct GeneralConfig {
     pub fallbacks: Vec<String>,
     /// Sources mixed into the main view, in display order, when typing without
     /// an addon trigger. Entries: `launchers`, `browser_tabs`,
-    /// `windows`, `system`, `media`, `audio`, `bluetooth`, `pass`,
+    /// `bookmarks`, `windows`, `system`, `media`, `audio`, `bluetooth`, `pass`,
     /// `text_snippets.<name>` and `script_filters.<name>`. When set, launchers
     /// only show if `launchers` is listed.
     #[serde(default)]
@@ -1505,6 +1603,7 @@ const FIRST_RUN_MAIN_VIEW: &[&str] = &[
     "launchers",
     "windows",
     "browser_tabs",
+    "bookmarks",
     "system",
     "media",
     "audio",
@@ -2729,6 +2828,18 @@ fn process_config(config: Config, args: &Args) -> Result<ParsedConfig> {
         sf.icon = sf.icon.as_ref().map(|s| expand_config_value(s));
         sf.action = sf.action.as_ref().map(|s| expand_config_value(s));
         sf.secondary_action = sf.secondary_action.as_ref().map(|s| expand_config_value(s));
+    }
+    let bm = &mut addons.bookmarks;
+    for source in bm.sources.iter_mut().flatten() {
+        source.path = source.path.as_ref().map(|s| expand_config_value(s));
+        if let Some(BookmarkOpener::Command(argv)) = &mut source.open_with {
+            argv.iter_mut()
+                .for_each(|arg| *arg = expand_config_value(arg));
+        }
+    }
+    if let Some(BookmarkOpener::Command(argv)) = &mut bm.open_with {
+        argv.iter_mut()
+            .for_each(|arg| *arg = expand_config_value(arg));
     }
     for ws in &mut addons.web_searches {
         ws.url = expand_config_value(&ws.url);
@@ -5660,6 +5771,36 @@ shell:
             serde_yaml::from_str("trigger: snd\nclose_on_action: true\n").unwrap();
         assert_eq!(config.trigger(), "snd");
         assert!(config.close_on_action(None));
+    }
+
+    #[test]
+    fn test_bookmarks_addon_config_parsing() {
+        let defaults = AddonsConfig::default().bookmarks;
+        assert!(defaults.enabled);
+        assert_eq!(defaults.trigger(), "bm");
+        assert!(defaults.sources.is_none());
+
+        let config: BookmarksAddonConfig = serde_yaml::from_str(
+            "trigger: bk\nopen_with: brave\nsources:\n  - browser: firefox\n    profile: default-release\n    folder: Bookmarks Toolbar/Work\n    open_with: [qutebrowser, \"{url}\"]\n  - path: ~/Bookmarks\n",
+        )
+        .unwrap();
+        assert_eq!(config.trigger(), "bk");
+        assert_eq!(
+            config.open_with,
+            Some(BookmarkOpener::Browser(BookmarkBrowser::Brave))
+        );
+        let sources = config.sources.unwrap();
+        assert_eq!(sources[0].browser, Some(BookmarkBrowser::Firefox));
+        assert_eq!(sources[0].folder.as_deref(), Some("Bookmarks Toolbar/Work"));
+        assert_eq!(
+            sources[0].open_with,
+            Some(BookmarkOpener::Command(vec![
+                "qutebrowser".into(),
+                "{url}".into()
+            ]))
+        );
+        assert_eq!(sources[1].path.as_deref(), Some("~/Bookmarks"));
+        assert!(serde_yaml::from_str::<BookmarksAddonConfig>("open_with: netscape\n").is_err());
     }
 
     #[test]

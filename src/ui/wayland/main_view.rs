@@ -97,6 +97,7 @@ pub(super) fn resolve(entries: &[String], addons: &AddonsConfig) -> Vec<Entry> {
             "system" => list(addons.system.enabled, CommandListAddon::System),
             "windows" => list(addons.windows.enabled, CommandListAddon::Windows),
             "browser_tabs" => list(addons.browser_tabs.enabled, CommandListAddon::BrowserTabs),
+            "bookmarks" => list(addons.bookmarks.enabled, CommandListAddon::Bookmarks),
             "media" => list(addons.media.enabled, CommandListAddon::Media),
             "audio" => list(addons.audio.enabled, CommandListAddon::Audio),
             "bluetooth" => list(addons.bluetooth.enabled, CommandListAddon::Bluetooth),
@@ -151,6 +152,7 @@ pub(super) fn list_trigger(addon: CommandListAddon, addons: &AddonsConfig) -> Op
         CommandListAddon::System => addons.system.trigger(),
         CommandListAddon::Windows => addons.windows.trigger(),
         CommandListAddon::BrowserTabs => addons.browser_tabs.trigger(),
+        CommandListAddon::Bookmarks => addons.bookmarks.trigger(),
         CommandListAddon::Media => addons.media.trigger(),
         CommandListAddon::Audio => addons.audio.trigger(),
         CommandListAddon::Bluetooth => addons.bluetooth.trigger(),
@@ -168,6 +170,7 @@ pub(super) fn recent_list_name(addon: CommandListAddon) -> Option<&'static str> 
     match addon {
         CommandListAddon::Windows => Some("windows"),
         CommandListAddon::BrowserTabs => Some("browser_tabs"),
+        CommandListAddon::Bookmarks => Some("bookmarks"),
         CommandListAddon::Pass => Some("pass"),
         _ => None,
     }
@@ -647,6 +650,7 @@ const CHIP_LABEL_MAX: usize = 12;
 pub(super) fn chip_label(keyword: &str, addons: &AddonsConfig) -> String {
     let builtin = [
         (addons.browser_tabs.trigger(), "Tabs"),
+        (addons.bookmarks.trigger(), "Bookmarks"),
         (addons.windows.trigger(), "Windows"),
         (addons.system.trigger(), "System"),
         (addons.media.trigger(), "Media"),
@@ -725,6 +729,13 @@ pub(super) fn short_label(name: &str, max: usize) -> String {
 }
 
 impl LauncherApp {
+    pub(super) fn main_view_lists(&self, addon: CommandListAddon) -> bool {
+        self.main_view
+            .sources
+            .iter()
+            .any(|source| matches!(source, Source::List(list) if list.addon == Some(addon)))
+    }
+
     /// Set up `general.main_view` and start loading its addons.
     pub(super) fn configure_main_view(&mut self, entries: Option<&[String]>) -> Task<Message> {
         let Some(entries) = entries else {
@@ -973,6 +984,19 @@ impl LauncherApp {
                 let close_keep_open = self.addons.browser_tabs.close_on_action != Some(true);
                 Box::new(move || super::browser_tabs::load_tabs(focus_keep_open, close_keep_open))
             }
+            CommandListAddon::Bookmarks => {
+                let config = self.addons.bookmarks.clone();
+                let options = self.bookmark_options();
+                let searches = self.bookmark_searches.clone();
+                Box::new(move || {
+                    let mut library = super::bookmarks::load(&config);
+                    library.icons = super::bookmarks::lookup_icons(&library);
+                    if let Ok(mut index) = searches.lock() {
+                        *index = super::bookmarks::SearchIndex::new(&library);
+                    }
+                    Ok(super::bookmarks::flat_items(&library, options))
+                })
+            }
             CommandListAddon::Media => {
                 if !exists("playerctl") {
                     return missing(self, "playerctl");
@@ -1028,7 +1052,11 @@ impl LauncherApp {
                 result.unwrap_or_else(|| Err("loading stopped unexpectedly".into())),
             )
         });
-        if addon != CommandListAddon::BrowserTabs || !fetch_favicons {
+        let has_favicons = matches!(
+            addon,
+            CommandListAddon::BrowserTabs | CommandListAddon::Bookmarks
+        );
+        if !has_favicons || !fetch_favicons {
             return load;
         }
         let session = MAIN_VIEW_SESSION | source as u64;
@@ -1597,6 +1625,7 @@ impl LauncherApp {
         match &self.main_view.sources[source] {
             Source::List(list) => match list.addon {
                 Some(CommandListAddon::BrowserTabs) => "Tabs",
+                Some(CommandListAddon::Bookmarks) => "Bookmarks",
                 Some(CommandListAddon::Windows) => "Windows",
                 Some(CommandListAddon::Pass) => "Passwords",
                 Some(addon) => addon.badge(),
@@ -1792,6 +1821,16 @@ impl LauncherApp {
         if self.view.current_modifiers.alt() {
             return Task::none();
         }
+        if let Source::List(list) = &self.main_view.sources[source] {
+            if let Some(task) = list
+                .item(row)
+                .filter(|_| list.addon == Some(CommandListAddon::Bookmarks))
+                .map(|item| item.identity.clone())
+                .and_then(|identity| self.open_main_view_bookmark_search(&identity))
+            {
+                return task;
+            }
+        }
         let snapshot = self.snapshot_main_view_context(source, row);
         let query = self.main_view.query.clone();
         match &self.main_view.sources[source] {
@@ -1817,6 +1856,7 @@ impl LauncherApp {
                     && matches!(
                         addon,
                         CommandListAddon::BrowserTabs
+                            | CommandListAddon::Bookmarks
                             | CommandListAddon::Windows
                             | CommandListAddon::System
                     );

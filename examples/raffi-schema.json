@@ -47,6 +47,9 @@
         "bluetooth": {
           "$ref": "#/$defs/BluetoothAddonConfig"
         },
+        "bookmarks": {
+          "$ref": "#/$defs/BookmarksAddonConfig"
+        },
         "browser_tabs": {
           "$ref": "#/$defs/BrowserTabsAddonConfig"
         },
@@ -258,6 +261,149 @@
         },
         "trigger": {
           "description": "Keyword that opens the Bluetooth list (default: `bt`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "BookmarkBrowser": {
+      "description": "A browser the bookmarks addon reads from or opens links with",
+      "type": "string",
+      "enum": [
+        "firefox",
+        "librewolf",
+        "zen",
+        "floorp",
+        "waterfox",
+        "chrome",
+        "chrome-beta",
+        "chrome-dev",
+        "chromium",
+        "brave",
+        "edge",
+        "vivaldi",
+        "opera",
+        "thorium"
+      ]
+    },
+    "BookmarkOpener": {
+      "description": "What opens a bookmark: a browser name, or a command whose `{url}`\narguments are replaced by the link",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BookmarkBrowser"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "BookmarkSourceConfig": {
+      "description": "One place bookmarks are read from",
+      "type": "object",
+      "properties": {
+        "browser": {
+          "description": "Browser whose profiles hold the bookmarks. Optional with `path`,\nwhere it only picks the browser that opens the links.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BookmarkBrowser"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "folder": {
+          "description": "Only list this folder, such as `Bookmarks Toolbar/Work`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "name": {
+          "description": "Label of the source in the list (default: the browser and profile).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "open_with": {
+          "description": "Opens this source's bookmarks (default: `addons.bookmarks.open_with`,\nelse the browser and profile they come from).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BookmarkOpener"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "path": {
+          "description": "A bookmarks file read directly: Chromium's `Bookmarks`, Firefox's\n`places.sqlite`, or the profile directory holding one.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "profile": {
+          "description": "Profile to read, by name or directory (default: every profile).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "BookmarksAddonConfig": {
+      "description": "Configuration for the browser bookmarks addon (native UI only)",
+      "type": "object",
+      "properties": {
+        "close_on_action": {
+          "description": "Close Raffi after opening a bookmark (default: `general.close_on_action`, else true).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "open_with": {
+          "description": "Opens bookmarks of every source without its own `open_with`\n(default: the browser and profile they come from).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BookmarkOpener"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sources": {
+          "description": "Where bookmarks come from (default: every profile of every supported\nbrowser found).",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/BookmarkSourceConfig"
+          }
+        },
+        "trigger": {
+          "description": "Keyword that opens the bookmarks (default: `bm`).",
           "type": [
             "string",
             "null"
@@ -768,7 +914,7 @@
           "default": null
         },
         "main_view": {
-          "description": "Sources mixed into the main view, in display order, when typing without\nan addon trigger. Entries: `launchers`, `browser_tabs`,\n`windows`, `system`, `media`, `audio`, `bluetooth`, `pass`,\n`text_snippets.<name>` and `script_filters.<name>`. When set, launchers\nonly show if `launchers` is listed.",
+          "description": "Sources mixed into the main view, in display order, when typing without\nan addon trigger. Entries: `launchers`, `browser_tabs`,\n`bookmarks`, `windows`, `system`, `media`, `audio`, `bluetooth`, `pass`,\n`text_snippets.<name>` and `script_filters.<name>`. When set, launchers\nonly show if `launchers` is listed.",
           "type": [
             "array",
             "null"

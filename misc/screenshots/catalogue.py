@@ -129,6 +129,8 @@ SHOTS = [
     Shot("file-browser-rich-preview", "~/Documents/preview.py", height=720),
     Shot("file-browser-pdf", "~/Documents/keyboard-first.pdf", height=720),
     Shot("browser-tabs", "tabs ", height=720, needs=frozenset({"browser"})),
+    Shot("bookmarks", "bm Firefox/Bookmarks Toolbar/", down(2), height=720),
+    Shot("bookmarks-search", "bm nixsearch mkShell"),
     # Older batch, 960x560 with fallbacks.
     Shot("calculator", "(2 + 3) * 64", classic=True),
     Shot("currency-converter", "$100", classic=True, settle=5,

@@ -2016,6 +2016,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "sys",
             "win",
             "tabs",
+            "bm",
             "media",
             "audio",
             "kill",
@@ -2066,7 +2067,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
     assert_eq!(entries[1].icon.as_deref(), Some("gist-icon"));
     assert_eq!(entries[1].completion.as_deref(), Some("gist "));
     assert_eq!(entries[0].completion.as_deref(), Some("~/"));
-    assert_eq!(entries[16].completion, None);
+    assert_eq!(entries[17].completion, None);
     // Shortcut rows are informational: they never arm a keyword.
     for entry in entries
         .iter()
@@ -2086,6 +2087,7 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
     addons.system.enabled = false;
     addons.windows.enabled = false;
     addons.browser_tabs.enabled = false;
+    addons.bookmarks.enabled = false;
     addons.media.enabled = false;
     addons.audio.enabled = false;
     addons.kill.enabled = false;
@@ -2154,6 +2156,7 @@ fn test_help_entries_skip_disabled_addons() {
     addons.system.enabled = false;
     addons.windows.enabled = false;
     addons.browser_tabs.enabled = false;
+    addons.bookmarks.enabled = false;
     addons.media.enabled = false;
     addons.audio.enabled = false;
     addons.kill.enabled = false;
@@ -9482,4 +9485,244 @@ fn test_slack_mrkdwn_parsing_and_chat_preview_header() {
             "https://acme.slack.com/archives/C1/p10?thread_ts=1.0&cid=C1".to_string(),
         ]
     );
+}
+
+fn bookmarks_app(query: &str) -> LauncherApp {
+    let mut app = test_app(AddonsConfig::default());
+    app.history.max_items = 0;
+    let task = app.update(Message::SearchChanged(query.into()));
+    assert!(task.units() > 0, "the bookmarks load");
+    assert_eq!(app.command_list.status(), Some("Loading bookmarks..."));
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::BookmarksLoaded(
+        generation,
+        Some(Arc::new(super::bookmarks::fixture_library())),
+    ));
+    app
+}
+
+#[test]
+fn test_route_query_bookmarks_trigger() {
+    let mut addons = AddonsConfig::default();
+    assert_eq!(
+        route_query("bm Firefox/Work/ru", &addons),
+        QueryMode::CommandList {
+            addon: CommandListAddon::Bookmarks,
+            query: "Firefox/Work/ru".into()
+        }
+    );
+    assert!(suggested_keywords("bookmarks", &addons).contains(&"bm".to_string()));
+
+    addons.bookmarks.enabled = false;
+    assert_eq!(route_query("bm rust", &addons), QueryMode::Standard);
+}
+
+#[test]
+fn test_bookmarks_enter_and_tab_open_folders_and_backspace_goes_up() {
+    let mut app = bookmarks_app("bm ");
+    assert_eq!(command_list_titles(&app), ["Firefox", "Brave"]);
+
+    let _ = app.update(Message::CommandListSelected(0));
+    assert_eq!(app.search_query, "bm Firefox/");
+    assert_eq!(
+        command_list_titles(&app),
+        ["Bookmarks Toolbar", "Other Bookmarks"]
+    );
+
+    app.selected_index = app.command_list_offset();
+    let _ = app.update(Message::TabComplete);
+    assert_eq!(app.search_query, "bm Firefox/Bookmarks Toolbar/");
+    assert_eq!(command_list_titles(&app), ["Work", "Mail"]);
+
+    // Backspace on the trailing `/` goes up and selects the folder left.
+    let _ = app.update(Message::SearchChanged(
+        "bm Firefox/Bookmarks Toolbar".into(),
+    ));
+    assert_eq!(app.search_query, "bm Firefox/");
+    assert_eq!(app.selected_index, app.command_list_offset());
+
+    let _ = app.update(Message::CommandListSelected(1));
+    assert_eq!(app.search_query, "bm Firefox/Other Bookmarks/");
+    let _ = app.update(Message::SearchChanged("bm Firefox/Other Bookmarks".into()));
+    assert_eq!(app.search_query, "bm Firefox/");
+    assert_eq!(app.selected_index, app.command_list_offset() + 1);
+
+    // A filter after the path searches below it; Enter opens the link.
+    let _ = app.update(Message::SearchChanged("bm firefox/rust docs".into()));
+    assert_eq!(command_list_titles(&app), ["Rust docs"]);
+    let _ = app.update(Message::CommandListSelected(0));
+    assert!(matches!(
+        deferred_action(&app),
+        Some(DeferredAction::Command(argv)) if argv == ["firefox", "https://doc.rust-lang.org/std/"]
+    ));
+}
+
+#[test]
+fn test_bookmarks_ctrl_tab_shows_each_source() {
+    let mut app = bookmarks_app("bm Firefox/");
+    assert_eq!(app.cycle_view_label().as_deref(), Some("All bookmarks"));
+
+    let _ = app.update(Message::CycleView(false));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Firefox"));
+    assert_eq!(app.search_query, "bm ");
+    assert_eq!(
+        command_list_titles(&app),
+        ["Bookmarks Toolbar", "Other Bookmarks"]
+    );
+
+    let _ = app.update(Message::CycleView(false));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Brave"));
+    assert_eq!(command_list_titles(&app), ["Bookmarks bar"]);
+
+    let _ = app.update(Message::CycleView(false));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("All bookmarks"));
+    assert_eq!(command_list_titles(&app), ["Firefox", "Brave"]);
+}
+
+#[test]
+fn test_bookmarks_search_prompt_asks_for_the_term() {
+    let mut app = bookmarks_app("bm nix code");
+    assert_eq!(command_list_titles(&app), ["Nix code search"]);
+    let row = &app.command_list.items[app.command_list.filtered[0]];
+    assert_eq!(row.badge.as_deref(), Some("Search"));
+
+    // Ctrl+Enter on the list row copies the link as saved.
+    app.view.current_modifiers = iced::keyboard::Modifiers::CTRL;
+    let _ = app.update(Message::CommandListSelected(0));
+    assert!(matches!(
+        deferred_action(&app),
+        Some(DeferredAction::Copy(url)) if url == "https://github.com/search?q=%22%s%22+path%3A*.nix"
+    ));
+    app.view.current_modifiers = iced::keyboard::Modifiers::empty();
+    *app.deferred_action.lock().unwrap() = None;
+    let finish = |app: &mut LauncherApp| {
+        let name = CommandListAddon::Bookmarks.name();
+        app.in_flight
+            .finish(name, "bookmark:firefox:abc.default:o2");
+    };
+    finish(&mut app);
+
+    let _ = app.update(Message::CommandListSelected(0));
+    assert!(app.bookmarks.prompt.is_some());
+    assert_eq!(app.cycle_view_label(), None, "Ctrl+Tab does nothing here");
+    assert_eq!(
+        command_list_titles(&app),
+        ["Type what to search Nix code search for"]
+    );
+    // Enter without a term does nothing.
+    let _ = app.update(Message::Submit);
+    assert!(deferred_action(&app).is_none());
+    assert!(app.bookmarks.prompt.is_some());
+
+    let _ = app.update(Message::SearchChanged("mk shell".into()));
+    assert_eq!(
+        command_list_titles(&app),
+        ["Search Nix code search for 'mk shell'"]
+    );
+    let url = "https://github.com/search?q=%22mk%20shell%22+path%3A*.nix";
+    app.view.current_modifiers = iced::keyboard::Modifiers::CTRL;
+    let _ = app.update(Message::Submit);
+    assert!(matches!(deferred_action(&app), Some(DeferredAction::Copy(copied)) if copied == url));
+    app.view.current_modifiers = iced::keyboard::Modifiers::empty();
+    finish(&mut app);
+    let _ = app.update(Message::Submit);
+    assert!(matches!(
+        deferred_action(&app),
+        Some(DeferredAction::Command(argv)) if argv == ["firefox", url]
+    ));
+}
+
+#[test]
+fn test_bookmarks_search_prompt_leaves_on_escape_and_backspace() {
+    let mut app = bookmarks_app("bm Firefox/Other Bookmarks/");
+    assert_eq!(command_list_titles(&app), ["Recipes", "Nix code search"]);
+    let _ = app.update(Message::CommandListSelected(1));
+    let _ = app.update(Message::SearchChanged("x".into()));
+    let _ = app.update(Message::Cancel);
+    assert!(app.bookmarks.prompt.is_none());
+    assert_eq!(app.search_query, "bm Firefox/Other Bookmarks/");
+    assert_eq!(app.selected_index, app.command_list_offset() + 1);
+
+    let _ = app.update(Message::TabComplete);
+    let _ = app.update(Message::SearchChanged("x".into()));
+    let _ = app.update(Message::SearchChanged(String::new()));
+    assert!(app.bookmarks.prompt.is_some(), "an emptied term still asks");
+    let _ = app.update(Message::SearchChanged(String::new()));
+    assert!(app.bookmarks.prompt.is_none());
+    assert_eq!(app.search_query, "bm Firefox/Other Bookmarks/");
+    assert_eq!(app.selected_index, app.command_list_offset() + 1);
+}
+
+#[test]
+fn test_bookmarks_keyword_opens_the_search_prompt() {
+    let mut app = bookmarks_app("bm ");
+    let _ = app.update(Message::SearchChanged("bm nixsearch flake".into()));
+    let prompt = app.bookmarks.prompt.as_ref().expect("the prompt");
+    assert_eq!(prompt.term, "flake");
+    assert_eq!(
+        command_list_titles(&app),
+        ["Search Nix code search for 'flake'"]
+    );
+    let _ = app.update(Message::Cancel);
+    assert_eq!(app.search_query, "bm nixsearch");
+    assert_eq!(command_list_titles(&app), ["Nix code search"]);
+
+    // Typed before the bookmarks loaded: the keyword is known once they do.
+    let app = bookmarks_app("bm nixsearch flake");
+    assert_eq!(app.bookmarks.prompt.as_ref().unwrap().term, "flake");
+}
+
+#[test]
+fn test_main_view_bookmark_keyword_opens_the_search_prompt() {
+    let mut app = main_view_app(&["bookmarks"], Vec::new(), AddonsConfig::default());
+    let library = super::bookmarks::fixture_library();
+    let mut index = super::bookmarks::SearchIndex::new(&library);
+    let _ = app.update(Message::SearchChanged("nixsearch".into()));
+    assert!(app.bookmarks.prompt.is_none());
+    *app.bookmark_searches.lock().unwrap() = std::mem::take(&mut index);
+
+    let _ = app.update(Message::SearchChanged("nixsearch nixpkgs".into()));
+    assert_eq!(app.bookmarks.prompt.as_ref().unwrap().term, "nixpkgs");
+    let _ = app.update(Message::Submit);
+    assert!(matches!(
+        deferred_action(&app),
+        Some(DeferredAction::Command(argv))
+            if argv == ["firefox", "https://github.com/search?q=%22nixpkgs%22+path%3A*.nix"]
+    ));
+
+    // An addon trigger wins over a keyword of the same name.
+    let mut app = main_view_app(&["bookmarks"], Vec::new(), AddonsConfig::default());
+    let mut library = library;
+    library.sources[0].root.folders[1].bookmarks[1].keyword = Some("bm".into());
+    *app.bookmark_searches.lock().unwrap() = super::bookmarks::SearchIndex::new(&library);
+    let _ = app.update(Message::SearchChanged("bm nix".into()));
+    assert!(app.bookmarks.prompt.is_none());
+}
+
+#[test]
+fn test_main_view_lists_bookmarks_and_opens_them() {
+    let mut app = main_view_app(&["bookmarks"], Vec::new(), AddonsConfig::default());
+    let super::main_view::Source::List(list) = &app.main_view.sources[0] else {
+        panic!("command list source");
+    };
+    let generation = list.generation;
+    let options = app.bookmark_options();
+    let _ = app.update(Message::MainViewLoaded(
+        0,
+        generation,
+        Ok(super::bookmarks::flat_items(
+            &super::bookmarks::fixture_library(),
+            options,
+        )),
+    ));
+    let _ = app.update(Message::SearchChanged("work".into()));
+    assert_eq!(main_view_titles(&app), ["Raffi", "Rust docs"]);
+
+    let _ = app.update(Message::SearchChanged("raffi".into()));
+    assert_eq!(main_view_titles(&app), ["Raffi"]);
+    let _ = app.update(Message::Submit);
+    assert!(matches!(
+        deferred_action(&app),
+        Some(DeferredAction::Command(argv)) if argv == ["firefox", "https://github.com/chmouel/raffi"]
+    ));
 }

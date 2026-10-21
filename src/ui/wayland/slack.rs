@@ -783,7 +783,7 @@ const SLACK_START_WAIT: std::time::Duration = std::time::Duration::from_secs(10)
 fn open_url(url: &str) -> Result<(), String> {
     DeferredAction::Command(vec!["xdg-open".to_string(), url.to_string()]).run()?;
     if url.starts_with("slack://") {
-        if let Err(error) = super::windows::raise_app_window("slack", SLACK_START_WAIT) {
+        if let Err(error) = super::windows::raise_app_window(&["slack"], SLACK_START_WAIT) {
             crate::debug_log!("slack: cannot focus the Slack window: {error}");
         }
     }

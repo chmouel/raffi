@@ -275,21 +275,51 @@ pub(super) fn lookup(browsers: &[(PathBuf, Listing)]) -> HashMap<String, PathBuf
     icons
 }
 
+/// Hosts and the favicon databases to look them up in, `true` marking
+/// Firefox-style ones.
+pub(super) type SiteGroup = (BTreeSet<String>, Vec<(PathBuf, bool)>);
+
+/// Like [`lookup`], for the hosts of each group looked up in its databases.
+pub(super) fn lookup_sites(groups: Vec<SiteGroup>) -> HashMap<String, PathBuf> {
+    let Some(dir) = cache_dir() else {
+        return HashMap::new();
+    };
+    let (icons, missing) = resolve(&dir, groups.into_iter().map(|(hosts, dbs)| (hosts, || dbs)));
+    if let Ok(mut pending) = PENDING.lock() {
+        *pending = missing;
+    }
+    icons
+}
+
 fn lookup_in(
     dir: &Path,
     home: &Path,
     config: &Path,
     browsers: &[(PathBuf, Listing)],
 ) -> (HashMap<String, PathBuf>, Vec<String>) {
+    resolve(
+        dir,
+        browsers.iter().map(|(_, listing)| {
+            let hosts: BTreeSet<String> = listing
+                .tabs
+                .iter()
+                .filter_map(|tab| host_key(&tab.url))
+                .collect();
+            (hosts, || databases(&listing.browser, home, config))
+        }),
+    )
+}
+
+/// The icons of each group's hosts, from the cache, else from the group's
+/// databases, listed only when needed; and the named hosts found nowhere.
+fn resolve<D: FnOnce() -> Vec<(PathBuf, bool)>>(
+    dir: &Path,
+    groups: impl IntoIterator<Item = (BTreeSet<String>, D)>,
+) -> (HashMap<String, PathBuf>, Vec<String>) {
     let mut icons: HashMap<String, PathBuf> = HashMap::new();
     let mut missing: BTreeSet<String> = BTreeSet::new();
-    for (_, listing) in browsers {
+    for (hosts, databases) in groups {
         let mut unresolved: Vec<String> = Vec::new();
-        let hosts: BTreeSet<String> = listing
-            .tabs
-            .iter()
-            .filter_map(|tab| host_key(&tab.url))
-            .collect();
         for host in hosts {
             if icons.contains_key(&host) {
                 continue;
@@ -305,7 +335,7 @@ fn lookup_in(
         if unresolved.is_empty() {
             continue;
         }
-        for (database, gecko) in databases(&listing.browser, home, config) {
+        for (database, gecko) in databases() {
             let Ok(connection) = open(&database) else {
                 continue;
             };

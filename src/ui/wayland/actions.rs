@@ -11,6 +11,8 @@ use super::placeholders::MAX_VALUE;
 const CLIPBOARD_TIMEOUT: Duration = Duration::from_secs(2);
 const IMAGE_CLIPBOARD_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFERRED_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long to wait for the window of an app that a link starts.
+const APP_START_WAIT: Duration = Duration::from_secs(10);
 /// Typing a key per character is slow and each press is a command argument, so
 /// keep caret movement for `{cursor}` within a sane bound.
 const MAX_CURSOR_MOVES: usize = 1000;
@@ -270,6 +272,14 @@ pub(super) enum DeferredAction {
     },
     /// Call the Slack Web API.
     Slack(super::slack::SlackAction),
+    /// Copy this text to the clipboard.
+    Copy(String),
+    /// Run `argv`, then focus the most recent window of one of `apps`, as
+    /// when a browser opens a link in a window behind others.
+    OpenInApp {
+        argv: Vec<String>,
+        apps: Vec<String>,
+    },
 }
 
 impl DeferredAction {
@@ -295,6 +305,15 @@ impl DeferredAction {
                 raise,
             } => open_in_terminal_tab(*kind, tab, window, raise.as_ref(), DEFERRED_TIMEOUT),
             Self::Slack(action) => super::slack::run_action(action),
+            Self::Copy(text) => copy_text_checked(text),
+            Self::OpenInApp { argv, apps } => {
+                run_detached(argv, DEFERRED_TIMEOUT)?;
+                let apps: Vec<&str> = apps.iter().map(String::as_str).collect();
+                if let Err(error) = super::windows::raise_app_window(&apps, APP_START_WAIT) {
+                    crate::debug_log!("cannot focus the {apps:?} window: {error}");
+                }
+                Ok(())
+            }
         }
     }
 
@@ -311,6 +330,8 @@ impl DeferredAction {
             Self::BrowserTab(_) | Self::BrowserHostSetup { .. } => "browser tabs",
             Self::TerminalTab { .. } => "terminal",
             Self::Slack(_) => "slack",
+            Self::Copy(_) => "copy",
+            Self::OpenInApp { .. } => "open",
         }
     }
 

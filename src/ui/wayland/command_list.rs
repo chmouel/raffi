@@ -18,6 +18,7 @@ pub(super) enum CommandListAddon {
     System,
     Windows,
     BrowserTabs,
+    Bookmarks,
     Media,
     Audio,
     Kill,
@@ -35,6 +36,7 @@ impl CommandListAddon {
             Self::System => "system",
             Self::Windows => "windows",
             Self::BrowserTabs => "browser_tabs",
+            Self::Bookmarks => "bookmarks",
             Self::Media => "media",
             Self::Audio => "audio",
             Self::Kill => "kill",
@@ -51,6 +53,7 @@ impl CommandListAddon {
             Self::System => "System",
             Self::Windows => "Window",
             Self::BrowserTabs => "Tab",
+            Self::Bookmarks => "Bookmark",
             Self::Media => "Media",
             Self::Audio => "Audio",
             Self::Kill => "Process",
@@ -67,6 +70,7 @@ impl CommandListAddon {
             Self::System => "Loading...",
             Self::Windows => "Loading windows...",
             Self::BrowserTabs => "Loading browser tabs...",
+            Self::Bookmarks => "Loading bookmarks...",
             Self::Media => "Loading players...",
             Self::Audio => "Loading audio devices...",
             Self::Kill => "Loading processes...",
@@ -501,6 +505,7 @@ pub(super) fn run_kept_open(action: &DeferredAction) -> Result<(), String> {
         DeferredAction::Bluetooth(args) => super::bluetooth::run_action(args),
         DeferredAction::BrowserTab(action) => super::browser_tabs::run(action),
         DeferredAction::Slack(action) => super::slack::run_action(action),
+        DeferredAction::Copy(text) => super::actions::copy_text_checked(text),
         DeferredAction::BrowserHostSetup { force } => {
             crate::browser_host::install_current(*force).map(|_| ())
         }

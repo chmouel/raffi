@@ -56,13 +56,13 @@ version: 1
 #   main_view:               # Mix addon results into the main list; Ctrl+Tab shows one source at a time.
 #                            # An empty query shows one row of chips with each detected entry's name
 #                            # (Tabs, System, Clipboard...) above the apps; Left/Right pick one, Enter arms it.
-#                            # With no config file at all, raffi uses launchers, windows, browser_tabs, system,
-#                            # media, audio, bluetooth, pass, clipboard, bitwarden, terminal, emoji.
+#                            # With no config file at all, raffi uses launchers, windows, browser_tabs, bookmarks,
+#                            # system, media, audio, bluetooth, pass, clipboard, bitwarden, terminal, emoji.
 #     - launchers            # Keep launchers; once main_view is set they only show if listed
 #     - browser_tabs         # Typing "gmail" lists matching tabs, up to 5 per addon;
 #                            # with no query, your 5 latest addon picks are listed;
 #                            # groups with a title starting with the query come first
-#     - windows              # Also: system, media, audio, bluetooth, pass
+#     - windows              # Also: bookmarks, system, media, audio, bluetooth, pass
 #     - clipboard            # Keyword chip only, no rows: also bitwarden, terminal, emoji
 #     - text_snippets."Emails"       # A snippet source, by name
 #     - script_filters."Bookmarks"   # A script filter, run when typing pauses
@@ -365,6 +365,26 @@ addons:
   #   enabled: true
   #   trigger: tabs
   #   favicon_service: twenty
+
+  # Bookmarks (native UI only). Type "bm " to list the bookmarks of every
+  # Firefox and Chromium profile found (Firefox, LibreWolf, Zen, Chrome,
+  # Brave, Vivaldi, Edge...). Words search every folder; Enter or Tab on a
+  # folder shows it ("bm Firefox/Bookmarks Toolbar/"), Backspace after its
+  # "/" goes back up. Enter opens the link in the browser and profile it
+  # comes from, Ctrl+Enter copies it, Ctrl+Tab shows one profile at a time.
+  # Listing sources replaces the detection.
+  # bookmarks:
+  #   enabled: true
+  #   trigger: bm
+  #   open_with: brave                    # Open every source's links in Brave
+  #   sources:
+  #     - browser: firefox
+  #       profile: default-release        # Profile name or directory; default: every profile
+  #       folder: Bookmarks Toolbar/Work  # Only this folder
+  #       name: Work                      # Label in the list and the Ctrl+Tab footer
+  #       open_with: chrome               # A browser, or a command:
+  #     - path: ~/sync/Bookmarks          # A Bookmarks or places.sqlite file, or a profile directory
+  #       open_with: ["qutebrowser", "{url}"]
 
   # Media controls (needs playerctl). Type "media " to play,
   # pause, skip or stop any running media player. Raffi stays open and

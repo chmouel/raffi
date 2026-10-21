@@ -513,6 +513,16 @@ pub(crate) enum Message {
     /// Site icons were downloaded for the browser tab list of this session;
     /// `true` when any arrived.
     FaviconsFetched(u64, bool),
+    /// The bookmarks read for the command list load of this generation;
+    /// None when reading stopped unexpectedly.
+    BookmarksLoaded(u64, Option<std::sync::Arc<super::bookmarks::Library>>),
+    /// Site icons by host for the bookmarks list of this session; `true`
+    /// when missing icons should be downloaded next.
+    BookmarkIconsLoaded(
+        u64,
+        std::collections::HashMap<String, std::path::PathBuf>,
+        bool,
+    ),
     /// The preview of the page at the URL for the browser tab list of this
     /// session; None when the row was left before it was looked up.
     TabPreviewLoaded(u64, String, Option<Vec<super::preview::PreviewBody>>),

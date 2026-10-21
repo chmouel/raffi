@@ -118,12 +118,14 @@ def _firefox(home: Path, repo: Path):
     profile.mkdir(parents=True)
     (profile / "favicons.sqlite").touch()
     with sqlite3.connect(profile / "places.sqlite") as conn:
-        conn.execute("CREATE TABLE moz_places (url TEXT, rev_host TEXT, description TEXT, preview_image_url TEXT)")
-        conn.execute("INSERT INTO moz_places VALUES (?, ?, ?, ?)", (
+        conn.execute("CREATE TABLE moz_places "
+                     "(id INTEGER PRIMARY KEY, url TEXT, rev_host TEXT, description TEXT, preview_image_url TEXT)")
+        conn.execute("INSERT INTO moz_places (url, rev_host, description, preview_image_url) VALUES (?, ?, ?, ?)", (
             "https://raffi.example.com/guide", "moc.elpmaxe.iffar.",
             "Launch apps, browse files, switch tabs, and inspect results without leaving the keyboard. Demo browser data.",
             "https://raffi.example.com/logo.png",
         ))
+        _firefox_bookmarks(conn)
     # Raffi caches link previews under an FNV-1a hash of the image URL.
     image_url = "https://raffi.example.com/logo.png"
     key_hash = 0xcbf29ce484222325
@@ -134,6 +136,68 @@ def _firefox(home: Path, repo: Path):
     logo = Image.open(repo / "assets/logo.png").convert("RGBA")
     logo.thumbnail((420, 340))
     logo.save(previews / f"{key_hash:016x}.png")
+
+
+# (id, type, parent, title, guid, url): type 1 is a bookmark, 2 a folder.
+FIREFOX_BOOKMARKS = [
+    (1, 2, 0, "", "root________", None),
+    (2, 2, 1, "menu", "menu________", None),
+    (3, 2, 1, "toolbar", "toolbar_____", None),
+    (5, 2, 1, "unfiled", "unfiled_____", None),
+    (10, 2, 3, "Work", "work_folder1", None),
+    (11, 2, 3, "Reading", "read_folder1", None),
+    (12, 1, 3, "Raffi guide", "bm_guide0001", "https://raffi.example.com/guide"),
+    (13, 1, 3, "Mail", "bm_mail00001", "https://mail.example.com/inbox"),
+    (14, 1, 3, "Calendar", "bm_calendar1", "https://calendar.example.com/week"),
+    (15, 1, 10, "Pull requests", "bm_pulls0001", "https://code.example.com/pulls"),
+    (16, 1, 10, "Release checklist", "bm_release01", "https://wiki.example.com/release"),
+    (17, 1, 11, "Rust standard library", "bm_rust00001", "https://doc.rust-lang.org/std/"),
+    (18, 1, 2, "Raffi on GitHub", "bm_github001", "https://github.com/chmouel/raffi"),
+    (19, 1, 5, "Sourdough recipe", "bm_bread0001", "https://recipes.example.org/sourdough"),
+    (20, 1, 2, "Nix code search", "bm_nixsrch01", "https://github.com/search?q=%22%s%22+path%3A*.nix&type=code"),
+]
+# (keyword, bookmark id)
+FIREFOX_KEYWORDS = [("nixsearch", 20)]
+
+
+def _firefox_bookmarks(conn):
+    conn.execute("CREATE TABLE moz_bookmarks "
+                 "(id INTEGER PRIMARY KEY, type INTEGER, fk INTEGER, parent INTEGER, position INTEGER, "
+                 "title TEXT, dateAdded INTEGER, guid TEXT)")
+    added = 1789000000 * 1_000_000
+    for position, (id_, kind, parent, title, guid, url) in enumerate(FIREFOX_BOOKMARKS):
+        place = None
+        if url:
+            place = conn.execute("SELECT id FROM moz_places WHERE url = ?", (url,)).fetchone()
+            place = place[0] if place else conn.execute(
+                "INSERT INTO moz_places (url) VALUES (?)", (url,)).lastrowid
+        conn.execute("INSERT INTO moz_bookmarks VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                     (id_, kind, place, parent, position, title, added + id_ * 86_400_000_000, guid))
+    conn.execute("CREATE TABLE moz_keywords "
+                 "(id INTEGER PRIMARY KEY, keyword TEXT, place_id INTEGER, post_data TEXT)")
+    for keyword, bookmark in FIREFOX_KEYWORDS:
+        conn.execute("INSERT INTO moz_keywords (keyword, place_id) "
+                     "SELECT ?, fk FROM moz_bookmarks WHERE id = ?", (keyword, bookmark))
+
+
+def _brave(home: Path):
+    root = home / ".config/BraveSoftware/Brave-Browser"
+    profile = root / "Default"
+    profile.mkdir(parents=True)
+    (root / "Local State").write_text(json.dumps({"profile": {"info_cache": {"Default": {"name": "Personal"}}}}))
+
+    def url(name, link):
+        return {"type": "url", "name": name, "url": link, "date_added": "13400000000000000"}
+
+    bar = {"type": "folder", "name": "Bookmarks bar", "children": [
+        {"type": "folder", "name": "News", "children": [url("Example News", "https://news.example.com/")]},
+        url("Forum", "https://forum.example.com/latest"),
+    ]}
+    (profile / "Bookmarks").write_text(json.dumps({"version": 1, "roots": {
+        "bookmark_bar": bar,
+        "other": {"type": "folder", "name": "Other bookmarks", "children": []},
+        "synced": {"type": "folder", "name": "Mobile bookmarks", "children": []},
+    }}))
 
 
 def _fix_mtimes(*roots: Path):
@@ -159,6 +223,7 @@ def setup(home: Path, repo: Path) -> dict:
         (snippets / name).write_text(text)
     _fix_mtimes(home / "Documents", home / "Projects")
     _firefox(home, repo)
+    _brave(home)
     (home / ".local/share/applications/raffi-demo.desktop").write_text(
         "[Desktop Entry]\nType=Application\nName=Demo browser\nExec=firefox\nIcon=firefox\n"
         "Actions=private;\n\n[Desktop Action private]\nName=Private window\nExec=firefox --private-window\n"
