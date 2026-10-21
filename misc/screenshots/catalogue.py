@@ -117,6 +117,8 @@ SHOTS = [
     Shot("clipboard-history", "clip "),
     Shot("password-store", "pass "),
     Shot("bitwarden", "bw "),
+    Shot("slack-people", "slack ", ("ctrl+p",), height=720,
+         tweak=addon("slack", {"enabled": True, "token_command": "sleep 30"})),
     Shot("terminal", "> cargo test --all-features"),
     Shot("installed-apps", "Demo browser", tweak=addon("apps", {"enabled": True})),
     Shot("file-browser-filter", "~/Documents/", ("ctrl+Tab", "ctrl+s")),

@@ -8710,6 +8710,46 @@ fn test_slack_images_apply_once_their_batch_lands_and_survive_reloads() {
 }
 
 #[test]
+fn test_slack_people_show_full_names_and_logins() {
+    use super::slack_api::{Directory, User};
+
+    let users = [
+        ("alice", "Alice Adams", "alice", "Alice Adams (alice)"),
+        ("alice", "", "Alice", "Alice (alice)"),
+        ("alice", "", "alice", "alice"),
+        ("alice", "", "", "alice"),
+        ("", "Alice Adams", "", "Alice Adams"),
+        ("", "", "", "U1"),
+    ];
+    for (login, real_name, display_name, expected) in users {
+        let directory = Directory::new(
+            Default::default(),
+            vec![User {
+                id: "U1".into(),
+                name: login.into(),
+                real_name: real_name.into(),
+                display_name: display_name.into(),
+                ..User::default()
+            }],
+            Vec::new(),
+            0,
+        );
+        let rows = super::slack::home_rows(
+            &directory,
+            &super::slack::Live::default(),
+            None,
+            crate::SlackOpenIn::Desktop,
+            chrono::Local::now(),
+        );
+        let person = rows
+            .iter()
+            .find(|row| row.identity == "slack:user:U1")
+            .unwrap();
+        assert_eq!(person.title, expected);
+    }
+}
+
+#[test]
 fn test_slack_status_fill_and_debounced_search() {
     let mut addons = AddonsConfig::default();
     addons.slack.enabled = true;

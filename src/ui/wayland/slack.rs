@@ -1244,11 +1244,17 @@ fn user_row(
     now: DateTime<Local>,
 ) -> CommandItem {
     let workspace = &directory.workspace;
-    let mut item = row(
-        &format!("slack:user:{}", user.id),
-        user.label(),
-        &USER_ICONS,
-    );
+    let name = if user.real_name.is_empty() {
+        user.label()
+    } else {
+        &user.real_name
+    };
+    let title = if user.name.is_empty() || name == user.name {
+        name.to_string()
+    } else {
+        format!("{name} ({})", user.name)
+    };
+    let mut item = row(&format!("slack:user:{}", user.id), title, &USER_ICONS);
     let status = replace_emoji_shortcodes(&describe_status(
         &user.status_emoji,
         &user.status_text,

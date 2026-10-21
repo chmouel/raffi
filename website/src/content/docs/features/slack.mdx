@@ -4,6 +4,8 @@ description: Open Slack conversations, search messages, follow unread messages, 
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import slackPeopleScreenshot from '../../../assets/screenshots/slack-people.png';
 
 Type `slack ` (with the trailing space) to list your Slack channels, group
 conversations and the people of your workspace, under a few shortcuts:
@@ -230,6 +232,12 @@ Replies show a Thread pill. Enter opens the message in its conversation.
 `slack people <name>` finds people by name once you stop typing, the ones
 you have a conversation with first. Enter opens your direct conversation
 with them, or their profile.
+
+People show their full name followed by their login in parentheses, such
+as `Alice Adams (alice)`. If no full name is available, Raffi uses their
+display name or login.
+
+<Image src={slackPeopleScreenshot} alt="Slack people showing full names and logins" width={800} />
 
 Bots and apps show up too, after the people, with a Bot badge. The home
 list only shows the bots you already have a direct conversation with, such

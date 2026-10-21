@@ -8,6 +8,7 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -231,6 +232,24 @@ def setup(home: Path, repo: Path) -> dict:
     (home / ".cache/raffi/recent.cache").write_text(
         json.dumps({"source": "text_snippets.Notes", "key": "Release checklist", "last_used": 1792400000}) + "\n"
     )
+    slack = home / ".cache/raffi/slack"
+    slack.mkdir()
+    slack_users = []
+    for uid, login, name, title in [
+        ("U1", "alice", "Alice Adams", "Engineering"),
+        ("U2", "bob", "Bob Bennett", "Design"),
+        ("U3", "carol", "Carol Chen", "Product"),
+    ]:
+        slack_users.append({
+            "id": uid, "name": login, "real_name": name, "display_name": login,
+            "title": title, "status_text": "", "status_emoji": "",
+            "tz_label": "", "tz_offset": 0, "avatar": "",
+        })
+    (slack / "directory.json").write_text(json.dumps({
+        "version": 3, "fetched_at": int(time.time()),
+        "workspace": {"team_id": "T1", "user_id": "U0", "url": "https://demo.slack.com/", "name": "Demo"},
+        "users": slack_users, "conversations": [],
+    }))
     return base_config(repo)
 
 
