@@ -1259,7 +1259,6 @@ fn test_file_browser_clear_resets_browsing_results() {
             is_dir: false,
         });
     app.file_browser.error = Some("boom".into());
-    app.file_browser.hovered_row = Some(0);
     app.file_browser.pressed_row = Some(0);
     app.file_browser.dragging = true;
 
@@ -1269,7 +1268,6 @@ fn test_file_browser_clear_resets_browsing_results() {
     assert!(app.file_browser.current_dir.is_empty());
     assert!(app.file_browser.entries.is_empty());
     assert!(app.file_browser.error.is_none());
-    assert!(app.file_browser.hovered_row.is_none());
     assert!(app.file_browser.pressed_row.is_none());
     assert!(!app.file_browser.dragging);
 }
@@ -1291,21 +1289,6 @@ fn browser_app_with_two_dirs() -> LauncherApp {
             });
     }
     app
-}
-
-#[test]
-fn test_file_browser_hover_tracks_the_row_under_the_pointer() {
-    let mut app = browser_app_with_two_dirs();
-
-    let _ = app.update(Message::FileBrowserHover(1));
-    assert_eq!(app.file_browser.hovered_row, Some(1));
-
-    // Leaving a different row must not clear the current hover.
-    let _ = app.update(Message::FileBrowserUnhover(0));
-    assert_eq!(app.file_browser.hovered_row, Some(1));
-
-    let _ = app.update(Message::FileBrowserUnhover(1));
-    assert_eq!(app.file_browser.hovered_row, None);
 }
 
 #[test]
@@ -1629,13 +1612,11 @@ fn test_file_browser_cycle_show_filters_entries() {
 fn test_drag_events_drive_browser_dragging_state() {
     let mut app = browser_app_with_two_dirs();
     app.file_browser.pressed_row = Some(0);
-    app.file_browser.hovered_row = Some(0);
 
     let _ = app.update(Message::DragEvent(super::dnd::DragEvent::Started));
     assert!(app.file_browser.dragging);
-    // The compositor consumed the pointer: press and hover tracking reset.
+    // The compositor consumed the pointer: press tracking resets.
     assert!(app.file_browser.pressed_row.is_none());
-    assert!(app.file_browser.hovered_row.is_none());
 
     // A drag ending over the origin window must not launch the file: the
     // release finds no matching press, so the row does not activate.
@@ -1655,14 +1636,14 @@ fn test_drag_events_drive_browser_dragging_state() {
 }
 
 #[test]
-fn test_file_browser_query_change_clears_stale_hover() {
+fn test_file_browser_query_change_clears_stale_press() {
     let mut app = browser_app_with_two_dirs();
-    app.file_browser.hovered_row = Some(1);
+    app.file_browser.pressed_row = Some(1);
 
     let _ = app.update(Message::SearchChanged("/tmp/al".into()));
 
     assert!(app.file_browser.active);
-    assert_eq!(app.file_browser.hovered_row, None);
+    assert_eq!(app.file_browser.pressed_row, None);
 }
 
 #[test]

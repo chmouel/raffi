@@ -1539,16 +1539,6 @@ impl LauncherApp {
                 self.handle_file_browser_row_pressed(index, path)
             }
             Message::FileBrowserRowReleased(index) => self.handle_file_browser_row_released(index),
-            Message::FileBrowserHover(row) => {
-                self.file_browser.hovered_row = Some(row);
-                Task::none()
-            }
-            Message::FileBrowserUnhover(row) => {
-                if self.file_browser.hovered_row == Some(row) {
-                    self.file_browser.hovered_row = None;
-                }
-                Task::none()
-            }
             Message::MouseReleased => {
                 // Every left release ends row press tracking, even the ones
                 // that happen outside the file browser rows.
@@ -2266,11 +2256,9 @@ impl LauncherApp {
     fn handle_file_browser_query(&mut self, expanded: &str, filter_text: &str) {
         self.file_browser.active = true;
         self.file_browser.error = None;
-        // Rows are about to be rebuilt; the pointer may now be over a
-        // different one, so hover state from the previous listing is stale.
-        self.file_browser.hovered_row = None;
-        // Likewise the press: a row at the same index in the rebuilt listing
-        // is a different file, so a held button must not activate or drag it.
+        // Rows are about to be rebuilt: a row at the same index in the new
+        // listing is a different file, so a held button must not activate or
+        // drag it.
         self.file_browser.pressed_row = None;
         if let Some(drag) = &self.drag {
             drag.disarm();
@@ -4338,7 +4326,6 @@ impl LauncherApp {
                 // The compositor grabbed the pointer: the matching release
                 // will never arrive, so press tracking has to reset now.
                 self.file_browser.pressed_row = None;
-                self.file_browser.hovered_row = None;
                 Task::none()
             }
             super::dnd::DragEvent::Cancelled => {

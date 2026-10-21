@@ -278,7 +278,7 @@ fn item_button_style(
     is_selected: bool,
     text_color: iced::Color,
 ) -> impl Fn(&iced::Theme, button::Status) -> button::Style {
-    move |_theme, status| {
+    move |_theme, _status| {
         let base_style = button::Style {
             text_color,
             border: iced::Border {
@@ -302,18 +302,11 @@ fn item_button_style(
                 ..base_style
             }
         } else {
-            match status {
-                button::Status::Hovered => button::Style {
-                    background: Some(iced::Background::Color(iced::Color {
-                        a: 0.12,
-                        ..t.accent_hover
-                    })),
-                    ..base_style
-                },
-                _ => button::Style {
-                    background: None,
-                    ..base_style
-                },
+            // No hover highlight: a second lit row next to the keyboard
+            // selection is confusing when the pointer just rests there.
+            button::Style {
+                background: None,
+                ..base_style
             }
         }
     }
@@ -418,11 +411,10 @@ pub(super) fn chip_window(widths: &[f32], available: f32, active: usize) -> std:
 /// Styling for file browser rows. The rows are [`mouse_area`] widgets rather
 /// than buttons (pressing a row must arm a drag with the exact entry under
 /// the pointer), so this replicates the item button look from tracked
-/// selection and hover state.
+/// selection state.
 fn item_row_style(
     t: ThemeColors,
     is_selected: bool,
-    is_hovered: bool,
     text_color: iced::Color,
 ) -> impl Fn(&iced::Theme) -> container::Style {
     move |_theme| {
@@ -446,14 +438,6 @@ fn item_row_style(
                     width: 1.0,
                     radius: 10.0.into(),
                 },
-                ..base_style
-            }
-        } else if is_hovered {
-            container::Style {
-                background: Some(iced::Background::Color(iced::Color {
-                    a: 0.12,
-                    ..t.accent_hover
-                })),
                 ..base_style
             }
         } else {
@@ -1992,7 +1976,7 @@ impl LauncherApp {
         container(strip)
             .padding(fs.item_padding)
             .width(Length::Fill)
-            .style(item_row_style(t, row_selected, false, t.text_main))
+            .style(item_row_style(t, row_selected, t.text_main))
             .into()
     }
 
@@ -2515,9 +2499,8 @@ impl LauncherApp {
                 items_column = items_column.push(error_button);
             }
 
-            for (entry_index, entry) in self.file_browser.entries.iter().enumerate() {
+            for entry in self.file_browser.entries.iter() {
                 let is_selected = self.selected_index == special_item_idx;
-                let is_hovered = self.file_browser.hovered_row == Some(entry_index);
                 let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
 
                 if !self.icon_map.is_empty() {
@@ -2576,11 +2559,9 @@ impl LauncherApp {
                 let item_container = container(item_row)
                     .padding(fs.item_padding)
                     .width(Length::Fill)
-                    .style(item_row_style(t, is_selected, is_hovered, name_color));
+                    .style(item_row_style(t, is_selected, name_color));
 
                 let item_area = mouse_area(item_container)
-                    .on_enter(Message::FileBrowserHover(entry_index))
-                    .on_exit(Message::FileBrowserUnhover(entry_index))
                     .on_press(Message::FileBrowserRowPressed {
                         index: special_item_idx,
                         path: entry.full_path.clone(),

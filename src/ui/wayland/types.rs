@@ -460,10 +460,6 @@ pub(crate) enum Message {
     },
     /// The user released the left button over a file browser row.
     FileBrowserRowReleased(usize),
-    /// The pointer entered the file browser row at this entries index.
-    FileBrowserHover(usize),
-    /// The pointer left the file browser row at this entries index.
-    FileBrowserUnhover(usize),
     /// A left button or touch release anywhere; used to reset row press
     /// tracking for mouse and touch.
     MouseReleased,
