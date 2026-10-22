@@ -3,7 +3,7 @@ use std::path::Path;
 
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
-use iced::widget::operation::{focus, move_cursor_to_end, scroll_by, snap_to};
+use iced::widget::operation::{focus, move_cursor_to_end, scroll_by};
 use iced::widget::scrollable::{self, AbsoluteOffset};
 use iced::Task;
 
@@ -1643,8 +1643,12 @@ impl LauncherApp {
             Message::SlackImagesLoaded(session, epoch, request, keys, outcome) => {
                 self.handle_slack_images_loaded(session, epoch, request, keys, outcome)
             }
-            Message::SlackListScrolled(offset) => {
-                self.slack.scroll = offset;
+            Message::ListScrolled(offset) => {
+                self.view.list_scrolled = offset > 0.0;
+                // Slack downloads the pictures of the rows scrolled into view.
+                if self.command_list.addon == Some(CommandListAddon::Slack) {
+                    self.slack.scroll = offset;
+                }
                 Task::none()
             }
             Message::SlackPreviewOpen {
@@ -1847,7 +1851,7 @@ impl LauncherApp {
             self.search_query = query;
             self.refresh_help_filter();
             self.view.refresh_ids();
-            return Task::none();
+            return self.reveal_reset_selection();
         }
 
         if query.trim() == "?" && question_mark_opens_help(&self.addons) {
@@ -1901,7 +1905,7 @@ impl LauncherApp {
 
         self.view.refresh_ids();
 
-        let mut tasks = Vec::new();
+        let mut tasks = vec![self.reveal_reset_selection()];
 
         crate::debug_log!("route_query: query={log_query:?} -> {:?}", class.mode);
         let qmode = class.mode.clone();
@@ -3396,17 +3400,39 @@ impl LauncherApp {
         ])
     }
 
+    /// Scrolls the list just enough to show the selected row. Rows differ in
+    /// height (wrapped titles, headings), so the row is measured rather than
+    /// placed by its index.
     fn snap_to_selection(&self) -> Task<Message> {
         let total = self.total_items();
-        let offset = if total > 1 {
+        let relative = if total > 1 {
             self.selected_index as f32 / (total - 1) as f32
         } else {
             0.0
         };
-        snap_to(
-            self.view.scrollable_id.clone(),
-            scrollable::RelativeOffset { x: 0.0, y: offset },
-        )
+        // The first and last rows go to the ends, so chips and headings
+        // above the first row stay in view.
+        let edge =
+            (self.selected_index == 0 || self.selected_index + 1 >= total).then_some(relative);
+        iced::advanced::widget::operate::<()>(RevealSelection {
+            scrollable: self.view.scrollable_id.clone(),
+            row: self.view.selected_row_id.clone(),
+            relative,
+            edge,
+            viewport: None,
+            row_bounds: None,
+        })
+        .discard()
+    }
+
+    /// Scrolls back to a selection reset by a new list. The list keeps its
+    /// offset when its id is refreshed, so one scrolled down would hide it.
+    fn reveal_reset_selection(&self) -> Task<Message> {
+        if self.view.list_scrolled {
+            self.snap_to_selection()
+        } else {
+            Task::none()
+        }
     }
 
     fn activate_index(&mut self, index: usize) -> Task<Message> {
@@ -5203,7 +5229,7 @@ impl LauncherApp {
         self.refresh_help_filter();
         self.view.refresh_ids();
         crate::debug_log!("help: opened with {} entries", self.help_filtered.len());
-        Task::none()
+        self.reveal_reset_selection()
     }
 
     fn close_help(&mut self) -> Task<Message> {
@@ -5328,5 +5354,95 @@ impl LauncherApp {
             }
             save_history(&self.history.items);
         }
+    }
+}
+
+/// Measures the selected row and the list viewport, then scrolls the list
+/// only if the row is not fully visible.
+struct RevealSelection {
+    scrollable: super::state::ScrollableId,
+    row: super::state::ContainerId,
+    /// Proportional position, used when the row is not tagged.
+    relative: f32,
+    /// Set for the first and last rows, which snap to the list ends.
+    edge: Option<f32>,
+    /// Viewport bounds, content bounds and current scroll offset.
+    viewport: Option<(iced::Rectangle, iced::Rectangle, iced::Vector)>,
+    row_bounds: Option<iced::Rectangle>,
+}
+
+impl<T: 'static> iced::advanced::widget::Operation<T> for RevealSelection {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn iced::advanced::widget::Operation<T>)) {
+        operate(self);
+    }
+
+    fn container(&mut self, id: Option<&iced::advanced::widget::Id>, bounds: iced::Rectangle) {
+        if id == Some(&self.row) {
+            self.row_bounds = Some(bounds);
+        }
+    }
+
+    fn scrollable(
+        &mut self,
+        id: Option<&iced::advanced::widget::Id>,
+        bounds: iced::Rectangle,
+        content_bounds: iced::Rectangle,
+        translation: iced::Vector,
+        _state: &mut dyn iced::advanced::widget::operation::Scrollable,
+    ) {
+        if id == Some(&self.scrollable) {
+            self.viewport = Some((bounds, content_bounds, translation));
+        }
+    }
+
+    fn finish(&self) -> iced::advanced::widget::operation::Outcome<T> {
+        use iced::advanced::widget::operation::{scrollable as ops, Outcome};
+        let target = self.scrollable.clone();
+        let snap = |y: f32| -> Outcome<T> {
+            Outcome::Chain(Box::new(ops::snap_to(
+                target.clone(),
+                scrollable::RelativeOffset {
+                    x: None,
+                    y: Some(y),
+                },
+            )))
+        };
+        let (Some((viewport, content, translation)), Some(row)) = (self.viewport, self.row_bounds)
+        else {
+            return snap(self.edge.unwrap_or(self.relative));
+        };
+        // Go to the list end only if the row stays fully visible there; a
+        // tall heading or error next to it could otherwise hide it.
+        let offset = match self.edge {
+            Some(edge) => edge * (content.height - viewport.height).max(0.0),
+            None => translation.y,
+        };
+        match reveal_offset(row.y - content.y, row.height, offset, viewport.height)
+            .or(self.edge.map(|_| offset))
+        {
+            Some(y) => Outcome::Chain(Box::new(ops::scroll_to(
+                target,
+                AbsoluteOffset {
+                    x: None,
+                    y: Some(y),
+                },
+            ))),
+            None => Outcome::None,
+        }
+    }
+}
+
+/// Scroll offset that shows a row at `top` (from the top of the content) of
+/// `height` in a viewport of `viewport` height scrolled to `offset`, or
+/// `None` when the row is already fully visible. A row taller than the
+/// viewport shows its top.
+pub(super) fn reveal_offset(top: f32, height: f32, offset: f32, viewport: f32) -> Option<f32> {
+    let bottom = top + height;
+    if top < offset {
+        Some(top)
+    } else if bottom > offset + viewport {
+        Some((bottom - viewport).min(top))
+    } else {
+        None
     }
 }

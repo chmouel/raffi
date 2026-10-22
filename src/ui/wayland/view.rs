@@ -1058,17 +1058,13 @@ impl LauncherApp {
             .width(Length::Fill)
             .height(Length::Shrink);
 
-        let mut items_scroll = scrollable(items_container)
+        let items_scroll = scrollable(items_container)
             .id(self.view.scrollable_id.clone())
             .direction(slim_scrollbar())
             .style(scrollable_style(t))
             .height(Length::Fill)
-            .width(Length::Fill);
-        // Slack downloads the pictures of the rows scrolled into view.
-        if self.command_list.addon == Some(super::command_list::CommandListAddon::Slack) {
-            items_scroll = items_scroll
-                .on_scroll(|viewport| Message::SlackListScrolled(viewport.relative_offset().y));
-        }
+            .width(Length::Fill)
+            .on_scroll(|viewport| Message::ListScrolled(viewport.relative_offset().y));
 
         let footer_divider = container(Space::new())
             .width(Length::Fill)
@@ -1350,12 +1346,33 @@ impl LauncherApp {
             })
             .width(Length::Fill)
             .style(item_button_style(t, is_selected, t.text_main));
-        Some(with_tree_guide(
-            item_button,
-            guides.get(row).cloned().unwrap_or_default(),
-            fs.item_padding,
-            t,
+        Some(self.selectable(
+            with_tree_guide(
+                item_button,
+                guides.get(row).cloned().unwrap_or_default(),
+                fs.item_padding,
+                t,
+            ),
+            is_selected,
         ))
+    }
+
+    /// Wraps the selected row in the container `snap_to_selection` measures
+    /// to scroll it into view. Containers share their content's widget tree,
+    /// so moving the wrapper between rows keeps their state.
+    fn selectable<'a>(
+        &self,
+        row: impl Into<Element<'a, Message>>,
+        is_selected: bool,
+    ) -> Element<'a, Message> {
+        if is_selected {
+            container(row)
+                .id(self.view.selected_row_id.clone())
+                .width(Length::Fill)
+                .into()
+        } else {
+            row.into()
+        }
     }
 
     fn help_items_column(&self) -> Column<'_, Message> {
@@ -1477,7 +1494,7 @@ impl LauncherApp {
                 .width(Length::Fill)
                 .style(item_button_style(t, is_selected, t.text_main));
 
-            items_column = items_column.push(item_button);
+            items_column = items_column.push(self.selectable(item_button, is_selected));
         }
 
         items_column
@@ -2068,7 +2085,8 @@ impl LauncherApp {
         let mut special_item_idx = 0;
 
         if self.keyword_chips && !self.keyword_suggestions.is_empty() {
-            items_column = items_column.push(self.chips_row());
+            items_column =
+                items_column.push(self.selectable(self.chips_row(), self.selected_index == 0));
             special_item_idx += 1;
         }
 
@@ -2117,7 +2135,7 @@ impl LauncherApp {
                 .width(Length::Fill)
                 .style(item_button_style(t, is_selected, t.text_main));
 
-            items_column = items_column.push(item_button);
+            items_column = items_column.push(self.selectable(item_button, is_selected));
             special_item_idx += 1;
         }
 
@@ -2140,7 +2158,7 @@ impl LauncherApp {
                 .width(Length::Fill)
                 .style(item_button_style(t, is_selected, t.text_muted));
 
-            items_column = items_column.push(loading_button);
+            items_column = items_column.push(self.selectable(loading_button, is_selected));
             special_item_idx += 1;
         } else if let Some(help_msg) = &self.script_filter.help_message {
             let help_row = Row::new()
@@ -2154,7 +2172,7 @@ impl LauncherApp {
                 .width(Length::Fill)
                 .style(item_button_style(t, is_selected, t.text_muted));
 
-            items_column = items_column.push(help_button);
+            items_column = items_column.push(self.selectable(help_button, is_selected));
             special_item_idx += 1;
         } else if let Some(sf_result) = &self.script_filter.results {
             let guides = tree_guide_segments(&sf_result.items);
@@ -2218,8 +2236,10 @@ impl LauncherApp {
                     .width(Length::Fill)
                     .style(item_button_style(t, is_selected, t.text_main));
 
-                items_column =
-                    items_column.push(with_tree_guide(item_button, guides, fs.item_padding, t));
+                items_column = items_column.push(self.selectable(
+                    with_tree_guide(item_button, guides, fs.item_padding, t),
+                    is_selected,
+                ));
                 special_item_idx += 1;
             }
         }
@@ -2240,7 +2260,7 @@ impl LauncherApp {
                 .width(Length::Fill)
                 .style(item_button_style(t, is_selected, t.text_muted));
 
-            items_column = items_column.push(loading_button);
+            items_column = items_column.push(self.selectable(loading_button, is_selected));
             special_item_idx += 1;
         } else if self.text_snippets.active {
             if let Some(error) = &self.text_snippets.error {
@@ -2317,7 +2337,7 @@ impl LauncherApp {
                         .width(Length::Fill)
                         .style(item_button_style(t, is_selected, t.text_main));
 
-                    items_column = items_column.push(item_button);
+                    items_column = items_column.push(self.selectable(item_button, is_selected));
                     special_item_idx += 1;
                 }
             }
@@ -2349,7 +2369,7 @@ impl LauncherApp {
                         .width(Length::Fill)
                         .style(item_button_style(t, is_selected, t.text_main));
 
-                    items_column = items_column.push(item_button);
+                    items_column = items_column.push(self.selectable(item_button, is_selected));
                     special_item_idx += 1;
                 }
             }
@@ -2364,10 +2384,13 @@ impl LauncherApp {
                     .align_y(iced::Alignment::Center)
                     .push(text(state.status()).size(fs.item).color(t.text_muted));
                 items_column = items_column.push(
-                    button(status_row)
-                        .padding(fs.item_padding)
-                        .width(Length::Fill)
-                        .style(item_button_style(t, is_selected, t.text_muted)),
+                    self.selectable(
+                        button(status_row)
+                            .padding(fs.item_padding)
+                            .width(Length::Fill)
+                            .style(item_button_style(t, is_selected, t.text_muted)),
+                        is_selected,
+                    ),
                 );
                 special_item_idx += 1;
             }
@@ -2382,11 +2405,14 @@ impl LauncherApp {
                     .align_y(iced::Alignment::Center)
                     .push(text_col.width(Length::Fill));
                 items_column = items_column.push(
-                    button(item_row)
-                        .on_press(Message::ItemClicked(special_item_idx))
-                        .padding(fs.item_padding)
-                        .width(Length::Fill)
-                        .style(item_button_style(t, is_selected, t.text_main)),
+                    self.selectable(
+                        button(item_row)
+                            .on_press(Message::ItemClicked(special_item_idx))
+                            .padding(fs.item_padding)
+                            .width(Length::Fill)
+                            .style(item_button_style(t, is_selected, t.text_main)),
+                        is_selected,
+                    ),
                 );
                 special_item_idx += 1;
             }
@@ -2399,10 +2425,13 @@ impl LauncherApp {
                 .align_y(iced::Alignment::Center)
                 .push(text(status.to_string()).size(fs.item).color(t.text_muted));
             items_column = items_column.push(
-                button(status_row)
-                    .padding(fs.item_padding)
-                    .width(Length::Fill)
-                    .style(item_button_style(t, is_selected, t.text_muted)),
+                self.selectable(
+                    button(status_row)
+                        .padding(fs.item_padding)
+                        .width(Length::Fill)
+                        .style(item_button_style(t, is_selected, t.text_muted)),
+                    is_selected,
+                ),
             );
             special_item_idx += 1;
         } else if self.command_list.is_active() {
@@ -2501,7 +2530,7 @@ impl LauncherApp {
                     })
                     .width(Length::Fill)
                     .style(item_button_style(t, is_selected, t.text_main));
-                items_column = items_column.push(if group.is_some() {
+                let row_element = if group.is_some() {
                     let guide = TreeGuideSegments {
                         above: true,
                         below: group_of(row + 1) == group,
@@ -2510,7 +2539,8 @@ impl LauncherApp {
                     with_tree_guide(item_button, vec![guide], fs.item_padding, t)
                 } else {
                     item_button.into()
-                });
+                };
+                items_column = items_column.push(self.selectable(row_element, is_selected));
                 special_item_idx += 1;
             }
         }
@@ -2545,7 +2575,7 @@ impl LauncherApp {
                 if row.copyable {
                     item_button = item_button.on_press(Message::ItemClicked(special_item_idx));
                 }
-                items_column = items_column.push(item_button);
+                items_column = items_column.push(self.selectable(item_button, is_selected));
                 special_item_idx += 1;
             }
         }
@@ -2642,7 +2672,7 @@ impl LauncherApp {
                     .on_release(Message::FileBrowserRowReleased(special_item_idx))
                     .interaction(iced::mouse::Interaction::Pointer);
 
-                items_column = items_column.push(item_area);
+                items_column = items_column.push(self.selectable(item_area, is_selected));
                 special_item_idx += 1;
             }
         }
@@ -2688,7 +2718,7 @@ impl LauncherApp {
                     .width(Length::Fill)
                     .style(item_button_style(t, is_selected, t.text_muted));
 
-                items_column = items_column.push(ws_button);
+                items_column = items_column.push(self.selectable(ws_button, is_selected));
             } else {
                 let label = format!("Search {} for '{}'", ws.name, ws.query);
                 ws_row = ws_row.push(text(label).size(fs.item).color(t.accent));
@@ -2699,7 +2729,7 @@ impl LauncherApp {
                     .width(Length::Fill)
                     .style(item_button_style(t, is_selected, t.accent));
 
-                items_column = items_column.push(ws_button);
+                items_column = items_column.push(self.selectable(ws_button, is_selected));
             }
             special_item_idx += 1;
         }
@@ -2720,7 +2750,7 @@ impl LauncherApp {
                 .width(Length::Fill)
                 .style(item_button_style(t, is_selected, t.text_muted));
 
-            items_column = items_column.push(help_button);
+            items_column = items_column.push(self.selectable(help_button, is_selected));
             special_item_idx += 1;
         }
 
@@ -2745,7 +2775,7 @@ impl LauncherApp {
                 .width(Length::Fill)
                 .style(item_button_style(t, is_selected, t.text_muted));
 
-            items_column = items_column.push(loading_button);
+            items_column = items_column.push(self.selectable(loading_button, is_selected));
             special_item_idx += 1;
         } else if let Some(currency) = &self.currency.result {
             let currency_text = format!(
@@ -2769,7 +2799,7 @@ impl LauncherApp {
                 .width(Length::Fill)
                 .style(item_button_style(t, is_selected, t.accent));
 
-            items_column = items_column.push(currency_button);
+            items_column = items_column.push(self.selectable(currency_button, is_selected));
             special_item_idx += 1;
         }
 
@@ -2796,7 +2826,7 @@ impl LauncherApp {
                 .width(Length::Fill)
                 .style(item_button_style(t, is_selected, t.text_muted));
 
-            items_column = items_column.push(loading_button);
+            items_column = items_column.push(self.selectable(loading_button, is_selected));
             special_item_idx += 1;
         } else if let Some(result) = &self.currency.multi_result {
             for (idx, conversion) in result.conversions.iter().enumerate() {
@@ -2821,7 +2851,7 @@ impl LauncherApp {
                     .width(Length::Fill)
                     .style(item_button_style(t, is_selected, t.accent));
 
-                items_column = items_column.push(conversion_button);
+                items_column = items_column.push(self.selectable(conversion_button, is_selected));
                 special_item_idx += 1;
             }
         }
@@ -2865,7 +2895,7 @@ impl LauncherApp {
                     .width(Length::Fill)
                     .style(item_button_style(t, is_selected, t.accent));
 
-                items_column = items_column.push(inline_button);
+                items_column = items_column.push(self.selectable(inline_button, is_selected));
                 special_item_idx += 1;
             }
         }
@@ -2975,7 +3005,7 @@ impl LauncherApp {
                     .width(Length::Fill)
                     .style(item_button_style(t, is_selected, t.text_main));
 
-                items_column = items_column.push(item_button);
+                items_column = items_column.push(self.selectable(item_button, is_selected));
             }
         }
 
@@ -3040,7 +3070,7 @@ impl LauncherApp {
                     .width(Length::Fill)
                     .style(item_button_style(t, is_selected, fb_text_color));
 
-                items_column = items_column.push(item_button);
+                items_column = items_column.push(self.selectable(item_button, is_selected));
             }
         }
 

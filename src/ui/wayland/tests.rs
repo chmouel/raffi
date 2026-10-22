@@ -1,7 +1,7 @@
 use super::actions::DeferredAction;
 use super::app::{
-    classify_query, fido_restart, fido_updir, keyword_suggestions, loggable_query, route_query,
-    tilde_path, QueryMode,
+    classify_query, fido_restart, fido_updir, keyword_suggestions, loggable_query, reveal_offset,
+    route_query, tilde_path, QueryMode,
 };
 use super::command_list::CommandListAddon;
 use super::help::{filter_help_entries, help_entries, search_tips, HelpSection};
@@ -9006,7 +9006,7 @@ fn test_slack_rows_near_follow_the_scroll_and_the_selection() {
     let generation = app.command_list.generation;
     let _ = app.update(Message::CommandListLoaded(generation, Ok(rows)));
     let selected = app.selected_index - app.command_list_offset();
-    let _ = app.update(Message::SlackListScrolled(0.5));
+    let _ = app.update(Message::ListScrolled(0.5));
     // Halfway down, the 20 rows shown start at row 90.
     assert!((90..110).all(|row| app.slack_row_near(row, 20)));
     assert!(app.slack_row_near(selected, 20));
@@ -10166,4 +10166,27 @@ fn test_main_view_lists_bookmarks_and_opens_them() {
         deferred_action(&app),
         Some(DeferredAction::Command(argv)) if argv == ["firefox", "https://github.com/chmouel/raffi"]
     ));
+}
+
+#[test]
+fn test_reveal_offset_scrolls_only_when_the_row_is_hidden() {
+    // A 400px viewport scrolled to 1000.
+    assert_eq!(reveal_offset(1100.0, 60.0, 1000.0, 400.0), None);
+    // Above the viewport: its top aligns with the top.
+    assert_eq!(reveal_offset(900.0, 60.0, 1000.0, 400.0), Some(900.0));
+    // Partly below: its bottom aligns with the bottom.
+    assert_eq!(reveal_offset(1380.0, 60.0, 1000.0, 400.0), Some(1040.0));
+    // Taller than the viewport: its top shows.
+    assert_eq!(reveal_offset(1500.0, 500.0, 1000.0, 400.0), Some(1500.0));
+}
+
+#[test]
+fn test_search_change_scrolls_back_only_when_the_list_is_scrolled() {
+    let mut app = test_app(AddonsConfig::default());
+    assert_eq!(app.update(Message::SearchChanged("a".into())).units(), 0);
+    // A list scrolled down keeps its offset while the selection resets.
+    let _ = app.update(Message::ListScrolled(0.5));
+    assert!(app.update(Message::SearchChanged("ab".into())).units() > 0);
+    let _ = app.update(Message::ListScrolled(0.0));
+    assert_eq!(app.update(Message::SearchChanged("a".into())).units(), 0);
 }

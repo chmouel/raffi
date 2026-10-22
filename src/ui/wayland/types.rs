@@ -533,8 +533,8 @@ pub(crate) enum Message {
     /// The pictures of a batch: list session, account epoch, request, the
     /// keys asked for, and what was downloaded.
     SlackImagesLoaded(u64, u64, u64, Vec<String>, super::slack::ImagesOutcome),
-    /// The Slack list was scrolled to this relative offset.
-    SlackListScrolled(f32),
+    /// The item list was scrolled to this relative offset.
+    ListScrolled(f32),
     /// A message or thread in the Slack preview pane was clicked to open in
     /// the desktop app or browser.
     SlackPreviewOpen {
