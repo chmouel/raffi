@@ -103,6 +103,10 @@ pub struct UISettings {
     pub print_only: bool,
     pub preview: PreviewConfig,
     pub default_script_shell: String,
+    /// Compositor that starts launcher programs, if any.
+    pub launch_via: Option<crate::compositor::Compositor>,
+    /// Focus a launcher app's open window instead of starting it again.
+    pub raise_running: bool,
 }
 
 impl Default for UISettings {
@@ -134,6 +138,8 @@ impl Default for UISettings {
             print_only: false,
             preview: PreviewConfig::default(),
             default_script_shell: "bash".to_string(),
+            launch_via: None,
+            raise_running: false,
         }
     }
 }

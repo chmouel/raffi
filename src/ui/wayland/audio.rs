@@ -415,6 +415,7 @@ fn control_item(
         dimmed: false,
         sort_priority: 0,
         typed_only: false,
+        close: None,
         group: None,
         pinned: false,
     }
@@ -623,6 +624,7 @@ fn device_item(kind: Kind, device: &Device, is_default: bool, keep_open: bool) -
         dimmed: false,
         sort_priority: 0,
         typed_only: false,
+        close: None,
         group: None,
         pinned: false,
     }

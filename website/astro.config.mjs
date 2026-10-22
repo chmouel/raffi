@@ -72,6 +72,7 @@ export default defineConfig({
           items: [
             { label: 'Sway', slug: 'integration/sway' },
             { label: 'Hyprland', slug: 'integration/hyprland' },
+            { label: 'niri', slug: 'integration/niri' },
             { label: 'Fuzzel', slug: 'integration/fuzzel' },
           ],
         },

@@ -75,6 +75,18 @@ When `true`, Raffi shows the right-hand preview pane for this entry (full comman
 Whether Raffi closes after launching this entry. Set `close_on_action: false` to keep Raffi open after running this entry, or `true` to close even when `general.close_on_action` is `false` (or `--keep-open` is passed).
 
 
+**`raise`** `boolean` (default: `general.raise_running`, else `false`)
+
+When the app already has a window open, **Enter** focuses it instead of starting the app again, and **Ctrl+Enter** starts a new one. Works on Hyprland, niri and sway with Raffi's own window. See [`raise_running`](../general-settings/#configuration-options).
+
+
+**`window_class`** `string` or list of strings (default: the binary's file name)
+
+The window class (Hyprland, Xwayland apps) or app ID (niri, sway) that `raise` looks for. Case does not matter, and `slack` also matches `com.slack.Slack`. Without it, only a plain `binary` with no `args` can raise, by the binary's file name. Set it for launchers that run a script or pass arguments.
+
+  To find the value, look at the `class` field of `hyprctl clients`, the `app_id` in `niri msg windows`, or the `app_id` in `swaymsg -t get_tree`.
+
+
 **`alias`** `string`
 
 Turns the entry into a shortcut for an internal command. Picking it types the alias into the search box, as if you had entered it yourself, and you carry on from there; nothing runs until you choose a result. Any trigger works: script filters, addons such as `audio`, web searches, snippets, and so on.
@@ -222,6 +234,20 @@ reboot:
 ## Common Patterns
 
 ### Jump or Raise Applications
+
+On Hyprland, niri and sway, `raise` focuses the app's open window, or starts the app when it has none:
+
+```yaml title="launchers.yaml"
+slack:
+  binary: slack
+  args: ["--enable-features=UseOzonePlatform", "--ozone-platform=wayland"]
+  description: "Slack"
+  icon: slack
+  raise: true
+  window_class: Slack
+```
+
+Set `general.raise_running: true` to do the same for every installed app and plain launcher. Elsewhere, a helper such as `jumpapp` does the job:
 
 ```yaml title="launchers.yaml"
 wally:

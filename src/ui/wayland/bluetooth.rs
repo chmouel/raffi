@@ -350,6 +350,7 @@ pub(super) fn power_item(adapter: &Adapter, keep_open: bool) -> CommandItem {
         dimmed: false,
         sort_priority: 0,
         typed_only: false,
+        close: None,
         group: None,
         pinned: false,
     }
@@ -396,6 +397,7 @@ pub(super) fn device_item(
             dimmed: false,
             sort_priority: 0,
             typed_only: false,
+            close: None,
             group: None,
             pinned: false,
         };
@@ -468,6 +470,7 @@ pub(super) fn device_item(
         dimmed: false,
         sort_priority: 0,
         typed_only: false,
+        close: None,
         group: None,
         pinned: false,
     }

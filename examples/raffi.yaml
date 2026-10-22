@@ -32,6 +32,10 @@ version: 1
 #                            # media, audio, bluetooth, and kill default to false). Individual launchers
 #                            # and addons can override this with their own close_on_action setting, or
 #                            # pass --keep-open / -o general.close_on_action=false on the CLI.
+#   launch: auto             # auto (default): start apps through Hyprland, niri or sway when running
+#                            # inside one; direct: Raffi starts them itself
+#   raise_running: false     # Enter focuses an app's open window instead of starting it again;
+#                            # Ctrl+Enter starts a new one (Hyprland, niri, sway; launchers set raise)
 #   show_tips: true          # Keyword tip in the empty search box, e.g. "clip for Clipboard history"
 #   preview:                 # Appearance of the preview pane
 #     font_size: 16          # Base preview text size in px (default: 0.8 x font_size, 16 at 20)

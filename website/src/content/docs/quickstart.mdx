@@ -21,9 +21,8 @@ around, trying a few addons, and then setting it up the way you like.
     Add to `~/.config/sway/config`, then run `swaymsg reload`:
 
     ```ini
-    set $menu raffi -p
     set $super Mod4
-    bindsym $super+Space exec cmd=$($menu) && [ -n "$cmd" ] && swaymsg exec -- "$cmd"
+    bindsym $super+Space exec raffi
     ```
 
     `Super+Space` now opens Raffi.
@@ -34,7 +33,7 @@ around, trying a few addons, and then setting it up the way you like.
 
     ```ini
     $super = SUPER
-    bind = $super, R, exec, (val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val")
+    bind = $super, R, exec, raffi
     ```
 
     After Hyprland reloads its config, `Super+R` opens Raffi.
@@ -43,7 +42,7 @@ around, trying a few addons, and then setting it up the way you like.
   <TabItem label="Other compositors">
     Bind a key to `raffi` and it runs what you pick itself. If your
     compositor should start the program instead, have Raffi print the
-    command with `-p` and pass it on, as the Sway example does.
+    command with `-p` and pass it on.
   </TabItem>
 </Tabs>
 
@@ -69,7 +68,8 @@ Some lists have more than one view. **Ctrl+Tab** moves to the next one and
 **Ctrl+Shift+Tab** goes back, and the footer shows where you are. It works
 the same in every list that has views: clipboard history (all, images, URLs),
 the file browser (all, files, directories), Slack (home, unread, people),
-audio devices (all, outputs, inputs) and the main list when you set up
+audio devices (all, outputs, inputs), the window switcher (windows,
+workspaces) and the main list when you set up
 [`main_view`](../configuration/main-list/).
 
 <Image src={mainSourceScreenshot} alt="Main list narrowed to Launchers with Ctrl+Tab" width={800} />

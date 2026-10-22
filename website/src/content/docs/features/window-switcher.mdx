@@ -6,6 +6,7 @@ description: Jump to any open window on Hyprland, niri or sway from Raffi
 import { Aside } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import windowsScreenshot from '../../../assets/screenshots/window-switcher.png';
+import workspacesScreenshot from '../../../assets/screenshots/window-switcher-workspaces.png';
 
 <Image src={windowsScreenshot} alt="Window switcher with demo browser, editor, terminal and file-manager windows grouped by their workspaces" width={800} />
 
@@ -28,17 +29,57 @@ example, "swaymsg not found".
 |------------|---------------------------------------------------------|
 | Enter      | Focus the window, switching to its workspace            |
 | Ctrl+Enter | Move the window to the current workspace and focus it   |
+| Ctrl+D     | Close the window and stay in the list                   |
+| Ctrl+Tab   | Switch to the workspaces view                           |
 
 Raffi closes first, then asks the compositor to switch. If that fails,
 Raffi reports the error as a notification (with `notify-send` outside
 Hyprland).
+
+A badge on the right shows the most notable state of a window: fullscreen,
+maximized, pinned, floating, grouped, urgent or XWayland, depending on what
+the compositor reports. The detail pane lists all of them. With more than one
+monitor, Hyprland rows also name the monitor after the workspace.
+
+Ctrl+D asks the application to close its window, the same way the
+compositor's own close binding does, so an editor with unsaved changes can
+still ask you first. Raffi stays open and the row goes away once the window
+is gone.
+
+## Workspaces view
+
+<Image src={workspacesScreenshot} alt="Workspaces view listing the Build, Terminal and Files workspaces with their window counts, Build marked Current" width={800} />
+
+Press Ctrl+Tab in the list to see the workspaces instead, and Ctrl+Tab again
+(or Ctrl+Shift+Tab) to go back. The footer shows which view you are in. Each
+row gives the workspace name, how many windows it holds and the title of the
+last one used, and the monitor when there are several. The focused workspace
+is marked "Current", and one shown on another monitor "Visible". Typing
+filters by workspace name and by the titles and applications of its windows.
+
+| Key        | Action                                                       |
+|------------|--------------------------------------------------------------|
+| Enter      | Switch to the workspace                                      |
+| Ctrl+Enter | Move the window you used last there, and follow it           |
+
+Hyprland lists its special workspaces after the others, and Enter shows or
+hides them. On sway the scratchpad is not a workspace and is left out.
+
+## Live updates
+
+While the list is open, Raffi follows the compositor's events (Hyprland's
+event socket, `niri msg event-stream`, `swaymsg -t subscribe`) and refreshes
+both views when windows open, close, move or change title, and when
+workspaces come and go. The selected row stays selected. Focus changes do not
+trigger a refresh, since Raffi takes the focus itself.
 
 ## Hyprland
 
 On Hyprland 0.55 or later with a Lua config, Raffi sends the action with
 `hyprctl eval`. Older versions and hyprlang configs do not support that, so
 Raffi falls back to `hyprctl dispatch`. If the window has closed in the
-meantime, Raffi reports it.
+meantime, Raffi reports it. Ctrl+D sends `hl.dsp.window.close` (or
+`dispatch closewindow`).
 
 ## niri
 
@@ -49,7 +90,9 @@ index, and first moves a window from another monitor to the focused one,
 because niri reads an index on the window's own monitor. The list follows
 the focus history on niri versions that report it, and puts the focused
 window first on older ones. niri ignores a window that has closed in the
-meantime, so nothing happens then.
+meantime, so nothing happens then. Ctrl+D runs
+`niri msg action close-window --id`, and the workspaces view uses
+`focus-workspace`, focusing the right monitor first.
 
 ## sway
 
@@ -65,7 +108,7 @@ together and the workspace you used last comes first. Windows in the
 scratchpad are listed last, on workspace "scratchpad". Enter shows such a
 window on the current workspace; Ctrl+Enter does the same, and the window
 stays a scratchpad window. If the window has closed in the meantime, Raffi
-reports it.
+reports it. Ctrl+D runs `swaymsg [con_id=N] kill`.
 
 Raffi's own window is left out of the list. Queries typed in this mode are
 not saved in the search history.

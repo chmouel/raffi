@@ -1,0 +1,100 @@
+---
+title: niri Integration
+description: Open Raffi with a key in niri, float its window, and use the window switcher
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Key binding
+
+```kdl
+binds {
+    Mod+R { spawn "raffi"; }
+}
+```
+
+Inside niri, Raffi starts the app you pick with `niri msg action spawn`, so
+niri is its parent and the app gets niri's environment and working directory.
+To always start apps from Raffi, set `launch: direct` in `general` (see
+[General Settings](../../configuration/general-settings/#configuration-options)).
+
+## Window rule
+
+Raffi's window has the app ID `com.chmouel.raffi`. niri opens new windows as
+columns; this rule floats it instead, and sizes it relative to the screen:
+
+```kdl
+window-rule {
+    match app-id=r#"^com\.chmouel\.raffi$"#
+    open-floating true
+    default-column-width { proportion 0.45; }
+    default-window-height { proportion 0.78; }
+}
+```
+
+Check your config with `niri validate`. If you start a second style with
+`raffi --app-name com.chmouel.raffi.fb`, match that app ID in another rule.
+
+## Binding addons
+
+Pass an addon keyword as the initial query to open Raffi straight into it:
+
+```kdl
+binds {
+    Mod+W { spawn "raffi" "-i" "win "; }
+    Mod+V { spawn "raffi" "-i" "clip "; }
+    Mod+T { spawn "raffi" "-i" "tabs "; }
+}
+```
+
+## Window switcher
+
+`win ` lists the open windows in focus order. Enter focuses one, Ctrl+Enter
+moves it to the current workspace, Ctrl+D closes it, and Ctrl+Tab shows the
+workspaces instead. The list follows `niri msg event-stream` while it is
+open. See [Window Switcher](../../features/window-switcher/).
+
+## Focus a running app
+
+With `raise_running: true` in `general`, Enter on a launcher whose app already
+has a window focuses that window, and Ctrl+Enter starts a new one. Raffi
+matches the app ID. See
+[General Settings](../../configuration/general-settings/#configuration-options).
+
+## niri-only launchers
+
+`ifcompositor` shows a launcher only under the given compositors:
+
+```yaml title="launchers.yaml"
+niri-overview:
+  binary: niri
+  args: ["msg", "action", "toggle-overview"]
+  description: "Toggle the overview"
+  ifcompositor: niri
+```
+
+## Transparency and blur
+
+Raffi is translucent by default (`opacity: 0.95` in `general`). niri 26.04
+and later blur behind it when a window rule asks for it:
+
+```kdl
+window-rule {
+    match app-id=r#"^com\.chmouel\.raffi$"#
+    background-effect { blur true; }
+}
+```
+
+See [Transparency and Blur](../../features/themes/#transparency-and-blur).
+
+## Troubleshooting
+
+<Aside type="note">
+Apps started through niri get niri's environment and working directory, not
+Raffi's. If an app needs a variable you exported in a terminal, set it in
+niri's `environment` section or use `launch: direct`.
+</Aside>
+
+- Raffi does not appear: check that `raffi` is on niri's `PATH` (try an
+  absolute path in the binding) and look at `journalctl --user -u niri`.
+- To see what Raffi asks niri, run it with `--debug-file /tmp/raffi.log`.

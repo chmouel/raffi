@@ -447,6 +447,13 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             "Clipboard history: remove the selected item from CopyQ",
         ));
     }
+    if addons.windows.enabled {
+        entries.push(shortcut(
+            "Ctrl+D",
+            "Close window",
+            "Window switcher: asks the selected window to close",
+        ));
+    }
     if addons.pass.enabled || addons.bitwarden.enabled {
         entries.extend([
             shortcut(
@@ -536,6 +543,7 @@ pub(super) fn add_cycle_view_shortcut(
         ),
         (addons.audio.enabled, "audio: all, outputs, inputs"),
         (addons.browser_tabs.enabled, "tabs: by browser, recent"),
+        (addons.windows.enabled, "windows: windows, workspaces"),
         (
             addons.bookmarks.enabled,
             "bookmarks: all browsers, then each one",

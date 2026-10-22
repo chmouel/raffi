@@ -46,25 +46,24 @@ Run `raffi` and start typing. With no config yet, Raffi searches your installed 
 Most people bind it to a key in their compositor. For Sway:
 
 ```config
-set $menu raffi -p
-set $super Mod4
-bindsym $super+Space exec cmd=$($menu) && [ -n "$cmd" ] && swaymsg exec -- "$cmd"
+bindsym Mod4+Space exec raffi
 ```
 
-For Hyprland:
-
-```conf
-$super = SUPER
-bind = $super, R, exec, (val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val")
-```
-
-For Hyprland's Lua configuration (`~/.config/hypr/hyprland.lua`):
+For Hyprland's Lua config:
 
 ```lua
-hl.bind("SUPER + R", hl.dsp.exec_cmd("(val=$(raffi -pI); [ -n \"$val\" ] && hyprctl dispatch exec \"$val\")"))
+hl.bind("SUPER + R", hl.dsp.exec_cmd("raffi"))
 ```
 
-The [Sway](https://chmouel.github.io/raffi/integration/sway/) and [Hyprland](https://chmouel.github.io/raffi/integration/hyprland/) pages have more examples, and the [CLI reference](https://chmouel.github.io/raffi/reference/cli-options/) lists every flag.
+For niri:
+
+```kdl
+binds {
+    Mod+R { spawn "raffi"; }
+}
+```
+
+Inside Hyprland, niri and Sway, Raffi asks the compositor to start the app you pick. The [Sway](https://chmouel.github.io/raffi/integration/sway/), [Hyprland](https://chmouel.github.io/raffi/integration/hyprland/) and [niri](https://chmouel.github.io/raffi/integration/niri/) pages cover window rules and more examples, and the [CLI reference](https://chmouel.github.io/raffi/reference/cli-options/) lists every flag.
 
 ## Features
 

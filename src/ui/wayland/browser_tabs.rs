@@ -474,6 +474,7 @@ fn tab_item(
         dimmed: false,
         sort_priority: 0,
         typed_only: false,
+        close: None,
         group: None,
         pinned: tab.pinned,
         title,

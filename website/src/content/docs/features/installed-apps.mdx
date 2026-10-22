@@ -30,6 +30,13 @@ first, such as "Firefox: New Private Window" or "Kitty: New Window". Set
 When no launcher is configured at all, Raffi already lists the installed
 apps on its own, whatever `enabled` is set to. `actions` applies there too.
 
+With [`general.raise_running`](../../configuration/general-settings/#configuration-options)
+on, Enter on an app that already has a window open focuses that window, and
+Ctrl+Enter starts another copy. Raffi matches the window against the app's
+`StartupWMClass` and the name of its desktop file. Desktop actions always
+start something new, and so do terminal apps unless their file sets
+`StartupWMClass`.
+
 ## Which apps are listed
 
 Raffi reads the `applications` folder of `$XDG_DATA_HOME` and of each

@@ -178,6 +178,7 @@ pub(super) fn media_items(players: &[Player], keep_open: bool) -> Vec<CommandIte
                 dimmed: false,
                 sort_priority: 0,
                 typed_only: false,
+                close: None,
                 group: None,
                 pinned: false,
             });
@@ -231,6 +232,7 @@ fn header_item(player: &Player) -> CommandItem {
         dimmed: false,
         sort_priority: 0,
         typed_only: false,
+        close: None,
         group: None,
         pinned: false,
     }

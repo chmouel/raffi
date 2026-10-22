@@ -522,7 +522,7 @@ fn is_user_input(message: &Message) -> bool {
             | Message::KeywordSuggestionSelected(_)
             | Message::ClipboardSelected(_)
             | Message::ClipboardRefresh
-            | Message::ClipboardDelete
+            | Message::DeleteSelected
             | Message::VaultShortcut(_)
     )
 }
@@ -1748,7 +1748,12 @@ impl LauncherApp {
                 self.handle_clipboard_action_done(session, result)
             }
             Message::ClipboardRefresh => self.handle_refresh(),
-            Message::ClipboardDelete => self.handle_clipboard_delete(),
+            Message::DeleteSelected if self.clipboard.active => self.handle_clipboard_delete(),
+            Message::DeleteSelected => self.handle_command_list_close(),
+            Message::WindowsChanged => self.handle_windows_changed(),
+            Message::LauncherRaiseChecked(index, focus) => {
+                self.handle_launcher_raise_checked(index, focus)
+            }
             Message::ClipboardDeleteDone(session, result) => {
                 self.handle_clipboard_delete_done(session, result)
             }
@@ -1796,8 +1801,7 @@ impl LauncherApp {
                 CommandListAddon::Bluetooth => self.load_bluetooth(true),
                 CommandListAddon::Windows => match (self.compositor)() {
                     Some(compositor) if (self.program_exists)(compositor.program()) => {
-                        let keep_open = !self.should_close(self.addons.windows.close_on_action);
-                        self.load_command_list(move || compositor.load_windows(keep_open), true)
+                        self.load_windows(compositor, true)
                     }
                     _ => Task::none(),
                 },
@@ -2618,8 +2622,7 @@ impl LauncherApp {
                         .set_notice(format!("{} not found", compositor.program()));
                     return Task::none();
                 }
-                let keep_open = !self.should_close(self.addons.windows.close_on_action);
-                self.load_command_list(move || compositor.load_windows(keep_open), false)
+                self.load_windows(compositor, false)
             }
             CommandListAddon::BrowserTabs if !entered => Task::none(),
             CommandListAddon::BrowserTabs => {
@@ -3164,6 +3167,103 @@ impl LauncherApp {
         )
     }
 
+    /// Start the launcher at this config index, closing Raffi unless the
+    /// launcher keeps it open.
+    fn launch_config(&mut self, index: usize) -> Task<Message> {
+        let Some(config) = self.configs.get(index).cloned() else {
+            return Task::none();
+        };
+        let description = config
+            .description
+            .clone()
+            .unwrap_or_else(|| config.binary.clone().unwrap_or_default());
+        let close = self.should_close(config.close_on_action);
+        record_mru_use(&mut self.mru_map, description.clone());
+        save_mru_map(get_mru_cache_path().ok().as_deref(), &self.mru_map);
+        self.save_query_to_history();
+        if !close && !self.print_only {
+            if let Err(e) = crate::spawn_launcher_command(
+                &config,
+                &self.view.default_script_shell,
+                self.view.launch_via,
+            ) {
+                eprintln!("Error executing command: {e:#}");
+            }
+            return Task::none();
+        }
+        if let Ok(mut selected) = self.selected_item.lock() {
+            *selected = Some(description);
+        }
+        iced::exit()
+    }
+
+    /// Focus the launcher's open window found on Enter, or start it when
+    /// there is none.
+    fn handle_launcher_raise_checked(
+        &mut self,
+        index: usize,
+        focus: Option<super::actions::DeferredAction>,
+    ) -> Task<Message> {
+        let Some(focus) = focus else {
+            return self.launch_config(index);
+        };
+        let Some(config) = self.configs.get(index) else {
+            return Task::none();
+        };
+        let description = config
+            .description
+            .clone()
+            .unwrap_or_else(|| config.binary.clone().unwrap_or_default());
+        let close = self.should_close(config.close_on_action);
+        crate::debug_log!("raise: focusing the open {description:?} window");
+        record_mru_use(&mut self.mru_map, description);
+        save_mru_map(get_mru_cache_path().ok().as_deref(), &self.mru_map);
+        self.save_query_to_history();
+        if !close {
+            return Task::future(async move {
+                if let Some(Err(error)) = super::browser_data::off_thread(move || focus.run()).await
+                {
+                    crate::debug_log!("raise: {error}");
+                }
+            })
+            .discard();
+        }
+        if let Ok(mut slot) = self.deferred_action.lock() {
+            *slot = Some(focus);
+        }
+        iced::exit()
+    }
+
+    /// Reload the window switcher after the compositor reported a change,
+    /// unless a load, an armed confirmation or an action would be disturbed.
+    fn handle_windows_changed(&mut self) -> Task<Message> {
+        let list = &self.command_list;
+        if list.addon != Some(CommandListAddon::Windows)
+            || list.loading
+            || list.refreshing
+            || list.armed.is_some()
+            || list.closing.is_some()
+            || list.overlay.is_some()
+        {
+            return Task::none();
+        }
+        match (self.compositor)() {
+            Some(compositor) => self.load_windows(compositor, true),
+            None => Task::none(),
+        }
+    }
+
+    /// Load the windows or the workspaces, whichever the switcher shows.
+    fn load_windows(
+        &mut self,
+        compositor: super::windows::Compositor,
+        refresh: bool,
+    ) -> Task<Message> {
+        let view = self.command_list.windows_view;
+        let keep_open = !self.should_close(self.addons.windows.close_on_action);
+        self.load_command_list(move || compositor.load_view(view, keep_open), refresh)
+    }
+
     fn load_audio(&mut self, refresh: bool) -> Task<Message> {
         let options = super::audio::AudioOptions::of(&self.addons.audio, self.close_on_action);
         self.command_list.query_row = Some(self.audio_query_row(true));
@@ -3257,6 +3357,9 @@ impl LauncherApp {
         result: Result<(), String>,
     ) -> Task<Message> {
         self.in_flight.finish(addon.name(), &identity);
+        if self.command_list.closing.as_ref() == Some(&identity) {
+            self.command_list.closing = None;
+        }
         let main_view = self.invalidate_main_view(addon);
         if self.command_list.addon != Some(addon) || self.command_list.session != session {
             if let Err(error) = result {
@@ -3278,14 +3381,10 @@ impl LauncherApp {
                 CommandListAddon::BrowserTabs => self.load_browser_tabs(true),
                 CommandListAddon::Bluetooth => self.load_bluetooth(true),
                 CommandListAddon::Slack => self.load_slack(true),
-                CommandListAddon::Windows => {
-                    if let Some(compositor) = (self.compositor)() {
-                        let keep_open = !self.should_close(self.addons.windows.close_on_action);
-                        self.load_command_list(move || compositor.load_windows(keep_open), true)
-                    } else {
-                        Task::none()
-                    }
-                }
+                CommandListAddon::Windows => match (self.compositor)() {
+                    Some(compositor) => self.load_windows(compositor, true),
+                    None => Task::none(),
+                },
                 CommandListAddon::System
                 | CommandListAddon::Pass
                 | CommandListAddon::Bitwarden
@@ -3354,7 +3453,12 @@ impl LauncherApp {
         if !self.in_flight.is_pending(addon.name(), &item.identity) {
             return None;
         }
-        item.primary.as_ref()?.progress.as_deref()
+        let action = if self.command_list.closing.as_ref() == Some(&item.identity) {
+            &item.close
+        } else {
+            &item.primary
+        };
+        action.as_ref()?.progress.as_deref()
     }
 
     pub(super) fn set_command_list_items(
@@ -3637,25 +3741,31 @@ impl LauncherApp {
                 save_mru_map(get_mru_cache_path().ok().as_deref(), &self.mru_map);
                 return self.type_alias(text);
             }
-            let close = self.should_close(config.close_on_action);
-            if !close && !self.print_only {
-                if let Err(e) =
-                    crate::spawn_launcher_command(&config, &self.view.default_script_shell)
-                {
-                    eprintln!("Error executing command: {e:#}");
+            if !self.print_only && !self.view.current_modifiers.control() {
+                if let Some(compositor) = self.view.raise_via {
+                    let classes = crate::raise_classes(&config, self.view.raise_running);
+                    if !classes.is_empty() {
+                        crate::debug_log!("raise: looking for a {classes:?} window");
+                        return Task::perform(
+                            super::browser_data::off_thread(move || {
+                                super::windows::find_app_window(compositor, &classes)
+                            }),
+                            move |found| {
+                                let focus = match found {
+                                    Some(Ok(focus)) => focus,
+                                    Some(Err(error)) => {
+                                        crate::debug_log!("raise: {error}");
+                                        None
+                                    }
+                                    None => None,
+                                };
+                                Message::LauncherRaiseChecked(real_config_index, focus)
+                            },
+                        );
+                    }
                 }
-                record_mru_use(&mut self.mru_map, description);
-                save_mru_map(get_mru_cache_path().ok().as_deref(), &self.mru_map);
-                self.save_query_to_history();
-                return Task::none();
             }
-            if let Ok(mut selected) = self.selected_item.lock() {
-                *selected = Some(description.clone());
-            }
-            record_mru_use(&mut self.mru_map, description);
-            save_mru_map(get_mru_cache_path().ok().as_deref(), &self.mru_map);
-            self.save_query_to_history();
-            return iced::exit();
+            return self.launch_config(real_config_index);
         }
         current_index += self.filtered_configs.len();
 
@@ -4465,6 +4575,12 @@ impl LauncherApp {
                 self.command_list.tabs_view = self.command_list.tabs_view.cycle();
                 return self.load_browser_tabs(true);
             }
+            Some(CommandListAddon::Windows) => {
+                if let Some(compositor) = (self.compositor)() {
+                    self.command_list.windows_view = self.command_list.windows_view.cycle();
+                    return self.load_windows(compositor, false);
+                }
+            }
             _ => {}
         }
         if self.main_view.active && !self.main_view.stops.is_empty() {
@@ -4499,6 +4615,9 @@ impl LauncherApp {
             }
             Some(CommandListAddon::BrowserTabs) => {
                 return Some(self.command_list.tabs_view.label().to_string());
+            }
+            Some(CommandListAddon::Windows) if (self.compositor)().is_some() => {
+                return Some(self.command_list.windows_view.label().to_string());
             }
             Some(CommandListAddon::Bookmarks) if self.bookmarks.prompt.is_some() => return None,
             Some(CommandListAddon::Bookmarks) => return self.bookmarks.view_label(),
@@ -4842,33 +4961,7 @@ impl LauncherApp {
         if keep_open {
             crate::debug_log!("{}: running {identity}", addon.name());
             self.save_query_to_history();
-            let session = self.command_list.session;
-            return Task::perform(
-                async move {
-                    let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                    std::thread::spawn(move || {
-                        let result = if matches!(
-                            addon,
-                            CommandListAddon::Terminal
-                                | CommandListAddon::System
-                                | CommandListAddon::Bookmarks
-                                | CommandListAddon::BrowserHistory
-                        ) {
-                            action.run()
-                        } else {
-                            super::command_list::run_kept_open(&action)
-                        };
-                        let _ = sender.send(result);
-                    });
-                    let result = receiver
-                        .await
-                        .unwrap_or_else(|_| Err("action stopped unexpectedly".to_string()));
-                    (identity, result)
-                },
-                move |(identity, result)| {
-                    Message::CommandListActionDone(addon, session, identity, result)
-                },
-            );
+            return self.run_kept_open_task(addon, identity, action);
         }
         crate::debug_log!("{}: running {identity} after close", addon.name());
         if let Ok(mut slot) = self.deferred_action.lock() {
@@ -4876,6 +4969,70 @@ impl LauncherApp {
         }
         self.save_query_to_history();
         iced::exit()
+    }
+
+    /// Ctrl+D on a command list row: run its close action, such as closing
+    /// a window, with Raffi kept open.
+    pub(super) fn handle_command_list_close(&mut self) -> Task<Message> {
+        if self.view.help_active || !self.command_list.is_active() {
+            return Task::none();
+        }
+        let Some(addon) = self.command_list.addon else {
+            return Task::none();
+        };
+        let Some((identity, action)) = self
+            .selected_index
+            .checked_sub(self.command_list_offset())
+            .and_then(|row| self.command_list.item(row))
+            .filter(|item| item.unavailable.is_none())
+            .and_then(|item| Some((item.identity.clone(), item.close.as_ref()?.action.clone())))
+        else {
+            return Task::none();
+        };
+        if !self.in_flight.begin(addon.name(), &identity) {
+            return Task::none();
+        }
+        crate::debug_log!("{}: closing {identity}", addon.name());
+        self.command_list.armed = None;
+        self.command_list.closing = Some(identity.clone());
+        self.run_kept_open_task(addon, identity, action)
+    }
+
+    /// Run `action` off the UI thread while Raffi stays open, reporting back
+    /// with [`Message::CommandListActionDone`].
+    fn run_kept_open_task(
+        &mut self,
+        addon: CommandListAddon,
+        identity: String,
+        action: DeferredAction,
+    ) -> Task<Message> {
+        let session = self.command_list.session;
+        Task::perform(
+            async move {
+                let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                std::thread::spawn(move || {
+                    let result = if matches!(
+                        addon,
+                        CommandListAddon::Terminal
+                            | CommandListAddon::System
+                            | CommandListAddon::Bookmarks
+                            | CommandListAddon::BrowserHistory
+                    ) {
+                        action.run()
+                    } else {
+                        super::command_list::run_kept_open(&action)
+                    };
+                    let _ = sender.send(result);
+                });
+                let result = receiver
+                    .await
+                    .unwrap_or_else(|_| Err("action stopped unexpectedly".to_string()));
+                (identity, result)
+            },
+            move |(identity, result)| {
+                Message::CommandListActionDone(addon, session, identity, result)
+            },
+        )
     }
 
     /// Keep a tab or window run with its main action as a recent pick;
@@ -4894,6 +5051,8 @@ impl LauncherApp {
         };
         if !super::main_view::is_mixable(addon, item)
             || (self.view.current_modifiers.control() && item.secondary.is_some())
+            || (addon == CommandListAddon::Windows
+                && self.command_list.windows_view != super::windows::View::Windows)
         {
             return;
         }

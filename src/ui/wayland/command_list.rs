@@ -134,6 +134,8 @@ pub(super) struct CommandItem {
     pub primary: Option<CommandAction>,
     /// Run with Ctrl+Enter; the primary action when absent.
     pub secondary: Option<CommandAction>,
+    /// Run with Ctrl+D, such as closing a window.
+    pub close: Option<CommandAction>,
     pub details: Vec<(String, String)>,
     /// Short tag shown as a pill at the end of the row.
     pub badge: Option<String>,
@@ -199,6 +201,7 @@ impl CommandItem {
             dimmed: false,
             sort_priority: 0,
             typed_only: false,
+            close: None,
             group: None,
             pinned: false,
         }
@@ -238,6 +241,8 @@ pub(super) struct CommandListState {
     pub notice: Option<String>,
     /// Target, action and modifiers armed by a first Enter.
     pub armed: Option<Armed>,
+    /// Identity of the row whose Ctrl+D action is running.
+    pub closing: Option<String>,
     /// A reload keeping the current rows until the new ones arrive.
     pub refreshing: bool,
     /// Error row from an action, kept above the rows of a refresh started
@@ -275,6 +280,8 @@ pub(super) struct CommandListState {
     pub audio_view: super::audio::View,
     /// Order of the browser tab list.
     pub tabs_view: super::browser_tabs::View,
+    /// Whether the window switcher lists windows or workspaces.
+    pub windows_view: super::windows::View,
     /// Which Slack slice this list shows when used as a `main_view` source.
     pub slack_source: Option<super::main_view::SlackSource>,
     /// Hide muted or zero-usage unpromoted Slack channels when the query is empty.
@@ -297,6 +304,7 @@ impl CommandListState {
         self.loading = false;
         self.notice = None;
         self.armed = None;
+        self.closing = None;
         self.refreshing = false;
         self.error = None;
         self.overlay = None;
@@ -308,6 +316,7 @@ impl CommandListState {
         self.query_row = None;
         self.audio_view = super::audio::View::All;
         self.tabs_view = super::browser_tabs::View::ByBrowser;
+        self.windows_view = super::windows::View::Windows;
         self.slack_source = None;
         self.slack_hide_cold_channels = false;
         self.generation = self.generation.wrapping_add(1);

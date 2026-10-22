@@ -1,72 +1,76 @@
 ---
 title: Sway Integration
-description: Open Raffi with a key in Sway
+description: Open Raffi with a key in Sway, float its window, and use the window switcher
 ---
 
-Bind Raffi to a key in Sway and open it from anywhere.
+import { Aside } from '@astrojs/starlight/components';
 
-## Configuration
-
-The simplest binding lets Raffi spawn the selected command itself:
+## Key binding
 
 ```ini
 set $super Mod4
 bindsym $super+Space exec raffi
 ```
 
-If you want Sway to be the parent process of the launched application (so it is owned by the
-compositor rather than by Raffi), use print-only mode and hand the command to `swaymsg`:
+Inside sway, Raffi starts the app you pick with `swaymsg exec`, so sway is its
+parent and the app gets sway's environment and working directory. Command
+lines that sway would split or expand (with `;`, `,`, `$`, quotes, backslashes
+or line breaks) are started by Raffi itself. To always start apps from Raffi,
+set `launch: direct` in `general` (see
+[General Settings](../../configuration/general-settings/#configuration-options)).
+
+## Window rule
+
+Raffi's window has the app ID `com.chmouel.raffi`. To float it in the middle
+of the screen without a border:
 
 ```ini
-set $menu raffi -p
-set $super Mod4
-bindsym $super+Space exec cmd=$($menu) && [ -n "$cmd" ] && swaymsg exec -- "$cmd"
+for_window [app_id="com.chmouel.raffi"] floating enable, border none, resize set width 45 ppt height 78 ppt, move position center
 ```
 
-## How It Works
+Put this in the config file. Sent through `swaymsg`, the commands after the
+first comma run on their own and fail.
 
-- `raffi -p` runs Raffi in print-only mode, which prints the selected command instead of executing it
-- `cmd=$(...)` captures that output; Sway runs the whole binding through `sh -c`
-- `[ -n "$cmd" ]` skips `swaymsg` when nothing was selected. Without this guard `swaymsg` is called
-  with no command and fails (see [Troubleshooting](#invalid-exec-command-expected-at-least-1-argument-got-0))
-- `swaymsg exec -- "$cmd"` passes the command as a **single quoted argument**, which preserves
-  arguments containing spaces as well as multi-line `script` entries
-- `$super+Space` binds Raffi to Super (Windows/Command key) + Space
+If you start a second style with `raffi --app-name com.chmouel.raffi.fb`, give
+it its own `for_window` line with that app ID.
 
-:::caution[Do not pipe through `xargs`]
-Older versions of this documentation suggested `raffi -p | xargs swaymsg exec --`. Avoid it:
-`xargs` splits on whitespace and strips quotes, so any argument containing a space and every
-`script` entry gets mangled before Sway sees it. Adding `-r`/`--no-run-if-empty` only silences the
-empty-selection error; it does not fix the quoting. Use the command-substitution form above.
-:::
+## Binding addons
 
-## Customization
-
-### Using a Different Keybinding
-
-You can change the keybinding to any combination you prefer:
+Pass an addon keyword as the initial query to open Raffi straight into it:
 
 ```ini
-# Use Super+D instead
-bindsym $super+d exec cmd=$($menu) && [ -n "$cmd" ] && swaymsg exec -- "$cmd"
-
-# Use Alt+Space
-bindsym Mod1+Space exec cmd=$($menu) && [ -n "$cmd" ] && swaymsg exec -- "$cmd"
+bindsym $super+w exec raffi -i "win "
+bindsym $super+v exec raffi -i "clip "
+bindsym $super+t exec raffi -i "tabs "
 ```
 
-### Additional Raffi Options
+## Window switcher
 
-You can pass additional flags to Raffi in the `$menu` variable:
+`win ` lists the open windows, scratchpad included. Enter focuses one,
+Ctrl+Enter moves it to the current workspace, Ctrl+D closes it, and Ctrl+Tab
+shows the workspaces instead. The list follows sway's window and workspace
+events while it is open. See [Window Switcher](../../features/window-switcher/).
 
-```ini
-# Disable icons for faster startup
-set $menu raffi -p -I
+## Focus a running app
 
-# Use a custom config file
-set $menu raffi -p -c ~/.config/raffi/custom.yaml
+With `raise_running: true` in `general`, Enter on a launcher whose app already
+has a window focuses that window, and Ctrl+Enter starts a new one. Raffi
+matches the app ID, or the class of an Xwayland window. See
+[General Settings](../../configuration/general-settings/#configuration-options).
+
+## Sway-only launchers
+
+`ifcompositor` shows a launcher only under the given compositors:
+
+```yaml title="launchers.yaml"
+sway-reload:
+  binary: swaymsg
+  args: ["reload"]
+  description: "Reload sway"
+  ifcompositor: sway
 ```
 
-### Transparency and Blur
+## Transparency and blur
 
 Raffi is translucent by default (`opacity: 0.95` in `general`). Plain
 Sway has no blur. [SwayFX](https://github.com/WillPower3309/swayfx) can blur
@@ -78,45 +82,53 @@ for_window [app_id="com.chmouel.raffi"] blur enable
 
 See [Transparency and Blur](../../features/themes/#transparency-and-blur).
 
-## Testing
+## Print-only mode
 
-After adding the configuration:
+`raffi -p` prints the selected command instead of running it. You can hand it
+to `swaymsg` yourself:
 
-1. Reload your Sway config: `swaymsg reload`
-2. Press `Super+Space` to launch Raffi
-3. Select an application and press Enter to launch it
+```ini
+set $menu raffi -p
+bindsym $super+Space exec cmd=$($menu) && [ -n "$cmd" ] && swaymsg exec -- "$cmd"
+```
+
+`[ -n "$cmd" ]` skips `swaymsg` when nothing was picked, and the quotes pass
+the command as one argument, which keeps arguments with spaces and multi-line
+`script` entries intact.
+
+<Aside type="caution" title="Do not pipe through xargs">
+Older versions of this page suggested `raffi -p | xargs swaymsg exec --`.
+`xargs` splits on whitespace and strips quotes, so any argument containing a
+space and every `script` entry gets mangled before sway sees it. Use the
+command substitution above.
+</Aside>
 
 ## Troubleshooting
 
 ### Raffi doesn't appear
 
-- Ensure Raffi is installed and in your `$PATH`
-- Check Sway logs: `journalctl --user -u sway`
+- Check that Raffi is in sway's `PATH`. Sway's `exec` runs commands through
+  `sh -c`, which does not read `~/.bashrc` or `~/.zshrc`, so a binary in
+  `~/.cargo/bin` can work in a terminal but not from a binding. Use an
+  absolute path, or export the directory with
+  `systemctl --user import-environment PATH`.
+- Check sway's logs: `journalctl --user -u sway`.
+
+### An app starts with the wrong environment or directory
+
+Apps started through sway inherit sway's environment, not your shell's. Set
+`launch: direct` to have Raffi start them, or export the variables to sway.
 
 ### `Invalid exec command (expected at least 1 argument, got 0)`
 
-This error comes from `swaymsg`, not from Raffi: it means `swaymsg exec` was called without a
-command because Raffi printed nothing. Common causes:
+This comes from `swaymsg` in the print-only recipe: Raffi printed nothing
+because you closed it or picked an addon result, which acts inside Raffi.
+Keep the `[ -n "$cmd" ]` guard.
 
-- Nothing guards against an empty selection. `raffi -p | xargs swaymsg exec --` runs `swaymsg`
-  even when its input is empty. Use the `[ -n "$cmd" ]` form shown above.
-- You closed Raffi. Pressing `Escape` or picking nothing exits without printing, which is
-  normal.
-- You picked an addon result. Emoji, calculator, web search, file browser and text snippet
-  entries perform their action directly in Raffi, so there is no command to print.
-- Raffi is not in Sway's `PATH`. Sway's `exec` runs commands through `sh -c`, which does not read
-  `~/.bashrc` or `~/.zshrc`. A `cargo install`ed binary in `~/.cargo/bin` therefore works in a
-  terminal but not from a keybinding. Test with an absolute path:
+### Debugging
 
-  ```ini
-  set $menu /home/yourname/.cargo/bin/raffi -p
-  ```
+Write a debug log from the binding:
 
-  Or export the directory in Sway's environment, for example via
-  `systemctl --user import-environment PATH` or your login shell profile.
-
-### Applications don't launch
-
-- Test the command manually: `cmd=$(raffi -p) && [ -n "$cmd" ] && swaymsg exec -- "$cmd"`
-- Verify `swaymsg` is working: `swaymsg -t get_version`
-- Capture a debug log from the keybinding: `set $menu raffi -p --debug-file /tmp/raffi.log`
+```ini
+bindsym $super+Space exec raffi --debug-file /tmp/raffi.log
+```

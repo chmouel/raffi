@@ -50,6 +50,7 @@ mod units;
 mod url_match;
 mod vault;
 mod view;
+mod window_events;
 mod windows;
 mod world_clock;
 
@@ -227,6 +228,8 @@ fn run_wayland_ui(
         settings.font_sizes.item,
     );
     let default_script_shell = settings.default_script_shell.clone();
+    let launch_via = settings.launch_via;
+    let raise_running = settings.raise_running;
 
     let window_settings = window::Settings {
         size: iced::Size::new(window_width, window_height),
@@ -274,6 +277,9 @@ fn run_wayland_ui(
             app.view.preview_style = preview_style.clone();
             app.view.window_size = iced::Size::new(window_width, window_height);
             app.view.default_script_shell = default_script_shell.clone();
+            app.view.launch_via = launch_via;
+            app.view.raise_running = raise_running;
+            app.view.raise_via = crate::compositor::Compositor::current();
             app.file_browser.preview_command = file_preview::FilePreviewCommand::resolve(
                 app.addons.file_browser.preview_command.as_deref(),
                 app.program_exists,

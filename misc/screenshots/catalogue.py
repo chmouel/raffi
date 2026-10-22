@@ -110,6 +110,7 @@ SHOTS = [
     Shot("world-clock", "3pm london in tokyo"),
     Shot("system-commands", "sys "),
     Shot("window-switcher", "win "),
+    Shot("window-switcher-workspaces", "win ", ("ctrl+Tab",)),
     Shot("audio-switcher", "audio outputs", down()),
     Shot("audio-volume", "audio 40"),
     Shot("media-controls", "media "),

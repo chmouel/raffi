@@ -7,6 +7,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::actions::{kill_process_group, run_bounded, run_bounded_status, validate_snippet};
 use super::placeholders::MAX_VALUE;
+use crate::compositor::{lua_quote, lua_unavailable};
 
 const TIMEOUT: Duration = Duration::from_secs(2);
 const RESTORE_DELAY: Duration = Duration::from_secs(1);
@@ -146,6 +147,24 @@ pub(super) enum HyprAction {
         address: String,
         workspace: String,
     },
+    /// Ask the window to close, as its close button would.
+    Close {
+        address: String,
+    },
+    /// Switch to `workspace`, a selector such as `3` or `name:web`.
+    Workspace {
+        workspace: String,
+    },
+    /// Show or hide the special workspace `name`, without its `special:`
+    /// prefix.
+    ToggleSpecial {
+        name: String,
+    },
+    /// Move the window to `workspace` and follow it there.
+    MoveTo {
+        address: String,
+        workspace: String,
+    },
     Exit,
 }
 
@@ -167,6 +186,23 @@ impl HyprAction {
                 window(address),
                 lua_quote(workspace)
             ),
+            Self::Close { address } => format!(
+                "{}hl.dispatch(hl.dsp.window.close({{ window = w }}))",
+                window(address)
+            ),
+            Self::Workspace { workspace } => format!(
+                "hl.dispatch(hl.dsp.focus({{ workspace = {} }}))",
+                lua_quote(workspace)
+            ),
+            Self::ToggleSpecial { name } => format!(
+                "hl.dispatch(hl.dsp.workspace.toggle_special({}))",
+                lua_quote(name)
+            ),
+            Self::MoveTo { address, workspace } => format!(
+                "{}hl.dispatch(hl.dsp.window.move({{ window = w, workspace = {}, follow = true }}))",
+                window(address),
+                lua_quote(workspace)
+            ),
             Self::Exit => "hl.dispatch(hl.dsp.exit())".into(),
         }
     }
@@ -183,6 +219,17 @@ impl HyprAction {
                 ],
                 focus(address),
             ],
+            Self::Close { address } => {
+                vec![vec!["closewindow".into(), format!("address:{address}")]]
+            }
+            Self::Workspace { workspace } => vec![vec!["workspace".into(), workspace.clone()]],
+            Self::ToggleSpecial { name } => {
+                vec![vec!["togglespecialworkspace".into(), name.clone()]]
+            }
+            Self::MoveTo { address, workspace } => vec![vec![
+                "movetoworkspace".into(),
+                format!("{workspace},address:{address}"),
+            ]],
             Self::Exit => vec![vec!["exit".into()]],
         }
     }
@@ -225,35 +272,11 @@ impl HyprAction {
     }
 }
 
-/// Whether an eval reply means Hyprland cannot run Lua: versions before 0.55
-/// do not know `eval`, and hyprlang configs reject it.
-fn lua_unavailable(reply: &str) -> bool {
-    let reply = reply.trim();
-    reply == "unknown request" || reply.starts_with("eval is only supported with the lua config")
-}
-
 fn checked_status(success: bool, reply: &str) -> Result<(), String> {
     match checked_reply_for(reply.as_bytes(), "action") {
         Ok(()) if !success => Err("hyprctl failed".into()),
         result => result,
     }
-}
-
-/// A Lua string literal for `value`. Control characters use decimal escapes
-/// so the expression stays on one line.
-fn lua_quote(value: &str) -> String {
-    let mut quoted = String::with_capacity(value.len() + 2);
-    quoted.push('"');
-    for c in value.chars() {
-        match c {
-            '\\' => quoted.push_str("\\\\"),
-            '"' => quoted.push_str("\\\""),
-            c if c.is_ascii_control() => quoted.push_str(&format!("\\{:03}", c as u32)),
-            c => quoted.push(c),
-        }
-    }
-    quoted.push('"');
-    quoted
 }
 
 /// Show `message` as a Hyprland notification; outside Hyprland it is only
@@ -272,7 +295,7 @@ pub(super) fn notify(message: &str) {
     let _ = run_bounded(command, TIMEOUT, 64 * 1024);
 }
 
-fn valid_instance_signature(instance: &str) -> bool {
+pub(super) fn valid_instance_signature(instance: &str) -> bool {
     !instance.is_empty()
         && instance
             .bytes()
@@ -773,6 +796,49 @@ printf '%s|' "$@" > "$OUT"
             ]
         );
 
+        let close = HyprAction::Close {
+            address: "0x1a".into(),
+        };
+        assert_eq!(
+            close.lua(),
+            r#"local w = hl.get_window("address:0x1a"); assert(w, "window is gone"); hl.dispatch(hl.dsp.window.close({ window = w }))"#
+        );
+        assert_eq!(close.legacy(), vec![vec!["closewindow", "address:0x1a"]]);
+
+        let workspace = HyprAction::Workspace {
+            workspace: "name:web".into(),
+        };
+        assert_eq!(
+            workspace.lua(),
+            r#"hl.dispatch(hl.dsp.focus({ workspace = "name:web" }))"#
+        );
+        assert_eq!(workspace.legacy(), vec![vec!["workspace", "name:web"]]);
+
+        let special = HyprAction::ToggleSpecial {
+            name: "magic".into(),
+        };
+        assert_eq!(
+            special.lua(),
+            r#"hl.dispatch(hl.dsp.workspace.toggle_special("magic"))"#
+        );
+        assert_eq!(
+            special.legacy(),
+            vec![vec!["togglespecialworkspace", "magic"]]
+        );
+
+        let move_to = HyprAction::MoveTo {
+            address: "0x1a".into(),
+            workspace: "3".into(),
+        };
+        assert_eq!(
+            move_to.lua(),
+            r#"local w = hl.get_window("address:0x1a"); assert(w, "window is gone"); hl.dispatch(hl.dsp.window.move({ window = w, workspace = "3", follow = true }))"#
+        );
+        assert_eq!(
+            move_to.legacy(),
+            vec![vec!["movetoworkspace", "3,address:0x1a"]]
+        );
+
         assert_eq!(HyprAction::Exit.lua(), "hl.dispatch(hl.dsp.exit())");
         assert_eq!(HyprAction::Exit.legacy(), vec![vec!["exit"]]);
     }
@@ -853,7 +919,8 @@ printf '%s|' "$@" > "$OUT"
         assert_eq!(result.unwrap_err(), "hyprctl failed");
     }
 
-    /// Exercises the real deferred path on a throwaway window:
+    /// Exercises the real deferred path on a throwaway window, which it
+    /// closes:
     /// `RAFFI_HYPR_TEST_ADDRESS=0x.. RAFFI_HYPR_TEST_WORKSPACE=2 cargo test --all-features -- --ignored live_hypr`
     #[test]
     #[ignore]
@@ -867,8 +934,26 @@ printf '%s|' "$@" > "$OUT"
             address: address.clone(),
         }))
         .unwrap();
-        super::super::actions::run_deferred(&slot(HyprAction::MoveHere { address, workspace }))
-            .unwrap();
+        super::super::actions::run_deferred(&slot(HyprAction::MoveHere {
+            address: address.clone(),
+            workspace: workspace.clone(),
+        }))
+        .unwrap();
+        // Follow the window to a special workspace, hide it, come back, and
+        // close the window.
+        for action in [
+            HyprAction::MoveTo {
+                address: address.clone(),
+                workspace: "special:raffilive".into(),
+            },
+            HyprAction::ToggleSpecial {
+                name: "raffilive".into(),
+            },
+            HyprAction::Workspace { workspace },
+            HyprAction::Close { address },
+        ] {
+            super::super::actions::run_deferred(&slot(action)).unwrap();
+        }
         assert!(
             super::super::actions::run_deferred(&slot(HyprAction::Focus {
                 address: "0xdead".into(),

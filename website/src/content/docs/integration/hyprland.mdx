@@ -1,101 +1,187 @@
 ---
 title: Hyprland Integration
-description: Open Raffi with a key in Hyprland
+description: Open Raffi with a key in Hyprland, set its window rules, and switch windows and workspaces
 ---
 
-Bind Raffi to a key in Hyprland and it opens on top of your current workspace.
+import { Aside } from '@astrojs/starlight/components';
 
-## Configuration
+Raffi knows when it runs inside Hyprland. It starts your apps through
+Hyprland, lists and closes windows, switches workspaces, and can focus an
+app that is already open instead of starting it again.
 
-Add the following to your Hyprland configuration file (typically `~/.config/hypr/hyprland.conf`):
+## Key binding
 
-```ini
-$super = SUPER
-bind = $super, R, exec, (val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val")
+Use Hyprland's Lua configuration (0.55 and later) to bind a key to plain
+`raffi`:
+
+```lua title="~/.config/hypr/hyprland.lua"
+hl.bind("SUPER + R", hl.dsp.exec_cmd("raffi"))
 ```
 
-If you use Hyprland's Lua configuration (`~/.config/hypr/hyprland.lua`), use
-the equivalent Lua binding instead:
+Hyprland still supports Hyprlang. Use Lua as the default here, and switch
+from the Hyprlang form if Hyprland deprecates it.
 
-```lua
-hl.bind("SUPER + R", hl.dsp.exec_cmd("(val=$(raffi -pI); [ -n \"$val\" ] && hyprctl dispatch exec \"$val\")"))
+```ini title="~/.config/hypr/hyprland.conf"
+bind = SUPER, R, exec, raffi
 ```
 
 ## How It Works
 
-- `raffi -pI` runs Raffi in print-only mode with icons disabled for faster startup
-- The selected command is stored in the `$val` variable
-- `[ -n "$val" ]` checks that the output is non-empty (the user did not cancel)
-- `hyprctl dispatch exec` launches the selected application through Hyprland's IPC
-- The keybinding is `Super+R`
+Raffi asks Hyprland to start the app you pick, so the app is Hyprland's
+child, as if Hyprland had started it from a binding. See
+[`launch`](../../configuration/general-settings/#configuration-options) to
+change that.
 
-## Customization
+## Window rules
 
-### Using a Different Keybinding
+Raffi's window has the class `com.chmouel.raffi`. This Lua rule makes it
+float in the middle of the screen without a border:
 
-You can bind Raffi to any key combination:
-
-```ini
-# Use Super+Space
-bind = $super, Space, exec, (val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val")
-
-# Use Super+D (like dmenu/rofi)
-bind = $super, D, exec, (val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val")
-
-# Use Alt+Space
-bind = ALT, Space, exec, (val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val")
+```lua title="Lua"
+hl.window_rule({
+  name = "raffi",
+  match = { class = "^(com\\.chmouel\\.raffi)$" },
+  float = true,
+  center = true,
+  size = { "(monitor_w*0.45)", "(monitor_h*0.78)" },
+  border_size = 0,
+})
 ```
 
-### Enable Icons
+For Hyprlang (0.53 and later), use:
 
-If you prefer to use icons (slightly slower startup):
-
-```ini
-bind = $super, R, exec, (val=$(raffi -p); [ -n "$val" ] && hyprctl dispatch exec "$val")
+```ini title="hyprland.conf"
+windowrule {
+  name = raffi
+  match:class = ^(com\.chmouel\.raffi)$
+  float = on
+  center = on
+  size = (monitor_w*0.45) (monitor_h*0.78)
+  border_size = 0
+}
 ```
 
-### Use Custom Config
+Raffi is translucent by default (`opacity: 0.95`), and Hyprland blurs what
+shows through while `decoration:blur:enabled` is on, which is the default.
+See [Transparency and Blur](../../features/themes/#transparency-and-blur).
 
-Specify a custom configuration file:
+### A second window style
 
-```ini
-bind = $super, R, exec, (val=$(raffi -pI -c ~/.config/raffi/custom.yaml); [ -n "$val" ] && hyprctl dispatch exec "$val")
+`--app-name` changes the class, so a binding can open Raffi with its own
+rules, such as a wider window for the file browser in a light theme:
+
+```lua
+hl.bind("SUPER + SHIFT + H",
+  hl.dsp.exec_cmd("raffi --app-name com.chmouel.raffi.fb -t light -i '~/Downloads/'"))
+
+hl.window_rule({
+  name = "raffi-files",
+  match = { class = "^(com\\.chmouel\\.raffi\\.fb)$" },
+  float = true,
+  center = true,
+  size = { "(monitor_w*0.8)", "(monitor_h*0.7)" },
+  border_size = 0,
+})
 ```
 
-### Clipboard History
-
-With the [clipboard browser](../../features/clipboard-history/) enabled, bind a key
-that opens Raffi straight into it. Ctrl+Enter then pastes the chosen item into
-the window you were using:
+Hyprlang equivalent:
 
 ```ini
-bind = $super, V, exec, raffi -i "clip "
+bind = SUPER SHIFT, H, exec, raffi --app-name com.chmouel.raffi.fb -t light -i '~/Downloads/'
+
+windowrule {
+  name = raffi-files
+  match:class = ^(com\.chmouel\.raffi\.fb)$
+  float = on
+  center = on
+  size = (monitor_w*0.8) (monitor_h*0.7)
+  border_size = 0
+}
 ```
 
-### Transparency and Blur
+## Keys that open an addon
 
-Raffi is translucent by default (`opacity: 0.95`), and Hyprland blurs
-what shows through as long as `decoration:blur:enabled` is on, which is the
-default. Set `opacity` in `general`, or pass `--opacity`, to change it. See
-[Transparency and Blur](../../features/themes/#transparency-and-blur).
+`-i` fills the search box, so a key can open Raffi straight into an addon:
 
-## Testing
+```lua
+hl.bind("SUPER + W", hl.dsp.exec_cmd("raffi -i 'win '"))
+hl.bind("SUPER + V", hl.dsp.exec_cmd("raffi -i 'clip '"))
+hl.bind("SUPER + B", hl.dsp.exec_cmd("raffi -i 'tabs '"))
+```
 
-After adding the configuration:
+Hyprlang equivalent:
 
-1. Reload Hyprland: `hyprctl reload`
-2. Press `Super+R` to launch Raffi
-3. Select an application and press Enter to launch it
+```ini
+bind = SUPER, W, exec, raffi -i "win "
+bind = SUPER, V, exec, raffi -i "clip "
+bind = SUPER, B, exec, raffi -i "tabs "
+```
+
+The [window switcher](../../features/window-switcher/) lists your windows
+with their state (fullscreen, pinned, floating, grouped, XWayland) and their
+monitor. **Ctrl+D** closes the selected window, **Ctrl+Enter** moves it to
+your current workspace, and **Ctrl+Tab** switches to a list of workspaces,
+special ones included. The lists follow Hyprland as windows open, close and
+move.
+
+In the [clipboard browser](../../features/clipboard-history/), Ctrl+Enter
+pastes the chosen item into the window you were using.
+
+## Focus an app that is already open
+
+Turn on `raise_running` and Enter on an app that has a window open focuses
+that window. Ctrl+Enter still starts a new one.
+
+```yaml title="raffi.yaml"
+general:
+  raise_running: true
+```
+
+Raffi matches the window class from `hyprctl clients`. Launchers can opt in
+or out with `raise`, and set `window_class` when the class differs from the
+binary name. See [Entries](../../configuration/entries/).
+
+## Launchers only for Hyprland
+
+`ifcompositor` shows a launcher only inside Hyprland:
+
+```yaml title="launchers.yaml"
+hyprpicker:
+  binary: hyprpicker
+  args: ["-a"]
+  description: "Pick a colour"
+  ifcompositor: hyprland
+```
+
+## Printing the command instead
+
+`raffi -p` prints the chosen command and starts nothing, if you prefer to
+start it yourself:
+
+```lua
+hl.bind("SUPER + R", hl.dsp.exec_cmd(
+  [=[choice=$(raffi -p); [ -n "$choice" ] && hyprctl dispatch "hl.dsp.exec_cmd([==[$choice]==])"]=]))
+```
+
+With Hyprlang, use:
+
+```ini
+bind = SUPER, R, exec, (val=$(raffi -p); [ -n "$val" ] && hyprctl dispatch exec "$val")
+```
+
+The `[ -n ... ]` check skips `hyprctl` when you close Raffi without picking
+anything. With a Lua config, `hyprctl dispatch` takes a Lua expression, so
+`hyprctl dispatch exec ...` fails there. Addon results such as emoji or
+snippets run inside Raffi and print nothing.
 
 ## Troubleshooting
 
-### Raffi doesn't appear
+<Aside type="note">
+Apps started through Hyprland get Hyprland's environment and working
+directory, not Raffi's. If an app needs a variable you exported in a
+terminal, set it in Hyprland's config or use `launch: direct`.
+</Aside>
 
-- Verify Raffi is installed: `which raffi`
-- Check Hyprland logs: `journalctl --user -xe`
-
-### Applications launch multiple times or don't launch
-
-- The `[ -n "$val" ]` check prevents execution when you close Raffi without picking anything
-- Ensure you're using the full command including the conditional check
-- Test manually: `val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val"`
+- Raffi does not appear: check that `raffi` is on Hyprland's `PATH` (try an
+  absolute path in the binding) and look at `hyprctl rollinglog`.
+- To see what Raffi asks Hyprland, run it with `--debug-file /tmp/raffi.log`.

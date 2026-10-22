@@ -3224,7 +3224,7 @@ impl LauncherApp {
         use iced::window;
         use iced::{event, Event};
 
-        event::listen_with(|event, _status, _id| match event {
+        let keys = event::listen_with(|event, _status, _id| match event {
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Named(Named::ArrowDown),
                 ..
@@ -3323,7 +3323,7 @@ impl LauncherApp {
                 key: keyboard::Key::Character(ref c),
                 modifiers,
                 ..
-            }) if c.as_str() == "d" && modifiers.control() => Some(Message::ClipboardDelete),
+            }) if c.as_str() == "d" && modifiers.control() => Some(Message::DeleteSelected),
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Character(ref c),
                 modifiers,
@@ -3344,6 +3344,18 @@ impl LauncherApp {
                 Some(Message::ModifiersChanged(modifiers))
             }
             _ => None,
-        })
+        });
+        let compositor = (self.command_list.addon
+            == Some(super::command_list::CommandListAddon::Windows))
+        .then(self.compositor)
+        .flatten();
+        match compositor {
+            Some(compositor) => iced::Subscription::batch([
+                keys,
+                iced::Subscription::run_with(compositor, super::window_events::watch)
+                    .map(|()| Message::WindowsChanged),
+            ]),
+            None => keys,
+        }
     }
 }

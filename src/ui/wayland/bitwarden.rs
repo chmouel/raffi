@@ -150,6 +150,7 @@ pub(super) fn parse_items(
                 dimmed: false,
                 sort_priority: 0,
                 typed_only: false,
+                close: None,
                 group: None,
                 pinned: false,
             }

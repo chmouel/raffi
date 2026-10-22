@@ -260,6 +260,7 @@ fn process_item(process: &Process, keep_open: bool) -> CommandItem {
         dimmed: false,
         sort_priority: 0,
         typed_only: false,
+        close: None,
         group: None,
         pinned: false,
     }

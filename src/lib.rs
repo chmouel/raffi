@@ -14,6 +14,7 @@ use serde::Deserialize;
 use serde_yaml::Value;
 
 pub mod browser_host;
+pub mod compositor;
 pub mod debug;
 #[cfg(feature = "wayland")]
 pub mod secret;
@@ -48,6 +49,32 @@ pub struct RaffiConfig {
     pub keyword: Option<String>,
     /// Close Raffi after launching this entry (default: `general.close_on_action`, else true).
     pub close_on_action: Option<bool>,
+    /// Show the entry only inside this compositor, or one of these:
+    /// `hyprland`, `niri`, `sway`.
+    pub ifcompositor: Option<OneOrMany<compositor::Compositor>>,
+    /// Focus the app's open window instead of starting it again
+    /// (default: `general.raise_running`, else false).
+    pub raise: Option<bool>,
+    /// Window class (Hyprland, Xwayland) or app ID (niri, sway) of the app's
+    /// windows, for `raise` (default: the binary name).
+    pub window_class: Option<OneOrMany<String>>,
+}
+
+/// A single value, or a list of them.
+#[derive(Deserialize, JsonSchema, Debug, PartialEq, Eq, Clone)]
+#[serde(untagged)]
+pub enum OneOrMany<T> {
+    One(T),
+    Many(Vec<T>),
+}
+
+impl<T> OneOrMany<T> {
+    pub fn as_slice(&self) -> &[T] {
+        match self {
+            Self::One(value) => std::slice::from_ref(value),
+            Self::Many(values) => values,
+        }
+    }
 }
 
 /// A launcher `keyword` and the `alias` text it expands to.
@@ -1593,6 +1620,28 @@ pub enum Renderer {
     Gpu,
 }
 
+/// How launchers start their program
+#[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LaunchMode {
+    /// Ask Hyprland, niri or sway to start it when Raffi runs in one, so the
+    /// program belongs to the session and follows its rules; elsewhere Raffi
+    /// starts it
+    #[default]
+    Auto,
+    /// Raffi starts it, and the program inherits Raffi's environment
+    Direct,
+}
+
+/// Who starts the chosen program for [`LaunchMode`] `launch`: `direct`
+/// gives Raffi the job, `auto` asks the compositor Raffi runs in.
+fn launch_via(launch: LaunchMode) -> Option<compositor::Compositor> {
+    match launch {
+        LaunchMode::Auto => compositor::Compositor::current(),
+        LaunchMode::Direct => None,
+    }
+}
+
 /// Clipboard manager used for `{clipboard:N}` snippet placeholders
 #[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -1690,6 +1739,15 @@ pub struct GeneralConfig {
     /// Addon and launcher `close_on_action` settings override this.
     #[serde(default)]
     pub close_on_action: Option<bool>,
+    /// How launchers start their program: `auto` (default) asks Hyprland,
+    /// niri or sway to start it, `direct` starts it from Raffi.
+    #[serde(default)]
+    pub launch: LaunchMode,
+    /// Focus an app's open window instead of starting it again (default:
+    /// false). Launchers can set `raise` and `window_class`. Raffi's own
+    /// window only, on Hyprland, niri and sway.
+    #[serde(default)]
+    pub raise_running: Option<bool>,
     /// Appearance of the right-hand preview pane (font, size, colours, width)
     #[serde(default)]
     pub preview: PreviewConfig,
@@ -3042,6 +3100,10 @@ fn is_valid_config(
             .ifexist
             .as_ref()
             .is_none_or(|exist| binary_checker.exists(exist))
+        && mc.ifcompositor.as_ref().is_none_or(|wanted| {
+            compositor::Compositor::detect(|name| env_provider.var(name).ok())
+                .is_some_and(|current| wanted.as_slice().contains(&current))
+        })
 }
 
 /// The launcher the UI picked, by description or binary. Alias launchers are
@@ -3358,10 +3420,26 @@ fn parse_desktop_entry_file(
         })
     };
 
+    // A terminal app's windows belong to the terminal, so only a declared
+    // class can tell them apart.
+    let mut classes: Vec<String> = keys.get("StartupWMClass").cloned().into_iter().collect();
+    if !in_terminal {
+        classes.extend(
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .filter(|stem| !classes.iter().any(|class| class == stem))
+                .map(str::to_string),
+        );
+    }
     let mut entries = Vec::new();
     entries.extend(
         keys.get("Exec")
-            .and_then(|exec| entry(name.clone(), exec, icon.clone())),
+            .and_then(|exec| entry(name.clone(), exec, icon.clone()))
+            .map(|config| RaffiConfig {
+                raise: classes.is_empty().then_some(false),
+                window_class: (!classes.is_empty()).then_some(OneOrMany::Many(classes)),
+                ..config
+            }),
     );
     if scan.actions {
         let actions = keys.get("Actions").map(String::as_str).unwrap_or_default();
@@ -3372,11 +3450,17 @@ fn parse_desktop_entry_file(
             let (Some(action_name), Some(exec)) = (action.get("Name"), action.get("Exec")) else {
                 continue;
             };
-            entries.extend(entry(
-                format!("{name}: {action_name}"),
-                exec,
-                action.get("Icon").cloned().or_else(|| icon.clone()),
-            ));
+            entries.extend(
+                entry(
+                    format!("{name}: {action_name}"),
+                    exec,
+                    action.get("Icon").cloned().or_else(|| icon.clone()),
+                )
+                .map(|config| RaffiConfig {
+                    raise: Some(false),
+                    ..config
+                }),
+            );
         }
     }
     entries
@@ -3856,31 +3940,91 @@ fn spawn_and_reap(mut command: Command) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Spawn a launcher entry's binary or script in the background.
-pub(crate) fn spawn_launcher_command(mc: &RaffiConfig, interpreter: &str) -> Result<()> {
-    if let Some(script) = &mc.script {
-        let mut command = Command::new(interpreter);
-        command.arg("-c").arg(script);
-        if let Some(args) = &mc.args {
-            command.arg(interpreter);
-            command.args(args);
-        }
-        spawn_and_reap(command).context("cannot launch script")?;
-    } else {
-        let mut command = Command::new(mc.binary.as_deref().context("Binary not found")?);
-        command.args(mc.args.as_deref().unwrap_or(&[]));
-        spawn_and_reap(command).context("cannot launch command")?;
+/// The window classes or app IDs of the windows a launcher focuses instead
+/// of starting its program again, none when it always starts it. Without
+/// `window_class`, only a plain binary without arguments raises, by its
+/// file name.
+#[cfg_attr(not(feature = "wayland"), allow(dead_code))]
+pub(crate) fn raise_classes(mc: &RaffiConfig, raise_running: bool) -> Vec<String> {
+    if !mc.raise.unwrap_or(raise_running) || mc.alias.is_some() {
+        return Vec::new();
     }
-    Ok(())
+    if let Some(classes) = &mc.window_class {
+        return classes
+            .as_slice()
+            .iter()
+            .filter(|class| !class.trim().is_empty())
+            .cloned()
+            .collect();
+    }
+    if mc.script.is_some() || mc.args.as_ref().is_some_and(|args| !args.is_empty()) {
+        return Vec::new();
+    }
+    mc.binary
+        .as_deref()
+        .and_then(|binary| Path::new(binary).file_name()?.to_str())
+        .filter(|name| !name.is_empty())
+        .map(|name| vec![name.to_string()])
+        .unwrap_or_default()
+}
+
+/// The program and arguments a launcher entry runs.
+fn launcher_argv(mc: &RaffiConfig, interpreter: &str) -> Result<Vec<String>> {
+    let mut argv = Vec::new();
+    if let Some(script) = &mc.script {
+        argv.extend([interpreter.to_string(), "-c".to_string(), script.clone()]);
+        if let Some(args) = &mc.args {
+            argv.push(interpreter.to_string());
+            argv.extend(args.iter().cloned());
+        }
+    } else {
+        argv.push(mc.binary.clone().context("Binary not found")?);
+        argv.extend(mc.args.iter().flatten().cloned());
+    }
+    Ok(argv)
+}
+
+/// Spawn a launcher entry's binary or script in the background, through
+/// `via` when set. If the compositor cannot start it, Raffi does.
+pub(crate) fn spawn_launcher_command(
+    mc: &RaffiConfig,
+    interpreter: &str,
+    via: Option<compositor::Compositor>,
+) -> Result<()> {
+    let argv = launcher_argv(mc, interpreter)?;
+    if let Some(compositor) = via {
+        let shell = format_print_only_command(mc, interpreter)?;
+        match compositor.launch(&argv, &shell) {
+            Ok(()) => {
+                debug_log!("launch: started through {}", compositor.program());
+                return Ok(());
+            }
+            // It may have started the program anyway; do not start a second one.
+            Err(error) if error.is::<compositor::NoAnswer>() => return Err(error),
+            Err(error) => debug_log!("launch: {error:#}; starting it directly"),
+        }
+    }
+    let mut command = Command::new(&argv[0]);
+    command.args(&argv[1..]);
+    spawn_and_reap(command).context(if mc.script.is_some() {
+        "cannot launch script"
+    } else {
+        "cannot launch command"
+    })
 }
 
 /// Execute the chosen command or script.
-pub fn execute_chosen_command(mc: &RaffiConfig, args: &Args, interpreter: &str) -> Result<()> {
+pub fn execute_chosen_command(
+    mc: &RaffiConfig,
+    args: &Args,
+    interpreter: &str,
+    via: Option<compositor::Compositor>,
+) -> Result<()> {
     if args.print_only {
         println!("{}", format_print_only_command(mc, interpreter)?);
         return Ok(());
     }
-    spawn_launcher_command(mc, interpreter)
+    spawn_launcher_command(mc, interpreter, via)
 }
 
 /// Percent-encode a query string for use in URLs.
@@ -4160,6 +4304,8 @@ pub fn run(args: Args) -> Result<()> {
         print_only: args.print_only,
         preview: general.preview.clone(),
         default_script_shell: default_script_shell.clone(),
+        launch_via: launch_via(general.launch),
+        raise_running: general.raise_running.unwrap_or(false),
     };
 
     debug_log!(
@@ -4201,7 +4347,8 @@ pub fn run(args: Args) -> Result<()> {
         mc.script.is_some(),
         mc.args
     );
-    execute_chosen_command(mc, &args, interpreter).context("Failed to execute command")?;
+    execute_chosen_command(mc, &args, interpreter, ui_settings.launch_via)
+        .context("Failed to execute command")?;
 
     Ok(())
 }
@@ -4646,6 +4793,12 @@ mod tests {
             alias: None,
             keyword: None,
             close_on_action: None,
+            ifcompositor: Some(OneOrMany::Many(vec![
+                compositor::Compositor::Niri,
+                compositor::Compositor::Sway,
+            ])),
+            raise: None,
+            window_class: None,
         };
         let args = Args {
             help: false,
@@ -4675,6 +4828,7 @@ mod tests {
                 let mut vars = HashMap::new();
                 vars.insert("TEST_VAR".to_string(), "true".to_string());
                 vars.insert("ANOTHER_VAR".to_string(), "some_value".to_string());
+                vars.insert("SWAYSOCK".to_string(), "/run/sway.sock".to_string());
                 vars
             },
         };
@@ -4688,6 +4842,19 @@ mod tests {
             &env_provider,
             &binary_checker
         ));
+        config.ifcompositor = Some(OneOrMany::One(compositor::Compositor::Hyprland));
+        assert!(!is_valid_config(
+            &mut config,
+            &args,
+            &env_provider,
+            &binary_checker
+        ));
+        let parsed: RaffiConfig =
+            serde_yaml::from_str("binary: x\nifcompositor: hyprland\n").unwrap();
+        assert_eq!(
+            parsed.ifcompositor.unwrap().as_slice(),
+            [compositor::Compositor::Hyprland]
+        );
     }
 
     #[test]
@@ -5181,6 +5348,23 @@ mod tests {
             );
         }
         assert!(parse("clipboard_history: gpaste").is_err());
+    }
+
+    #[test]
+    fn test_general_launch_parsing() {
+        let parse = |yaml: &str| serde_yaml::from_str::<GeneralConfig>(yaml).map(|g| g.launch);
+        assert_eq!(parse("{}").unwrap(), LaunchMode::Auto);
+        assert_eq!(parse("launch: auto").unwrap(), LaunchMode::Auto);
+        assert_eq!(parse("launch: direct").unwrap(), LaunchMode::Direct);
+        assert!(parse("launch: elsewhere").is_err());
+
+        // `direct` maps to no compositor launch; `auto` asks the compositor
+        // Raffi runs in, if any.
+        assert_eq!(launch_via(LaunchMode::Direct), None);
+        assert_eq!(
+            launch_via(LaunchMode::Auto),
+            compositor::Compositor::current()
+        );
     }
 
     #[test]
@@ -6330,7 +6514,7 @@ Terminal=true
                 &system_dir,
                 "firefox.desktop",
                 "[Desktop Entry]\nType=Application\nName=Firefox\nExec=firefox %u\nIcon=firefox\n\
-                 Actions=private;broken;\n\n[Desktop Action private]\nName=New Private Window\n\
+                 StartupWMClass=Firefox\nActions=private;broken;\n\n[Desktop Action private]\nName=New Private Window\n\
                  Exec=firefox --private-window %u\n\n[Desktop Action broken]\nName=Broken\n",
             ),
             (
@@ -6387,12 +6571,64 @@ Terminal=true
             detected[2].args.as_deref(),
             Some(&["htop".to_string(), "-t".to_string()][..])
         );
+        // The app raises its window by class and desktop file id; an action
+        // or a terminal app without a class starts a new one.
+        let raises: Vec<Vec<String>> = detected
+            .iter()
+            .map(|entry| raise_classes(entry, true))
+            .collect();
+        assert_eq!(
+            raises,
+            [
+                vec!["Firefox".to_string(), "firefox".to_string()],
+                vec![],
+                vec![]
+            ]
+        );
 
         let detected = detect_desktop_entries_from_dirs(&dirs, &plain_scan(), &checker);
         // OnlyShowIn hides an entry unless the desktop is listed.
         assert_eq!(descriptions(&detected), ["Firefox", "Not Hyprland"]);
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_raise_classes() {
+        let launcher = |binary: &str, args: &[&str]| RaffiConfig {
+            binary: Some(binary.to_string()),
+            args: Some(args.iter().map(|arg| arg.to_string()).collect()),
+            ..Default::default()
+        };
+        assert_eq!(
+            raise_classes(&launcher("/usr/bin/firefox", &[]), true),
+            ["firefox"]
+        );
+        assert!(raise_classes(&launcher("firefox", &[]), false).is_empty());
+        let forced = RaffiConfig {
+            raise: Some(true),
+            ..launcher("firefox", &[])
+        };
+        assert_eq!(raise_classes(&forced, false), ["firefox"]);
+        let opted_out = RaffiConfig {
+            raise: Some(false),
+            ..launcher("firefox", &[])
+        };
+        assert!(raise_classes(&opted_out, true).is_empty());
+        // Arguments or a script may start something else than the app, so
+        // only an explicit class raises.
+        assert!(raise_classes(&launcher("kitty", &["-e", "htop"]), true).is_empty());
+        let script = RaffiConfig {
+            script: Some("exec slack".to_string()),
+            ..Default::default()
+        };
+        assert!(raise_classes(&script, true).is_empty());
+        let classed = RaffiConfig {
+            script: Some("exec slack".to_string()),
+            window_class: Some(OneOrMany::Many(vec!["Slack".to_string(), " ".to_string()])),
+            ..Default::default()
+        };
+        assert_eq!(raise_classes(&classed, true), ["Slack"]);
     }
 
     #[test]

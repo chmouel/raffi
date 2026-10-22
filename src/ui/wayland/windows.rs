@@ -13,53 +13,42 @@ use super::hyprland::{valid_address, HyprAction};
 const TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_OUTPUT: usize = 4 * 1024 * 1024;
 
-/// The compositor Raffi runs in, for window switching and log out.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Compositor {
-    Hyprland,
-    Niri,
-    Sway,
+pub(super) use crate::compositor::Compositor;
+
+/// What the window switcher lists; Ctrl+Tab switches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum View {
+    #[default]
+    Windows,
+    Workspaces,
+}
+
+impl View {
+    pub(super) fn cycle(self) -> Self {
+        match self {
+            Self::Windows => Self::Workspaces,
+            Self::Workspaces => Self::Windows,
+        }
+    }
+
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::Windows => "Windows",
+            Self::Workspaces => "Workspaces",
+        }
+    }
 }
 
 impl Compositor {
-    /// Detect the compositor from the environment. `var` reads a variable.
-    /// The running compositor instance, which window ids are only unique
-    /// within: niri and sway number windows from 1 every session.
-    pub fn instance(var: impl Fn(&str) -> Option<String>) -> Option<String> {
-        ["HYPRLAND_INSTANCE_SIGNATURE", "NIRI_SOCKET", "SWAYSOCK"]
-            .into_iter()
-            .find_map(|name| var(name).filter(|value| !value.is_empty()))
-    }
-
-    pub fn detect(var: impl Fn(&str) -> Option<String>) -> Option<Self> {
-        let set = |name| var(name).is_some_and(|value| !value.is_empty());
-        if set("HYPRLAND_INSTANCE_SIGNATURE") {
-            Some(Self::Hyprland)
-        } else if set("NIRI_SOCKET") {
-            Some(Self::Niri)
-        } else if set("SWAYSOCK") {
-            Some(Self::Sway)
-        } else {
-            None
-        }
-    }
-
-    pub fn current() -> Option<Self> {
-        Self::detect(|name| std::env::var(name).ok())
-    }
-
-    /// The program the window switcher talks to.
-    pub fn program(self) -> &'static str {
-        match self {
-            Self::Hyprland => "hyprctl",
-            Self::Niri => "niri",
-            Self::Sway => "swaymsg",
-        }
-    }
-
     /// List the windows, most recently focused first. Blocking: run it off
     /// the UI thread.
-    pub fn load_windows(self, keep_open: bool) -> Result<Vec<CommandItem>, String> {
+    pub(super) fn load_windows(self, keep_open: bool) -> Result<Vec<CommandItem>, String> {
+        self.load_view(View::Windows, keep_open)
+    }
+
+    /// List the windows or the workspaces. Blocking: run it off the UI
+    /// thread.
+    pub(super) fn load_view(self, view: View, keep_open: bool) -> Result<Vec<CommandItem>, String> {
         let program = self.program();
         let run = |args: &[&str]| {
             let mut command = Command::new(program);
@@ -67,18 +56,34 @@ impl Compositor {
             run_bounded(command, TIMEOUT, MAX_OUTPUT).map_err(|error| format!("{program}: {error}"))
         };
         let own_pid = std::process::id();
-        let mut items = match self {
-            Self::Hyprland => hyprland_items(
+        let mut items = match (self, view) {
+            (Self::Hyprland, View::Windows) => hyprland_items(
                 &run(&["clients", "-j"])?,
                 &run(&["monitors", "-j"])?,
                 own_pid,
             )?,
-            Self::Niri => niri_items(
+            (Self::Hyprland, View::Workspaces) => hyprland_workspace_items(
+                &run(&["workspaces", "-j"])?,
+                &run(&["monitors", "-j"])?,
+                &run(&["clients", "-j"])?,
+                own_pid,
+            )?,
+            (Self::Niri, View::Windows) => niri_items(
                 &run(&["msg", "--json", "windows"])?,
                 &run(&["msg", "--json", "workspaces"])?,
                 own_pid,
             )?,
-            Self::Sway => sway_items(
+            (Self::Niri, View::Workspaces) => niri_workspace_items(
+                &run(&["msg", "--json", "windows"])?,
+                &run(&["msg", "--json", "workspaces"])?,
+                own_pid,
+            )?,
+            (Self::Sway, View::Windows) => sway_items(
+                &run(&["-t", "get_tree", "-r"])?,
+                &run(&["-t", "get_workspaces", "-r"])?,
+                own_pid,
+            )?,
+            (Self::Sway, View::Workspaces) => sway_workspace_items(
                 &run(&["-t", "get_tree", "-r"])?,
                 &run(&["-t", "get_workspaces", "-r"])?,
                 own_pid,
@@ -260,6 +265,17 @@ pub(super) fn pick_app_window<'a>(
         .map(|window| &window.focus)
 }
 
+/// The focus action for the most recent window of one of `apps`, if any.
+/// Blocking: run it off the UI thread.
+pub(super) fn find_app_window(
+    compositor: Compositor,
+    apps: &[String],
+) -> Result<Option<DeferredAction>, String> {
+    let windows = compositor.process_windows()?;
+    let apps: Vec<&str> = apps.iter().map(String::as_str).collect();
+    Ok(pick_app_window(&windows, &apps).cloned())
+}
+
 /// Focus the most recent window of one of `apps`, waiting up to `wait` for
 /// it to appear, as when the app is starting. Does nothing outside
 /// Hyprland, niri and sway. Blocking: run it off the UI thread.
@@ -289,8 +305,11 @@ struct Window {
     app_label: &'static str,
     workspace: String,
     icon_names: Vec<String>,
+    /// States worth showing, most notable first; the first is the badge.
+    flags: Vec<&'static str>,
     focus: DeferredAction,
     move_here: Option<DeferredAction>,
+    close: DeferredAction,
 }
 
 fn window_item(window: Window) -> CommandItem {
@@ -307,8 +326,11 @@ fn window_item(window: Window) -> CommandItem {
     let mut details = vec![
         (window.app_label.to_string(), window.app.clone()),
         ("Workspace".to_string(), window.workspace),
-        ("Enter".to_string(), "Focus the window".to_string()),
     ];
+    if !window.flags.is_empty() {
+        details.push(("State".to_string(), window.flags.join(", ")));
+    }
+    details.push(("Enter".to_string(), "Focus the window".to_string()));
     let action = |action| CommandAction {
         action,
         confirm: None,
@@ -321,6 +343,7 @@ fn window_item(window: Window) -> CommandItem {
             "Move it to the current workspace and focus it".to_string(),
         ));
     }
+    details.push(("Ctrl+D".to_string(), "Close the window".to_string()));
     CommandItem {
         match_text: format!("{title} {}", window.app),
         title,
@@ -332,11 +355,17 @@ fn window_item(window: Window) -> CommandItem {
         primary: Some(action(window.focus)),
         secondary: window.move_here.map(action),
         details,
-        badge: None,
+        badge: window.flags.first().map(|flag| flag.to_string()),
         domains: Vec::new(),
         dimmed: false,
         sort_priority: 0,
         typed_only: false,
+        close: Some(CommandAction {
+            action: window.close,
+            confirm: None,
+            keep_open: true,
+            progress: Some("Closing...".to_string()),
+        }),
         group: None,
         pinned: false,
     }
@@ -353,6 +382,106 @@ fn icon_names(names: &[&str]) -> Vec<String> {
         }
     }
     icons
+}
+
+/// What a workspace row needs, whatever the compositor.
+struct WorkspaceRow<'a> {
+    name: String,
+    /// Shown when there are several outputs.
+    output: Option<&'a str>,
+    /// Titles and apps of its windows, the most recently focused first.
+    windows: Vec<(&'a str, &'a str)>,
+    /// "Current" for the focused one, "Visible" for one shown elsewhere.
+    state: Option<&'static str>,
+    /// None when the compositor cannot be asked to switch to it.
+    switch: Option<(DeferredAction, &'static str)>,
+    /// Moves the last focused window here and follows it, with its title.
+    move_here: Option<(&'a str, DeferredAction)>,
+}
+
+const WORKSPACE_ICONS: [&str; 3] = ["workspace-switcher", "cs-workspaces", "view-grid"];
+
+fn workspace_item(row: WorkspaceRow) -> CommandItem {
+    let count = match row.windows.len() {
+        0 => "No windows".to_string(),
+        1 => "1 window".to_string(),
+        count => format!("{count} windows"),
+    };
+    let last = row.windows.first().map(|(title, app)| {
+        if title.is_empty() {
+            app.to_string()
+        } else {
+            title.to_string()
+        }
+    });
+    let subtitle = row
+        .output
+        .map(|output| format!("on {output}"))
+        .into_iter()
+        .chain([count.clone()])
+        .chain(last.clone())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let mut details = vec![("Windows".to_string(), count)];
+    if let Some(last) = last {
+        details.push(("Last window".to_string(), last));
+    }
+    if let Some(output) = row.output {
+        details.push(("Output".to_string(), output.to_string()));
+    }
+    let action = |action| CommandAction {
+        action,
+        confirm: None,
+        keep_open: false,
+        progress: None,
+    };
+    let (primary, unavailable) = match row.switch {
+        Some((switch, label)) => {
+            details.push(("Enter".to_string(), label.to_string()));
+            (Some(action(switch)), None)
+        }
+        None => (
+            None,
+            Some("Raffi cannot switch to a workspace with this name".to_string()),
+        ),
+    };
+    let secondary = row
+        .move_here
+        .filter(|_| primary.is_some())
+        .map(|(title, move_here)| {
+            details.push((
+                "Ctrl+Enter".to_string(),
+                format!("Move \u{201c}{title}\u{201d} here and follow it"),
+            ));
+            action(move_here)
+        });
+    let match_text = std::iter::once(row.name.as_str())
+        .chain(row.windows.iter().flat_map(|(title, app)| [*title, *app]))
+        .collect::<Vec<_>>()
+        .join(" ");
+    CommandItem {
+        title: format!("Workspace {}", row.name),
+        subtitle,
+        match_text: format!("workspace {match_text}"),
+        icon_names: WORKSPACE_ICONS
+            .iter()
+            .map(|icon| icon.to_string())
+            .collect(),
+        icon: None,
+        identity: format!("workspace:{}", row.name),
+        unavailable,
+        primary,
+        secondary,
+        details,
+        badge: row.state.map(str::to_string),
+        domains: Vec::new(),
+        dimmed: row.windows.is_empty() && row.state.is_none(),
+        sort_priority: 0,
+        typed_only: false,
+        close: None,
+        group: None,
+        pinned: false,
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -375,10 +504,35 @@ struct Client {
     focus_history_id: i64,
     #[serde(default)]
     grouped: Vec<String>,
+    #[serde(default)]
+    floating: bool,
+    #[serde(default)]
+    pinned: bool,
+    #[serde(default)]
+    fullscreen: HyprFullscreen,
+    #[serde(default)]
+    xwayland: bool,
+    #[serde(default)]
+    monitor: Option<i64>,
 }
 
 fn mapped_default() -> bool {
     true
+}
+
+/// A boolean before Hyprland 0.42, then 1 for maximized, 2 for fullscreen
+/// and 3 for both.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum HyprFullscreen {
+    Old(bool),
+    Mode(u8),
+}
+
+impl Default for HyprFullscreen {
+    fn default() -> Self {
+        Self::Mode(0)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -391,6 +545,10 @@ struct Workspace {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Monitor {
+    #[serde(default)]
+    id: i64,
+    #[serde(default)]
+    name: String,
     #[serde(default)]
     focused: bool,
     active_workspace: Workspace,
@@ -431,9 +589,130 @@ pub(super) fn hyprland_items(
     });
     // Windows never focused report -1; they go last.
     clients.sort_by_key(|client| (client.focus_history_id < 0, client.focus_history_id));
+    let output = |client: &Client| {
+        monitors
+            .iter()
+            .find(|monitor| Some(monitor.id) == client.monitor && monitors.len() > 1)
+            .map(|monitor| monitor.name.clone())
+    };
     Ok(clients
         .into_iter()
-        .map(|client| hyprland_window(client, target.as_deref()))
+        .map(|client| {
+            let output = output(&client);
+            hyprland_window(client, target.as_deref(), output.as_deref())
+        })
+        .collect())
+}
+
+#[derive(Debug, Deserialize)]
+struct HyprWorkspace {
+    id: i64,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    monitor: String,
+}
+
+/// Build the workspace rows from `hyprctl workspaces -j`, `monitors -j` and
+/// `clients -j` output, numbered workspaces first, then named, then special
+/// ones. The windows of `own_pid` are left out.
+pub(super) fn hyprland_workspace_items(
+    workspaces: &[u8],
+    monitors: &[u8],
+    clients: &[u8],
+    own_pid: u32,
+) -> Result<Vec<CommandItem>, String> {
+    let invalid = |_| "hyprctl returned invalid workspace data".to_string();
+    let mut workspaces: Vec<HyprWorkspace> = serde_json::from_slice(workspaces).map_err(invalid)?;
+    let monitors: Vec<Monitor> = serde_json::from_slice(monitors).map_err(invalid)?;
+    let mut clients: Vec<Client> = serde_json::from_slice(clients)
+        .map_err(|_| "hyprctl returned invalid window data".to_string())?;
+    clients.retain(|client| {
+        client.mapped
+            && (!client.hidden || !client.grouped.is_empty())
+            && client.pid != i64::from(own_pid)
+            && !(client.title.is_empty() && client.class.is_empty())
+            && valid_address(&client.address)
+    });
+    clients.sort_by_key(|client| (client.focus_history_id < 0, client.focus_history_id));
+    workspaces.sort_by(|a, b| {
+        let key = |workspace: &HyprWorkspace| {
+            (
+                workspace.name.starts_with("special:"),
+                workspace.id < 0,
+                workspace.id,
+            )
+        };
+        key(a).cmp(&key(b)).then_with(|| a.name.cmp(&b.name))
+    });
+    let state = |workspace: &HyprWorkspace| {
+        monitors.iter().find_map(|monitor| {
+            let special = monitor
+                .special_workspace
+                .as_ref()
+                .filter(|special| !special.name.is_empty());
+            let on_top = special.map_or(monitor.active_workspace.id, |special| special.id);
+            if workspace.id == on_top && monitor.focused {
+                Some("Current")
+            } else if workspace.id == on_top || workspace.id == monitor.active_workspace.id {
+                Some("Visible")
+            } else {
+                None
+            }
+        })
+    };
+    let recent = clients.first();
+    Ok(workspaces
+        .iter()
+        .map(|workspace| {
+            let selector = move_target(&Workspace {
+                id: workspace.id,
+                name: workspace.name.clone(),
+            });
+            let switch = match workspace.name.strip_prefix("special:") {
+                Some(name) => Some((
+                    DeferredAction::Hypr(HyprAction::ToggleSpecial {
+                        name: name.to_string(),
+                    }),
+                    "Show or hide this special workspace",
+                )),
+                None => selector.clone().map(|workspace| {
+                    (
+                        DeferredAction::Hypr(HyprAction::Workspace { workspace }),
+                        "Switch to this workspace",
+                    )
+                }),
+            };
+            let move_here = recent
+                .filter(|client| client.workspace.id != workspace.id)
+                .zip(selector)
+                .map(|(client, selector)| {
+                    (
+                        client.title.as_str(),
+                        DeferredAction::Hypr(HyprAction::MoveTo {
+                            address: client.address.clone(),
+                            workspace: selector,
+                        }),
+                    )
+                });
+            workspace_item(WorkspaceRow {
+                name: if workspace.name.is_empty() {
+                    workspace.id.to_string()
+                } else {
+                    workspace.name.clone()
+                },
+                output: Some(workspace.monitor.as_str())
+                    .filter(|output| monitors.len() > 1 && !output.is_empty()),
+                windows: clients
+                    .iter()
+                    .filter(|client| client.workspace.id == workspace.id)
+                    .map(|client| (client.title.as_str(), client.class.as_str()))
+                    .collect(),
+                state: state(workspace),
+                switch,
+                move_here,
+            })
+        })
         .collect())
 }
 
@@ -454,13 +733,36 @@ fn move_target(active: &Workspace) -> Option<String> {
     }
 }
 
-fn hyprland_window(client: Client, target: Option<&str>) -> CommandItem {
-    let workspace = if client.workspace.name.is_empty() {
+fn hyprland_window(client: Client, target: Option<&str>, output: Option<&str>) -> CommandItem {
+    let mut workspace = if client.workspace.name.is_empty() {
         client.workspace.id.to_string()
     } else {
         client.workspace.name.clone()
     };
+    if let Some(output) = output.filter(|output| !output.is_empty()) {
+        workspace = format!("{workspace} ({output})");
+    }
+    let mut flags = Vec::new();
+    match client.fullscreen {
+        HyprFullscreen::Old(true) | HyprFullscreen::Mode(2..) => flags.push("Fullscreen"),
+        HyprFullscreen::Mode(1) => flags.push("Maximized"),
+        _ => {}
+    }
+    for (set, flag) in [
+        (client.pinned, "Pinned"),
+        (client.floating, "Floating"),
+        (!client.grouped.is_empty(), "Grouped"),
+        (client.xwayland, "XWayland"),
+    ] {
+        if set {
+            flags.push(flag);
+        }
+    }
     window_item(Window {
+        flags,
+        close: DeferredAction::Hypr(HyprAction::Close {
+            address: client.address.clone(),
+        }),
         identity: client.address.clone(),
         title: client.title,
         icon_names: icon_names(&[&client.class, &client.initial_class]),
@@ -492,6 +794,10 @@ struct NiriWindow {
     workspace_id: Option<u64>,
     #[serde(default)]
     is_focused: bool,
+    #[serde(default)]
+    is_floating: bool,
+    #[serde(default)]
+    is_urgent: bool,
     /// Missing in older niri versions.
     #[serde(default)]
     focus_timestamp: Option<NiriTimestamp>,
@@ -513,6 +819,8 @@ struct NiriWorkspace {
     output: Option<String>,
     #[serde(default)]
     is_focused: bool,
+    #[serde(default)]
+    is_active: bool,
 }
 
 /// Build the window rows from `niri msg --json windows` and `niri msg --json
@@ -570,7 +878,16 @@ fn niri_window(
     }
     let id = window.id.to_string();
     let app = window.app_id.unwrap_or_default();
+    let flags = [
+        (window.is_urgent, "Urgent"),
+        (window.is_floating, "Floating"),
+    ]
+    .into_iter()
+    .filter_map(|(set, flag)| set.then_some(flag))
+    .collect();
     window_item(Window {
+        flags,
+        close: DeferredAction::Command(niri_action(&["close-window", "--id", &id])),
         title: window.title.unwrap_or_default(),
         icon_names: icon_names(&[&app]),
         app,
@@ -588,6 +905,104 @@ fn niri_window(
     })
 }
 
+/// Build the workspace rows from `niri msg --json windows` and `niri msg
+/// --json workspaces` output, by output then index, leaving out the windows
+/// of `own_pid`.
+pub(super) fn niri_workspace_items(
+    windows: &[u8],
+    workspaces: &[u8],
+    own_pid: u32,
+) -> Result<Vec<CommandItem>, String> {
+    let mut windows: Vec<NiriWindow> = serde_json::from_slice(windows)
+        .map_err(|_| "niri returned invalid window data".to_string())?;
+    let mut workspaces: Vec<NiriWorkspace> = serde_json::from_slice(workspaces)
+        .map_err(|_| "niri returned invalid workspace data".to_string())?;
+    windows.retain(|window| {
+        window.pid != Some(i64::from(own_pid))
+            && !(window.title.as_deref().unwrap_or_default().is_empty()
+                && window.app_id.as_deref().unwrap_or_default().is_empty())
+    });
+    windows.sort_by_key(|window| Reverse((window.is_focused, window.focus_timestamp)));
+    workspaces.sort_by(|a, b| (&a.output, a.idx).cmp(&(&b.output, b.idx)));
+    let focused_output = workspaces
+        .iter()
+        .find(|workspace| workspace.is_focused)
+        .and_then(|workspace| workspace.output.clone());
+    let several_outputs = workspaces
+        .iter()
+        .any(|workspace| workspace.output != workspaces[0].output);
+    let recent = windows.first();
+    Ok(workspaces
+        .iter()
+        .map(|workspace| {
+            let reference = niri_reference(workspace);
+            let mut switch = Vec::new();
+            if let Some(output) = workspace
+                .output
+                .as_deref()
+                .filter(|&output| Some(output) != focused_output.as_deref())
+            {
+                switch.push(niri_action(&["focus-monitor", output]));
+            }
+            switch.push(niri_action(&["focus-workspace", &reference]));
+            let move_here = recent
+                .filter(|window| window.workspace_id != Some(workspace.id))
+                .map(|window| {
+                    let output = workspaces
+                        .iter()
+                        .find(|other| Some(other.id) == window.workspace_id)
+                        .and_then(|other| other.output.as_deref());
+                    (
+                        window.title.as_deref().unwrap_or_default(),
+                        DeferredAction::CommandBatch(niri_move_here(
+                            &window.id.to_string(),
+                            output,
+                            workspace,
+                        )),
+                    )
+                });
+            workspace_item(WorkspaceRow {
+                name: workspace
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| workspace.idx.to_string()),
+                output: workspace.output.as_deref().filter(|_| several_outputs),
+                windows: windows
+                    .iter()
+                    .filter(|window| window.workspace_id == Some(workspace.id))
+                    .map(|window| {
+                        (
+                            window.title.as_deref().unwrap_or_default(),
+                            window.app_id.as_deref().unwrap_or_default(),
+                        )
+                    })
+                    .collect(),
+                state: if workspace.is_focused {
+                    Some("Current")
+                } else if workspace.is_active {
+                    Some("Visible")
+                } else {
+                    None
+                },
+                switch: Some((
+                    DeferredAction::CommandBatch(switch),
+                    "Switch to this workspace",
+                )),
+                move_here,
+            })
+        })
+        .collect())
+}
+
+/// How niri commands name `workspace`: its name, unless niri would read it
+/// as an index, else its index on its output.
+fn niri_reference(workspace: &NiriWorkspace) -> String {
+    match &workspace.name {
+        Some(name) if name.parse::<i32>().is_err() => name.clone(),
+        _ => workspace.idx.to_string(),
+    }
+}
+
 fn niri_action(args: &[&str]) -> Vec<String> {
     ["niri", "msg", "action"]
         .iter()
@@ -602,19 +1017,16 @@ fn niri_action(args: &[&str]) -> Vec<String> {
 /// first moves to the focused monitor.
 fn niri_move_here(id: &str, output: Option<&str>, focused: &NiriWorkspace) -> Vec<Vec<String>> {
     let mut commands = Vec::new();
-    let reference = match &focused.name {
-        Some(name) if name.parse::<i32>().is_err() => name.clone(),
-        _ => {
-            if let Some(target) = focused
-                .output
-                .as_deref()
-                .filter(|&target| Some(target) != output)
-            {
-                commands.push(niri_action(&["move-window-to-monitor", "--id", id, target]));
-            }
-            focused.idx.to_string()
+    let reference = niri_reference(focused);
+    if reference == focused.idx.to_string() {
+        if let Some(target) = focused
+            .output
+            .as_deref()
+            .filter(|&target| Some(target) != output)
+        {
+            commands.push(niri_action(&["move-window-to-monitor", "--id", id, target]));
         }
-    };
+    }
     commands.push(niri_action(&[
         "move-window-to-workspace",
         "--window-id",
@@ -648,6 +1060,15 @@ struct SwayNode {
     /// Child ids, most recently focused first.
     #[serde(default)]
     focus: Vec<i64>,
+    #[serde(default)]
+    fullscreen_mode: u8,
+    #[serde(default)]
+    sticky: bool,
+    #[serde(default)]
+    urgent: bool,
+    /// `xdg_shell` or `xwayland`.
+    #[serde(default)]
+    shell: Option<String>,
 }
 
 /// Set for Xwayland windows.
@@ -662,6 +1083,8 @@ struct SwayWorkspace {
     name: String,
     #[serde(default)]
     focused: bool,
+    #[serde(default)]
+    visible: bool,
     #[serde(default)]
     output: Option<String>,
 }
@@ -718,6 +1141,83 @@ pub(super) fn sway_items(
         .collect())
 }
 
+/// Build the workspace rows from `swaymsg -t get_tree -r` and `swaymsg -t
+/// get_workspaces -r` output, in sway's order, leaving out the windows of
+/// `own_pid`.
+pub(super) fn sway_workspace_items(
+    tree: &[u8],
+    workspaces: &[u8],
+    own_pid: u32,
+) -> Result<Vec<CommandItem>, String> {
+    let tree: SwayNode = serde_json::from_slice(tree)
+        .map_err(|_| "sway returned invalid window data".to_string())?;
+    let workspaces: Vec<SwayWorkspace> = serde_json::from_slice(workspaces)
+        .map_err(|_| "sway returned invalid workspace data".to_string())?;
+    let several_outputs = workspaces
+        .iter()
+        .any(|workspace| workspace.output != workspaces[0].output);
+    let mut windows = Vec::new();
+    sway_windows(&tree, None, None, &mut windows);
+    windows.retain(|window| window.node.pid != Some(i64::from(own_pid)));
+    let recent = windows.first();
+    Ok(workspaces
+        .iter()
+        .map(|workspace| {
+            let quoted = sway_quote(&workspace.name);
+            let switch = quoted.as_ref().map(|quoted| {
+                (
+                    DeferredAction::Command(vec![
+                        "swaymsg".to_string(),
+                        format!("workspace --no-auto-back-and-forth {quoted}"),
+                    ]),
+                    "Switch to this workspace",
+                )
+            });
+            let move_here = recent
+                .filter(|window| window.workspace != Some(workspace.name.as_str()))
+                .zip(quoted)
+                .map(|(window, quoted)| {
+                    let id = window.node.id.to_string();
+                    (
+                        window.node.name.as_deref().unwrap_or_default(),
+                        DeferredAction::CommandBatch(vec![
+                            sway_command(
+                                &id,
+                                &format!(
+                                    "move --no-auto-back-and-forth container to workspace {quoted}"
+                                ),
+                            ),
+                            sway_command(&id, "focus"),
+                        ]),
+                    )
+                });
+            workspace_item(WorkspaceRow {
+                name: workspace.name.clone(),
+                output: workspace.output.as_deref().filter(|_| several_outputs),
+                windows: windows
+                    .iter()
+                    .filter(|window| window.workspace == Some(workspace.name.as_str()))
+                    .map(|window| {
+                        (
+                            window.node.name.as_deref().unwrap_or_default(),
+                            window.node.app().0,
+                        )
+                    })
+                    .collect(),
+                state: if workspace.focused {
+                    Some("Current")
+                } else if workspace.visible {
+                    Some("Visible")
+                } else {
+                    None
+                },
+                switch,
+                move_here,
+            })
+        })
+        .collect())
+}
+
 /// Collect the windows under `node`, visiting the children of each container
 /// most recently focused first. Sway keeps that order per container, not
 /// globally, so the windows of a workspace stay together even when one of
@@ -771,7 +1271,19 @@ fn sway_window(window: SwayWindow, target: Option<&str>, several_outputs: bool) 
     let id = node.id.to_string();
     let (app, app_label) = node.app();
     let focus = sway_command(&id, "focus");
+    let flags = [
+        (node.urgent, "Urgent"),
+        (node.fullscreen_mode > 0, "Fullscreen"),
+        (node.sticky, "Sticky"),
+        (node.kind == "floating_con", "Floating"),
+        (node.shell.as_deref() == Some("xwayland"), "XWayland"),
+    ]
+    .into_iter()
+    .filter_map(|(set, flag)| set.then_some(flag))
+    .collect();
     window_item(Window {
+        flags,
+        close: DeferredAction::Command(sway_command(&id, "kill")),
         title: node.name.clone().unwrap_or_default(),
         icon_names: icon_names(&[app]),
         app: app.to_string(),
@@ -1002,6 +1514,52 @@ mod tests {
     }
 
     #[test]
+    fn test_hyprland_rows_show_state_monitor_and_close() {
+        let clients = r#"[
+            {"address":"0x1","workspace":{"id":1,"name":"1"},"class":"mpv","title":"a","pid":1,
+             "floating":true,"pinned":true,"xwayland":true,"fullscreen":0,"monitor":1},
+            {"address":"0x2","workspace":{"id":2,"name":"2"},"class":"foot","title":"b","pid":2,
+             "fullscreen":1,"grouped":["0x2","0x3"],"monitor":0},
+            {"address":"0x3","workspace":{"id":2,"name":"2"},"class":"foot","title":"c","pid":3,
+             "fullscreen":true},
+            {"address":"0x4","workspace":{"id":2,"name":"2"},"class":"foot","title":"d","pid":4,
+             "fullscreen":3}]"#;
+        let monitors = r#"[
+            {"id":0,"name":"DP-2","focused":true,"activeWorkspace":{"id":2,"name":"2"}},
+            {"id":1,"name":"HDMI-A-1","activeWorkspace":{"id":1,"name":"1"}}]"#;
+        let items = hyprland_items(clients.as_bytes(), monitors.as_bytes(), 0).unwrap();
+        let badges: Vec<_> = items.iter().map(|item| item.badge.as_deref()).collect();
+        assert_eq!(
+            badges,
+            [
+                Some("Pinned"),
+                Some("Maximized"),
+                Some("Fullscreen"),
+                Some("Fullscreen")
+            ]
+        );
+        assert_eq!(items[0].subtitle, "mpv on workspace 1 (HDMI-A-1)");
+        assert!(items[0]
+            .details
+            .contains(&("State".into(), "Pinned, Floating, XWayland".into())));
+        assert!(items[1]
+            .details
+            .contains(&("State".into(), "Maximized, Grouped".into())));
+        assert_eq!(items[2].subtitle, "foot on workspace 2");
+        let close = items[0].close.as_ref().unwrap();
+        assert!(close.keep_open && close.confirm.is_none());
+        assert!(matches!(
+            &close.action,
+            DeferredAction::Hypr(HyprAction::Close { address }) if address == "0x1"
+        ));
+
+        let one =
+            r#"[{"id":0,"name":"DP-2","focused":true,"activeWorkspace":{"id":2,"name":"2"}}]"#;
+        let items = hyprland_items(clients.as_bytes(), one.as_bytes(), 0).unwrap();
+        assert_eq!(items[0].subtitle, "mpv on workspace 1");
+    }
+
+    #[test]
     fn test_pick_process_window_matches_title_then_single_window() {
         let clients = r#"[
             {"address":"0x1","workspace":{"id":1,"name":"1"},"title":"Mail — Mozilla Firefox","pid":100},
@@ -1129,6 +1687,93 @@ mod tests {
         );
     }
 
+    fn workspace_rows(items: &[CommandItem]) -> Vec<(&str, &str, Option<&str>)> {
+        items
+            .iter()
+            .map(|item| {
+                (
+                    item.title.as_str(),
+                    item.subtitle.as_str(),
+                    item.badge.as_deref(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_hyprland_workspace_rows() {
+        let workspaces = r#"[
+            {"id": 7, "name": "7", "monitor": "HDMI-A-1"},
+            {"id": -98, "name": "special:magic", "monitor": "DP-2"},
+            {"id": 3, "name": "3", "monitor": "DP-2"},
+            {"id": -1337, "name": "web", "monitor": "HDMI-A-1"},
+            {"id": 2, "name": "2", "monitor": "DP-2"},
+            {"id": 1, "name": "1", "monitor": "DP-2"}
+        ]"#;
+        let items = hyprland_workspace_items(
+            workspaces.as_bytes(),
+            ACTIVE.as_bytes(),
+            CLIENTS.as_bytes(),
+            4242,
+        )
+        .unwrap();
+        assert_eq!(
+            workspace_rows(&items),
+            vec![
+                ("Workspace 1", "on DP-2 · No windows", Some("Current")),
+                ("Workspace 2", "on DP-2 · 1 window · tab", None),
+                ("Workspace 3", "on DP-2 · 1 window · Mozilla Firefox", None),
+                ("Workspace 7", "on HDMI-A-1 · No windows", Some("Visible")),
+                ("Workspace web", "on HDMI-A-1 · No windows", None),
+                (
+                    "Workspace special:magic",
+                    "on DP-2 · 1 window · notes",
+                    None
+                ),
+            ]
+        );
+        assert!(items[4].dimmed && !items[0].dimmed);
+
+        let action = |item: &CommandItem| item.primary.as_ref().unwrap().action.clone();
+        assert!(matches!(
+            action(&items[4]),
+            DeferredAction::Hypr(HyprAction::Workspace { workspace }) if workspace == "name:web"
+        ));
+        assert!(matches!(
+            action(&items[5]),
+            DeferredAction::Hypr(HyprAction::ToggleSpecial { name }) if name == "magic"
+        ));
+        // The last focused window, notes, moves anywhere but its own workspace.
+        assert!(matches!(
+            &items[0].secondary.as_ref().unwrap().action,
+            DeferredAction::Hypr(HyprAction::MoveTo { address, workspace })
+                if address == "0x3c" && workspace == "1"
+        ));
+        assert!(items[5].secondary.is_none());
+    }
+
+    #[test]
+    fn test_hyprland_workspace_special_shown_is_current() {
+        let workspaces = r#"[
+            {"id": 1, "name": "1", "monitor": "DP-2"},
+            {"id": -98, "name": "special:magic", "monitor": "DP-2"}
+        ]"#;
+        let monitors = r#"[{"name": "DP-2", "focused": true,
+            "activeWorkspace": {"id": 1, "name": "1"},
+            "specialWorkspace": {"id": -98, "name": "special:magic"}}]"#;
+        let items =
+            hyprland_workspace_items(workspaces.as_bytes(), monitors.as_bytes(), b"[]", 4242)
+                .unwrap();
+        assert_eq!(
+            workspace_rows(&items),
+            vec![
+                ("Workspace 1", "No windows", Some("Visible")),
+                ("Workspace special:magic", "No windows", Some("Current")),
+            ]
+        );
+        assert!(items.iter().all(|item| item.secondary.is_none()));
+    }
+
     // Captured from a nested niri 26.04, plus a Raffi window (pid 4242).
     const NIRI_WINDOWS: &str = r#"[
         {"id":3,"title":"term two","app_id":"kitty","pid":1767294,"workspace_id":1,
@@ -1242,6 +1887,12 @@ mod tests {
         assert_eq!(items[0].subtitle, "kitty on workspace 2");
         assert_eq!(items[1].subtitle, "kitty on workspace web");
         assert_eq!(items[1].icon_names, vec!["kitty"]);
+        assert_eq!(items[0].badge, None);
+        assert_eq!(items[1].badge.as_deref(), Some("Floating"));
+        assert_eq!(
+            argvs(items[1].close.as_ref().unwrap()),
+            vec![niri("close-window --id 3")]
+        );
 
         let items = niri_items(NIRI_OLD_WINDOWS.as_bytes(), NIRI_WORKSPACES.as_bytes(), 1).unwrap();
         let ids: Vec<&str> = items.iter().map(|item| item.identity.as_str()).collect();
@@ -1252,6 +1903,56 @@ mod tests {
             vec!["org.gnome.Nautilus", "org.gnome.nautilus"]
         );
         assert_eq!(items[2].subtitle, "Workspace 3");
+    }
+
+    #[test]
+    fn test_niri_workspace_rows() {
+        let items = niri_workspace_items(NIRI_WINDOWS.as_bytes(), NIRI_WORKSPACES.as_bytes(), 4242)
+            .unwrap();
+        assert_eq!(
+            workspace_rows(&items),
+            vec![
+                ("Workspace web", "1 window · term two", None),
+                ("Workspace 2", "1 window · term one", Some("Current")),
+                ("Workspace 3", "No windows", None),
+            ]
+        );
+        assert_eq!(
+            argvs(items[0].primary.as_ref().unwrap()),
+            vec![niri("focus-workspace web")]
+        );
+        assert!(items[1].secondary.is_none());
+        assert_eq!(
+            argvs(items[2].secondary.as_ref().unwrap()),
+            vec![
+                niri("move-window-to-workspace --window-id 2 --focus false -- 3"),
+                niri("focus-window --id 2"),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_niri_workspace_rows_skip_nameless_windows() {
+        // A window with neither a title nor an app id is not a row in the
+        // Windows view, so the workspace rows skip it too.
+        let windows = r#"[
+            {"id":3,"title":"term two","app_id":"kitty","pid":1767294,"workspace_id":1,
+             "is_focused":false,"is_floating":false},
+            {"id":9,"title":null,"app_id":null,"pid":1767295,"workspace_id":1,
+             "is_focused":false,"is_floating":false},
+            {"id":10,"title":"","app_id":"","pid":1767296,"workspace_id":3,
+             "is_focused":false,"is_floating":false}
+        ]"#;
+        let items =
+            niri_workspace_items(windows.as_bytes(), NIRI_WORKSPACES.as_bytes(), 4242).unwrap();
+        assert_eq!(
+            workspace_rows(&items),
+            vec![
+                ("Workspace web", "1 window · term two", None),
+                ("Workspace 2", "No windows", Some("Current")),
+                ("Workspace 3", "No windows", None),
+            ]
+        );
     }
 
     #[test]
@@ -1481,11 +2182,61 @@ mod tests {
         assert_eq!(items[0].details[0].0, "App ID");
         assert_eq!(items[4].subtitle, "termD on workspace 3 (HEADLESS-2)");
         assert_eq!(items[5].subtitle, "scratchy on workspace scratchpad");
+        let badges: Vec<_> = items.iter().map(|item| item.badge.as_deref()).collect();
+        assert_eq!(
+            badges,
+            [
+                None,
+                None,
+                Some("XWayland"),
+                Some("Floating"),
+                None,
+                Some("Floating")
+            ]
+        );
+        assert_eq!(
+            argvs(items[0].close.as_ref().unwrap()),
+            vec![swaymsg("[con_id=7] kill")]
+        );
 
         let one_output = r#"[{"name":"web","focused":true,"output":"HEADLESS-1"}]"#;
         let items = sway_items(SWAY_TREE.as_bytes(), one_output.as_bytes(), 0).unwrap();
         assert_eq!(items.len(), 7);
         assert_eq!(items[0].subtitle, "termA on workspace 1");
+    }
+
+    #[test]
+    fn test_sway_workspace_rows() {
+        let items = sway_workspace_items(SWAY_TREE.as_bytes(), SWAY_WORKSPACES.as_bytes(), 1847043)
+            .unwrap();
+        assert_eq!(
+            workspace_rows(&items),
+            vec![
+                (
+                    "Workspace 1",
+                    "on HEADLESS-1 · 2 windows · term A",
+                    Some("Current")
+                ),
+                ("Workspace web", "on HEADLESS-1 · 2 windows · x kitty", None),
+                (
+                    "Workspace 3",
+                    "on HEADLESS-2 · 1 window · term D",
+                    Some("Visible")
+                ),
+            ]
+        );
+        assert_eq!(
+            argvs(items[1].primary.as_ref().unwrap()),
+            vec![swaymsg("workspace --no-auto-back-and-forth \"web\"")]
+        );
+        assert!(items[0].secondary.is_none());
+        assert_eq!(
+            argvs(items[2].secondary.as_ref().unwrap()),
+            vec![
+                swaymsg("[con_id=7] move --no-auto-back-and-forth container to workspace \"3\""),
+                swaymsg("[con_id=7] focus"),
+            ]
+        );
     }
 
     #[test]

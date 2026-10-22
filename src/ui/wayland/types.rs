@@ -606,7 +606,14 @@ pub(crate) enum Message {
         std::result::Result<Option<super::hyprland::Hyprland>, String>,
     ),
     ClipboardRefresh,
-    ClipboardDelete,
+    /// Ctrl+D: delete the clipboard entry, or run the row's close action.
+    DeleteSelected,
+    /// The compositor reported windows or workspaces changing while the
+    /// window switcher is open.
+    WindowsChanged,
+    /// The open window of the launcher at this config index, looked up
+    /// before starting it: focus it, or launch when there is none.
+    LauncherRaiseChecked(usize, Option<super::actions::DeferredAction>),
     ClipboardDeleteDone(u64, std::result::Result<String, String>),
     /// Text typed in the masked password prompt, never shown by `Debug`.
     PromptChanged(crate::secret::Secret),

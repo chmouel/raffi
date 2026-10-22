@@ -9,7 +9,7 @@ import { Aside } from '@astrojs/starlight/components';
 
 A [custom entry](../entries/) can stay hidden until a condition holds. Use conditions to:
 
-- Show entries only in specific desktop environments
+- Show entries only in specific desktop environments or compositors
 - Display entries only when certain binaries are installed
 - Conditionally show entries based on environment variables
 
@@ -52,6 +52,8 @@ cliphistory:
   icon: accessories-clipboard
   ifenvset: SWAYSOCK
 ```
+
+[`ifcompositor`](#ifcompositor) says the same thing more directly.
 
 ### ifenvnotset
 
@@ -120,6 +122,35 @@ reboot:
   description: "Reboot"
   icon: gnome-session-reboot
   ifenveq: [DESKTOP_SESSION, GNOME]
+```
+
+### ifcompositor
+
+Shows the entry only inside a given Wayland compositor.
+
+**`ifcompositor`** `string` or `array`
+
+One of `hyprland`, `niri` or `sway`, or a list of them. Raffi tells them apart with `HYPRLAND_INSTANCE_SIGNATURE`, `NIRI_SOCKET` and `SWAYSOCK`.
+
+#### Example: Compositor-Specific Entries
+
+```yaml title="launchers.yaml"
+hypr-reload:
+  binary: hyprctl
+  args: [reload]
+  description: "Reload Hyprland config"
+  ifcompositor: hyprland
+
+overview:
+  binary: niri
+  args: [msg, action, toggle-overview]
+  description: "Overview"
+  ifcompositor: niri
+
+lock:
+  binary: swaylock
+  description: "Lock screen"
+  ifcompositor: [niri, sway]
 ```
 
 ### ifexist

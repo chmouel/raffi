@@ -703,6 +703,15 @@
       },
       "additionalProperties": false
     },
+    "Compositor": {
+      "description": "The compositor Raffi runs in, for window switching, launching and log out.",
+      "type": "string",
+      "enum": [
+        "hyprland",
+        "niri",
+        "sway"
+      ]
+    },
     "CurrencyAddonConfig": {
       "description": "Configuration for the currency addon",
       "type": "object",
@@ -1027,6 +1036,10 @@
           "format": "float",
           "default": null
         },
+        "launch": {
+          "description": "How launchers start their program: `auto` (default) asks Hyprland,\nniri or sway to start it, `direct` starts it from Raffi.",
+          "$ref": "#/$defs/LaunchMode"
+        },
         "main_view": {
           "description": "Sources mixed into the main view, in display order, when typing without\nan addon trigger. Entries: `launchers`, `browser_tabs`,\n`bookmarks`, `browser_history`, `windows`, `system`, `media`, `audio`,\n`bluetooth`, `pass`,\n`kill`, `slack`, `slack.unread`, `slack.threads` (`slack.unread_threads`),\n`slack.activity`, `slack.actions`, `slack.directs` (`slack.dms`),\n`slack.channels`, `text_snippets.<name>` and `script_filters.<name>`.\nSlack shows its Home rows on an empty query and searches messages when\ntyping. When set, launchers only show if `launchers` is listed.",
           "type": [
@@ -1080,6 +1093,14 @@
         "preview": {
           "description": "Appearance of the right-hand preview pane (font, size, colours, width)",
           "$ref": "#/$defs/PreviewConfig"
+        },
+        "raise_running": {
+          "description": "Focus an app's open window instead of starting it again (default:\nfalse). Launchers can set `raise` and `window_class`. Raffi's own\nwindow only, on Hyprland, niri and sway.",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
         },
         "renderer": {
           "description": "Renderer for the window: `auto` (default: `gpu` when `opacity` is\nbelow 1, else `cpu`), `cpu` (faster to open, opaque on Wayland) or `gpu`.\nAn `ICED_BACKEND` environment variable takes precedence.",
@@ -1182,6 +1203,21 @@
       },
       "additionalProperties": false
     },
+    "LaunchMode": {
+      "description": "How launchers start their program",
+      "oneOf": [
+        {
+          "description": "Ask Hyprland, niri or sway to start it when Raffi runs in one, so the\nprogram belongs to the session and follows its rules; elsewhere Raffi\nstarts it",
+          "type": "string",
+          "const": "auto"
+        },
+        {
+          "description": "Raffi starts it, and the program inherits Raffi's environment",
+          "type": "string",
+          "const": "direct"
+        }
+      ]
+    },
     "MainViewChips": {
       "description": "What the chips on an empty main view query show",
       "oneOf": [
@@ -1228,6 +1264,34 @@
         }
       },
       "additionalProperties": false
+    },
+    "OneOrMany": {
+      "description": "A single value, or a list of them.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Compositor"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Compositor"
+          }
+        }
+      ]
+    },
+    "OneOrMany2": {
+      "description": "A single value, or a list of them.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
     },
     "PassAddonConfig": {
       "description": "Configuration for the pass (password-store) addon",
@@ -1466,6 +1530,17 @@
             "null"
           ]
         },
+        "ifcompositor": {
+          "description": "Show the entry only inside this compositor, or one of these:\n`hyprland`, `niri`, `sway`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OneOrMany"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "ifenveq": {
           "type": [
             "array",
@@ -1500,6 +1575,13 @@
             "null"
           ]
         },
+        "raise": {
+          "description": "Focus the app's open window instead of starting it again\n(default: `general.raise_running`, else false).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "script": {
           "type": [
             "string",
@@ -1511,6 +1593,17 @@
           "type": [
             "boolean",
             "null"
+          ]
+        },
+        "window_class": {
+          "description": "Window class (Hyprland, Xwayland) or app ID (niri, sway) of the app's\nwindows, for `raise` (default: the binary name).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OneOrMany2"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },

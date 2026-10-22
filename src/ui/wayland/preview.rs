@@ -1518,14 +1518,21 @@ impl LauncherApp {
             }
         }
 
+        let raises = self.view.raise_via.is_some()
+            && !crate::raise_classes(config, self.view.raise_running).is_empty();
         metadata.push((
             "Enter".to_string(),
-            if config.script.is_some() {
+            if raises {
+                "Focus its open window, or launch".to_string()
+            } else if config.script.is_some() {
                 "Execute script".to_string()
             } else {
                 "Launch application".to_string()
             },
         ));
+        if raises {
+            metadata.push(("Ctrl+Enter".to_string(), "Launch a new one".to_string()));
+        }
 
         PreviewData {
             title,

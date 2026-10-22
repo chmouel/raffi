@@ -6,6 +6,43 @@
     "$ref": "#/$defs/RaffiConfig"
   },
   "$defs": {
+    "Compositor": {
+      "description": "The compositor Raffi runs in, for window switching, launching and log out.",
+      "type": "string",
+      "enum": [
+        "hyprland",
+        "niri",
+        "sway"
+      ]
+    },
+    "OneOrMany": {
+      "description": "A single value, or a list of them.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Compositor"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Compositor"
+          }
+        }
+      ]
+    },
+    "OneOrMany2": {
+      "description": "A single value, or a list of them.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
     "RaffiConfig": {
       "description": "Represents the configuration for each Raffi entry.",
       "type": "object",
@@ -57,6 +94,17 @@
             "null"
           ]
         },
+        "ifcompositor": {
+          "description": "Show the entry only inside this compositor, or one of these:\n`hyprland`, `niri`, `sway`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OneOrMany"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "ifenveq": {
           "type": [
             "array",
@@ -91,6 +139,13 @@
             "null"
           ]
         },
+        "raise": {
+          "description": "Focus the app's open window instead of starting it again\n(default: `general.raise_running`, else false).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "script": {
           "type": [
             "string",
@@ -102,6 +157,17 @@
           "type": [
             "boolean",
             "null"
+          ]
+        },
+        "window_class": {
+          "description": "Window class (Hyprland, Xwayland) or app ID (niri, sway) of the app's\nwindows, for `raise` (default: the binary name).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OneOrMany2"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },

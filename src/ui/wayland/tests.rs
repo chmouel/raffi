@@ -2024,6 +2024,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "Ctrl+Y",
             "Ctrl+Alt+Y",
             "Ctrl+S",
+            "Ctrl+D",
             "Ctrl+U",
             "Ctrl+O",
             "Alt+P/N",
@@ -5263,6 +5264,127 @@ fn test_windows_ctrl_enter_brings_window_here() {
         Some(DeferredAction::Hypr(HyprAction::MoveHere { address, workspace }))
             if address == "0xb2" && workspace == "2"
     ));
+}
+
+#[test]
+fn test_windows_ctrl_d_closes_the_window_and_stays_open() {
+    let mut app = windows_app();
+    let _ = app.update(Message::SearchChanged("win notes".into()));
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(window_fixture())));
+    let task = app.update(Message::DeleteSelected);
+    assert!(task.units() > 0, "the close runs in the background");
+    assert!(deferred_action(&app).is_none(), "Raffi stays open");
+    assert!(app.in_flight.is_pending("windows", "0xb2"));
+    let item = app.command_list.item(0).unwrap().clone();
+    assert_eq!(app.command_list_progress(&item), Some("Closing..."));
+    assert!(matches!(
+        &item.close.as_ref().unwrap().action,
+        DeferredAction::Hypr(HyprAction::Close { address }) if address == "0xb2"
+    ));
+
+    let task = app.update(Message::CommandListActionDone(
+        CommandListAddon::Windows,
+        app.command_list.session,
+        "0xb2".into(),
+        Ok(()),
+    ));
+    assert!(task.units() > 0, "the list reloads");
+    assert!(app.command_list.closing.is_none());
+    assert_ne!(app.command_list.generation, generation);
+}
+
+#[test]
+fn test_windows_ctrl_tab_switches_to_workspaces() {
+    let mut app = windows_app();
+    app.main_view.names = vec![Some("windows".into())];
+    app.main_view.window_session = Some("session".into());
+    let _ = app.update(Message::SearchChanged("win ".into()));
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(window_fixture())));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Windows"));
+
+    let task = app.update(Message::CycleView(false));
+    assert!(task.units() > 0, "the workspaces load");
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Workspaces"));
+    assert_ne!(app.command_list.generation, generation);
+    let workspaces = super::windows::hyprland_workspace_items(
+        br#"[{"id": 3, "name": "3", "monitor": "DP-2"}, {"id": 1, "name": "1", "monitor": "DP-2"}]"#,
+        br#"[{"name": "DP-2", "focused": true, "activeWorkspace": {"id": 1, "name": "1"}}]"#,
+        b"[]",
+        1,
+    )
+    .unwrap();
+    let _ = app.update(Message::CommandListLoaded(
+        app.command_list.generation,
+        Ok(workspaces),
+    ));
+    assert_eq!(
+        command_list_titles(&app),
+        vec!["Workspace 1", "Workspace 3"]
+    );
+
+    let _ = app.update(Message::CycleView(true));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Windows"));
+    let _ = app.update(Message::CycleView(false));
+    let _ = app.update(Message::CommandListLoaded(
+        app.command_list.generation,
+        Ok(super::windows::hyprland_workspace_items(
+            br#"[{"id": 3, "name": "3", "monitor": "DP-2"}]"#,
+            b"[]",
+            b"[]",
+            1,
+        )
+        .unwrap()),
+    ));
+    let _ = app.update(Message::Submit);
+    assert!(matches!(
+        deferred_action(&app),
+        Some(DeferredAction::Hypr(HyprAction::Workspace { workspace })) if workspace == "3"
+    ));
+    assert!(
+        app.main_view.recent.is_empty(),
+        "workspaces are not recent window picks"
+    );
+
+    // Entering the switcher again lists windows.
+    let _ = app.update(Message::SearchChanged(String::new()));
+    assert_eq!(app.command_list.windows_view, super::windows::View::Windows);
+}
+
+#[test]
+fn test_windows_reload_on_compositor_changes_keeps_the_selection() {
+    let mut app = windows_app();
+    let _ = app.update(Message::SearchChanged("win ".into()));
+    let task = app.update(Message::WindowsChanged);
+    assert_eq!(task.units(), 0, "the first load is still running");
+
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(window_fixture())));
+    let _ = app.update(Message::MoveDown);
+    assert_eq!(
+        command_list_titles(&app)[app.selected_index],
+        "Mozilla Firefox"
+    );
+
+    let task = app.update(Message::WindowsChanged);
+    assert!(task.units() > 0, "the list reloads");
+    assert!(app.command_list.refreshing);
+    assert_eq!(app.total_items(), 2, "the rows stay while reloading");
+    let mut reloaded = window_fixture();
+    reloaded.reverse();
+    let _ = app.update(Message::CommandListLoaded(
+        app.command_list.generation,
+        Ok(reloaded),
+    ));
+    assert_eq!(
+        command_list_titles(&app)[app.selected_index],
+        "Mozilla Firefox"
+    );
+
+    // Leaving the switcher ignores late changes.
+    let _ = app.update(Message::SearchChanged(String::new()));
+    assert_eq!(app.update(Message::WindowsChanged).units(), 0);
 }
 
 #[test]
@@ -9527,6 +9649,64 @@ fn test_launcher_keep_open_respects_general_and_launcher_override() {
     assert_eq!(
         app.selected_item.lock().unwrap().as_deref(),
         Some("Closing Launcher")
+    );
+}
+
+#[test]
+fn test_launcher_raises_its_open_window_unless_ctrl() {
+    let mut app = test_app(AddonsConfig::default());
+    app.configs = vec![RaffiConfig {
+        description: Some("Firefox".into()),
+        binary: Some("firefox".into()),
+        raise: Some(true),
+        ..Default::default()
+    }];
+    app.history.max_items = 0;
+    // The lookup task is never run here, so no compositor is reached.
+    app.view.raise_via = Some(Compositor::Hyprland);
+    app.view.show_launcher_preview = true;
+    let _ = app.update(Message::SearchChanged("Firefox".into()));
+    let keys: Vec<(String, String)> = app.resolve_selected_preview().unwrap().metadata;
+    assert!(keys.contains(&(
+        "Enter".to_string(),
+        "Focus its open window, or launch".to_string()
+    )));
+    assert!(keys.contains(&("Ctrl+Enter".to_string(), "Launch a new one".to_string())));
+
+    let task = app.update(Message::Submit);
+    assert!(task.units() > 0);
+    assert!(
+        app.selected_item.lock().unwrap().is_none(),
+        "Enter looks for a window before launching"
+    );
+
+    // An open window is focused once Raffi has closed.
+    let _ = app.update(Message::LauncherRaiseChecked(
+        0,
+        Some(DeferredAction::Command(vec!["true".into()])),
+    ));
+    assert!(matches!(
+        *app.deferred_action.lock().unwrap(),
+        Some(DeferredAction::Command(_))
+    ));
+    assert!(app.selected_item.lock().unwrap().is_none());
+
+    // Without one, the launcher starts as usual.
+    *app.deferred_action.lock().unwrap() = None;
+    let _ = app.update(Message::LauncherRaiseChecked(0, None));
+    assert_eq!(
+        app.selected_item.lock().unwrap().as_deref(),
+        Some("Firefox")
+    );
+    assert!(app.deferred_action.lock().unwrap().is_none());
+
+    // Ctrl+Enter starts a new one without looking.
+    *app.selected_item.lock().unwrap() = None;
+    let _ = app.update(Message::ModifiersChanged(iced::keyboard::Modifiers::CTRL));
+    let _ = app.update(Message::Submit);
+    assert_eq!(
+        app.selected_item.lock().unwrap().as_deref(),
+        Some("Firefox")
     );
 }
 

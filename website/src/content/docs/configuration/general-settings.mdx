@@ -85,6 +85,26 @@ Whether Raffi closes its window after executing an action.
 
   Set `close_on_action: false` (or pass `--keep-open` / `-o general.close_on_action=false`) to keep Raffi open with your current search query and selection after launching an app, copying an inline result, or running an addon action. Individual entries and addons can override this with their own `close_on_action: true | false` setting (`media`, `audio`, `bluetooth`, and `kill` stay open unless you set `close_on_action: true` on the addon or write it out explicitly here). Actions that must type or paste into the previously focused window (`insert`, `hypr_paste`, password typing) or end the desktop session still close Raffi first.
 
+**`launch`** `string` (default: `auto`)
+
+How Raffi starts launchers and installed apps. Valid options:
+  - `auto` - Inside Hyprland, niri or sway, ask the compositor to start the app (`hyprctl`, `niri msg action spawn`, `swaymsg exec`), so it runs as the compositor's child, with the compositor's environment and working directory. Outside them, or if the compositor refuses, Raffi starts it itself.
+  - `direct` - Raffi always starts the app itself, and the app inherits Raffi's environment and working directory.
+
+  Sway reads `;` and `,` in `exec` as command separators and expands `$` variables, so on sway Raffi starts command lines containing `;`, `,`, `$`, quotes, backslashes or line breaks itself.
+
+  With `auto`, the compositor reports success once it accepts the command, even when starting the program itself then fails, for example because the binary is not on the compositor's `PATH`, so such failures stay silent. `direct` surfaces them instead.
+
+  `-p` / `--print-only` is not affected: it prints the command and starts nothing.
+
+**`raise_running`** `boolean` (default: `false`)
+
+When an app already has a window open, pressing **Enter** on its launcher focuses that window instead of starting a second copy. **Ctrl+Enter** still starts a new one. If the app has no open window, Raffi starts it as usual.
+
+  Raffi finds the window by its class (Hyprland, Xwayland) or app ID (niri, sway). Installed apps use the `StartupWMClass` and the name of their desktop file. A launcher with a plain `binary` and no `args` uses the binary's file name. Launchers with `args` or a `script` need a `window_class` to raise. Launchers can opt in or out with `raise`; see [Entries](../entries/).
+
+  This needs Hyprland, niri or sway and Raffi's own window. It does nothing with `ui_type: fuzzel` or `-p`.
+
 **`show_tips`** `boolean` (default: `true`)
 
 Shows a tip in the empty search box, such as `Type to search... (tip: clip for Clipboard history)`, picked from your enabled addons and changed on each launch. Set it to `false` to keep the plain `Type to search...`.

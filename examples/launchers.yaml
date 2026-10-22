@@ -21,6 +21,16 @@ thunar:
   # icon is optional here; Raffi will try to infer a system icon and then
   # fall back to a generic one if nothing matches.
 
+# Enter focuses Thunderbird when it is already open, Ctrl+Enter starts a new
+# one (Hyprland, niri, sway). window_class defaults to the binary name, which
+# is enough here; set it when the launcher has args or a script.
+thunderbird:
+  binary: thunderbird
+  description: "Thunderbird"
+  icon: thunderbird
+  ifexist: thunderbird
+  raise: true
+
 rbw-pass:
   args:
     [
@@ -43,7 +53,7 @@ cliphistory:
   binary: "clipman"
   description: "Clipboard history"
   icon: accessories-clipboard
-  ifenvset: SWAYSOCK
+  ifcompositor: sway
 
 evolution-mail:
   args: ["-t", "Evolution", "-X", "evolution"]
