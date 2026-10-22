@@ -58,6 +58,12 @@ $super = SUPER
 bind = $super, R, exec, (val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val")
 ```
 
+For Hyprland's Lua configuration (`~/.config/hypr/hyprland.lua`):
+
+```lua
+hl.bind("SUPER + R", hl.dsp.exec_cmd("(val=$(raffi -pI); [ -n \"$val\" ] && hyprctl dispatch exec \"$val\")"))
+```
+
 The [Sway](https://chmouel.github.io/raffi/integration/sway/) and [Hyprland](https://chmouel.github.io/raffi/integration/hyprland/) pages have more examples, and the [CLI reference](https://chmouel.github.io/raffi/reference/cli-options/) lists every flag.
 
 ## Features
