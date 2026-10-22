@@ -1687,11 +1687,14 @@ impl LauncherApp {
             Message::BookmarkIconsLoaded(session, icons, fetch) => {
                 self.handle_bookmark_icons_loaded(session, icons, fetch)
             }
-            Message::BrowserHistoryLoaded(generation, library) => {
-                self.handle_browser_history_loaded(generation, library)
+            Message::BrowserHistoryInitialized(generation, init) => {
+                self.handle_browser_history_initialized(generation, init)
             }
-            Message::BrowserHistoryIconsLoaded(session, icons, fetch) => {
-                self.handle_browser_history_icons_loaded(session, icons, fetch)
+            Message::BrowserHistoryGroupLoaded(generation, key, library) => {
+                self.handle_browser_history_group_loaded(generation, key, library)
+            }
+            Message::BrowserHistoryIconsLoaded(session, key, icons, fetch) => {
+                self.handle_browser_history_icons_loaded(session, key, icons, fetch)
             }
             Message::BrowserHistorySearchDue(session, generation) => {
                 self.handle_browser_history_search_due(session, generation)
@@ -3449,7 +3452,7 @@ impl LauncherApp {
     /// Scrolls the list just enough to show the selected row. Rows differ in
     /// height (wrapped titles, headings), so the row is measured rather than
     /// placed by its index.
-    fn snap_to_selection(&self) -> Task<Message> {
+    pub(super) fn snap_to_selection(&self) -> Task<Message> {
         let total = self.total_items();
         let relative = if total > 1 {
             self.selected_index as f32 / (total - 1) as f32

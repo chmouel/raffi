@@ -6,7 +6,6 @@ description: Search and reopen pages from your Firefox and Chromium browser hist
 import { Aside } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import browserHistoryScreenshot from '../../../assets/screenshots/browser-history.png';
-import browserHistoryFrequentScreenshot from '../../../assets/screenshots/browser-history-frequent.png';
 
 Type `hist ` (with the trailing space) to search the pages you visited in
 your browsers. Raffi reads the history databases directly, so there is no
@@ -19,14 +18,14 @@ names. Matching is literal and case-insensitive: every word must appear as a
 substring, and pages where a word starts with it rank first. At the same prefix
 quality, matches in the address rank before matches in the title. Results
 refresh one second after you stop typing; pressing Enter applies the pending
-search immediately. The same address visited in several profiles appears once,
-with every profile listed in the preview.
+search immediately. Each row shows the profile it came from; when a browser
+has several, its pages are grouped by profile.
 
 | Key            | Action                                      |
 |----------------|---------------------------------------------|
 | Enter          | Open the page                               |
 | Ctrl+Enter     | Copy the link                               |
-| Ctrl+Tab       | Switch between recent, frequent and by browser |
+| Ctrl+Tab       | Switch between browsers                     |
 | Ctrl+R         | Read browser history again                  |
 
 <Aside type="note">
@@ -36,16 +35,13 @@ it never edits, deletes or prunes it.
 
 ## Views
 
-Ctrl+Tab cycles through three views, shown in the footer:
+Ctrl+Tab cycles browser by browser; the footer names the one shown. Raffi
+opens with the first browser found and reads the others the first time you
+switch to them, then keeps them for the session. Pages in a browser are listed
+by their latest visit, with a section per profile when that browser has several.
 
-- **Recent** lists pages by their latest visit.
-- **Frequent** ranks pages by frecency: recent visits count more, then how
-  often and whether you typed the address. Pages picked from Raffi before
-  get a small boost.
-- **By browser** keeps one section per profile, so the same address can
-  appear once for each browser it was visited in.
-
-<Image src={browserHistoryFrequentScreenshot} alt="Frequent browser history rows ordered by frecency, with the view name in the footer" width={800} />
+The [main list](#in-the-main-list) still shows pages from every browser
+together, most recent first.
 
 ## Filters
 

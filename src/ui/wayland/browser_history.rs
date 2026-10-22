@@ -1,6 +1,5 @@
 //! Browser history: read Firefox-style `places.sqlite` and Chromium
-//! `History` databases, rank pages by frecency, and collapse the same URL
-//! across profiles.
+//! `History` databases, and list pages grouped by browser and profile.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::OsStr;
@@ -103,47 +102,51 @@ pub(super) struct Library {
     pub picked: HashSet<String>,
 }
 
-/// How the history list is ordered, switched with Ctrl+Tab.
+/// One browser or standalone source, loaded lazily as a Ctrl+Tab view.
+#[derive(Debug, Clone)]
+pub(super) struct BrowserGroup {
+    pub key: String,
+    pub label: String,
+    specs: Vec<Spec>,
+}
+
+/// Discovery plus the first loaded group, for the dedicated history list.
+#[derive(Debug, Clone)]
+pub(super) struct BrowserHistoryInit {
+    pub groups: Vec<BrowserGroup>,
+    pub errors: Vec<String>,
+    pub library: Option<Library>,
+}
+
+/// How rows are ordered; the dedicated list uses [`View::ByBrowser`] inside
+/// one browser group, and the main view uses [`View::Recent`] across groups.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) enum View {
     #[default]
     Recent,
-    Frequent,
     ByBrowser,
 }
 
-impl View {
-    pub(super) fn cycle(self, backwards: bool) -> Self {
-        let views = [Self::Recent, Self::Frequent, Self::ByBrowser];
-        let at = views.iter().position(|view| *view == self).unwrap_or(0);
-        let next = if backwards {
-            (at + views.len() - 1) % views.len()
-        } else {
-            (at + 1) % views.len()
-        };
-        views[next]
-    }
-
-    pub(super) fn label(self) -> &'static str {
-        match self {
-            Self::Recent => "Recent",
-            Self::Frequent => "Frequent",
-            Self::ByBrowser => "By browser",
-        }
-    }
-}
-
-/// The browser history mode: the loaded library and what the rows show.
+/// The browser history mode: discovered views and the libraries loaded so far.
 #[derive(Debug, Default)]
 pub(super) struct BrowserHistoryState {
     /// The command list session the state belongs to.
     pub session: u64,
     /// The query after the keyword the rows show.
     pub query: String,
-    pub library: Option<Arc<Library>>,
-    pub view: View,
-    /// The view and filters the rows were built for, without free text.
-    pub built: Option<(View, Filters)>,
+    /// Browser or standalone-source views, in Ctrl+Tab order.
+    pub groups: Vec<BrowserGroup>,
+    pub active: usize,
+    /// Loaded libraries, parallel to `groups`; None until that group loads.
+    pub libraries: Vec<Option<Arc<Library>>>,
+    /// Discovery errors, shown when the active group has no rows.
+    pub discovery_errors: Vec<String>,
+    /// Whether discovery has finished for this session.
+    pub initialized: bool,
+    /// Rows handed over from the main view before the views were discovered.
+    pub handoff: bool,
+    /// Active group index and filters the rows were built for, without text.
+    pub built: Option<(usize, Filters)>,
     /// The latest scheduled search and whether it is still waiting.
     pub search_generation: u64,
     pub search_pending: bool,
@@ -151,7 +154,17 @@ pub(super) struct BrowserHistoryState {
 
 impl BrowserHistoryState {
     pub fn view_label(&self) -> String {
-        self.view.label().to_string()
+        self.groups
+            .get(self.active)
+            .map_or_else(|| "History".to_string(), |group| group.label.clone())
+    }
+
+    pub fn active_group(&self) -> Option<&BrowserGroup> {
+        self.groups.get(self.active)
+    }
+
+    pub fn active_library(&self) -> Option<Arc<Library>> {
+        self.libraries.get(self.active).cloned().flatten()
     }
 }
 
@@ -519,9 +532,9 @@ fn item_for_merged(
         .collect();
     let identity = format!("{IDENTITY_PREFIX}{}", merged.canonical);
     CommandItem {
+        match_text: match_text(&entry.url, &title, source),
         title,
         subtitle,
-        match_text: match_text(&entry.url, &entry.title, source),
         icon_names,
         icon: favicon,
         identity,
@@ -649,29 +662,18 @@ pub(super) fn rows(library: &Library, view: View, filters: &Filters, options: Ro
     }
     let mut rows = Rows::default();
     match view {
-        View::Recent | View::Frequent => {
+        View::Recent => {
             rows.items = info_rows(library);
-            let mut built: Vec<(f64, Totals, CommandItem)> = Vec::new();
+            let mut built: Vec<(Totals, CommandItem)> = Vec::new();
             for (entry, totals) in merged.iter().zip(all_totals) {
-                let identity = format!("{IDENTITY_PREFIX}{}", entry.canonical);
-                let picked = library.picked.contains(&identity);
-                let score = score(&totals, now_ts, max_visits, max_typed, picked);
                 let item = item_for_merged(library, entry, totals, options, now);
-                built.push((score, totals, item));
+                built.push((totals, item));
             }
             // `built` is already in view order. The command list keeps that
             // order for equal fuzzy scores, so no usage map is needed (which
             // also avoids sorting the whole list again on an empty query).
-            if view == View::Recent {
-                built.sort_by_key(|(_, totals, _)| std::cmp::Reverse(totals.last_visit));
-            } else {
-                built.sort_by(|a, b| {
-                    b.0.total_cmp(&a.0)
-                        .then(b.1.last_visit.cmp(&a.1.last_visit))
-                });
-            }
-            rows.items
-                .extend(built.into_iter().map(|(_, _, item)| item));
+            built.sort_by_key(|(totals, _)| std::cmp::Reverse(totals.last_visit));
+            rows.items.extend(built.into_iter().map(|(_, item)| item));
         }
         View::ByBrowser => {
             rows.items = info_rows(library);
@@ -763,17 +765,61 @@ pub(super) fn load(config: &BrowserHistoryAddonConfig) -> Library {
         };
     };
     let path = std::env::var_os("PATH").unwrap_or_default();
-    let mut library = load_from(config, &home, &config_dir, &path);
-    if let Ok(cache) = crate::ui::get_recent_cache_path() {
-        library.picked = super::recent::load(Some(&cache))
-            .into_iter()
-            .filter(|pick| pick.source == "browser_history")
-            .map(|pick| pick.key)
-            .collect();
+    let (specs, errors) = collect_specs(config, &home, &config_dir);
+    let mut library = Library {
+        errors,
+        ..Library::default()
+    };
+    let mut budget = MAX_LIBRARY_ENTRIES;
+    for group in group_specs(specs) {
+        if budget == 0 {
+            break;
+        }
+        let mut loaded = read_group(config, &path, &group, budget);
+        budget = budget.saturating_sub(
+            loaded
+                .sources
+                .iter()
+                .map(|source| source.entries.len())
+                .sum::<usize>(),
+        );
+        library.sources.append(&mut loaded.sources);
+        library.errors.append(&mut loaded.errors);
     }
+    make_unique_keys(&mut library.sources);
+    library.picked = load_picked();
     library
 }
 
+/// Discover browser views and load only the first one.
+pub(super) fn initialize(config: &BrowserHistoryAddonConfig) -> BrowserHistoryInit {
+    let Ok((home, config_dir)) = browser_host::user_dirs() else {
+        return BrowserHistoryInit {
+            groups: Vec::new(),
+            errors: vec!["HOME is not set".to_string()],
+            library: None,
+        };
+    };
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let (specs, errors) = collect_specs(config, &home, &config_dir);
+    let groups = group_specs(specs);
+    let library = groups
+        .first()
+        .map(|group| read_group(config, &path, group, MAX_LIBRARY_ENTRIES));
+    BrowserHistoryInit {
+        groups,
+        errors,
+        library,
+    }
+}
+
+/// Read the sources of one browser view. Blocking: run it off the UI thread.
+pub(super) fn load_group(config: &BrowserHistoryAddonConfig, group: &BrowserGroup) -> Library {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    read_group(config, &path, group, MAX_LIBRARY_ENTRIES)
+}
+
+#[derive(Debug, Clone)]
 struct Spec {
     browser: Option<BookmarkBrowser>,
     file: PathBuf,
@@ -799,14 +845,13 @@ fn profile_spec(profile: BrowserProfile) -> Spec {
     }
 }
 
-pub(super) fn load_from(
+fn collect_specs(
     config: &BrowserHistoryAddonConfig,
     home: &Path,
     config_dir: &Path,
-    path: &OsStr,
-) -> Library {
-    let mut library = Library::default();
+) -> (Vec<Spec>, Vec<String>) {
     let mut specs: Vec<Spec> = Vec::new();
+    let mut errors: Vec<String> = Vec::new();
     match &config.sources {
         None => specs.extend(
             browser_host::history_profiles(None, home, config_dir)
@@ -850,9 +895,7 @@ pub(super) fn load_from(
                     continue;
                 }
                 let Some(browser) = source.browser else {
-                    library
-                        .errors
-                        .push("A browser_history source needs a browser or a path".to_string());
+                    errors.push("A browser_history source needs a browser or a path".to_string());
                     continue;
                 };
                 let browser_name =
@@ -868,7 +911,7 @@ pub(super) fn load_from(
                         })
                         .collect();
                 if profiles.is_empty() {
-                    library.errors.push(match &source.profile {
+                    errors.push(match &source.profile {
                         Some(profile) => {
                             format!("{browser_name}: no profile {profile} with history")
                         }
@@ -879,28 +922,71 @@ pub(super) fn load_from(
             }
         }
     }
+    (specs, errors)
+}
 
-    let mut sources: Vec<(Source, String)> = Vec::new();
-    let mut total = 0usize;
+fn group_specs(specs: Vec<Spec>) -> Vec<BrowserGroup> {
+    let mut groups: Vec<BrowserGroup> = Vec::new();
     for spec in specs {
-        if total >= MAX_LIBRARY_ENTRIES {
-            break;
-        }
-        let label = spec.name.clone().unwrap_or_else(|| {
-            spec.browser
-                .and_then(browser_host::browser_details)
-                .map_or_else(|| dir_name(&spec.file), |(name, _, _)| name.to_string())
-        });
-        match read_source(&spec, config.open_with.as_ref(), path, config.max_entries()) {
-            Ok(mut source) => {
-                let take = source.entries.len().min(MAX_LIBRARY_ENTRIES - total);
-                source.entries.truncate(take);
-                total += source.entries.len();
-                sources.push((Source { label, ..source }, spec.profile_name));
-            }
-            Err(error) => library.errors.push(format!("{label}: {error}")),
+        let (key, label) = spec_group(&spec);
+        if let Some(group) = groups.iter_mut().find(|group| group.key == key) {
+            group.specs.push(spec);
+        } else {
+            groups.push(BrowserGroup {
+                key,
+                label,
+                specs: vec![spec],
+            });
         }
     }
+    groups
+}
+
+fn spec_group(spec: &Spec) -> (String, String) {
+    if let Some(name) = &spec.name {
+        return (format!("name:{}", name.to_lowercase()), name.clone());
+    }
+    if let Some(browser) = spec.browser {
+        let key = format!("{browser:?}").to_lowercase();
+        let label = browser_host::browser_details(browser)
+            .map_or_else(|| key.clone(), |(name, _, _)| name.to_string());
+        return (key, label);
+    }
+    let label = dir_name(&spec.file);
+    (format!("file:{}", spec.file.display()), label)
+}
+
+fn read_group(
+    config: &BrowserHistoryAddonConfig,
+    path: &OsStr,
+    group: &BrowserGroup,
+    budget: usize,
+) -> Library {
+    let mut sources: Vec<(Source, String)> = Vec::new();
+    let mut errors: Vec<String> = Vec::new();
+    let mut total = 0usize;
+    for spec in &group.specs {
+        if total >= budget {
+            break;
+        }
+        let label = spec.name.clone().unwrap_or_else(|| group.label.clone());
+        match read_source(spec, config.open_with.as_ref(), path, config.max_entries()) {
+            Ok(mut source) => {
+                let take = source.entries.len().min(budget - total);
+                source.entries.truncate(take);
+                total += source.entries.len();
+                sources.push((Source { label, ..source }, spec.profile_name.clone()));
+            }
+            Err(error) => errors.push(format!("{label}: {error}")),
+        }
+    }
+    let mut library = finish_sources(sources);
+    library.errors = errors;
+    library.picked = load_picked();
+    library
+}
+
+fn finish_sources(mut sources: Vec<(Source, String)>) -> Library {
     let duplicated = |sources: &[(Source, String)], label: &str| {
         sources
             .iter()
@@ -921,8 +1007,17 @@ pub(super) fn load_from(
     for ((source, _), label) in sources.iter_mut().zip(labels) {
         source.label = label;
     }
+    let mut library = Library::default();
+    for (source, _) in sources {
+        library.sources.push(source);
+    }
+    make_unique_keys(&mut library.sources);
+    library
+}
+
+fn make_unique_keys(sources: &mut [Source]) {
     let mut keys: Vec<String> = Vec::new();
-    for (mut source, _) in sources {
+    for source in sources {
         let mut key = source.key.clone();
         let mut n = 1;
         while keys.contains(&key) {
@@ -931,9 +1026,18 @@ pub(super) fn load_from(
         }
         keys.push(key.clone());
         source.key = key;
-        library.sources.push(source);
     }
-    library
+}
+
+fn load_picked() -> HashSet<String> {
+    let Ok(cache) = crate::ui::get_recent_cache_path() else {
+        return HashSet::new();
+    };
+    super::recent::load(Some(&cache))
+        .into_iter()
+        .filter(|pick| pick.source == "browser_history")
+        .map(|pick| pick.key)
+        .collect()
 }
 
 fn read_source(
@@ -1125,8 +1229,8 @@ fn merge_source_entry(
     };
     match entries.get_mut(&canonical) {
         Some(existing) => {
-            // The recent and frequent queries return the same row; keep the
-            // larger counters instead of counting it twice.
+            // The recent and most-visited queries return the same row; keep
+            // the larger counters instead of counting it twice.
             existing.visit_count = existing.visit_count.max(visit_count);
             existing.typed_count = existing.typed_count.max(typed_count);
             if last_visit >= existing.last_visit {
@@ -1210,6 +1314,26 @@ pub(super) fn canonical_url(raw: &str) -> Option<String> {
         }
     }
     Some(canonical)
+}
+
+#[cfg(test)]
+pub(super) fn fixture_groups() -> Vec<BrowserGroup> {
+    fixture_library()
+        .sources
+        .iter()
+        .map(|source| BrowserGroup {
+            key: source.key.clone(),
+            label: source.label.clone(),
+            specs: Vec::new(),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+pub(super) fn fixture_group_library(label: &str) -> Library {
+    let mut library = fixture_library();
+    library.sources.retain(|source| source.label == label);
+    library
 }
 
 #[cfg(test)]
@@ -1361,7 +1485,29 @@ mod tests {
     }
 
     #[test]
-    fn test_recent_and_frequent_orders_differ() {
+    fn test_merged_history_searches_the_title_it_shows() {
+        let mut library = fixture_library();
+        let raffi = |entry: &&mut Entry| entry.canonical == "https://github.com/chmouel/raffi";
+        let latest = library
+            .sources
+            .iter_mut()
+            .flat_map(|source| source.entries.iter_mut())
+            .filter(|entry| raffi(entry))
+            .max_by_key(|entry| entry.last_visit)
+            .unwrap();
+        latest.title.clear();
+        let rows = rows(&library, View::Recent, &Filters::default(), options());
+        let item = rows
+            .items
+            .iter()
+            .find(|item| item.identity == "history:https://github.com/chmouel/raffi")
+            .unwrap();
+        assert!(!item.title.is_empty() && !item.title.starts_with("https://"));
+        assert!(item.match_text.contains(&item.title));
+    }
+
+    #[test]
+    fn test_recent_orders_by_last_visit() {
         let mut library = fixture_library();
         library.sources[0].entries.push(Entry::new(
             canonical_url("https://old.example/").unwrap(),
@@ -1372,12 +1518,10 @@ mod tests {
             50,
         ));
         let recent = rows(&library, View::Recent, &Filters::default(), options());
-        let frequent = rows(&library, View::Frequent, &Filters::default(), options());
         assert_eq!(
             recent.items[0].identity,
             "history:https://github.com/chmouel/raffi"
         );
-        assert_eq!(frequent.items[0].identity, "history:https://old.example/");
     }
 
     #[test]

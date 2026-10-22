@@ -134,7 +134,6 @@ SHOTS = [
     Shot("bookmarks", "bm Firefox/Bookmarks Toolbar/", down(2), height=720),
     Shot("bookmarks-search", "bm nixsearch mkShell"),
     Shot("browser-history", "hist ", height=720),
-    Shot("browser-history-frequent", "hist ", ("ctrl+Tab",), height=720),
     # Older batch, 960x560 with fallbacks.
     Shot("calculator", "(2 + 3) * 64", classic=True),
     Shot("currency-converter", "$100", classic=True, settle=5,

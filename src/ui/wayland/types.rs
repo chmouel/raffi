@@ -519,13 +519,23 @@ pub(crate) enum Message {
         std::collections::HashMap<String, std::path::PathBuf>,
         bool,
     ),
-    /// The browser history read for the command list load of this
-    /// generation; None when reading stopped unexpectedly.
-    BrowserHistoryLoaded(u64, Option<std::sync::Arc<super::browser_history::Library>>),
-    /// Site icons by host for the browser history list of this session;
-    /// `true` when missing icons should be downloaded next.
+    /// The browser history views discovered and the first one loaded for
+    /// the command list load of this generation.
+    BrowserHistoryInitialized(
+        u64,
+        Option<std::sync::Arc<super::browser_history::BrowserHistoryInit>>,
+    ),
+    /// One browser view read for the command list load of this generation.
+    BrowserHistoryGroupLoaded(
+        u64,
+        String,
+        Option<std::sync::Arc<super::browser_history::Library>>,
+    ),
+    /// Site icons by host for one browser view of this session; `true` when
+    /// missing icons should be downloaded next.
     BrowserHistoryIconsLoaded(
         u64,
+        String,
         std::collections::HashMap<String, std::path::PathBuf>,
         bool,
     ),

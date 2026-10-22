@@ -394,7 +394,7 @@ addons:
 
   # Browser history (native UI only). Type "hist " to search pages you
   # visited in every Firefox and Chromium profile found. Ctrl+Tab cycles
-  # recent, frequent and by-browser views; filters such as site:github.com,
+  # browser by browser; filters such as site:github.com,
   # browser:firefox, profile:work, after:7d and before:2026-01-01 narrow the
   # list. Enter opens the page, Ctrl+Enter copies the URL. Raffi never edits
   # or deletes history.

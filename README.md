@@ -91,7 +91,7 @@ Control your desktop:
 - [Window switcher](https://chmouel.github.io/raffi/features/window-switcher/) for Hyprland, niri and sway: `win `
 - [Browser tabs](https://chmouel.github.io/raffi/features/browser-tabs/) through the Vicinae browser extension: `tabs `
 - [Bookmarks](https://chmouel.github.io/raffi/features/bookmarks/): search and open browser bookmarks: `bm `
-- [Browser history](https://chmouel.github.io/raffi/features/browser-history/): search visited pages with recent, frequent and by-browser views: `hist `
+- [Browser history](https://chmouel.github.io/raffi/features/browser-history/): search visited pages browser by browser: `hist `
 - [Media controls](https://chmouel.github.io/raffi/features/media-controls/): `media `
 - [Audio devices and volume](https://chmouel.github.io/raffi/features/audio-switcher/): `audio `
 - [Bluetooth](https://chmouel.github.io/raffi/features/bluetooth/): `bt `

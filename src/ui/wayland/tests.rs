@@ -10247,9 +10247,14 @@ fn browser_history_app(query: &str) -> LauncherApp {
         Some("Loading browser history...")
     );
     let generation = app.command_list.generation;
-    let _ = app.update(Message::BrowserHistoryLoaded(
+    let init = super::browser_history::BrowserHistoryInit {
+        groups: super::browser_history::fixture_groups(),
+        errors: Vec::new(),
+        library: Some(super::browser_history::fixture_group_library("Firefox")),
+    };
+    let _ = app.update(Message::BrowserHistoryInitialized(
         generation,
-        Some(Arc::new(super::browser_history::fixture_library())),
+        Some(Arc::new(init)),
     ));
     app
 }
@@ -10271,39 +10276,82 @@ fn test_route_query_browser_history_trigger() {
 }
 
 #[test]
-fn test_browser_history_ctrl_tab_cycles_views() {
+fn test_browser_history_ctrl_tab_cycles_browser_views() {
     let mut app = browser_history_app("hist ");
-    assert_eq!(app.cycle_view_label().as_deref(), Some("Recent"));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Firefox"));
+    assert_eq!(command_list_titles(&app), ["Raffi", "Rust docs"]);
 
-    let _ = app.update(Message::CycleView(false));
-    assert_eq!(app.cycle_view_label().as_deref(), Some("Frequent"));
+    let task = app.update(Message::CycleView(false));
+    assert!(task.units() > 0, "the next browser loads lazily");
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Brave"));
+    assert_eq!(
+        app.command_list.status(),
+        Some("Loading browser history...")
+    );
 
+    let key = app.browser_history.active_group().unwrap().key.clone();
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::BrowserHistoryGroupLoaded(
+        generation,
+        key,
+        Some(Arc::new(super::browser_history::fixture_group_library(
+            "Brave",
+        ))),
+    ));
+    assert_eq!(command_list_titles(&app), ["Raffi on GitHub"]);
+
+    let task = app.update(Message::CycleView(true));
+    assert_eq!(task.units(), 0, "a cached browser shows at once");
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Firefox"));
+    assert_eq!(command_list_titles(&app), ["Raffi", "Rust docs"]);
+
+    let task = app.update(Message::CycleView(true));
+    assert_eq!(task.units(), 0, "backwards wraps to the cached browser");
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Brave"));
+    assert_eq!(command_list_titles(&app), ["Raffi on GitHub"]);
+}
+
+#[test]
+fn test_browser_history_ignores_a_stale_browser_load() {
+    let mut app = browser_history_app("hist ");
     let _ = app.update(Message::CycleView(false));
-    assert_eq!(app.cycle_view_label().as_deref(), Some("By browser"));
-    assert!(command_list_titles(&app).contains(&"Raffi"));
+    let stale_generation = app.command_list.generation;
+    let stale_key = app.browser_history.active_group().unwrap().key.clone();
 
     let _ = app.update(Message::CycleView(true));
-    assert_eq!(app.cycle_view_label().as_deref(), Some("Frequent"));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Firefox"));
+    let _ = app.update(Message::BrowserHistoryGroupLoaded(
+        stale_generation,
+        stale_key,
+        Some(Arc::new(super::browser_history::fixture_group_library(
+            "Brave",
+        ))),
+    ));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Firefox"));
+    assert_eq!(command_list_titles(&app), ["Raffi", "Rust docs"]);
 }
 
 #[test]
 fn test_browser_history_search_waits_for_the_debounce() {
     let mut app = browser_history_app("hist ");
-    assert_eq!(command_list_titles(&app), ["Raffi on GitHub", "Rust docs"]);
+    assert_eq!(command_list_titles(&app), ["Raffi", "Rust docs"]);
 
     let _ = app.update(Message::SearchChanged("hist docs".into()));
     assert!(app.browser_history.search_pending);
     assert_eq!(
         command_list_titles(&app),
-        ["Raffi on GitHub", "Rust docs"],
+        ["Raffi", "Rust docs"],
         "the old rows stay while typing"
     );
 
     let session = app.browser_history.session;
     let generation = app.browser_history.search_generation;
+    // Moving through the old rows must not leave the selection past the new ones.
+    let _ = app.update(Message::MoveDown);
     let _ = app.update(Message::BrowserHistorySearchDue(session, generation));
     assert!(!app.browser_history.search_pending);
     assert_eq!(command_list_titles(&app), ["Rust docs"]);
+    assert_eq!(app.selected_index, app.command_list_offset());
 }
 
 #[test]
@@ -10317,11 +10365,11 @@ fn test_browser_history_ignores_a_stale_debounce() {
     let session = app.browser_history.session;
     let _ = app.update(Message::BrowserHistorySearchDue(session, stale_generation));
     assert!(app.browser_history.search_pending);
-    assert_eq!(command_list_titles(&app), ["Raffi on GitHub", "Rust docs"]);
+    assert_eq!(command_list_titles(&app), ["Raffi", "Rust docs"]);
 
     let _ = app.update(Message::BrowserHistorySearchDue(session, generation));
     assert!(!app.browser_history.search_pending);
-    assert_eq!(command_list_titles(&app), ["Raffi on GitHub"]);
+    assert_eq!(command_list_titles(&app), ["Raffi"]);
 }
 
 #[test]
@@ -10332,7 +10380,7 @@ fn test_browser_history_empty_query_refreshes_immediately() {
 
     let _ = app.update(Message::SearchChanged("hist ".into()));
     assert!(!app.browser_history.search_pending);
-    assert_eq!(command_list_titles(&app), ["Raffi on GitHub", "Rust docs"]);
+    assert_eq!(command_list_titles(&app), ["Raffi", "Rust docs"]);
 }
 
 #[test]
@@ -10366,12 +10414,12 @@ fn test_browser_history_structured_filters_use_the_debounce() {
     let mut app = browser_history_app("hist ");
     let _ = app.update(Message::SearchChanged("hist site:github.com".into()));
     assert!(app.browser_history.search_pending);
-    assert_eq!(command_list_titles(&app), ["Raffi on GitHub", "Rust docs"]);
+    assert_eq!(command_list_titles(&app), ["Raffi", "Rust docs"]);
 
     let session = app.browser_history.session;
     let generation = app.browser_history.search_generation;
     let _ = app.update(Message::BrowserHistorySearchDue(session, generation));
-    assert_eq!(command_list_titles(&app), ["Raffi on GitHub"]);
+    assert_eq!(command_list_titles(&app), ["Raffi"]);
 }
 
 #[test]
@@ -10406,11 +10454,11 @@ fn test_browser_history_stale_debounce_after_leaving_is_ignored() {
 #[test]
 fn test_browser_history_filters_and_opens_pages() {
     let mut app = browser_history_app("hist site:github.com");
-    assert_eq!(command_list_titles(&app), ["Raffi on GitHub"]);
+    assert_eq!(command_list_titles(&app), ["Raffi"]);
     let _ = app.update(Message::CommandListSelected(0));
     assert!(matches!(
         deferred_action(&app),
-        Some(DeferredAction::Command(argv)) if argv == ["firefox", "https://github.com/chmouel/raffi?utm_source=news"]
+        Some(DeferredAction::Command(argv)) if argv == ["firefox", "https://github.com/chmouel/raffi"]
     ));
 }
 
