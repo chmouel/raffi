@@ -14,6 +14,13 @@ $super = SUPER
 bind = $super, R, exec, (val=$(raffi -pI); [ -n "$val" ] && hyprctl dispatch exec "$val")
 ```
 
+If you use Hyprland's Lua configuration (`~/.config/hypr/hyprland.lua`), use
+the equivalent Lua binding instead:
+
+```lua
+hl.bind("SUPER + R", hl.dsp.exec_cmd("(val=$(raffi -pI); [ -n \"$val\" ] && hyprctl dispatch exec \"$val\")"))
+```
+
 ## How It Works
 
 - `raffi -pI` runs Raffi in print-only mode with icons disabled for faster startup
