@@ -676,10 +676,7 @@ mod tests {
 
         let valid = super::run_script_filter(
             "sh",
-            &[
-                "-c".into(),
-                r#"printf '{\"items\":[{\"title\":\"ok\"}]}'"#.into(),
-            ],
+            &["-c".into(), r#"printf '{"items":[{"title":"ok"}]}'"#.into()],
             &Default::default(),
             "",
             None,
