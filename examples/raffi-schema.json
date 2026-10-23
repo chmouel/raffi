@@ -1720,7 +1720,7 @@
           "minimum": 0
         },
         "close_on_action": {
-          "description": "Close Raffi after opening a conversation or message (default: `general.close_on_action`, else false).",
+          "description": "Close Raffi after opening a conversation or message (default: `general.close_on_action`, else true).",
           "type": [
             "boolean",
             "null"

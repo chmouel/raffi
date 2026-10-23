@@ -7759,6 +7759,37 @@ fn slack_fixture_item(
 }
 
 #[test]
+fn test_slack_open_closes_by_default_but_in_place_actions_stay_open() {
+    let mut addons = AddonsConfig::default();
+    addons.slack.enabled = true;
+    let mut app = test_app(addons);
+    let open = slack_fixture_item("slack:conv:C1", "general", 0, false);
+    let mut snooze = super::command_list::CommandItem::info(
+        "slack:action:end-snooze",
+        "Resume notifications".into(),
+        "slack",
+    );
+    snooze.primary = Some(super::command_list::CommandAction {
+        action: super::actions::DeferredAction::Slack(super::slack::SlackAction::EndSnooze),
+        confirm: None,
+        keep_open: false,
+        progress: None,
+    });
+    let keep_open = |app: &LauncherApp| {
+        let mut rows = vec![open.clone(), snooze.clone()];
+        app.apply_slack_keep_open(&mut rows);
+        rows.iter()
+            .map(|row| row.primary.as_ref().unwrap().keep_open)
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(keep_open(&app), [false, true]);
+
+    app.close_on_action = Some(false);
+    assert_eq!(keep_open(&app), [true, true]);
+}
+
+#[test]
 fn test_main_view_slack_hides_muted_and_cold_channels_until_queried_or_focused() {
     let mut addons = AddonsConfig::default();
     addons.slack.enabled = true;
@@ -10068,7 +10099,6 @@ fn test_slack_mrkdwn_parsing_and_chat_preview_header() {
 
     let mut addons = AddonsConfig::default();
     addons.slack.enabled = true;
-    addons.slack.close_on_action = Some(true);
     let mut app = test_app(addons);
     app.history.max_items = 0;
     let _ = app.update(Message::SearchChanged("slack ".into()));
