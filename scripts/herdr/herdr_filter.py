@@ -7,6 +7,8 @@ of them and keeps the ancestors of each match, so results stay in tree
 order. Pass --agents (or export HERDR_SCOPE=agents) to list
 only panes hosting a recognized agent, like earlier versions did.
 Use --status or HERDR_VIEW=status to group agents by lifecycle status.
+These modes are also Raffi views: Ctrl+Tab switches between them, and the
+one picked arrives in RAFFI_VIEW, which wins over the flags.
 
 When Raffi runs it with RAFFI_PREVIEW=1, it prints a live preview of the
 selected workspace, tab, or pane (RAFFI_VALUE holds its Herdr ID) instead of
@@ -30,6 +32,11 @@ from pathlib import Path
 ICON = "utilities-terminal"
 ICON_DIR = Path(__file__).resolve().parent / "icons"
 ICON_SETS = ("color", "mono-dark", "mono-light")
+VIEWS = (
+    ("workspace", "Workspaces"),
+    ("status", "Status"),
+    ("agents", "Agents"),
+)
 STATUS_GROUPS = (
     ("working", "Working"),
     ("blocked", "Waiting"),
@@ -714,6 +721,9 @@ def parse_argv(argv):
             mode = "status"
         else:
             words.append(arg)
+    view = os.environ.get("RAFFI_VIEW", "")
+    if view in dict(VIEWS):
+        mode = view
     return mode, " ".join(words).strip()
 
 
@@ -742,7 +752,9 @@ def main(argv=None):
         print(f"Herdr script filter: {error}", file=sys.stderr)
         return 1
 
-    print(json.dumps({"items": items}, ensure_ascii=False))
+    views = [{"id": view, "title": title} for view, title in VIEWS]
+    output = {"views": views, "view": mode, "items": items}
+    print(json.dumps(output, ensure_ascii=False))
     return 0
 
 

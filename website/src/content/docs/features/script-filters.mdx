@@ -60,13 +60,14 @@ addons:
       command: "~/.config/raffi/scripts/github/pr.py"
       icon: "github"
       cache_seconds: 300
-      warm_queries: ["", "review"]
+      warm_queries: [""]
       warm_interval_seconds: 300
 ```
 
 `warm_queries` are run periodically by
 [`raffi --cache-daemon`](../../reference/cli-options/#cache-management),
-so these queries are already fresh when Raffi opens. `warm_interval_seconds`
+in every [view](#views) the script offers, so these queries are already
+fresh when Raffi opens. `warm_interval_seconds`
 defaults to `cache_seconds`. Pressing Ctrl+R runs the script again with
 `RAFFI_REFRESH=1` in its environment, which the bundled GitHub script uses to
 bypass the `gh` CLI cache and fetch live state. When the cache service is
@@ -148,6 +149,9 @@ pr                   your open pull requests across all repositories
 pr review            pull requests waiting for your review (also: assigned, involved)
 pr owner/repo login  open pull requests of owner/repo matching "login"
 ```
+
+Ctrl+Tab switches between your pull requests, review requests, assigned and
+involved without retyping the query.
 
 Enter opens the pull request in the browser and Ctrl+Enter copies its URL.
 When results span several owners (organizations or user accounts), they are
@@ -273,7 +277,8 @@ workspace in the subtitle. Plain shells stay in the workspace view. Group
 headings show their counts and a summary preview but have no action, while
 agent rows keep their focus action and terminal preview. Search `waiting` or
 `blocked` to find the agents that need you. The workspace tree stays the
-default (`HERDR_VIEW: workspace` or `--tree`).
+default (`HERDR_VIEW: workspace` or `--tree`). Whichever one you configure,
+Ctrl+Tab switches between Workspaces, Status and Agents.
 
 For a flat list of recognised agents only, add `args: ["--agents"]` and focus
 them directly:
@@ -580,6 +585,39 @@ including results cut short in the main list.
 
 The script still does the filtering: it receives the query and can return
 only the matching rows plus their ancestors.
+
+### Views
+
+A script with several ways of listing its items, such as the
+[GitHub](#github-pull-requests) review requests or the [Herdr](#herdr-sessions)
+status tree, can offer them as views. Ctrl+Tab then switches to the next view
+and Ctrl+Shift+Tab to the previous one, keeping what you typed, and the footer
+shows the view you are on. Add a `views` list next to `items`:
+
+```json
+{
+  "views": [
+    { "id": "open", "title": "Open issues" },
+    { "id": "all", "title": "All issues", "variables": { "SHOW_ALL": "1" } }
+  ],
+  "view": "open",
+  "items": []
+}
+```
+
+Each view has an `id`, a `title` for the footer (the `id` when missing) and
+optional `variables`, which are set on top of the filter's `env`, overriding
+entries with the same name. Raffi first runs the command as usual, and `view` names
+the view the script opened on; without it, the first one in the list is
+assumed. After a switch, Raffi runs the command again with the view's
+`variables` and `RAFFI_VIEW` set to its `id` in the environment, and preview
+runs get them too. Switching back to the view it opened on runs the command
+without `RAFFI_VIEW` again, and each time you enter the filter it starts
+there.
+
+Every view is cached under its own key, and the cache service warms each
+`warm_queries` entry in every view. A script that prints no `views` works as
+before, and Raffi versions without views ignore the extra fields.
 
 ## Dynamic previews
 

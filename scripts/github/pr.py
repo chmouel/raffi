@@ -2,9 +2,10 @@
 """Raffi script filter for GitHub pull requests.
 
 Lists the open pull requests of a repository, or the open pull requests you
-wrote, were asked to review, are assigned to, or are involved in. When Raffi
-sets RAFFI_PREVIEW=1, it prints a preview of the pull request whose URL is in
-RAFFI_VALUE instead.
+wrote, were asked to review, are assigned to, or are involved in. Those four
+lists are Raffi views, switched with Ctrl+Tab and passed in RAFFI_VIEW. When
+Raffi sets RAFFI_PREVIEW=1, it prints a preview of the pull request whose URL
+is in RAFFI_VALUE instead.
 """
 
 import argparse
@@ -135,6 +136,14 @@ MODES = {
     ),
 }
 
+# Ctrl+Tab views over MODES, in order.
+VIEWS = (
+    ("myprs", "My pull requests"),
+    ("review", "Review requested"),
+    ("assigned", "Assigned"),
+    ("involved", "Involved"),
+)
+
 PR_FRAGMENT = """
 fragment pr on PullRequest {
   number title url isDraft headRefName reviewDecision mergeable
@@ -261,8 +270,13 @@ def graphql(
     return response["data"]
 
 
-def parse_query(query: str, repo: str | None = None) -> tuple[str, str]:
-    """Split the typed text into (repository or a MODES key, filter)."""
+def parse_query(
+    query: str, repo: str | None = None, view: str | None = None
+) -> tuple[str, str]:
+    """Split the typed text into (repository or a MODES key, filter).
+
+    A typed MODES key or repository wins over the Raffi view.
+    """
     query = query.strip()
     if repo:
         return os.environ.get(f"ALIAS_{repo}", repo), query
@@ -274,7 +288,7 @@ def parse_query(query: str, repo: str | None = None) -> tuple[str, str]:
         return alias, rest
     if "/" in word:
         return word, rest
-    return "myprs", query
+    return (view if view in MODES else "myprs"), query
 
 
 def ci_group(state: str) -> str:
@@ -389,10 +403,13 @@ def error_item(title: str, message: str) -> dict:
     }
 
 
-def list_items(query: str, repo_arg: str | None = None) -> list[dict]:
-    target, needle = parse_query(query, repo_arg)
+def list_items(
+    query: str, repo_arg: str | None = None, view: str | None = None
+) -> tuple[str, list[dict]]:
+    """List the pull requests for the query, with the target it resolved to."""
+    target, needle = parse_query(query, repo_arg, view)
     if target not in MODES and not REPO.fullmatch(target):
-        return [
+        return target, [
             error_item("Invalid repository", f"Expected owner/repo, got {target!r}")
         ]
 
@@ -409,7 +426,7 @@ def list_items(query: str, repo_arg: str | None = None) -> list[dict]:
             url = f"https://{API_HOST}/{target}/pulls"
             items = [link_item("Open all pull requests page", url)]
     except GhError as error:
-        return [error_item("GitHub error", str(error))]
+        return target, [error_item("GitHub error", str(error))]
 
     needle = needle.casefold()
     matches: list[tuple[dict, dict]] = []
@@ -429,7 +446,7 @@ def list_items(query: str, repo_arg: str | None = None) -> list[dict]:
 
     if target not in MODES:
         items.extend(item for _, item in matches)
-        return items
+        return target, items
 
     groups: dict[str, list[dict]] = {}
     for pr, item in matches:
@@ -438,14 +455,14 @@ def list_items(query: str, repo_arg: str | None = None) -> list[dict]:
 
     if len(groups) < 2:
         items.extend(item for _, item in matches)
-        return items
+        return target, items
 
     for owner, owner_items in groups.items():
         items.append({"title": owner, "indent": 0, "valid": False})
         for item in owner_items:
             item["indent"] = 1
             items.append(item)
-    return items
+    return target, items
 
 
 def check_name(check: dict) -> str:
@@ -754,7 +771,13 @@ def main(argv: list[str] | None = None) -> int:
     if os.environ.get("RAFFI_PREVIEW") == "1":
         output = preview(os.environ.get("RAFFI_VALUE", ""))
     else:
-        output = {"items": list_items(" ".join(args.query), args.repo)}
+        query = " ".join(args.query)
+        view = os.environ.get("RAFFI_VIEW")
+        target, items = list_items(query, args.repo, view)
+        output = {"items": items}
+        if target in MODES:
+            output["views"] = [{"id": mode, "title": title} for mode, title in VIEWS]
+            output["view"] = target
     print(json.dumps(output, ensure_ascii=False))
     return 0
 

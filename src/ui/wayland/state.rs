@@ -11,7 +11,7 @@ use super::theme::{PreviewStyle, ThemeColors};
 pub(crate) use super::types::{
     CachedRate, CalculatorResult, ClipboardData, CurrencyConversion, CurrencyConversionRequest,
     CurrencyResult, DynamicPreview, EmojiEntry, FileBrowserEntry, Message, MultiCurrencyRequest,
-    MultiCurrencyResult, ScriptFilterResult, WebSearchActiveState,
+    MultiCurrencyResult, ScriptFilterResult, ScriptFilterView, WebSearchActiveState,
 };
 use crate::{AddonsConfig, TextSnippet};
 
@@ -91,6 +91,15 @@ pub(super) struct ScriptFilterState {
     /// Config indexes with a first preview run in flight. Until it answers no
     /// other run starts, so a legacy script is run only once more.
     pub preview_probing: HashSet<usize>,
+    /// Views the active script offers, switched with Ctrl+Tab.
+    pub views: Vec<ScriptFilterView>,
+    /// View picked with Ctrl+Tab; None runs the script's default view.
+    pub view: Option<String>,
+    /// View whose items are on screen. A typed mode can make this differ from
+    /// `view`, which keeps the requested override for later runs.
+    pub displayed_view: Option<String>,
+    /// View the script shows when run without `RAFFI_VIEW`.
+    pub default_view: Option<String>,
 }
 
 impl ScriptFilterState {
@@ -107,6 +116,72 @@ impl ScriptFilterState {
         self.previews.clear();
         self.preview_force_refresh = false;
         self.bump_preview_generation();
+        self.reset_views();
+    }
+
+    pub fn reset_views(&mut self) {
+        self.views.clear();
+        self.view = None;
+        self.displayed_view = None;
+        self.default_view = None;
+    }
+
+    /// The picked view, None for the default one.
+    pub fn active_view(&self) -> Option<&ScriptFilterView> {
+        let id = self.view.as_deref()?;
+        self.views.iter().find(|view| view.id == id)
+    }
+
+    /// Id of the view on screen.
+    pub fn current_view_id(&self) -> Option<&str> {
+        self.displayed_view
+            .as_deref()
+            .or(self.view.as_deref())
+            .or(self.default_view.as_deref())
+            .or_else(|| self.views.first().map(|view| view.id.as_str()))
+    }
+
+    /// Take the views a run reported. A default run names the default view;
+    /// a view run that lists none keeps the known ones. The reported view is
+    /// what is on screen even when a typed mode overrode the requested view.
+    pub fn adopt_views(&mut self, result: &ScriptFilterResult) {
+        if self.view.is_none() {
+            self.views.clone_from(&result.views);
+            self.default_view = result
+                .view
+                .clone()
+                .or_else(|| self.views.first().map(|view| view.id.clone()));
+        } else if !result.views.is_empty() {
+            self.views.clone_from(&result.views);
+        }
+        self.displayed_view = result
+            .view
+            .clone()
+            .or_else(|| self.view.clone())
+            .or_else(|| self.default_view.clone())
+            .or_else(|| self.views.first().map(|view| view.id.clone()));
+    }
+
+    /// Move to the next view, or the previous one when `backwards`. Returns
+    /// false when there is nothing to switch to.
+    pub fn cycle_view(&mut self, backwards: bool) -> bool {
+        let count = self.views.len();
+        if count < 2 {
+            return false;
+        }
+        let position = self
+            .current_view_id()
+            .and_then(|id| self.views.iter().position(|view| view.id == id))
+            .unwrap_or(0);
+        let next = if backwards {
+            (position + count - 1) % count
+        } else {
+            (position + 1) % count
+        };
+        let id = self.views[next].id.clone();
+        self.view = (self.default_view.as_deref() != Some(id.as_str())).then_some(id.clone());
+        self.displayed_view = Some(id);
+        true
     }
 
     pub fn bump_preview_generation(&mut self) {

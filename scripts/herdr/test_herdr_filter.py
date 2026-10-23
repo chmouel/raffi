@@ -359,7 +359,18 @@ class HerdrFilterTests(unittest.TestCase):
             result = herdr_filter.main(["--agents"])
 
         self.assertEqual(result, 0)
-        self.assertEqual(json.loads(stdout.getvalue()), {"items": []})
+        output = json.loads(stdout.getvalue())
+        self.assertEqual(output["items"], [])
+        self.assertEqual(output["view"], "agents")
+        self.assertEqual(
+            [view["id"] for view in output["views"]], ["workspace", "status", "agents"]
+        )
+
+    def test_raffi_view_overrides_flags_and_env(self):
+        with patch.dict(os.environ, {"RAFFI_VIEW": "agents", "HERDR_VIEW": "status"}):
+            self.assertEqual(herdr_filter.parse_argv(["--status", "x"]), ("agents", "x"))
+        with patch.dict(os.environ, {"RAFFI_VIEW": "bogus"}):
+            self.assertEqual(herdr_filter.parse_argv(["--status"]), ("status", ""))
 
     def test_command_failure_is_reported(self):
         stderr = io.StringIO()

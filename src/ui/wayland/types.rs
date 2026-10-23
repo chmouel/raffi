@@ -344,11 +344,43 @@ pub(crate) struct DynamicPreview {
     pub error: Option<String>,
 }
 
+/// A view a Script Filter offers, switched with Ctrl+Tab.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(from = "RawScriptFilterView")]
+pub(crate) struct ScriptFilterView {
+    pub id: String,
+    pub title: String,
+    /// Environment added to the runs for this view.
+    pub variables: std::collections::HashMap<String, String>,
+}
+
+#[derive(Deserialize)]
+struct RawScriptFilterView {
+    id: String,
+    title: Option<String>,
+    #[serde(default)]
+    variables: std::collections::HashMap<String, String>,
+}
+
+impl From<RawScriptFilterView> for ScriptFilterView {
+    fn from(raw: RawScriptFilterView) -> Self {
+        Self {
+            title: raw.title.unwrap_or_else(|| raw.id.clone()),
+            id: raw.id,
+            variables: raw.variables,
+        }
+    }
+}
+
 /// Container for script filter results with default icon.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ScriptFilterResult {
     pub items: Vec<ScriptFilterItem>,
     pub default_icon: Option<String>,
+    /// Views the script offers, in Ctrl+Tab order.
+    pub views: Vec<ScriptFilterView>,
+    /// View these items belong to, when the script says.
+    pub view: Option<String>,
 }
 
 /// A file or directory entry for the file browser addon.

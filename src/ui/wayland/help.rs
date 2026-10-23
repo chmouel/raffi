@@ -572,6 +572,10 @@ pub(super) fn add_cycle_view_shortcut(
             addons.browser_history.enabled,
             "history: recent, frequent, by browser",
         ),
+        (
+            !addons.script_filters.is_empty(),
+            "script filters: the views the script lists",
+        ),
     ]
     .into_iter()
     .filter_map(|(enabled, views)| enabled.then_some(views))

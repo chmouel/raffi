@@ -175,6 +175,10 @@ You can also pass `args: ["--status"]`. `--tree` selects the workspace tree
 and `--agents` selects the flat agent list; the last mode flag overrides
 the environment.
 
+Whichever mode you configure is only where the filter opens: Ctrl+Tab
+switches between Workspaces, Status, and Agents, and Ctrl+Shift+Tab goes
+back.
+
 ```text
 Working · 2 agents
   Implement tree icons · raffi · copilot

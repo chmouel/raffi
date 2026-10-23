@@ -157,6 +157,13 @@ class ParseQueryTests(unittest.TestCase):
                 with self.subTest(query=query):
                     self.assertEqual(pr.parse_query(query), expected)
 
+    def test_view_picks_the_mode_unless_one_is_typed(self):
+        self.assertEqual(pr.parse_query("fix", view="review"), ("review", "fix"))
+        self.assertEqual(pr.parse_query("involved x", view="review"), ("involved", "x"))
+        self.assertEqual(pr.parse_query("a/b x", view="review"), ("a/b", "x"))
+        self.assertEqual(pr.parse_query("x", view="bogus"), ("myprs", "x"))
+        self.assertEqual([mode for mode, _ in pr.VIEWS], list(pr.MODES))
+
     def test_repo_argument_makes_whole_query_a_filter(self):
         self.assertEqual(
             pr.parse_query(" a/b c ", "owner/repo"), ("owner/repo", "a/b c")
@@ -166,7 +173,7 @@ class ParseQueryTests(unittest.TestCase):
 class ListItemsTests(unittest.TestCase):
     def list(self, query, response):
         with patch.object(pr, "run_gh", return_value={"data": response}) as run_gh:
-            return pr.list_items(query), run_gh
+            return pr.list_items(query)[1], run_gh
 
     def test_repository_pulls_are_filtered(self):
         response = {"repository": {"pullRequests": {"nodes": PULLS}}}
@@ -280,9 +287,9 @@ class ListItemsTests(unittest.TestCase):
         )
 
     def test_errors_become_items(self):
-        self.assertEqual(pr.list_items("owner/")[0]["title"], "Invalid repository")
+        self.assertEqual(pr.list_items("owner/")[1][0]["title"], "Invalid repository")
         with patch.object(pr, "run_gh", side_effect=pr.GhError("boom")):
-            self.assertEqual(pr.list_items("")[0]["subtitle"], "boom")
+            self.assertEqual(pr.list_items("")[1][0]["subtitle"], "boom")
 
 
 class PreviewTests(unittest.TestCase):
@@ -361,6 +368,30 @@ class PreviewTests(unittest.TestCase):
         self.assertIn("number=7", args)
         self.assertNotIn("--cache", args)
         self.assertEqual(json.loads(stdout.getvalue())["title"], "#7 Add feature")
+
+    def test_main_lists_views_for_modes_only(self):
+        def run(argv, view):
+            stdout = io.StringIO()
+            env = {"RAFFI_PREVIEW": "", "RAFFI_VIEW": view}
+            with (
+                patch.dict(os.environ, env),
+                patch.object(
+                    pr,
+                    "list_items",
+                    side_effect=lambda q, repo=None, view=None: (
+                        pr.parse_query(q, repo, view)[0],
+                        [],
+                    ),
+                ),
+                redirect_stdout(stdout),
+            ):
+                self.assertEqual(pr.main(argv), 0)
+            return json.loads(stdout.getvalue())
+
+        output = run(["fix"], "assigned")
+        self.assertEqual(output["view"], "assigned")
+        self.assertEqual(len(output["views"]), len(pr.MODES))
+        self.assertNotIn("views", run(["owner/repo"], "assigned"))
 
     def test_raffi_refresh_bypasses_the_gh_cache(self):
         with (
@@ -484,7 +515,7 @@ class AvatarTests(unittest.TestCase):
                     pr, "account_icon", side_effect=lambda a: f"/{a['login']}.svg"
                 ),
             ):
-                items = pr.list_items(query)
+                items = pr.list_items(query)[1]
             return [item["icon"]["path"] for item in items if "icon" in item]
 
         same_repo = [pull(1, "org/one", "alice"), pull(2, "org/one", "bob")]

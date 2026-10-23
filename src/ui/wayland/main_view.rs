@@ -593,7 +593,7 @@ impl MainViewState {
                 Source::ScriptFilter { results, .. } => {
                     *results = (!stored.is_empty()).then_some(ScriptFilterResult {
                         items: stored,
-                        default_icon: None,
+                        ..Default::default()
                     });
                 }
             }
@@ -2345,6 +2345,7 @@ impl LauncherApp {
                 }
                 self.script_filter.generation = self.script_filter.generation.wrapping_add(1);
                 self.script_filter.loading = false;
+                self.script_filter.adopt_views(&result);
                 self.script_filter.results = Some(result);
                 self.selected_index = self.keyword_rows() + row;
                 let selected = self.handle_script_filter_selected(row);

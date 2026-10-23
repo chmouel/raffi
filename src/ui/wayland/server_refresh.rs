@@ -251,11 +251,13 @@ impl LauncherApp {
         let mut requests = Vec::new();
         // RefreshAll only warms the configured queries, not the shown one.
         if let Some(Target::ScriptFilter { index, query, .. }) = &target {
+            let view = self.script_filter.active_view();
             requests.extend(
                 self.addons
                     .script_filters
                     .get(*index)
-                    .and_then(|config| cache::script_filter_refresh_request(config, query)),
+                    .map(|config| super::script_filters::view_config(config, view))
+                    .and_then(|config| cache::script_filter_refresh_request(&config, query)),
             );
         }
         let source = match backed {

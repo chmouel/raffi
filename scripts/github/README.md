@@ -35,12 +35,13 @@ addons:
       action: "xdg-open {value}"
       secondary_action: "copy"
       cache_seconds: 300
-      warm_queries: ["", "review"]
+      warm_queries: [""]
 ```
 
 `cache_seconds` shows the last result for a query immediately and refreshes
 it in the background. `warm_queries` are warmed periodically by
-`raffi --cache-daemon`, so those queries are already fresh when Raffi opens.
+`raffi --cache-daemon`, in every view, so those queries are already fresh
+when Raffi opens.
 Set `warm_interval_seconds` to change the warming period (default:
 `cache_seconds`). Without `cache_seconds` nothing is cached.
 
@@ -76,6 +77,11 @@ The filter matches everything shown on the row: number, title, repository or
 author, state, CI status, review decision, "Conflicts", unresolved threads and
 size. The first row opens the matching pull request list on GitHub. Enter
 opens the selected pull request, Ctrl+Enter copies its URL.
+
+Without a repository, Ctrl+Tab switches between your pull requests, review
+requests, assigned and involved, and Ctrl+Shift+Tab goes back, keeping what
+you typed as the filter. A mode word you type yourself, such as `pr review`,
+takes precedence over the view.
 
 Cross-repository modes group results under non-actionable repository-owner
 headings when the filtered results span multiple owners. Pull requests are

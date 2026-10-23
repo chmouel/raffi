@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use crate::{AddonsConfig, ParsedConfig, ScriptFilterConfig};
 
 use super::script_filters::{self, PreviewRequest};
-use super::types::ScriptFilterResult;
+use super::types::{ScriptFilterResult, ScriptFilterView};
 
 const SNAPSHOT_VERSION: u32 = 1;
 /// Snapshots older than this are discarded instead of shown while refreshing.
@@ -833,23 +833,52 @@ fn warm_script_filter(
     let Some(ttl) = config.cache_ttl() else {
         return Ok(());
     };
-    let mut env = config.env.clone();
-    env.insert("RAFFI_REFRESH".into(), "1".into());
     let mut error = None;
     for query in &config.warm_queries {
-        if let Err(message) = script_filters::run_script_filter(
-            &config.command,
-            &config.args,
-            &env,
-            query,
-            config.icon.clone(),
-            list_target(config, query, ttl),
-        ) {
-            error.get_or_insert(format!("{}: {message}", config.name));
+        // The default run names the other views, each warmed under its own key.
+        let views = match warm_script_filter_view(config, None, query, ttl) {
+            Ok(result) => {
+                let default = result
+                    .view
+                    .or_else(|| result.views.first().map(|view| view.id.clone()));
+                result
+                    .views
+                    .into_iter()
+                    .filter(|view| Some(&view.id) != default.as_ref())
+                    .collect()
+            }
+            Err(message) => {
+                error.get_or_insert(format!("{}: {message}", config.name));
+                Vec::new()
+            }
+        };
+        for view in &views {
+            if let Err(message) = warm_script_filter_view(config, Some(view), query, ttl) {
+                error.get_or_insert(format!("{} ({}): {message}", config.name, view.title));
+            }
         }
     }
     state.set_status(&format!("script:{index}"), error.clone());
     error.map_or(Ok(()), Err)
+}
+
+fn warm_script_filter_view(
+    config: &ScriptFilterConfig,
+    view: Option<&ScriptFilterView>,
+    query: &str,
+    ttl: Duration,
+) -> Result<ScriptFilterResult, String> {
+    let config = script_filters::view_config(config, view);
+    let mut env = config.env.clone();
+    env.insert("RAFFI_REFRESH".into(), "1".into());
+    script_filters::run_script_filter(
+        &config.command,
+        &config.args,
+        &env,
+        query,
+        config.icon.clone(),
+        list_target(&config, query, ttl),
+    )
 }
 
 fn warm_named(state: &Arc<DaemonState>, source: &str) -> Result<(), String> {
@@ -1085,6 +1114,49 @@ mod tests {
         let mut changed = config.clone();
         changed.env.insert("A".into(), "9".into());
         assert_ne!(key, script_filter_list_key(&changed, "q"));
+    }
+
+    #[test]
+    fn warming_runs_every_view_of_each_query() {
+        let dir = tempdir("views");
+        let log = dir.join("runs");
+        let config = ScriptFilterConfig {
+            name: "Views".into(),
+            command: "sh".into(),
+            args: vec![
+                "-c".into(),
+                r#"echo "${RAFFI_VIEW:-default} $RAFFI_REFRESH $0" >> "$LOG"
+                   echo '{"items":[],"view":"a","views":[{"id":"a"},{"id":"b"},{"id":"c"}]}'"#
+                    .into(),
+            ],
+            keyword: "v".into(),
+            env: [("LOG".into(), log.display().to_string())].into(),
+            cache_seconds: Some(60),
+            warm_queries: vec!["".into(), "x".into()],
+            ..Default::default()
+        };
+        let state = Arc::new(DaemonState::new(quiet_addons()));
+        warm_script_filter(&state, 0, &config).unwrap();
+        assert_eq!(
+            fs::read_to_string(&log)
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>(),
+            [
+                "default 1 ",
+                "b 1 ",
+                "c 1 ",
+                "default 1 x",
+                "b 1 x",
+                "c 1 x"
+            ]
+        );
+
+        let view: ScriptFilterView = serde_json::from_str(r#"{"id":"b"}"#).unwrap();
+        let key = script_filter_list_key(&config, "q");
+        let viewed = script_filters::view_config(&config, Some(&view));
+        assert_ne!(key, script_filter_list_key(&viewed, "q"));
+        let _ = fs::remove_dir_all(dir);
     }
 
     fn quiet_addons() -> AddonsConfig {

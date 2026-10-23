@@ -55,6 +55,122 @@ fn test_app_with_fallbacks(addons: AddonsConfig, fallback_paths: Vec<String>) ->
 }
 
 #[test]
+fn test_script_filter_views_cycle_with_ctrl_tab() {
+    let mut addons = AddonsConfig::default();
+    addons.script_filters.push(ScriptFilterConfig {
+        name: "Jira".into(),
+        command: "true".into(),
+        keyword: "jira".into(),
+        ..Default::default()
+    });
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+    let views: Vec<super::types::ScriptFilterView> = serde_json::from_str(
+        r#"[{"id":"open","title":"Open"},{"id":"all","title":"All"},{"id":"mine"}]"#,
+    )
+    .unwrap();
+    let reply = |app: &mut LauncherApp, view: Option<&str>| {
+        let generation = app.script_filter.generation;
+        let _ = app.update(Message::ScriptFilterResult(
+            generation,
+            Ok(ScriptFilterResult {
+                views: views.clone(),
+                view: view.map(Into::into),
+                ..Default::default()
+            }),
+        ));
+    };
+
+    let _ = app.update(Message::SearchChanged("jira bug".into()));
+    assert_eq!(
+        app.cycle_view_label(),
+        None,
+        "no views until the script says"
+    );
+    reply(&mut app, Some("all"));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("All"));
+    assert_eq!(app.script_filter.active_view(), None, "default runs bare");
+
+    let generation = app.script_filter.generation;
+    let _ = app.update(Message::CycleView(false));
+    assert_ne!(
+        app.script_filter.generation, generation,
+        "the script re-runs"
+    );
+    assert_eq!(app.search_query, "jira bug", "the typed text stays");
+    assert_eq!(app.cycle_view_label().as_deref(), Some("mine"));
+    assert_eq!(app.script_filter.view.as_deref(), Some("mine"));
+    reply(&mut app, Some("mine"));
+
+    let _ = app.update(Message::CycleView(false));
+    assert_eq!(
+        app.cycle_view_label().as_deref(),
+        Some("Open"),
+        "wraps around"
+    );
+    let _ = app.update(Message::CycleView(false));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("All"));
+    assert_eq!(app.script_filter.view, None, "back on the default view");
+    let _ = app.update(Message::CycleView(true));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Open"));
+
+    let _ = app.update(Message::SearchChanged(String::new()));
+    let _ = app.update(Message::SearchChanged("jira bug".into()));
+    assert_eq!(
+        app.script_filter.view, None,
+        "a new visit starts on the default"
+    );
+    assert_eq!(app.cycle_view_label(), None);
+}
+
+#[test]
+fn test_script_filter_typed_mode_updates_displayed_view() {
+    let mut addons = AddonsConfig::default();
+    addons.script_filters.push(ScriptFilterConfig {
+        name: "GitHub".into(),
+        command: "true".into(),
+        keyword: "pr".into(),
+        ..Default::default()
+    });
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+    let views: Vec<super::types::ScriptFilterView> = serde_json::from_str(
+        r#"[{"id":"myprs","title":"My pull requests"},{"id":"review","title":"Review requested"},{"id":"assigned","title":"Assigned"},{"id":"involved","title":"Involved"}]"#,
+    )
+    .unwrap();
+    let reply = |app: &mut LauncherApp, view: &str| {
+        let generation = app.script_filter.generation;
+        let _ = app.update(Message::ScriptFilterResult(
+            generation,
+            Ok(ScriptFilterResult {
+                views: views.clone(),
+                view: Some(view.into()),
+                ..Default::default()
+            }),
+        ));
+    };
+
+    let _ = app.update(Message::SearchChanged("pr bug".into()));
+    reply(&mut app, "myprs");
+    let _ = app.update(Message::CycleView(false));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Review requested"));
+    assert_eq!(app.script_filter.view.as_deref(), Some("review"));
+
+    // The GitHub script lets a typed mode win over the requested view.
+    reply(&mut app, "assigned");
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Assigned"));
+    assert_eq!(
+        app.script_filter.view.as_deref(),
+        Some("review"),
+        "the requested override stays put"
+    );
+
+    let _ = app.update(Message::CycleView(false));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("Involved"));
+    assert_eq!(app.script_filter.view.as_deref(), Some("involved"));
+}
+
+#[test]
 fn test_refreshed_script_filter_results_drop_old_previews() {
     let mut app = test_app(AddonsConfig::default());
     app.script_filter.generation = 9;
@@ -65,7 +181,7 @@ fn test_refreshed_script_filter_results_drop_old_previews() {
         9,
         Ok(ScriptFilterResult {
             items: Vec::new(),
-            default_icon: None,
+            ..Default::default()
         }),
     ));
 
@@ -84,7 +200,7 @@ fn test_failed_refresh_keeps_cached_script_filter_rows() {
     let mut app = test_app(AddonsConfig::default());
     app.script_filter.results = Some(ScriptFilterResult {
         items: Vec::new(),
-        default_icon: None,
+        ..Default::default()
     });
     app.script_filter.generation = 7;
     app.script_filter.results_are_cached = true;
@@ -238,7 +354,6 @@ fn test_preview_script_filter_reads_virtual_file_with_zero_reported_size() {
 
     let mut app = test_app(AddonsConfig::default());
     app.script_filter.results = Some(ScriptFilterResult {
-        default_icon: None,
         items: vec![ScriptFilterItem {
             title: "CPU info".into(),
             valid: true,
@@ -251,6 +366,7 @@ fn test_preview_script_filter_reads_virtual_file_with_zero_reported_size() {
             variables: Default::default(),
             text: None,
         }],
+        ..Default::default()
     });
 
     let preview = app
@@ -2722,7 +2838,6 @@ fn test_preview_text_snippet_shows_full_multiline_and_raw_template() {
 fn test_preview_script_filter_precedence() {
     let mut app = test_app(AddonsConfig::default());
     app.script_filter.results = Some(ScriptFilterResult {
-        default_icon: None,
         items: vec![
             ScriptFilterItem {
                 title: "Item 1".into(),
@@ -2757,6 +2872,7 @@ fn test_preview_script_filter_precedence() {
                 }),
             },
         ],
+        ..Default::default()
     });
 
     let p1 = app
@@ -2806,8 +2922,8 @@ fn test_preview_script_filter_decodes_file_url_paths() {
     let mut app = test_app(AddonsConfig::default());
     app.keyword_suggestions.clear();
     app.script_filter.results = Some(ScriptFilterResult {
-        default_icon: None,
         items: vec![make_item(file_url), make_item(localhost_file_url)],
+        ..Default::default()
     });
 
     for selected_index in 0..2 {
@@ -2848,8 +2964,8 @@ fn dynamic_preview_app(items: Vec<ScriptFilterItem>) -> LauncherApp {
     app.view.show_preview = true;
     app.script_filter.config_index = Some(0);
     app.script_filter.results = Some(ScriptFilterResult {
-        default_icon: None,
         items,
+        ..Default::default()
     });
     app
 }
@@ -2913,8 +3029,8 @@ fn test_script_filter_invalid_main_view_heading_preserves_mode() {
         panic!("script filter source");
     };
     *results = Some(ScriptFilterResult {
-        default_icon: None,
         items: vec![heading],
+        ..Default::default()
     });
     app.main_view.recent.clear();
     app.history.items.clear();
@@ -8162,7 +8278,6 @@ fn test_main_view_script_filter_waits_for_min_length_and_drops_stale_runs() {
     });
     let mut app = main_view_app(&["script_filters.Issues"], Vec::new(), addons);
     let result = |title: &str| ScriptFilterResult {
-        default_icon: None,
         items: vec![ScriptFilterItem {
             title: title.into(),
             valid: true,
@@ -8175,6 +8290,7 @@ fn test_main_view_script_filter_waits_for_min_length_and_drops_stale_runs() {
             variables: Default::default(),
             text: None,
         }],
+        ..Default::default()
     };
 
     let task = app.update(Message::SearchChanged("ab".into()));
@@ -8255,8 +8371,8 @@ fn test_main_view_late_rows_keep_the_selection() {
         0,
         run,
         Some(Ok(ScriptFilterResult {
-            default_icon: None,
             items,
+            ..Default::default()
         })),
     ));
     assert_eq!(app.total_items(), 3);
@@ -8336,7 +8452,6 @@ fn test_main_view_snippets_fill_in_placeholders() {
 
 fn issue_items(count: usize) -> ScriptFilterResult {
     ScriptFilterResult {
-        default_icon: None,
         items: (0..count)
             .map(|index| ScriptFilterItem {
                 title: format!("issue {index}"),
@@ -8351,6 +8466,7 @@ fn issue_items(count: usize) -> ScriptFilterResult {
                 text: None,
             })
             .collect(),
+        ..Default::default()
     }
 }
 
@@ -9950,7 +10066,6 @@ fn test_main_view_keep_open_preserves_query_and_selection() {
         2,
         run,
         Some(Ok(ScriptFilterResult {
-            default_icon: None,
             items: vec![ScriptFilterItem {
                 title: "mail bug".into(),
                 valid: true,
@@ -9963,6 +10078,7 @@ fn test_main_view_keep_open_preserves_query_and_selection() {
                 variables: Default::default(),
                 text: None,
             }],
+            ..Default::default()
         })),
     ));
     assert_eq!(app.total_items(), 4);

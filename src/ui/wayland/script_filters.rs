@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -9,7 +10,9 @@ use serde::Deserialize;
 
 use super::cache::{self, SnapshotTarget};
 use super::state::{Message, ScriptFilterResult};
-use super::types::{PreparedPreview, RawPreviewSpec, ScriptFilterItem, ScriptFilterPreviewError};
+use super::types::{
+    PreparedPreview, RawPreviewSpec, ScriptFilterItem, ScriptFilterPreviewError, ScriptFilterView,
+};
 
 /// Longest a `RAFFI_PREVIEW=1` run may take before it is killed.
 const PREVIEW_TIMEOUT: Duration = Duration::from_secs(3);
@@ -19,6 +22,10 @@ const MAX_PREVIEW_OUTPUT: usize = 8 * 1024 * 1024;
 #[derive(Debug, Clone, Deserialize)]
 struct ScriptFilterResponse {
     items: Vec<ScriptFilterItem>,
+    #[serde(default)]
+    views: Vec<ScriptFilterView>,
+    #[serde(default)]
+    view: Option<String>,
 }
 
 pub(super) fn parse_script_filter_output(
@@ -29,8 +36,25 @@ pub(super) fn parse_script_filter_output(
         .map(|response| ScriptFilterResult {
             items: response.items,
             default_icon,
+            views: response.views,
+            view: response.view,
         })
         .map_err(|error| format!("Invalid JSON: {}", error))
+}
+
+/// `config` as run for `view`: its `variables` and `RAFFI_VIEW` join the
+/// environment. No view keeps the config as written, the script's default.
+pub(super) fn view_config<'a>(
+    config: &'a crate::ScriptFilterConfig,
+    view: Option<&ScriptFilterView>,
+) -> Cow<'a, crate::ScriptFilterConfig> {
+    let Some(view) = view else {
+        return Cow::Borrowed(config);
+    };
+    let mut config = config.clone();
+    config.env.extend(view.variables.clone());
+    config.env.insert("RAFFI_VIEW".into(), view.id.clone());
+    Cow::Owned(config)
 }
 
 pub(super) fn execute_script_filter(
@@ -271,6 +295,71 @@ mod tests {
         .unwrap();
         assert!(result.items[0].valid);
         assert!(!result.items[1].valid);
+    }
+
+    #[test]
+    fn test_view_runs_get_view_env_and_title_defaults_to_id() {
+        let output = r#"{"items":[],"view":"b","views":[
+            {"id":"a"},{"id":"b","title":"Bee","variables":{"MODE":"bee","KEEP":"view"}}]}"#;
+        let result = parse_script_filter_output(output, None).unwrap();
+        assert_eq!(result.view.as_deref(), Some("b"));
+        assert_eq!(result.views[0].title, "a");
+        assert_eq!(result.views[1].title, "Bee");
+
+        let config = crate::ScriptFilterConfig {
+            command: "sh".into(),
+            args: vec![
+                "-c".into(),
+                r#"printf '{"items":[{"title":"%s %s %s"}]}' "$RAFFI_VIEW" "$MODE" "$KEEP""#.into(),
+            ],
+            env: [("KEEP".into(), "config".into())].into(),
+            ..Default::default()
+        };
+        assert!(matches!(
+            super::view_config(&config, None),
+            std::borrow::Cow::Borrowed(_)
+        ));
+        let config = super::view_config(&config, Some(&result.views[1]));
+        let run =
+            super::run_script_filter(&config.command, &config.args, &config.env, "", None, None)
+                .unwrap();
+        assert_eq!(run.items[0].title, "b bee view");
+    }
+
+    #[test]
+    fn test_preview_runs_carry_the_view_env() {
+        let output = r#"{"items":[],"views":[{"id":"review","variables":{"MODE":"view"}}]}"#;
+        let result = parse_script_filter_output(output, None).unwrap();
+        let config = crate::ScriptFilterConfig {
+            command: "sh".into(),
+            args: vec!["-c".into(), "true".into()],
+            env: [
+                ("MODE".into(), "config".into()),
+                ("KEEP".into(), "kept".into()),
+            ]
+            .into(),
+            ..Default::default()
+        };
+        let config = super::view_config(&config, Some(&result.views[0]));
+        let item = super::ScriptFilterItem {
+            title: "Agent".into(),
+            valid: true,
+            subtitle: None,
+            arg: Some("w1:p1".into()),
+            indent: 0,
+            icon: None,
+            preview: None,
+            variables: Default::default(),
+            quicklookurl: None,
+            text: None,
+        };
+        let request = super::PreviewRequest::new(&config, "query", &item, (400, 600));
+        assert_eq!(
+            request.env.get("RAFFI_VIEW").map(String::as_str),
+            Some("review")
+        );
+        assert_eq!(request.env.get("MODE").map(String::as_str), Some("view"));
+        assert_eq!(request.env.get("KEEP").map(String::as_str), Some("kept"));
     }
 
     #[test]

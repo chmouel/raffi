@@ -36,7 +36,7 @@ use super::preview::image_mime_type;
 use super::recent::{RecentPick, StoredItem};
 use super::script_filters::{
     execute_script_filter, execute_script_filter_preview, parse_preview_response,
-    parse_script_filter_output, schedule_script_filter_preview, PreviewRequest,
+    parse_script_filter_output, schedule_script_filter_preview, view_config, PreviewRequest,
 };
 use super::secret_io::{SecretError, SystemRunner};
 use super::snippets::{
@@ -2380,6 +2380,9 @@ impl LauncherApp {
         let Some(config) = self.addons.script_filters.get(config_index) else {
             return;
         };
+        if self.script_filter.config_index != Some(config_index) {
+            self.script_filter.reset_views();
+        }
         if let Some(min) = config.min_query_length {
             if query.len() < min {
                 self.script_filter.results = None;
@@ -2406,6 +2409,9 @@ impl LauncherApp {
         self.script_filter.previews.clear();
         self.script_filter.preview_force_refresh = force_refresh;
         self.script_filter.bump_preview_generation();
+        let view = self.script_filter.active_view().cloned();
+        let config = view_config(config, view.as_ref());
+        let config = config.as_ref();
 
         let cache_ttl = config.cache_ttl();
         let mut cached = None;
@@ -2423,6 +2429,7 @@ impl LauncherApp {
         if let Some(result) = cached {
             // Show the snapshot at once; a stale one refreshes underneath.
             self.script_filter.loading = false;
+            self.script_filter.adopt_views(&result);
             self.script_filter.results = Some(result);
             self.script_filter.loading_name = None;
             self.script_filter.results_are_cached = true;
@@ -4013,6 +4020,7 @@ impl LauncherApp {
         self.script_filter.loading_name = None;
         match result {
             Ok(result) => {
+                self.script_filter.adopt_views(&result);
                 self.script_filter.results = Some(result);
                 self.script_filter.results_are_cached = false;
                 // Indices from the old rows mean nothing once new rows land.
@@ -4118,7 +4126,9 @@ impl LauncherApp {
             self.preview_viewport_width().round() as u32,
             self.preview_viewport_height().round() as u32,
         );
-        let mut request = PreviewRequest::new(config, &self.script_filter.query, item, pane);
+        let view = self.script_filter.active_view().cloned();
+        let config = view_config(config, view.as_ref());
+        let mut request = PreviewRequest::new(&config, &self.script_filter.query, item, pane);
         request.env.extend(self.view.theme.command_env());
         if let Some(ttl) = config.cache_ttl() {
             // A timer wake for a preview already on screen is a live refresh,
@@ -4676,6 +4686,9 @@ impl LauncherApp {
             }
             _ => {}
         }
+        if self.script_filter.config_index.is_some() && self.script_filter.cycle_view(backwards) {
+            return self.handle_search_changed(self.search_query.clone());
+        }
         if self.main_view.active && !self.main_view.stops.is_empty() {
             self.main_view.cycle(backwards);
             return self.handle_search_changed(self.search_query.clone());
@@ -4718,6 +4731,15 @@ impl LauncherApp {
                 return Some(self.browser_history.view_label());
             }
             _ => {}
+        }
+        if self.script_filter.config_index.is_some() && self.script_filter.views.len() > 1 {
+            let id = self.script_filter.current_view_id();
+            return self
+                .script_filter
+                .views
+                .iter()
+                .find(|view| Some(view.id.as_str()) == id)
+                .map(|view| view.title.clone());
         }
         (self.main_view.active && !self.main_view.stops.is_empty())
             .then(|| self.main_view_focus_label())

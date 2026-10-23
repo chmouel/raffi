@@ -124,7 +124,9 @@ addons:
       # Commands with side effects should check RAFFI_PREVIEW or turn this off.
       # dynamic_preview: false # turn it off for this filter (default: true)
       # cache_seconds: 300     # Optional stale-while-revalidate cache; unset keeps side-effecting scripts uncached
-      # warm_queries: ["", "review"] # Queries the cache daemon warms periodically
+      # warm_queries: [""]     # Queries the cache daemon warms periodically, in every view
+      # A script can also print "views" next to "items": Ctrl+Tab then switches
+      # between them and passes the picked one in RAFFI_VIEW.
     # action/secondary_action accept two special keywords:
     #   "copy"   — copy to clipboard via wl-copy (default for Enter)
     #   "insert" — type into focused app via wtype/ydotool
@@ -179,6 +181,7 @@ addons:
     # The preview pane shows live terminal output, pane lists, or tab lists.
     # HERDR_VIEW: status groups agents by Working/Waiting/Idle/Done/Unknown,
     # with counts and non-actionable headings; shells stay in the workspace view.
+    # Ctrl+Tab switches between the workspace tree, status tree and agents.
     # - name: "Herdr"
     #   keyword: "herdr"
     #   command: "~/.config/raffi/scripts/herdr/herdr_filter.py"
@@ -197,7 +200,8 @@ addons:
 
     # GitHub pull requests with CI status. Install scripts/github/pr.py first.
     # "pr" lists your open pull requests, "pr owner/repo" those of a repository,
-    # "pr review", "pr assigned" and "pr involved" the ones that concern you.
+    # "pr review", "pr assigned" and "pr involved" the ones that concern you;
+    # Ctrl+Tab switches between those lists too.
     # Cross-repository results group under owner headings when multiple owners
     # are present; single-owner and fixed-repository results stay flat.
     # The preview pane shows reviewers, merge state, checks, closed issues,
@@ -211,7 +215,7 @@ addons:
     #   action: "xdg-open {value}"
     #   secondary_action: "copy"
     #   cache_seconds: 300          # Show cached rows at once, refresh stale ones in the background
-    #   warm_queries: ["", "review"] # Queries the cache daemon warms while Raffi is closed
+    #   warm_queries: [""]           # Queries the cache daemon warms while Raffi is closed, in every view
     #   warm_interval_seconds: 300   # Defaults to cache_seconds
     # One keyword per repository, the typed text only filters:
     # - name: "Raffi Pull Requests"
