@@ -43,6 +43,39 @@ Until you type the space after the keyword, Raffi keeps searching the main
 list and shows a row describing the filter; Enter or Tab on that row enters
 it. The command runs again each time the text after the keyword changes.
 
+## Caching slow filters
+
+A filter that calls a slow API, such as
+[the GitHub pull request script](#github-pull-requests), can opt into a
+private stale-while-revalidate cache. Set `cache_seconds` to show the last
+result for a query immediately while a fresh run happens in the background.
+Without it, nothing is cached, so a script with side effects never runs from
+the cache.
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Pull Requests"
+      keyword: "pr"
+      command: "~/.config/raffi/scripts/github/pr.py"
+      icon: "github"
+      cache_seconds: 300
+      warm_queries: ["", "review"]
+      warm_interval_seconds: 300
+```
+
+`warm_queries` are run periodically by
+[`raffi --cache-daemon`](../../reference/cli-options/#cache-management),
+so these queries are already fresh when Raffi opens. `warm_interval_seconds`
+defaults to `cache_seconds`. Pressing Ctrl+R runs the script again with
+`RAFFI_REFRESH=1` in its environment, which the bundled GitHub script uses to
+bypass the `gh` CLI cache and fetch live state.
+
+Cached item lists and dynamic previews live under
+`$XDG_CACHE_HOME/raffi/script-filters/`. `raffi --refresh-cache` removes them.
+The cache keys include the command, arguments, environment and query, so
+changing the configuration starts from a clean entry.
+
 ## Actions
 
 | Key        | Action                                                    |

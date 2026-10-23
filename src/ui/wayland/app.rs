@@ -12,6 +12,7 @@ use super::actions::{
     execute_file_action, execute_snippet_action, open_in_file_manager, DeferredAction,
 };
 use super::browser::read_directory;
+use super::cache;
 use super::color::{color_inline_result, try_parse_color};
 use super::command_list::{CommandListAddon, Selection};
 use super::currency::{
@@ -34,8 +35,8 @@ use super::pass::PassContext;
 use super::preview::image_mime_type;
 use super::recent::{RecentPick, StoredItem};
 use super::script_filters::{
-    execute_script_filter, execute_script_filter_preview, parse_script_filter_output,
-    schedule_script_filter_preview, PreviewRequest,
+    execute_script_filter, execute_script_filter_preview, parse_preview_response,
+    parse_script_filter_output, schedule_script_filter_preview, PreviewRequest,
 };
 use super::secret_io::{SecretError, SystemRunner};
 use super::snippets::{
@@ -1843,7 +1844,7 @@ impl LauncherApp {
         if let Some(index) = self.script_filter.config_index {
             let query = self.script_filter.query.clone();
             let mut tasks = Vec::new();
-            self.handle_script_filter_query(index, query, &mut tasks);
+            self.handle_script_filter_query(index, query, true, &mut tasks);
             return Task::batch(tasks);
         }
         if self.main_view.active && !self.main_view.sources.is_empty() {
@@ -2018,7 +2019,7 @@ impl LauncherApp {
                 query,
             } => {
                 self.file_browser.clear();
-                self.handle_script_filter_query(config_index, query, &mut tasks);
+                self.handle_script_filter_query(config_index, query, false, &mut tasks);
                 self.text_snippets.clear();
                 self.emoji.clear();
                 self.web_search.clear();
@@ -2373,44 +2374,82 @@ impl LauncherApp {
         &mut self,
         config_index: usize,
         query: String,
+        force_refresh: bool,
         tasks: &mut Vec<Task<Message>>,
     ) {
-        if let Some(config) = self.addons.script_filters.get(config_index) {
-            if let Some(min) = config.min_query_length {
-                if query.len() < min {
-                    self.script_filter.results = None;
-                    self.script_filter.loading = false;
-                    let remaining = min - query.len();
-                    self.script_filter.help_message = Some(format!(
-                        "Type at least {} more char{} to trigger {}",
-                        remaining,
-                        if remaining == 1 { "" } else { "s" },
-                        config.name
-                    ));
-                    return;
+        let Some(config) = self.addons.script_filters.get(config_index) else {
+            return;
+        };
+        if let Some(min) = config.min_query_length {
+            if query.len() < min {
+                self.script_filter.results = None;
+                self.script_filter.loading = false;
+                let remaining = min - query.len();
+                self.script_filter.help_message = Some(format!(
+                    "Type at least {} more char{} to trigger {}",
+                    remaining,
+                    if remaining == 1 { "" } else { "s" },
+                    config.name
+                ));
+                return;
+            }
+        }
+        self.script_filter.help_message = None;
+        self.filtered_configs.clear();
+        self.script_filter.generation = self.script_filter.generation.wrapping_add(1);
+        let generation = self.script_filter.generation;
+        self.script_filter.loading_name = Some(config.name.clone());
+        self.script_filter.action = config.action.clone();
+        self.script_filter.secondary_action = config.secondary_action.clone();
+        self.script_filter.config_index = Some(config_index);
+        self.script_filter.query.clone_from(&query);
+        self.script_filter.previews.clear();
+        self.script_filter.preview_force_refresh = force_refresh;
+        self.script_filter.bump_preview_generation();
+
+        let cache_ttl = config.cache_ttl();
+        let mut cached = None;
+        let mut stale = false;
+        if let Some(ttl) = cache_ttl {
+            let key = cache::script_filter_list_key(config, &query);
+            if let Some(snapshot) = cache::read_list(&key) {
+                if let Some(result) = cache::parse_list(&snapshot, config.icon.clone()) {
+                    stale = force_refresh || !snapshot.is_fresh(ttl);
+                    cached = Some(result);
                 }
             }
-            self.script_filter.help_message = None;
-            self.filtered_configs.clear();
-            self.script_filter.generation = self.script_filter.generation.wrapping_add(1);
-            self.script_filter.loading = true;
-            self.script_filter.loading_name = Some(config.name.clone());
-            self.script_filter.action = config.action.clone();
-            self.script_filter.secondary_action = config.secondary_action.clone();
-            self.script_filter.results = None;
-            self.script_filter.config_index = Some(config_index);
-            self.script_filter.query.clone_from(&query);
-            self.script_filter.previews.clear();
-            self.script_filter.bump_preview_generation();
-            tasks.push(execute_script_filter(
-                config.command.clone(),
-                config.args.clone(),
-                config.env.clone(),
-                query,
-                self.script_filter.generation,
-                config.icon.clone(),
-            ));
         }
+
+        if let Some(result) = cached {
+            // Show the snapshot at once; a stale one refreshes underneath.
+            self.script_filter.loading = false;
+            self.script_filter.results = Some(result);
+            self.script_filter.loading_name = None;
+            self.script_filter.results_are_cached = true;
+            if !stale {
+                tasks.push(self.request_script_filter_preview());
+                return;
+            }
+        } else {
+            self.script_filter.loading = true;
+            self.script_filter.results = None;
+            self.script_filter.results_are_cached = false;
+        }
+
+        let mut env = config.env.clone();
+        if force_refresh {
+            env.insert("RAFFI_REFRESH".into(), "1".into());
+        }
+        let cache_target = cache_ttl.and_then(|ttl| cache::list_target(config, &query, ttl));
+        tasks.push(execute_script_filter(
+            config.command.clone(),
+            config.args.clone(),
+            env,
+            query,
+            generation,
+            config.icon.clone(),
+            cache_target,
+        ));
     }
 
     fn handle_text_snippet_query(
@@ -3972,7 +4011,25 @@ impl LauncherApp {
 
         self.script_filter.loading = false;
         self.script_filter.loading_name = None;
-        self.script_filter.results = result.ok();
+        match result {
+            Ok(result) => {
+                self.script_filter.results = Some(result);
+                self.script_filter.results_are_cached = false;
+                // Indices from the old rows mean nothing once new rows land.
+                self.script_filter.previews.clear();
+                self.script_filter.bump_preview_generation();
+            }
+            Err(error) => {
+                if self.script_filter.results_are_cached {
+                    // A failed revalidation keeps the rows the user can still use.
+                    crate::debug_log!(
+                        "script_filter: background refresh failed, keeping cached rows: {error}"
+                    );
+                } else {
+                    self.script_filter.results = None;
+                }
+            }
+        }
         self.refresh_file_preview_cache();
         self.request_script_filter_preview()
     }
@@ -4063,6 +4120,42 @@ impl LauncherApp {
         );
         let mut request = PreviewRequest::new(config, &self.script_filter.query, item, pane);
         request.env.extend(self.view.theme.command_env());
+        if let Some(ttl) = config.cache_ttl() {
+            // A timer wake for a preview already on screen is a live refresh,
+            // and Ctrl+R asks for live data too: neither may reuse a snapshot.
+            let visible = self
+                .script_filter
+                .previews
+                .get(&index)
+                .and_then(|dynamic| dynamic.preview.as_ref())
+                .is_some();
+            if !visible && !self.script_filter.preview_force_refresh {
+                let key = cache::script_filter_preview_key(&request);
+                if let Some(snapshot) = cache::read_preview(&key) {
+                    if let Ok(Some(preview)) = parse_preview_response(snapshot.payload.as_bytes()) {
+                        self.script_filter.preview_supported.insert(config_index);
+                        self.script_filter.preview_probing.remove(&config_index);
+                        let entry = self.script_filter.previews.entry(index).or_default();
+                        let refresh = preview.refresh;
+                        entry.preview = Some(preview);
+                        entry.error = None;
+                        if snapshot.is_fresh(ttl) {
+                            // Revalidate after the script's own refresh interval,
+                            // or when the snapshot's freshness window ends.
+                            let delay =
+                                refresh.unwrap_or_else(|| ttl.saturating_sub(snapshot.age()));
+                            return schedule_script_filter_preview(
+                                delay,
+                                generation,
+                                self.script_filter.preview_live_generation.clone(),
+                                index,
+                            );
+                        }
+                    }
+                }
+            }
+            request.cache = cache::preview_target(&request, ttl);
+        }
         execute_script_filter_preview(request, generation, config_index, index)
     }
 

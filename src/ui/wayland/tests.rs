@@ -55,6 +55,60 @@ fn test_app_with_fallbacks(addons: AddonsConfig, fallback_paths: Vec<String>) ->
 }
 
 #[test]
+fn test_refreshed_script_filter_results_drop_old_previews() {
+    let mut app = test_app(AddonsConfig::default());
+    app.script_filter.generation = 9;
+    app.script_filter.previews.insert(0, Default::default());
+    let preview_generation = app.script_filter.preview_generation;
+
+    let _ = app.update(Message::ScriptFilterResult(
+        9,
+        Ok(ScriptFilterResult {
+            items: Vec::new(),
+            default_icon: None,
+        }),
+    ));
+
+    assert!(
+        app.script_filter.previews.is_empty(),
+        "row-indexed previews must not survive a new result list"
+    );
+    assert_ne!(
+        app.script_filter.preview_generation, preview_generation,
+        "in-flight previews for the old rows must be dropped"
+    );
+}
+
+#[test]
+fn test_failed_refresh_keeps_cached_script_filter_rows() {
+    let mut app = test_app(AddonsConfig::default());
+    app.script_filter.results = Some(ScriptFilterResult {
+        items: Vec::new(),
+        default_icon: None,
+    });
+    app.script_filter.generation = 7;
+    app.script_filter.results_are_cached = true;
+    let _ = app.update(Message::ScriptFilterResult(
+        7,
+        Err("network unavailable".into()),
+    ));
+    assert!(
+        app.script_filter.results.is_some(),
+        "a failed background refresh must keep the cached rows"
+    );
+
+    app.script_filter.results_are_cached = false;
+    let _ = app.update(Message::ScriptFilterResult(
+        7,
+        Err("network unavailable".into()),
+    ));
+    assert!(
+        app.script_filter.results.is_none(),
+        "a direct run still clears the rows when it fails"
+    );
+}
+
+#[test]
 fn test_script_filter_tree_guides_follow_sibling_branches() {
     let items = tree_items(&[0, 1, 2, 2, 1, 0, 1, 2]);
     let guides = super::view::tree_guide_segments(&items);

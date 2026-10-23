@@ -11,6 +11,7 @@ mod browser_data;
 mod browser_history;
 mod browser_history_mode;
 mod browser_tabs;
+mod cache;
 mod clipboard;
 mod clipboard_history;
 mod clipboard_mode;
@@ -338,4 +339,16 @@ fn run_wayland_ui(
     }
 
     Ok(String::new())
+}
+
+/// Run the optional background cache service.
+pub(crate) fn run_cache_daemon(config: crate::ParsedConfig) -> Result<()> {
+    self::cache::run(config)
+}
+
+/// Clear every wayland-side disk cache and ask a running daemon to clear its state.
+pub(crate) fn clear_wayland_caches() {
+    clear_slack_cache();
+    self::cache::notify_clear();
+    self::cache::clear_snapshots();
 }

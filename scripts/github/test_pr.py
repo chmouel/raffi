@@ -362,6 +362,21 @@ class PreviewTests(unittest.TestCase):
         self.assertNotIn("--cache", args)
         self.assertEqual(json.loads(stdout.getvalue())["title"], "#7 Add feature")
 
+    def test_raffi_refresh_bypasses_the_gh_cache(self):
+        with (
+            patch.object(pr, "REFRESH", True),
+            patch.object(pr, "run_gh", return_value={"data": {"ok": True}}) as run_gh,
+        ):
+            self.assertEqual(pr.graphql("query"), {"ok": True})
+        self.assertNotIn("--cache", run_gh.call_args.args)
+
+    def test_default_graphql_uses_the_gh_cache(self):
+        with patch.object(
+            pr, "run_gh", return_value={"data": {"ok": True}}
+        ) as run_gh:
+            pr.graphql("query")
+        self.assertIn("--cache", run_gh.call_args.args)
+
     def test_preview_error_is_shown_in_the_pane(self):
         with patch.object(pr, "run_gh", side_effect=pr.GhError("offline")):
             preview = pr.preview(VIEW["url"])

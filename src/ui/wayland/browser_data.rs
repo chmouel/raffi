@@ -8,6 +8,8 @@ use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use serde::{Deserialize, Serialize};
+
 use crate::{BookmarkBrowser, BookmarkOpener};
 
 use super::actions::DeferredAction;
@@ -23,7 +25,7 @@ pub(super) async fn off_thread<T: Send + 'static>(
 }
 
 /// What opens a source's links.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) enum Opener {
     /// Run this, with `{url}` replaced by the link; `name` says by what.
     /// The window of one of `apps` is focused after.

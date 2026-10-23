@@ -10,7 +10,7 @@ use std::{
 use anyhow::{Context, Result};
 use gumdrop::Options;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 
 pub mod browser_host;
@@ -481,7 +481,7 @@ impl Default for EmojiAddonConfig {
 }
 
 /// Configuration for a script filter addon
-#[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
+#[derive(Deserialize, Serialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
 pub struct ScriptFilterConfig {
     pub name: String,
@@ -501,6 +501,36 @@ pub struct ScriptFilterConfig {
     /// Close Raffi after executing an action on a result (default: `general.close_on_action`, else true).
     #[serde(default)]
     pub close_on_action: Option<bool>,
+    /// How long a query's items and previews stay fresh before Raffi refreshes
+    /// them in the background. Unset disables caching, so side-effecting
+    /// scripts never run from or through the cache.
+    #[serde(default)]
+    pub cache_seconds: Option<u64>,
+    /// Queries the cache daemon warms periodically, such as `["", "review"]`.
+    #[serde(default)]
+    pub warm_queries: Vec<String>,
+    /// Seconds between background warming runs for `warm_queries` (default:
+    /// `cache_seconds`).
+    #[serde(default)]
+    pub warm_interval_seconds: Option<u64>,
+}
+
+impl ScriptFilterConfig {
+    /// Freshness window for cached results, if caching is enabled.
+    pub fn cache_ttl(&self) -> Option<std::time::Duration> {
+        self.cache_seconds
+            .filter(|seconds| *seconds > 0)
+            .map(std::time::Duration::from_secs)
+    }
+
+    /// Interval between background warming runs, if any.
+    pub fn warm_interval(&self) -> Option<std::time::Duration> {
+        let seconds = self
+            .warm_interval_seconds
+            .or(self.cache_seconds)
+            .filter(|seconds| *seconds > 0)?;
+        Some(std::time::Duration::from_secs(seconds))
+    }
 }
 
 /// Configuration for a web search addon
@@ -828,7 +858,7 @@ impl Default for BrowserTabsAddonConfig {
 
 /// A browser the bookmarks and browser history addons read from or open
 /// links with
-#[derive(Deserialize, JsonSchema, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Deserialize, Serialize, JsonSchema, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum BookmarkBrowser {
     Firefox,
@@ -849,7 +879,7 @@ pub enum BookmarkBrowser {
 
 /// What opens a bookmark: a browser name, or a command whose `{url}`
 /// arguments are replaced by the link
-#[derive(Deserialize, JsonSchema, Debug, Clone, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, JsonSchema, Debug, Clone, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum BookmarkOpener {
     Browser(BookmarkBrowser),
@@ -924,7 +954,7 @@ impl Default for BookmarksAddonConfig {
 }
 
 /// One place browser history is read from
-#[derive(Deserialize, JsonSchema, Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, JsonSchema, Debug, Clone, Default, PartialEq, Eq)]
 #[schemars(deny_unknown_fields)]
 pub struct BrowserHistorySourceConfig {
     /// Browser whose profiles hold the history. Optional with `path`,
@@ -948,7 +978,7 @@ pub struct BrowserHistorySourceConfig {
 }
 
 /// Configuration for the browser history addon (native UI only)
-#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[derive(Deserialize, Serialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct BrowserHistoryAddonConfig {
     #[serde(default = "default_true")]
@@ -968,6 +998,9 @@ pub struct BrowserHistoryAddonConfig {
     /// clamped to 100..10000).
     #[serde(default)]
     pub max_entries: Option<usize>,
+    /// Seconds cached browser-history snapshots stay fresh (default: 300).
+    #[serde(default)]
+    pub cache_seconds: Option<u64>,
     /// Close Raffi after opening a page (default: `general.close_on_action`, else true).
     #[serde(default)]
     pub close_on_action: Option<bool>,
@@ -981,6 +1014,11 @@ impl BrowserHistoryAddonConfig {
     pub fn max_entries(&self) -> usize {
         self.max_entries.unwrap_or(2000).clamp(100, 10_000)
     }
+
+    /// Freshness window for cached snapshots.
+    pub fn cache_ttl(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.cache_seconds.unwrap_or(300))
+    }
 }
 
 impl Default for BrowserHistoryAddonConfig {
@@ -991,6 +1029,7 @@ impl Default for BrowserHistoryAddonConfig {
             open_with: None,
             sources: None,
             max_entries: None,
+            cache_seconds: None,
             close_on_action: None,
         }
     }
@@ -1367,7 +1406,7 @@ impl Default for BitwardenAddonConfig {
 }
 
 /// Where the Slack addon opens conversations
-#[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SlackOpenIn {
     /// The Slack desktop app, through `slack://` links
@@ -1378,7 +1417,7 @@ pub enum SlackOpenIn {
 }
 
 /// Order of the messages in the Slack previews
-#[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SlackMessageOrder {
     /// The newest message on top
@@ -1389,7 +1428,7 @@ pub enum SlackMessageOrder {
 }
 
 /// Configuration for the Slack addon
-#[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
+#[derive(Deserialize, Serialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
 pub struct SlackAddonConfig {
     /// Off by default: the addon needs a Slack token.
@@ -1426,6 +1465,10 @@ pub struct SlackAddonConfig {
     /// fresh ones load.
     #[serde(default)]
     pub cache_minutes: Option<u64>,
+    /// Minutes between cache-daemon warming runs for the Slack views
+    /// (default: `cache_minutes` when it is above 0).
+    #[serde(default)]
+    pub warm_interval_minutes: Option<u64>,
     /// Close Raffi after opening a conversation or message (default: `general.close_on_action`, else true).
     #[serde(default)]
     pub close_on_action: Option<bool>,
@@ -1444,6 +1487,16 @@ impl SlackAddonConfig {
         self.cache_minutes
             .map(|minutes| std::time::Duration::from_secs(minutes.saturating_mul(60)))
             .unwrap_or(std::time::Duration::from_secs(60 * 60))
+    }
+
+    /// Interval between cache-daemon warming runs, if the addon is enabled.
+    /// Unset follows `cache_minutes`, whose own default is 60 minutes.
+    pub fn warm_interval(&self) -> Option<std::time::Duration> {
+        let minutes = self
+            .warm_interval_minutes
+            .or(self.cache_minutes)
+            .unwrap_or(60);
+        (minutes > 0).then(|| std::time::Duration::from_secs(minutes.saturating_mul(60)))
     }
 }
 
@@ -1991,6 +2044,8 @@ pub struct Args {
         no_short
     )]
     pub force: bool,
+    #[options(help = "run the background cache service in the foreground", no_short)]
+    pub cache_daemon: bool,
 }
 
 fn resolve_window_dimensions(general: &GeneralConfig) -> (f32, f32) {
@@ -4095,6 +4150,11 @@ pub fn run(args: Args) -> Result<()> {
         debug_log!("raffi starting, debug log: {path}");
     }
 
+    #[cfg(not(feature = "wayland"))]
+    if args.cache_daemon {
+        anyhow::bail!("--cache-daemon requires the native UI build (the wayland feature)");
+    }
+
     if args.version {
         println!("raffi version {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
@@ -4108,7 +4168,7 @@ pub fn run(args: Args) -> Result<()> {
         clear_icon_cache()?;
         clear_emoji_cache()?;
         #[cfg(feature = "wayland")]
-        ui::clear_slack_cache();
+        ui::clear_wayland_caches();
     }
 
     let default_config_path = format!(
@@ -4185,6 +4245,11 @@ pub fn run(args: Args) -> Result<()> {
         process_config(config, &args)?
     };
     debug_log!("config: loaded {} entries", parsed_config.entries.len());
+
+    #[cfg(feature = "wayland")]
+    if args.cache_daemon {
+        return ui::run_cache_daemon(parsed_config);
+    }
 
     if parsed_config.entries.is_empty() {
         let scan = DesktopScan::from_addons(&parsed_config.addons);
@@ -4653,6 +4718,7 @@ mod tests {
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            cache_daemon: false,
             options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -4736,6 +4802,7 @@ mod tests {
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            cache_daemon: false,
             options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -4821,6 +4888,7 @@ mod tests {
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            cache_daemon: false,
             options: Vec::new(),
         };
         let env_provider = MockEnvProvider {
@@ -4977,6 +5045,7 @@ mod tests {
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            cache_daemon: false,
             options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -5077,6 +5146,7 @@ mod tests {
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            cache_daemon: false,
             options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -5278,6 +5348,7 @@ mod tests {
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            cache_daemon: false,
             options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -5320,6 +5391,7 @@ mod tests {
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            cache_daemon: false,
             options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -5398,6 +5470,7 @@ mod tests {
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            cache_daemon: false,
             options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -5442,6 +5515,7 @@ mod tests {
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            cache_daemon: false,
             options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -5482,6 +5556,7 @@ mod tests {
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            cache_daemon: false,
             options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -5646,6 +5721,7 @@ mod tests {
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            cache_daemon: false,
             options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -5715,6 +5791,7 @@ mod tests {
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            cache_daemon: false,
             options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -5798,6 +5875,7 @@ mod tests {
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            cache_daemon: false,
             options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -5846,6 +5924,7 @@ mod tests {
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            cache_daemon: false,
             options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -5890,6 +5969,7 @@ mod tests {
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            cache_daemon: false,
             options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -5937,6 +6017,7 @@ mod tests {
                 uninstall_browser_host: false,
                 force: false,
                 keep_open: false,
+                cache_daemon: false,
                 options: Vec::new(),
             };
             read_config_from_reader(Cursor::new(yaml), &args)
@@ -6133,6 +6214,51 @@ shell:
     }
 
     #[test]
+    fn test_cache_config_fields() {
+        let filter: ScriptFilterConfig = serde_yaml::from_str(
+            "name: pr\ncommand: pr.py\nkeyword: pr\ncache_seconds: 30\nwarm_queries: ['', review]\n",
+        )
+        .unwrap();
+        assert_eq!(filter.cache_ttl(), Some(std::time::Duration::from_secs(30)));
+        assert_eq!(
+            filter.warm_interval(),
+            Some(std::time::Duration::from_secs(30))
+        );
+        assert_eq!(filter.warm_queries, ["", "review"]);
+
+        let filter: ScriptFilterConfig =
+            serde_yaml::from_str("name: x\ncommand: y\nkeyword: z\n").unwrap();
+        assert_eq!(filter.cache_ttl(), None);
+        assert_eq!(filter.warm_interval(), None);
+
+        let history: BrowserHistoryAddonConfig =
+            serde_yaml::from_str("cache_seconds: 10\n").unwrap();
+        assert_eq!(history.cache_ttl(), std::time::Duration::from_secs(10));
+        assert_eq!(
+            BrowserHistoryAddonConfig::default().cache_ttl(),
+            std::time::Duration::from_secs(300)
+        );
+
+        let slack: SlackAddonConfig =
+            serde_yaml::from_str("enabled: true\ncache_minutes: 5\n").unwrap();
+        assert_eq!(
+            slack.warm_interval(),
+            Some(std::time::Duration::from_secs(300))
+        );
+        assert_eq!(
+            SlackAddonConfig::default().warm_interval(),
+            Some(std::time::Duration::from_secs(3600))
+        );
+        let slack: SlackAddonConfig =
+            serde_yaml::from_str("enabled: true\ncache_minutes: 5\nwarm_interval_minutes: 1\n")
+                .unwrap();
+        assert_eq!(
+            slack.warm_interval(),
+            Some(std::time::Duration::from_secs(60))
+        );
+    }
+
+    #[test]
     fn test_media_addon_config_parsing() {
         let defaults = AddonsConfig::default().media;
         assert!(defaults.enabled);
@@ -6196,6 +6322,7 @@ shell:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            cache_daemon: false,
             options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -6246,6 +6373,7 @@ shell:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            cache_daemon: false,
             options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -6295,6 +6423,7 @@ shell:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            cache_daemon: false,
             options: Vec::new(),
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();

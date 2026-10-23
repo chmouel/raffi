@@ -7,6 +7,7 @@ use std::time::Duration;
 use iced::Task;
 use serde::Deserialize;
 
+use super::cache::{self, SnapshotTarget};
 use super::state::{Message, ScriptFilterResult};
 use super::types::{PreparedPreview, RawPreviewSpec, ScriptFilterItem, ScriptFilterPreviewError};
 
@@ -39,9 +40,10 @@ pub(super) fn execute_script_filter(
     query: String,
     generation: u64,
     default_icon: Option<String>,
+    cache: Option<SnapshotTarget>,
 ) -> Task<Message> {
     Task::perform(
-        async move { run_script_filter(&command, &args, &env, &query, default_icon) },
+        async move { run_script_filter(&command, &args, &env, &query, default_icon, cache) },
         move |result| Message::ScriptFilterResult(generation, result),
     )
 }
@@ -53,6 +55,7 @@ pub(super) fn run_script_filter(
     env: &HashMap<String, String>,
     query: &str,
     default_icon: Option<String>,
+    cache: Option<SnapshotTarget>,
 ) -> Result<ScriptFilterResult, String> {
     crate::debug_log!("script_filter: executing command={command:?} args={args:?} query={query:?}");
     let output = Command::new(command)
@@ -68,6 +71,16 @@ pub(super) fn run_script_filter(
             let stdout = String::from_utf8_lossy(&output.stdout);
             match parse_script_filter_output(&stdout, default_icon) {
                 Ok(result) => {
+                    if let Some(target) = cache {
+                        if let Err(error) = cache::write_snapshot_path(
+                            &target.path,
+                            &stdout,
+                            target.ttl,
+                            target.keep,
+                        ) {
+                            crate::debug_log!("script_filter: cannot write cache: {error}");
+                        }
+                    }
                     crate::debug_log!(
                         "script_filter: got {} items from {command:?}",
                         result.items.len()
@@ -127,6 +140,7 @@ pub(super) struct PreviewRequest {
     pub args: Vec<String>,
     pub query: String,
     pub env: HashMap<String, String>,
+    pub cache: Option<SnapshotTarget>,
 }
 
 impl PreviewRequest {
@@ -152,10 +166,11 @@ impl PreviewRequest {
             args: config.args.clone(),
             query: query.to_string(),
             env,
+            cache: None,
         }
     }
 
-    fn run(self) -> Result<Option<PreparedPreview>, ScriptFilterPreviewError> {
+    pub(super) fn run(self) -> Result<Option<PreparedPreview>, ScriptFilterPreviewError> {
         crate::debug_log!(
             "script_filter: preview command={:?} value={:?}",
             self.command,
@@ -165,7 +180,18 @@ impl PreviewRequest {
         command.args(&self.args).arg(&self.query).envs(&self.env);
         let output = super::actions::run_bounded(command, PREVIEW_TIMEOUT, MAX_PREVIEW_OUTPUT)
             .map_err(ScriptFilterPreviewError::Run)?;
-        parse_preview_response(&output)
+        let preview = parse_preview_response(&output)?;
+        if preview.is_some() {
+            if let Some(target) = self.cache {
+                let payload = String::from_utf8_lossy(&output);
+                if let Err(error) =
+                    cache::write_snapshot_path(&target.path, &payload, target.ttl, target.keep)
+                {
+                    crate::debug_log!("script_filter: cannot write preview cache: {error}");
+                }
+            }
+        }
+        Ok(preview)
     }
 }
 
@@ -507,6 +533,9 @@ mod tests {
             min_query_length: None,
             dynamic_preview: None,
             close_on_action: None,
+            cache_seconds: None,
+            warm_queries: Vec::new(),
+            warm_interval_seconds: None,
         };
         let item = super::ScriptFilterItem {
             title: "\u{1b}[32mAgent\u{1b}[0m".into(),
@@ -534,5 +563,55 @@ mod tests {
     fn test_parse_script_filter_output_invalid_json() {
         let result = parse_script_filter_output("{not json}", None);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_invalid_output_does_not_overwrite_a_valid_snapshot() {
+        let dir = std::env::temp_dir().join(format!(
+            "raffi-script-cache-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("list.json");
+        let target = || {
+            Some(super::SnapshotTarget {
+                path: path.clone(),
+                ttl: std::time::Duration::from_secs(60),
+                keep: 10,
+            })
+        };
+
+        let valid = super::run_script_filter(
+            "sh",
+            &[
+                "-c".into(),
+                r#"printf '{\"items\":[{\"title\":\"ok\"}]}'"#.into(),
+            ],
+            &Default::default(),
+            "",
+            None,
+            target(),
+        )
+        .unwrap();
+        assert_eq!(valid.items[0].title, "ok");
+        assert!(super::cache::read_snapshot_path(&path).is_some());
+
+        let invalid = super::run_script_filter(
+            "sh",
+            &["-c".into(), "printf 'not json'".into()],
+            &Default::default(),
+            "",
+            None,
+            target(),
+        );
+        assert!(invalid.is_err());
+        let snapshot = super::cache::read_snapshot_path(&path).unwrap();
+        assert!(snapshot.payload.contains("\"title\":\"ok\""));
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

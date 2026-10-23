@@ -194,6 +194,22 @@ Current cache artifacts:
 - `mru.cache`: launch frequency and recency data
 - `history.cache`: prior search queries for native history navigation
 - `emoji/`: downloaded emoji datasets
+- `slack/`: Slack directory, view and preview caches
+- `script-filters/lists/` and `script-filters/previews/`: opt-in
+  stale-while-revalidate snapshots of Script Filter output
+- `browser-history/init.json`: parsed browser history plus SQLite file
+  fingerprints
+
+These snapshots are versioned JSON or binary files written atomically with
+private permissions (`0700` directories, `0600` files). `raffi --refresh-cache`
+removes them together with the other caches.
+
+An optional foreground service, `raffi --cache-daemon`, speaks
+newline-delimited JSON over `$XDG_RUNTIME_DIR/raffi/cache.sock`. It warms
+opted-in Script Filters, Slack views and browser history while Raffi is
+closed. The UI never blocks on it: it reads the same snapshots directly and
+falls back to running sources itself when the socket is absent or slow. See
+`src/ui/wayland/cache.rs` and `misc/systemd/raffi-cache.service`.
 
 On startup, `run()` writes `raffi-schema.json` and `launchers-schema.json` next
 to the user config when either file is missing or outdated.

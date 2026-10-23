@@ -171,6 +171,13 @@ first time the Slack list asks Slack for something in a run.
 Shell command printing the value of the browser's `d` cookie. Required with
 a session (`xoxc-`) token, ignored with a user token.
 
+**`addons.slack.warm_interval_minutes`** `integer` (default: `cache_minutes` when above 0)
+
+How often `raffi --cache-daemon` refreshes the Slack directory, Home, Unread,
+Threads and Activity views while Raffi is closed. It also re-fetches the ten
+most recently viewed cached previews once they are stale. Leave it unset to
+follow `cache_minutes`.
+
 **`addons.slack.open_in`** `desktop | browser` (default: `desktop`)
 
 Where Enter opens conversations and messages: the Slack desktop app

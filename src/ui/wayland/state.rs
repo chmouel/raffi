@@ -62,6 +62,8 @@ impl CurrencyState {
 #[derive(Debug, Clone, Default)]
 pub(super) struct ScriptFilterState {
     pub results: Option<ScriptFilterResult>,
+    /// The visible rows came from a snapshot and may be kept if a refresh fails.
+    pub results_are_cached: bool,
     pub loading: bool,
     pub loading_name: Option<String>,
     pub generation: u64,
@@ -79,6 +81,8 @@ pub(super) struct ScriptFilterState {
     pub preview_live_generation: Arc<AtomicU64>,
     /// Dynamic previews of the current results, by item index.
     pub previews: HashMap<usize, DynamicPreview>,
+    /// Ctrl+R asked for live data, so previews must bypass their snapshots.
+    pub preview_force_refresh: bool,
     /// Config indexes whose script did not answer `RAFFI_PREVIEW=1` with a
     /// preview object; kept for the whole session.
     pub preview_unsupported: HashSet<usize>,
@@ -92,6 +96,7 @@ pub(super) struct ScriptFilterState {
 impl ScriptFilterState {
     pub fn clear(&mut self) {
         self.results = None;
+        self.results_are_cached = false;
         self.loading = false;
         self.loading_name = None;
         self.action = None;
@@ -100,6 +105,7 @@ impl ScriptFilterState {
         self.config_index = None;
         self.query.clear();
         self.previews.clear();
+        self.preview_force_refresh = false;
         self.bump_preview_generation();
     }
 

@@ -51,7 +51,16 @@
           "$ref": "#/$defs/BookmarksAddonConfig"
         },
         "browser_history": {
-          "$ref": "#/$defs/BrowserHistoryAddonConfig"
+          "$ref": "#/$defs/BrowserHistoryAddonConfig",
+          "default": {
+            "cache_seconds": null,
+            "close_on_action": null,
+            "enabled": true,
+            "max_entries": null,
+            "open_with": null,
+            "sources": null,
+            "trigger": null
+          }
         },
         "browser_tabs": {
           "$ref": "#/$defs/BrowserTabsAddonConfig"
@@ -98,12 +107,25 @@
         },
         "script_filters": {
           "type": "array",
+          "default": [],
           "items": {
             "$ref": "#/$defs/ScriptFilterConfig"
           }
         },
         "slack": {
-          "$ref": "#/$defs/SlackAddonConfig"
+          "$ref": "#/$defs/SlackAddonConfig",
+          "default": {
+            "cache_minutes": null,
+            "close_on_action": null,
+            "cookie_command": null,
+            "enabled": false,
+            "message_order": "newest_first",
+            "open_in": "desktop",
+            "token_command": null,
+            "trigger": null,
+            "unread_conversations": [],
+            "warm_interval_minutes": null
+          }
         },
         "system": {
           "$ref": "#/$defs/SystemAddonConfig"
@@ -320,7 +342,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         },
         "folder": {
           "description": "Only list this folder, such as `Bookmarks Toolbar/Work`.",
@@ -347,7 +370,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         },
         "path": {
           "description": "A bookmarks file read directly: Chromium's `Bookmarks`, Firefox's\n`places.sqlite`, or the profile directory holding one.",
@@ -393,7 +417,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         },
         "sources": {
           "description": "Where bookmarks come from (default: every profile of every supported\nbrowser found).",
@@ -420,6 +445,16 @@
       "description": "Configuration for the browser history addon (native UI only)",
       "type": "object",
       "properties": {
+        "cache_seconds": {
+          "description": "Seconds cached browser-history snapshots stay fresh (default: 300).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
         "close_on_action": {
           "description": "Close Raffi after opening a page (default: `general.close_on_action`, else true).",
           "type": [
@@ -451,7 +486,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         },
         "sources": {
           "description": "Where history comes from (default: every profile of every supported\nbrowser found).",
@@ -459,6 +495,7 @@
             "array",
             "null"
           ],
+          "default": null,
           "items": {
             "$ref": "#/$defs/BrowserHistorySourceConfig"
           }
@@ -487,7 +524,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         },
         "name": {
           "description": "Label of the source in the list (default: the browser and profile).",
@@ -506,7 +544,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         },
         "path": {
           "description": "A history file read directly: Chromium's `History`, Firefox's\n`places.sqlite`, or the profile directory holding one.",
@@ -1646,6 +1685,16 @@
             "type": "string"
           }
         },
+        "cache_seconds": {
+          "description": "How long a query's items and previews stay fresh before Raffi refreshes\nthem in the background. Unset disables caching, so side-effecting\nscripts never run from or through the cache.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
         "close_on_action": {
           "description": "Close Raffi after executing an action on a result (default: `general.close_on_action`, else true).",
           "type": [
@@ -1696,6 +1745,24 @@
             "string",
             "null"
           ]
+        },
+        "warm_interval_seconds": {
+          "description": "Seconds between background warming runs for `warm_queries` (default:\n`cache_seconds`).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "warm_queries": {
+          "description": "Queries the cache daemon warms periodically, such as `[\"\", \"review\"]`.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false,
@@ -1742,11 +1809,13 @@
         },
         "message_order": {
           "description": "Order of the messages in the previews (default: `newest_first`).\nThreads keep their first message on top.",
-          "$ref": "#/$defs/SlackMessageOrder"
+          "$ref": "#/$defs/SlackMessageOrder",
+          "default": "newest_first"
         },
         "open_in": {
           "description": "Open conversations in the desktop app or in the browser (default:\ndesktop). Ctrl+Enter uses the other one.",
-          "$ref": "#/$defs/SlackOpenIn"
+          "$ref": "#/$defs/SlackOpenIn",
+          "default": "desktop"
         },
         "token_command": {
           "description": "Shell command printing the Slack token: a user token (`xoxp-`) from\nyour own Slack app, or the session token (`xoxc-`) of a logged-in\nbrowser tab.",
@@ -1771,6 +1840,16 @@
           "items": {
             "type": "string"
           }
+        },
+        "warm_interval_minutes": {
+          "description": "Minutes between cache-daemon warming runs for the Slack views\n(default: `cache_minutes` when it is above 0).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
         }
       },
       "additionalProperties": false

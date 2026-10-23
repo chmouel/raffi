@@ -34,7 +34,15 @@ addons:
       icon: "github"
       action: "xdg-open {value}"
       secondary_action: "copy"
+      cache_seconds: 300
+      warm_queries: ["", "review"]
 ```
+
+`cache_seconds` shows the last result for a query immediately and refreshes
+it in the background. `warm_queries` are warmed periodically by
+`raffi --cache-daemon`, so those queries are already fresh when Raffi opens.
+Set `warm_interval_seconds` to change the warming period (default:
+`cache_seconds`). Without `cache_seconds` nothing is cached.
 
 To give a repository its own keyword, pin it with `--repo`. Everything typed
 after the keyword then filters that repository's pull requests:
@@ -108,6 +116,10 @@ These environment variables can also be set in the entry's `env`:
 |----------|---------|-------------|
 | `API_HOST` | `github.com` | GitHub host, for GitHub Enterprise |
 | `CACHE_PULLS` | `10m` | How long `gh` caches the pull request list |
+
+Raffi sets `RAFFI_REFRESH=1` when you press Ctrl+R or when the cache daemon
+refreshes a filter. The script then skips `gh api --cache` so it reads live
+GitHub state instead of the `gh` CLI's own cache.
 
 ## Live preview
 

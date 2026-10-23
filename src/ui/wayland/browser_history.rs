@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Local, NaiveDate, TimeZone};
 use rusqlite::{Connection, OpenFlags};
+use serde::{Deserialize, Serialize};
 
 use crate::browser_host::{self, BrowserProfile};
 use crate::{BookmarkBrowser, BookmarkOpener, BrowserHistoryAddonConfig};
@@ -34,7 +35,7 @@ const TRACKING_PARAMS: [&str; 9] = [
     "utm_source",
 ];
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct Entry {
     /// Canonical URL used for identity and deduplication.
     pub canonical: String,
@@ -77,7 +78,7 @@ impl Entry {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct Source {
     pub key: String,
     pub label: String,
@@ -92,7 +93,7 @@ pub(super) struct Source {
     pub favicons: Vec<(PathBuf, bool)>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(super) struct Library {
     pub sources: Vec<Source>,
     pub errors: Vec<String>,
@@ -103,7 +104,7 @@ pub(super) struct Library {
 }
 
 /// One browser or standalone source, loaded lazily as a Ctrl+Tab view.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct BrowserGroup {
     pub key: String,
     pub label: String,
@@ -111,7 +112,7 @@ pub(super) struct BrowserGroup {
 }
 
 /// Discovery plus the first loaded group, for the dedicated history list.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct BrowserHistoryInit {
     pub groups: Vec<BrowserGroup>,
     pub errors: Vec<String>,
@@ -757,27 +758,191 @@ pub(super) fn lookup_icons(library: &Library) -> HashMap<String, PathBuf> {
     )
 }
 
-/// Read every configured source, or every browser profile found. Blocking:
-/// run it off the UI thread.
-pub(super) fn load(config: &BrowserHistoryAddonConfig) -> Library {
-    let Ok((home, config_dir)) = browser_host::user_dirs() else {
-        return Library {
-            errors: vec!["HOME is not set".to_string()],
-            ..Library::default()
-        };
+const SNAPSHOT_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct FileFingerprint {
+    path: PathBuf,
+    exists: bool,
+    size: u64,
+    /// Modification time in nanoseconds since the Unix epoch.
+    mtime: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BrowserHistorySnapshot {
+    version: u32,
+    created_at: u64,
+    config_digest: String,
+    groups: Vec<BrowserGroup>,
+    errors: Vec<String>,
+    /// Libraries by group key.
+    libraries: HashMap<String, Library>,
+    /// SQLite file states by group key.
+    fingerprints: HashMap<String, Vec<FileFingerprint>>,
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs())
+}
+
+impl BrowserHistorySnapshot {
+    fn new(
+        config: &BrowserHistoryAddonConfig,
+        groups: &[BrowserGroup],
+        errors: Vec<String>,
+    ) -> Self {
+        let fingerprints = groups
+            .iter()
+            .map(|group| (group.key.clone(), fingerprints_for_group(group)))
+            .collect();
+        Self {
+            version: SNAPSHOT_VERSION,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |duration| duration.as_secs()),
+            config_digest: super::cache::config_digest(config),
+            groups: groups.to_vec(),
+            errors,
+            libraries: HashMap::new(),
+            fingerprints,
+        }
+    }
+
+    fn is_fresh(&self, config: &BrowserHistoryAddonConfig) -> bool {
+        now_secs().saturating_sub(self.created_at) < config.cache_ttl().as_secs()
+    }
+
+    fn group_is_current(&self, config: &BrowserHistoryAddonConfig, group: &BrowserGroup) -> bool {
+        self.version == SNAPSHOT_VERSION
+            && self.is_fresh(config)
+            && self.config_digest == super::cache::config_digest(config)
+            && self.fingerprints.get(&group.key) == Some(&fingerprints_for_group(group))
+    }
+
+    fn matches(&self, config: &BrowserHistoryAddonConfig, groups: &[BrowserGroup]) -> bool {
+        self.groups.len() == groups.len()
+            && groups
+                .iter()
+                .all(|group| self.group_is_current(config, group))
+    }
+}
+
+fn snapshot_path() -> Option<PathBuf> {
+    Some(
+        super::cache::browser_history_cache_dir()
+            .ok()?
+            .join("init.json"),
+    )
+}
+
+fn read_snapshot() -> Option<BrowserHistorySnapshot> {
+    super::cache::read_private_json(&snapshot_path()?)
+}
+
+fn write_snapshot(snapshot: &BrowserHistorySnapshot) {
+    let Some(path) = snapshot_path() else {
+        return;
     };
-    let path = std::env::var_os("PATH").unwrap_or_default();
+    if let Err(error) = super::cache::write_private_json(&path, snapshot) {
+        crate::debug_log!("browser_history: cannot write cache: {error}");
+    }
+}
+
+fn sidecar(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
+fn fingerprint_file(path: &Path) -> FileFingerprint {
+    match std::fs::metadata(path) {
+        Ok(metadata) => FileFingerprint {
+            path: path.to_path_buf(),
+            exists: true,
+            size: metadata.len(),
+            mtime: metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |duration| {
+                    duration.as_nanos().min(u64::MAX as u128) as u64
+                }),
+        },
+        Err(_) => FileFingerprint {
+            path: path.to_path_buf(),
+            exists: false,
+            size: 0,
+            mtime: 0,
+        },
+    }
+}
+
+fn fingerprints_for_group(group: &BrowserGroup) -> Vec<FileFingerprint> {
+    let mut files = Vec::new();
+    for spec in &group.specs {
+        for suffix in ["", "-wal", "-shm"] {
+            let path = if suffix.is_empty() {
+                spec.file.clone()
+            } else {
+                sidecar(&spec.file, suffix)
+            };
+            files.push(fingerprint_file(&path));
+        }
+    }
+    files
+}
+
+fn discover(config: &BrowserHistoryAddonConfig) -> (Vec<BrowserGroup>, Vec<String>) {
+    let Ok((home, config_dir)) = browser_host::user_dirs() else {
+        return (Vec::new(), vec!["HOME is not set".to_string()]);
+    };
     let (specs, errors) = collect_specs(config, &home, &config_dir);
+    (group_specs(specs), errors)
+}
+
+fn merge_libraries(
+    libraries: &HashMap<String, Library>,
+    groups: &[BrowserGroup],
+    errors: Vec<String>,
+) -> Library {
     let mut library = Library {
         errors,
         ..Library::default()
     };
+    for group in groups {
+        if let Some(loaded) = libraries.get(&group.key) {
+            library.sources.extend(loaded.sources.iter().cloned());
+            library.errors.extend(loaded.errors.iter().cloned());
+        }
+    }
+    make_unique_keys(&mut library.sources);
+    library.picked = load_picked();
+    library
+}
+
+/// Read every configured source, or every browser profile found. Blocking:
+/// run it off the UI thread.
+pub(super) fn load(config: &BrowserHistoryAddonConfig) -> Library {
+    let (groups, errors) = discover(config);
+    if let Some(snapshot) = read_snapshot().filter(|snapshot| snapshot.matches(config, &groups)) {
+        if groups
+            .iter()
+            .all(|group| snapshot.libraries.contains_key(&group.key))
+        {
+            return merge_libraries(&snapshot.libraries, &groups, snapshot.errors);
+        }
+    }
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let mut snapshot = BrowserHistorySnapshot::new(config, &groups, errors.clone());
     let mut budget = MAX_LIBRARY_ENTRIES;
-    for group in group_specs(specs) {
+    for group in &groups {
         if budget == 0 {
             break;
         }
-        let mut loaded = read_group(config, &path, &group, budget);
+        let loaded = read_group(config, &path, group, budget);
         budget = budget.saturating_sub(
             loaded
                 .sources
@@ -785,29 +950,39 @@ pub(super) fn load(config: &BrowserHistoryAddonConfig) -> Library {
                 .map(|source| source.entries.len())
                 .sum::<usize>(),
         );
-        library.sources.append(&mut loaded.sources);
-        library.errors.append(&mut loaded.errors);
+        snapshot.libraries.insert(group.key.clone(), loaded);
     }
-    make_unique_keys(&mut library.sources);
-    library.picked = load_picked();
-    library
+    write_snapshot(&snapshot);
+    merge_libraries(&snapshot.libraries, &groups, errors)
 }
 
-/// Discover browser views and load only the first one.
+/// Discover browser views and load only the first one, or the whole cached
+/// snapshot when it still matches the browser databases.
 pub(super) fn initialize(config: &BrowserHistoryAddonConfig) -> BrowserHistoryInit {
-    let Ok((home, config_dir)) = browser_host::user_dirs() else {
-        return BrowserHistoryInit {
-            groups: Vec::new(),
-            errors: vec!["HOME is not set".to_string()],
-            library: None,
-        };
-    };
+    let (groups, errors) = discover(config);
+    if let Some(snapshot) = read_snapshot().filter(|snapshot| snapshot.matches(config, &groups)) {
+        let library = groups
+            .first()
+            .and_then(|group| snapshot.libraries.get(&group.key).cloned());
+        if library.is_some() {
+            return BrowserHistoryInit {
+                groups,
+                errors,
+                library,
+            };
+        }
+    }
     let path = std::env::var_os("PATH").unwrap_or_default();
-    let (specs, errors) = collect_specs(config, &home, &config_dir);
-    let groups = group_specs(specs);
     let library = groups
         .first()
         .map(|group| read_group(config, &path, group, MAX_LIBRARY_ENTRIES));
+    let mut snapshot = BrowserHistorySnapshot::new(config, &groups, errors.clone());
+    if let (Some(group), Some(library)) = (groups.first(), library.as_ref()) {
+        snapshot
+            .libraries
+            .insert(group.key.clone(), library.clone());
+    }
+    write_snapshot(&snapshot);
     BrowserHistoryInit {
         groups,
         errors,
@@ -816,12 +991,69 @@ pub(super) fn initialize(config: &BrowserHistoryAddonConfig) -> BrowserHistoryIn
 }
 
 /// Read the sources of one browser view. Blocking: run it off the UI thread.
-pub(super) fn load_group(config: &BrowserHistoryAddonConfig, group: &BrowserGroup) -> Library {
+pub(super) fn load_group(
+    config: &BrowserHistoryAddonConfig,
+    group: &BrowserGroup,
+    force_refresh: bool,
+) -> Library {
+    if !force_refresh {
+        if let Some(snapshot) = read_snapshot() {
+            if snapshot.group_is_current(config, group) {
+                if let Some(library) = snapshot.libraries.get(&group.key) {
+                    return library.clone();
+                }
+            }
+        }
+    }
     let path = std::env::var_os("PATH").unwrap_or_default();
-    read_group(config, &path, group, MAX_LIBRARY_ENTRIES)
+    let library = read_group(config, &path, group, MAX_LIBRARY_ENTRIES);
+    let mut snapshot = read_snapshot().unwrap_or_else(|| {
+        let (groups, errors) = discover(config);
+        BrowserHistorySnapshot::new(config, &groups, errors)
+    });
+    snapshot
+        .libraries
+        .insert(group.key.clone(), library.clone());
+    snapshot
+        .fingerprints
+        .insert(group.key.clone(), fingerprints_for_group(group));
+    write_snapshot(&snapshot);
+    library
 }
 
-#[derive(Debug, Clone)]
+/// Parse every browser group in the background and replace the snapshot.
+pub(super) fn warm(config: &BrowserHistoryAddonConfig) -> Result<(), String> {
+    let (groups, errors) = discover(config);
+    if groups.is_empty() {
+        return if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; "))
+        };
+    }
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let mut snapshot = BrowserHistorySnapshot::new(config, &groups, errors);
+    let mut budget = MAX_LIBRARY_ENTRIES;
+    for group in &groups {
+        if budget == 0 {
+            break;
+        }
+        let mut library = read_group(config, &path, group, budget);
+        budget = budget.saturating_sub(
+            library
+                .sources
+                .iter()
+                .map(|source| source.entries.len())
+                .sum::<usize>(),
+        );
+        library.icons = lookup_icons(&library);
+        snapshot.libraries.insert(group.key.clone(), library);
+    }
+    write_snapshot(&snapshot);
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Spec {
     browser: Option<BookmarkBrowser>,
     file: PathBuf,
@@ -1409,6 +1641,46 @@ mod tests {
 
     fn options() -> RowOptions {
         RowOptions { keep_open: false }
+    }
+
+    #[test]
+    fn test_fingerprints_and_snapshot_track_database_changes() {
+        let dir = temporary("fingerprint");
+        let file = dir.join("places.sqlite");
+        std::fs::write(&file, b"first").unwrap();
+        let group = BrowserGroup {
+            key: "firefox:default".into(),
+            label: "Firefox".into(),
+            specs: vec![Spec {
+                browser: Some(BookmarkBrowser::Firefox),
+                file: file.clone(),
+                profile: None,
+                profile_name: "default".into(),
+                name: None,
+                open_with: None,
+            }],
+        };
+        let config = BrowserHistoryAddonConfig::default();
+        let first = fingerprints_for_group(&group);
+        let snapshot =
+            BrowserHistorySnapshot::new(&config, std::slice::from_ref(&group), Vec::new());
+        assert!(snapshot.group_is_current(&config, &group));
+        let encoded = serde_json::to_string(&snapshot).unwrap();
+        let decoded: BrowserHistorySnapshot = serde_json::from_str(&encoded).unwrap();
+        assert!(decoded.group_is_current(&config, &group));
+
+        let mut expired = decoded.clone();
+        expired.created_at = 0;
+        assert!(!expired.group_is_current(&config, &group));
+        assert!(!expired.matches(&config, std::slice::from_ref(&group)));
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        std::fs::write(&file, b"second, longer").unwrap();
+        let second = fingerprints_for_group(&group);
+        assert_ne!(first, second);
+        assert!(!snapshot.group_is_current(&config, &group));
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     fn temporary(name: &str) -> PathBuf {

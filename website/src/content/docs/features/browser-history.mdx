@@ -161,6 +161,15 @@ Keyword that opens the list. Type it followed by a space.
 Most recent and most visited addresses read per source, clamped between
 `100` and `10000`.
 
+**`addons.browser_history.cache_seconds`** `integer` (default: `300`)
+
+How long a parsed snapshot stays reusable. Raffi fingerprints each browser
+database and its `-wal` and `-shm` companions, so it reparses as soon as the
+browser writes a visit, even before the timer expires. The snapshot lives in
+`$XDG_CACHE_HOME/raffi/browser-history/`; `raffi --refresh-cache` removes it.
+With `raffi --cache-daemon`, the snapshot is also warmed while Raffi is
+closed.
+
 **`addons.browser_history.open_with`** `string | list of strings` (default: source browser)
 
 Browser name or command argv (`{url}` placeholder) that opens pages from

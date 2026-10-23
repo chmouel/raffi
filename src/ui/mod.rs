@@ -13,11 +13,11 @@ mod wayland;
 
 use self::fuzzel::FuzzelUI;
 #[cfg(feature = "wayland")]
-pub(crate) use self::wayland::clear_slack_cache;
-#[cfg(feature = "wayland")]
 use self::wayland::WaylandUI;
 #[cfg(feature = "wayland")]
 pub(crate) use self::wayland::THUMBNAIL_DIR_NAME;
+#[cfg(feature = "wayland")]
+pub(crate) use self::wayland::{clear_wayland_caches, run_cache_daemon};
 
 /// Font and padding sizes derived from the base font_size.
 /// All sizes scale proportionally from the base.

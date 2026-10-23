@@ -189,7 +189,7 @@ impl LauncherApp {
         };
         let config = self.addons.browser_history.clone();
         Task::perform(
-            off_thread(move || Arc::new(browser_history::load_group(&config, &group))),
+            off_thread(move || Arc::new(browser_history::load_group(&config, &group, refresh))),
             move |library| Message::BrowserHistoryGroupLoaded(generation, key, library),
         )
     }

@@ -123,6 +123,8 @@ addons:
       # prints. Scripts that only print items are detected and skipped.
       # Commands with side effects should check RAFFI_PREVIEW or turn this off.
       # dynamic_preview: false # turn it off for this filter (default: true)
+      # cache_seconds: 300     # Optional stale-while-revalidate cache; unset keeps side-effecting scripts uncached
+      # warm_queries: ["", "review"] # Queries the cache daemon warms periodically
     # action/secondary_action accept two special keywords:
     #   "copy"   — copy to clipboard via wl-copy (default for Enter)
     #   "insert" — type into focused app via wtype/ydotool
@@ -208,6 +210,9 @@ addons:
     #   icon: "github"
     #   action: "xdg-open {value}"
     #   secondary_action: "copy"
+    #   cache_seconds: 300          # Show cached rows at once, refresh stale ones in the background
+    #   warm_queries: ["", "review"] # Queries the cache daemon warms while Raffi is closed
+    #   warm_interval_seconds: 300   # Defaults to cache_seconds
     # One keyword per repository, the typed text only filters:
     # - name: "Raffi Pull Requests"
     #   keyword: "rafpr"
@@ -406,6 +411,7 @@ addons:
   #   enabled: true
   #   trigger: hist
   #   max_entries: 2000                 # Stored visits read per source (100..10000)
+  #   cache_seconds: 300                # Reuse the parsed snapshot until a database changes
   #   open_with: firefox                # A browser, or a command:
   #   sources:
   #     - browser: firefox
@@ -519,6 +525,7 @@ addons:
   #   message_order: newest_first                 # newest_first | oldest_first
   #   unread_conversations: ["#ops", "@alice"]    # for xoxp- tokens
   #   cache_minutes: 60                           # 0 asks Slack every time
+  #   warm_interval_minutes: 60                   # Cache daemon refresh interval (default: cache_minutes)
 
   # Unit conversion. Type "10 km to mi", "70f to c" or
   # "5 GB in MB" without any keyword. Enter copies the number, Ctrl+Enter

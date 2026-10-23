@@ -3377,6 +3377,9 @@ struct CachedPreview {
     /// Message order the bodies were built in.
     #[serde(default)]
     newest_first: bool,
+    /// Row identity, so the cache daemon can refresh this preview later.
+    #[serde(default)]
+    identity: Option<String>,
 }
 
 fn preview_cache_name(identity: &str) -> String {
@@ -3441,7 +3444,7 @@ fn store_preview(
     avatar: Option<&str>,
     newest_first: bool,
 ) {
-    let Some(cached) = to_cached_preview(bodies, avatar, newest_first) else {
+    let Some(cached) = to_cached_preview(identity, bodies, avatar, newest_first) else {
         return;
     };
     slack_api::write_cache(&preview_cache_name(identity), account, &cached);
@@ -3452,6 +3455,7 @@ fn store_preview(
 
 /// The preview as kept on disk; none when it contains non-cacheable bodies.
 fn to_cached_preview(
+    identity: &str,
     bodies: &[PreviewBody],
     avatar: Option<&str>,
     newest_first: bool,
@@ -3479,6 +3483,7 @@ fn to_cached_preview(
         bodies: bodies?,
         avatar: avatar.map(str::to_string),
         newest_first,
+        identity: Some(identity.to_string()),
     })
 }
 
@@ -3521,6 +3526,51 @@ fn message_users(list: &[Value]) -> Vec<String> {
         }
     }
     ids
+}
+
+/// Refresh the most recently viewed cached previews, bounded so a daemon run
+/// does not hammer the Slack API. Blocking.
+pub(super) fn warm_cached_previews(
+    config: &crate::SlackAddonConfig,
+    limit: usize,
+) -> Result<(), String> {
+    let (_client, directory) = connect(config, false)?;
+    let Some(dir) = slack_api::cache_path(slack_api::PREVIEW_DIR) else {
+        return Ok(());
+    };
+    let now = slack_api::now_secs();
+    let fresh = slack_api::cache_fresh();
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            (path.extension().and_then(|ext| ext.to_str()) == Some("json"))
+                .then(|| Some((entry.metadata().ok()?.modified().ok()?, path)))
+                .flatten()
+        })
+        .collect();
+    files.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
+    let newest_first = config.message_order == crate::SlackMessageOrder::NewestFirst;
+    let epoch = slack_api::account_epoch();
+    for (_, path) in files.into_iter().take(limit) {
+        let Some((cached, age)) =
+            slack_api::read_cache_from::<CachedPreview>(&path, &directory.workspace, now)
+        else {
+            continue;
+        };
+        if age < fresh {
+            continue;
+        }
+        let Some(identity) = cached.identity else {
+            continue;
+        };
+        let wanted = Wanted::default();
+        wanted.set(&identity);
+        let _ = load_preview(&identity, &wanted, true, epoch, newest_first);
+    }
+    Ok(())
 }
 
 fn preview_bodies(
@@ -5035,7 +5085,8 @@ mod tests {
             ],
         };
         let input = [text_body.clone(), chat_body];
-        let cached = to_cached_preview(&input, Some("/no/avatar.png"), true).unwrap();
+        let cached =
+            to_cached_preview("slack:conv:C1", &input, Some("/no/avatar.png"), true).unwrap();
         let data = serde_json::to_vec(&cached).unwrap();
         let (bodies, avatar) = from_cached_preview(serde_json::from_slice(&data).unwrap());
         assert_eq!(bodies[0], text_body);
@@ -5050,7 +5101,7 @@ mod tests {
         let image = PreviewBody::Image {
             path: "/tmp/image.png".into(),
         };
-        assert!(to_cached_preview(&[image], None, true).is_none());
+        assert!(to_cached_preview("slack:conv:C1", &[image], None, true).is_none());
     }
 
     #[test]

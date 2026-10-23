@@ -239,15 +239,32 @@ Set the default shell interpreter for script entries.
 
 **`-r, --refresh-cache`** `boolean` (default: `false`)
 
-Refresh the cached icon paths.
+Refresh every local cache.
 
-  Raffi caches icon locations from system directories to speed up subsequent launches. Use this flag to force regeneration of the cache, for example after installing new icon themes.
+  Raffi caches icon locations from system directories to speed up subsequent launches. Use this flag to force regeneration of the cache, for example after installing new icon themes. It also removes the private script-filter and browser-history snapshots and the Slack cache, and tells a running cache service to drop its state.
 
   ```bash
   raffi -r
   ```
 
-  Cache location: `$XDG_CACHE_HOME/raffi/icon.cache` (defaults to `~/.cache/raffi/icon.cache`)
+  Caches live under `$XDG_CACHE_HOME/raffi/` (defaults to `~/.cache/raffi/`).
+
+
+**`--cache-daemon`** `boolean` (default: `false`)
+
+Run the optional background cache service in the foreground. It warms the
+script filters, Slack views and browser history you opted into, and serves
+requests over `$XDG_RUNTIME_DIR/raffi/cache.sock`. Raffi never starts it
+behind your back: run it from a terminal or a user service such as
+`misc/systemd/raffi-cache.service`.
+
+  ```bash
+  raffi --cache-daemon
+  ```
+
+  Without the service, Raffi still reads and writes the same private
+  snapshots directly, so cached rows still show immediately; only the
+  periodic warming while Raffi is closed is lost.
 
 
 ## Examples

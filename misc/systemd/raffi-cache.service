@@ -1,0 +1,20 @@
+[Unit]
+Description=Raffi background cache service
+Documentation=https://github.com/chmouel/raffi
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/raffi --cache-daemon
+Restart=on-failure
+RestartSec=5
+# The service only needs the user's runtime and cache directories.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%t %h/.cache
+
+[Install]
+WantedBy=graphical-session.target

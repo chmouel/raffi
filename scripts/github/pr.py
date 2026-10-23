@@ -20,6 +20,7 @@ from pathlib import Path
 
 API_HOST = os.environ.get("API_HOST", "github.com")
 CACHE_PULLS = os.environ.get("CACHE_PULLS", "10m")
+REFRESH = os.environ.get("RAFFI_REFRESH") == "1"
 ICON = "github"
 # Raffi gives the preview command 3 seconds in total.
 PREVIEW_TIMEOUT = 2.5
@@ -249,7 +250,7 @@ def graphql(
     query: str, cache: str | None = CACHE_PULLS, timeout: float = 30, **variables
 ) -> dict:
     args = ["api", "graphql", "--hostname", API_HOST]
-    if cache:
+    if cache and not REFRESH:
         args += ["--cache", cache]
     for name, value in {"query": query, **variables}.items():
         # -F sends integers as numbers, -f keeps everything else a string.
