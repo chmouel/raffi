@@ -12,7 +12,7 @@ use fuzzy_matcher::FuzzyMatcher;
 
 use super::state::CalculatorResult;
 use super::types::{InlineProvider, InlineResult, InlineRow};
-use crate::ui::get_history_cache_path;
+use crate::ui::{get_history_cache_path, get_last_query_cache_path};
 use crate::{RaffiConfig, SortMode};
 
 #[derive(Debug, Clone)]
@@ -391,6 +391,22 @@ pub(super) fn save_history(history: &[String]) {
         let content = history.join("\n");
         if let Err(error) = fs::write(&path, content) {
             eprintln!("Warning: Failed to save history to {:?}: {}", path, error);
+        }
+    }
+}
+
+/// Keep the raw text so a later `--last-query` can restore a mode keyword
+/// with its trailing space, such as `clip `.
+pub(super) fn save_last_query(query: &str) {
+    if query.trim().is_empty() {
+        return;
+    }
+    if let Ok(path) = get_last_query_cache_path() {
+        if let Err(error) = fs::write(&path, query) {
+            eprintln!(
+                "Warning: Failed to save last query to {:?}: {}",
+                path, error
+            );
         }
     }
 }

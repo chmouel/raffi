@@ -3654,7 +3654,7 @@ fn test_clipboard_routing_and_suggestion() {
 }
 
 #[test]
-fn test_clipboard_queries_stay_out_of_history_and_logs() {
+fn test_clipboard_queries_are_saved_in_history_but_not_logged() {
     let addons = clipboard_addons();
     assert_eq!(
         loggable_query("clip my password", &addons),
@@ -3663,10 +3663,12 @@ fn test_clipboard_queries_stay_out_of_history_and_logs() {
     assert_eq!(loggable_query(" firefox ", &addons), "firefox");
 
     let mut app = test_app(addons);
-    let before = app.history.items.clone();
     open_clipboard(&mut app, "clip my password");
     app.save_query_to_history();
-    assert_eq!(app.history.items, before);
+    assert_eq!(
+        app.history.items.last().map(String::as_str),
+        Some("clip my password")
+    );
 }
 
 #[test]
@@ -4807,20 +4809,16 @@ fn test_system_logout_default_follows_session() {
 }
 
 #[test]
-fn test_vault_queries_are_saved_in_history_but_not_logged() {
+fn test_vault_queries_are_not_logged() {
     let addons = AddonsConfig::default();
     for query in ["bw github", "pass web/github"] {
-        let class = classify_query(query, &addons);
-        assert!(class.saved_in_history(), "{query}");
         assert_eq!(loggable_query(query, &addons), "<redacted>");
     }
-    assert!(!classify_query("sys reboot", &addons).saved_in_history());
-    assert!(!classify_query("clip secret", &clipboard_addons()).saved_in_history());
-    assert!(classify_query("firefox", &addons).saved_in_history());
+    assert_eq!(loggable_query("firefox", &addons), "firefox");
 }
 
 #[test]
-fn test_system_queries_stay_out_of_history_and_logs() {
+fn test_system_queries_are_saved_in_history_but_not_logged() {
     let addons = AddonsConfig::default();
     assert_eq!(loggable_query("sys reboot", &addons), "<redacted>");
     assert!(classify_query("sys reboot", &addons).sensitive);
@@ -4828,10 +4826,12 @@ fn test_system_queries_stay_out_of_history_and_logs() {
     let mut app = test_app(addons);
     open_system(&mut app, "sys lock");
     app.history.max_items = 10;
-    let before = app.history.items.clone();
     let _ = app.update(Message::Submit);
     app.save_query_to_history();
-    assert_eq!(app.history.items, before);
+    assert_eq!(
+        app.history.items.last().map(String::as_str),
+        Some("sys lock")
+    );
 }
 
 #[test]
@@ -4977,10 +4977,12 @@ fn test_windows_load_then_filter_and_focus() {
         deferred_action(&app),
         Some(DeferredAction::Hypr(HyprAction::Focus { address })) if address == "0xa1"
     ));
-    let before = app.history.items.clone();
     app.history.max_items = 10;
     app.save_query_to_history();
-    assert_eq!(app.history.items, before);
+    assert_eq!(
+        app.history.items.last().map(String::as_str),
+        Some("win fire")
+    );
 }
 
 #[test]
@@ -5636,10 +5638,12 @@ fn test_media_action_keeps_raffi_open_and_refreshes() {
     let task = app.update(Message::Submit);
     assert!(task.units() > 0, "Next can be pressed again");
 
-    let before = app.history.items.clone();
     app.history.max_items = 10;
     app.save_query_to_history();
-    assert_eq!(app.history.items, before);
+    assert_eq!(
+        app.history.items.last().map(String::as_str),
+        Some("media mpv next")
+    );
 }
 
 #[test]
@@ -6063,7 +6067,6 @@ fn test_terminal_runs_the_query_and_keeps_it_in_history() {
 
     let _ = app.update(Message::SearchChanged("> htop -d 5".into()));
     assert_eq!(command_list_titles(&app), vec!["Run htop -d 5"]);
-    assert!(app.query_class.saved_in_history());
     let task = app.update(Message::Submit);
     assert!(task.units() > 0, "Raffi closes");
     assert_eq!(
@@ -6241,7 +6244,7 @@ fn test_generator_queries_classify_as_sensitive() {
 }
 
 #[test]
-fn test_password_row_keeps_launchers_and_stays_out_of_history() {
+fn test_password_row_keeps_launchers_and_saves_the_query_in_history() {
     let mut app = devtools_app();
     let _ = app.update(Message::SearchChanged("pw".into()));
     let inline = app.inline_result.as_ref().expect("password row");
@@ -6263,7 +6266,7 @@ fn test_password_row_keeps_launchers_and_stays_out_of_history() {
     assert_eq!(longer.chars().count(), 32);
     assert_ne!(longer, &password);
 
-    // Launching the app under the generator row saves nothing either.
+    // Launching the app under the generator row keeps the query in history.
     let _ = app.update(Message::SearchChanged("pw".into()));
     let _ = app.update(Message::MoveDown);
     let _ = app.update(Message::Submit);
@@ -6271,7 +6274,7 @@ fn test_password_row_keeps_launchers_and_stays_out_of_history() {
         app.selected_item.lock().unwrap().as_deref(),
         Some("pwvucontrol")
     );
-    assert_eq!(app.history.items, ["older"]);
+    assert_eq!(app.history.items, ["older", "pw"]);
 }
 
 #[test]
@@ -6293,7 +6296,7 @@ fn test_uuid_row_copies_through_checked_copy() {
 
     let task = app.update(Message::InlineCopied(app.inline_generation, Ok(())));
     assert!(task.units() > 0);
-    assert_eq!(app.history.items, ["older"]);
+    assert_eq!(app.history.items, ["older", "uuid"]);
 }
 
 fn fake_hash_command(script: &str) -> Option<Vec<String>> {
@@ -6401,12 +6404,13 @@ fn test_devtools_rows_hash_asynchronously_and_drop_stale_results() {
         .iter()
         .all(|row| row.value == super::devtools::HASH_PENDING));
 
-    // Enter copies the selected result; the query never reaches history.
+    // Enter copies the selected result; the devtools query reaches history
+    // but not the debug log.
     let _ = app.update(Message::Submit);
     assert!(app.in_flight.is_pending("inline-copy", ""));
     let task = app.update(Message::InlineCopied(app.inline_generation, Ok(())));
     assert!(task.units() > 0);
-    assert_eq!(app.history.items, ["older"]);
+    assert_eq!(app.history.items, ["older", "dev hj"]);
 
     // Leaving the mode clears its rows.
     let _ = app.update(Message::SearchChanged("fire".into()));
@@ -6590,9 +6594,11 @@ fn test_kill_missing_program_and_history() {
 
     let mut app = kill_app("kill firefox");
     app.history.max_items = 10;
-    let before = app.history.items.clone();
     app.save_query_to_history();
-    assert_eq!(app.history.items, before);
+    assert_eq!(
+        app.history.items.last().map(String::as_str),
+        Some("kill firefox")
+    );
 }
 
 fn bluetooth_app(query: &str, powered: bool) -> LauncherApp {
@@ -6813,9 +6819,11 @@ fn test_bluetooth_missing_program_and_history() {
 
     let mut app = bluetooth_app("bt buds", true);
     app.history.max_items = 10;
-    let before = app.history.items.clone();
     app.save_query_to_history();
-    assert_eq!(app.history.items, before);
+    assert_eq!(
+        app.history.items.last().map(String::as_str),
+        Some("bt buds")
+    );
 }
 
 fn file_preview_app(command: Option<&str>) -> (LauncherApp, String, String, std::path::PathBuf) {
@@ -10355,6 +10363,11 @@ fn test_bookmarks_search_prompt_asks_for_the_term() {
 
     let _ = app.update(Message::CommandListSelected(0));
     assert!(app.bookmarks.prompt.is_some());
+    assert_eq!(
+        app.bookmarks.prompt.as_ref().unwrap().last_query_context,
+        "bm nixsearch",
+        "a row filter is not the query that reopens the prompt"
+    );
     assert_eq!(app.cycle_view_label(), None, "Ctrl+Tab does nothing here");
     assert_eq!(
         command_list_titles(&app),
@@ -10366,6 +10379,13 @@ fn test_bookmarks_search_prompt_asks_for_the_term() {
     assert!(app.bookmarks.prompt.is_some());
 
     let _ = app.update(Message::SearchChanged("mk shell".into()));
+    assert_eq!(
+        LauncherApp::prompt_last_query(
+            &app.bookmarks.prompt.as_ref().unwrap().last_query_context,
+            "mk shell"
+        ),
+        "bm nixsearch mk shell"
+    );
     assert_eq!(
         command_list_titles(&app),
         ["Search Nix code search for 'mk shell'"]
@@ -10405,11 +10425,33 @@ fn test_bookmarks_search_prompt_leaves_on_escape_and_backspace() {
 }
 
 #[test]
+fn test_bookmarks_prompt_last_query_keeps_the_keyword_and_trailing_space() {
+    assert_eq!(
+        LauncherApp::prompt_last_query("bm nixsearch", "flake"),
+        "bm nixsearch flake"
+    );
+    assert_eq!(
+        LauncherApp::prompt_last_query("bm nixsearch", ""),
+        "bm nixsearch "
+    );
+    assert_eq!(
+        LauncherApp::prompt_last_query("nixsearch", "nixpkgs"),
+        "nixsearch nixpkgs"
+    );
+    assert_eq!(
+        LauncherApp::prompt_last_query("", "flake"),
+        "flake",
+        "a prompt opened from a row has no keyword context"
+    );
+}
+
+#[test]
 fn test_bookmarks_keyword_opens_the_search_prompt() {
     let mut app = bookmarks_app("bm ");
     let _ = app.update(Message::SearchChanged("bm nixsearch flake".into()));
     let prompt = app.bookmarks.prompt.as_ref().expect("the prompt");
     assert_eq!(prompt.term, "flake");
+    assert_eq!(prompt.last_query_context, "bm nixsearch");
     assert_eq!(
         command_list_titles(&app),
         ["Search Nix code search for 'flake'"]
@@ -10433,7 +10475,14 @@ fn test_main_view_bookmark_keyword_opens_the_search_prompt() {
     *app.bookmark_searches.lock().unwrap() = std::mem::take(&mut index);
 
     let _ = app.update(Message::SearchChanged("nixsearch nixpkgs".into()));
-    assert_eq!(app.bookmarks.prompt.as_ref().unwrap().term, "nixpkgs");
+    let prompt = app.bookmarks.prompt.as_ref().unwrap();
+    assert_eq!(prompt.term, "nixpkgs");
+    assert_eq!(prompt.last_query_context, "nixsearch");
+    assert_eq!(
+        LauncherApp::prompt_last_query(&prompt.last_query_context, &prompt.term),
+        "nixsearch nixpkgs",
+        "the main-view keyword stays the last query"
+    );
     let _ = app.update(Message::Submit);
     assert!(matches!(
         deferred_action(&app),
@@ -10448,6 +10497,18 @@ fn test_main_view_bookmark_keyword_opens_the_search_prompt() {
     *app.bookmark_searches.lock().unwrap() = super::bookmarks::SearchIndex::new(&library);
     let _ = app.update(Message::SearchChanged("bm nix".into()));
     assert!(app.bookmarks.prompt.is_none());
+
+    // Opening that bookmark's row still saves a query that reaches the
+    // prompt rather than the `bm` list.
+    let _ = app
+        .open_main_view_bookmark_search("bookmark:firefox:abc.default:o2")
+        .expect("the search prompt");
+    let prompt = app.bookmarks.prompt.as_ref().unwrap();
+    assert_eq!(prompt.last_query_context, "bm bm");
+    assert_eq!(
+        LauncherApp::prompt_last_query(&prompt.last_query_context, "flake"),
+        "bm bm flake"
+    );
 }
 
 #[test]

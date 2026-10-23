@@ -1989,6 +1989,8 @@ pub struct Args {
     pub app_name: Option<String>,
     #[options(help = "initial search query", short = "i")]
     pub initial_query: Option<String>,
+    #[options(help = "print the last search query typed in Raffi and exit", no_short)]
+    pub last_query: bool,
     #[options(
         help = "activate the only selectable result for a non-empty initial query",
         short = "1"
@@ -4160,6 +4162,13 @@ pub fn run(args: Args) -> Result<()> {
         return Ok(());
     }
 
+    if args.last_query {
+        if let Some(query) = ui::read_last_query() {
+            println!("{query}");
+        }
+        return Ok(());
+    }
+
     if args.install_browser_host || args.uninstall_browser_host {
         return browser_host::manifest_command(args.uninstall_browser_host, args.force);
     }
@@ -4708,6 +4717,7 @@ mod tests {
             ui_type: None,
             app_name: None,
             initial_query: None,
+            last_query: false,
             select_1: false,
             theme: None,
             opacity: None,
@@ -4792,6 +4802,7 @@ mod tests {
             ui_type: None,
             app_name: None,
             initial_query: None,
+            last_query: false,
             select_1: false,
             theme: None,
             opacity: None,
@@ -4878,6 +4889,7 @@ mod tests {
             ui_type: None,
             app_name: None,
             initial_query: None,
+            last_query: false,
             select_1: false,
             theme: None,
             opacity: None,
@@ -5035,6 +5047,7 @@ mod tests {
             ui_type: None,
             app_name: None,
             initial_query: None,
+            last_query: false,
             select_1: false,
             theme: None,
             opacity: None,
@@ -5136,6 +5149,7 @@ mod tests {
             ui_type: None,
             app_name: None,
             initial_query: None,
+            last_query: false,
             select_1: false,
             theme: None,
             opacity: None,
@@ -5338,6 +5352,7 @@ mod tests {
             ui_type: None,
             app_name: None,
             initial_query: None,
+            last_query: false,
             select_1: false,
             theme: None,
             opacity: None,
@@ -5381,6 +5396,7 @@ mod tests {
             ui_type: None,
             app_name: None,
             initial_query: None,
+            last_query: false,
             select_1: false,
             theme: None,
             opacity: None,
@@ -5460,6 +5476,7 @@ mod tests {
             ui_type: None,
             app_name: None,
             initial_query: None,
+            last_query: false,
             select_1: false,
             theme: None,
             opacity: None,
@@ -5505,6 +5522,7 @@ mod tests {
             ui_type: None,
             app_name: None,
             initial_query: None,
+            last_query: false,
             select_1: false,
             theme: None,
             opacity: None,
@@ -5546,6 +5564,7 @@ mod tests {
             ui_type: None,
             app_name: None,
             initial_query: None,
+            last_query: false,
             select_1: false,
             theme: None,
             opacity: None,
@@ -5620,6 +5639,12 @@ mod tests {
     fn test_app_name_flag_is_parsed() {
         let args = Args::parse_args_default::<&str>(&["--app-name", "org.example.raffi"]).unwrap();
         assert_eq!(args.app_name.as_deref(), Some("org.example.raffi"));
+    }
+
+    #[test]
+    fn test_last_query_flag_is_parsed() {
+        let args = Args::parse_args_default::<&str>(&["--last-query"]).unwrap();
+        assert!(args.last_query);
     }
 
     #[test]
@@ -5711,6 +5736,7 @@ mod tests {
             ui_type: None,
             app_name: None,
             initial_query: None,
+            last_query: false,
             select_1: false,
             theme: None,
             opacity: None,
@@ -5781,6 +5807,7 @@ mod tests {
             ui_type: None,
             app_name: None,
             initial_query: None,
+            last_query: false,
             select_1: false,
             theme: None,
             opacity: None,
@@ -5865,6 +5892,7 @@ mod tests {
             ui_type: None,
             app_name: None,
             initial_query: None,
+            last_query: false,
             select_1: false,
             theme: None,
             opacity: None,
@@ -5914,6 +5942,7 @@ mod tests {
             ui_type: None,
             app_name: None,
             initial_query: None,
+            last_query: false,
             select_1: false,
             theme: None,
             opacity: None,
@@ -5959,6 +5988,7 @@ mod tests {
             ui_type: None,
             app_name: None,
             initial_query: None,
+            last_query: false,
             select_1: false,
             theme: None,
             opacity: None,
@@ -6007,6 +6037,7 @@ mod tests {
                 ui_type: None,
                 app_name: None,
                 initial_query: None,
+                last_query: false,
                 select_1: false,
                 theme: None,
                 opacity: None,
@@ -6312,6 +6343,7 @@ shell:
             ui_type: None,
             app_name: None,
             initial_query: None,
+            last_query: false,
             select_1: false,
             theme: None,
             opacity: None,
@@ -6363,6 +6395,7 @@ shell:
             ui_type: None,
             app_name: None,
             initial_query: None,
+            last_query: false,
             select_1: false,
             theme: None,
             opacity: None,
@@ -6413,6 +6446,7 @@ shell:
             ui_type: None,
             app_name: None,
             initial_query: None,
+            last_query: false,
             select_1: false,
             theme: None,
             opacity: None,

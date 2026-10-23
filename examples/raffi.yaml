@@ -549,7 +549,7 @@ addons:
   # base64 and URL encoded or decoded, hashed (sha256sum, sha1sum, md5sum),
   # converted between epoch and date, JSON reformatted or case changed.
   # Typing "uuid", "pw" or "pw 32" shows a random UUID or password. Enter
-  # copies. None of these are saved in the search history.
+  # copies. Queries are saved in the search history when you run an action.
   # devtools:
   #   enabled: true
   #   trigger: dev

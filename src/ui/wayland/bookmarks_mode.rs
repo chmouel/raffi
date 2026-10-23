@@ -8,6 +8,7 @@ use std::sync::Arc;
 use iced::widget::operation::{focus, move_cursor_to_end};
 use iced::Task;
 
+use super::app::{classify_query, QueryMode};
 use super::bookmarks::{
     self, keyword_query, split_query, BookmarksState, Library, RowOptions, SearchIndex,
     SearchPrompt, SearchTarget,
@@ -15,6 +16,7 @@ use super::bookmarks::{
 use super::browser_data::off_thread;
 use super::command_list::CommandListAddon;
 use super::state::LauncherApp;
+use super::support::save_last_query;
 use super::types::Message;
 
 impl LauncherApp {
@@ -339,17 +341,37 @@ impl LauncherApp {
         term: &str,
         back: String,
     ) -> Task<Message> {
+        let context = self.search_prompt_context(&target);
         let mut tasks = Vec::new();
         if self.command_list.addon != Some(CommandListAddon::Bookmarks) {
             let trigger = self.addons.bookmarks.trigger();
             tasks.push(self.handle_search_changed(format!("{trigger} ")));
         }
         crate::debug_log!("bookmarks: searching with {}", target.identity);
-        self.bookmarks.prompt = Some(SearchPrompt::new(target, term, back));
+        self.bookmarks.prompt = Some(SearchPrompt::new(target, term, back, context.clone()));
+        save_last_query(&Self::prompt_last_query(&context, term));
         self.show_search_prompt();
         let input = self.view.search_input_id.clone();
         tasks.push(focus(input.clone()).chain(move_cursor_to_end(input)));
         Task::batch(tasks)
+    }
+
+    /// The keyword that reopens this prompt, without the list filter or
+    /// folder path it may have been opened from.
+    fn search_prompt_context(&self, target: &SearchTarget) -> String {
+        let Some(keyword) = target.keyword.as_deref() else {
+            return String::new();
+        };
+        if self.main_view_lists(CommandListAddon::Bookmarks)
+            && matches!(
+                classify_query(&format!("{keyword} "), &self.addons).mode,
+                QueryMode::Standard
+            )
+        {
+            keyword.to_string()
+        } else {
+            format!("{} {keyword}", self.addons.bookmarks.trigger())
+        }
     }
 
     /// Show the row of the term prompt, when one is open.
@@ -365,6 +387,19 @@ impl LauncherApp {
         true
     }
 
+    /// The text `--last-query` keeps for an edited term prompt.
+    pub(super) fn prompt_last_query(context: &str, term: &str) -> String {
+        if context.trim().is_empty() {
+            return term.to_string();
+        }
+        let mut query = context.to_string();
+        if !query.ends_with(|c: char| c.is_whitespace()) {
+            query.push(' ');
+        }
+        query.push_str(term);
+        query
+    }
+
     /// Typing in the term prompt; Backspace with no term leaves it.
     pub(super) fn handle_search_prompt_input(&mut self, term: String) -> Task<Message> {
         let Some(prompt) = self.bookmarks.prompt.as_mut() else {
@@ -373,7 +408,9 @@ impl LauncherApp {
         if term.is_empty() && prompt.term.is_empty() {
             return self.leave_search_prompt();
         }
+        let last_query = Self::prompt_last_query(&prompt.last_query_context, &term);
         prompt.term = term;
+        save_last_query(&last_query);
         self.show_search_prompt();
         Task::none()
     }

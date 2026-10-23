@@ -217,3 +217,18 @@ pub fn get_history_cache_path() -> Result<PathBuf> {
     path.set_file_name("history.cache");
     Ok(path)
 }
+
+/// Get the cache file holding the last query typed in Raffi.
+pub fn get_last_query_cache_path() -> Result<PathBuf> {
+    let mut path = get_mru_cache_path()?;
+    path.set_file_name("last-query.cache");
+    Ok(path)
+}
+
+/// The last query typed in Raffi's native UI, if one was recorded.
+pub fn read_last_query() -> Option<String> {
+    let path = get_last_query_cache_path().ok()?;
+    std::fs::read_to_string(path)
+        .ok()
+        .filter(|query| !query.trim().is_empty())
+}

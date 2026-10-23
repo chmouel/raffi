@@ -126,7 +126,8 @@ to copying.
 
 ## Privacy
 
-Clipboard queries are not saved in Raffi's search history. Debug logs show
+Clipboard queries are saved in Raffi's search history and in the last-query
+cache, so Alt+P and `--last-query` can bring them back. Debug logs still show
 `clip <redacted>` in place of the query. Previews are discarded when the
 window closes.
 

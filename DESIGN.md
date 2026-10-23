@@ -193,6 +193,7 @@ Current cache artifacts:
 - `icon.cache`: serialized icon-name to icon-path map
 - `mru.cache`: launch frequency and recency data
 - `history.cache`: prior search queries for native history navigation
+- `last-query.cache`: raw text of the last query typed, read by `--last-query`
 - `emoji/`: downloaded emoji datasets
 - `slack/`: Slack directory, view and preview caches
 - `script-filters/lists/` and `script-filters/previews/`: opt-in

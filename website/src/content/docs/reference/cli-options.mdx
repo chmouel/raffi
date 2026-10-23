@@ -150,6 +150,19 @@ Pre-fill the search field with an initial query.
   raffi -i firefox
   ```
 
+**`--last-query`** `boolean` (default: `false`)
+
+Print the last query typed in Raffi's search box and exit. Raffi's own window
+records the raw text each time the query changes, so addon modes such as
+`clip ` and script filters are included, and a script gets the exact keyword
+and trailing space back. Nothing is printed when no query has been recorded
+yet. Fuzzel does its own search and cannot record the typed query.
+
+  ```bash
+  raffi --last-query
+  raffi -i "$(raffi --last-query)"
+  ```
+
 **`-1, --select-1`** `boolean` (default: `false`)
 
 With a non-empty `--initial-query`, automatically activate the only selectable

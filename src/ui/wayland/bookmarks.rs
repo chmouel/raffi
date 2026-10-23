@@ -214,6 +214,8 @@ pub(super) fn keyword_query(text: &str) -> Option<(&str, &str)> {
 pub(super) struct SearchTarget {
     /// The identity of the bookmark row.
     pub identity: String,
+    /// The bookmark's keyword, when it has one.
+    pub keyword: Option<String>,
     pub title: String,
     pub url: String,
     pub source: String,
@@ -243,6 +245,7 @@ impl SearchIndex {
                     identity.clone(),
                     SearchTarget {
                         identity,
+                        keyword: bookmark.keyword.clone(),
                         title: title(bookmark),
                         url: bookmark.url.clone(),
                         source: source.label.clone(),
@@ -279,16 +282,20 @@ pub(super) struct SearchPrompt {
     pub term: String,
     /// The query shown again when the prompt is left.
     pub back: String,
+    /// The keyword context used for `--last-query`; unlike `back`, this
+    /// reopens the prompt instead of filtering the list it was opened from.
+    pub last_query_context: String,
     pub placeholder: String,
 }
 
 impl SearchPrompt {
-    pub fn new(target: SearchTarget, term: &str, back: String) -> Self {
+    pub fn new(target: SearchTarget, term: &str, back: String, last_query_context: String) -> Self {
         Self {
             placeholder: format!("Search {}…", target.title),
             target,
             term: term.to_string(),
             back,
+            last_query_context,
         }
     }
 
@@ -1288,6 +1295,7 @@ mod tests {
         let index = SearchIndex::new(&library);
         let target = index.keyword("NIXSEARCH").unwrap();
         assert_eq!(target.identity, "bookmark:firefox:abc.default:o2");
+        assert_eq!(target.keyword.as_deref(), Some("nixsearch"));
         assert!(index.get("bookmark:brave:Default:b2").is_some());
         assert!(index.get("bookmark:firefox:abc.default:o1").is_none());
         assert!(index.keyword("recipes").is_none());
@@ -1297,7 +1305,8 @@ mod tests {
     fn test_search_prompt_asks_for_a_term_then_opens_or_copies_the_expanded_url() {
         let index = SearchIndex::new(&fixture_library());
         let target = index.keyword("nixsearch").unwrap().clone();
-        let mut prompt = SearchPrompt::new(target, " ", "bm ".to_string());
+        let mut prompt =
+            SearchPrompt::new(target, " ", "bm ".to_string(), "bm nixsearch".to_string());
         assert_eq!(prompt.placeholder, "Search Nix code search…");
         let items = prompt.items(OPTIONS);
         assert_eq!(items[0].title, "Type what to search Nix code search for");

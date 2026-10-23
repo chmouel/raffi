@@ -52,7 +52,7 @@ use super::state::{
 };
 use super::support::{
     calculator_inline_result, fuzzy_match_configs, load_history, load_mru_map, mru_bounds,
-    mru_sort_key, record_mru_use, save_history, save_mru_map, try_evaluate_math,
+    mru_sort_key, record_mru_use, save_history, save_last_query, save_mru_map, try_evaluate_math,
 };
 use super::system::system_entries;
 use super::types::InlineProvider;
@@ -170,8 +170,7 @@ impl std::fmt::Debug for QueryMode {
 }
 
 /// How a query is handled, worked out before anything filters or logs it.
-/// `sensitive` queries stay out of debug logs, and out of search history
-/// unless [`QueryClass::saved_in_history`] lets them in.
+/// `sensitive` queries stay out of debug logs; search history keeps every query.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct QueryClass {
     pub mode: QueryMode,
@@ -190,19 +189,6 @@ impl Default for QueryClass {
 }
 
 impl QueryClass {
-    /// pass and Bitwarden queries are saved: they only filter entry names,
-    /// and secrets never reach the query.
-    pub(super) fn saved_in_history(&self) -> bool {
-        match &self.mode {
-            QueryMode::CommandList { addon, .. } if VaultAddon::of(*addon).is_some() => true,
-            QueryMode::CommandList {
-                addon: CommandListAddon::Terminal,
-                ..
-            } => true,
-            _ => !self.sensitive,
-        }
-    }
-
     /// The query as it may appear in debug logs.
     pub(super) fn loggable_query(&self, query: &str, addons: &AddonsConfig) -> String {
         match &self.mode {
@@ -1882,6 +1868,10 @@ impl LauncherApp {
         } else {
             (query, None)
         };
+
+        if !self.history.search_in_progress && !self.view.help_active {
+            save_last_query(&query);
+        }
 
         if self.select_1_query.is_some() {
             if self.select_1_query.as_deref() == Some(query.as_str()) && !self.view.help_active {
@@ -5659,11 +5649,8 @@ impl LauncherApp {
     }
 
     pub(super) fn save_query_to_history(&mut self) {
-        if !self.query_class.saved_in_history() {
-            return;
-        }
-        let query = self.search_query.trim().to_string();
-        if !query.is_empty() && self.history.max_items > 0 {
+        let query = self.search_query.clone();
+        if !query.trim().is_empty() && self.history.max_items > 0 {
             self.history.items.retain(|item| item != &query);
             self.history.items.push(query);
             if self.history.items.len() > self.history.max_items as usize {
