@@ -526,8 +526,6 @@ fn scrollable_style(
 /// Opacity of rows drawn dimmed, such as muted Slack conversations.
 const DIMMED_OPACITY: f32 = 0.45;
 
-const PINNED_BADGE: &str = "Pinned";
-
 /// `title` led by a pin for pinned browser tabs.
 fn pinned_title(title: &str, pinned: bool) -> String {
     if pinned {
@@ -1256,9 +1254,6 @@ impl LauncherApp {
                             .color(t.text_muted),
                     );
                 badges.extend(item.badge.clone());
-                if item.pinned {
-                    badges.push(PINNED_BADGE.to_string());
-                }
                 badges.extend(list.addon.map(|addon| addon.badge().to_string()));
             }
             MainViewSource::Snippets {
@@ -2529,8 +2524,7 @@ impl LauncherApp {
                 } else {
                     t.accent
                 };
-                let pinned = item.pinned.then(|| PINNED_BADGE.to_string());
-                for badge in notes.iter().chain(&item.badge).chain(&pinned) {
+                for badge in notes.iter().chain(&item.badge) {
                     item_row =
                         item_row.push(tinted_badge_pill(badge.clone(), badge_color, fs.subtitle));
                 }

@@ -152,7 +152,7 @@ pub(super) struct CommandItem {
     /// Section heading drawn above a run of rows sharing it while nothing
     /// is typed, such as the browser of a tab.
     pub group: Option<RowGroup>,
-    /// A pinned browser tab, marked with a pin and a "Pinned" pill.
+    /// A pinned browser tab, marked with a pin before its title.
     pub pinned: bool,
 }
 
