@@ -1152,6 +1152,7 @@ impl LauncherApp {
                 },
                 devtools: DevtoolsState::default(),
                 slack: Default::default(),
+                server: Default::default(),
                 bookmarks: Default::default(),
                 bookmark_searches: Default::default(),
                 browser_history: Default::default(),
@@ -1735,6 +1736,14 @@ impl LauncherApp {
                 self.handle_clipboard_action_done(session, result)
             }
             Message::ClipboardRefresh => self.handle_refresh(),
+            Message::CacheServerStatus(info) => self.handle_cache_server_status(info),
+            Message::ServerRefresh(all) => self.handle_server_refresh(all),
+            Message::ServerRefreshDone(token, result) => {
+                self.handle_server_refresh_done(token, result)
+            }
+            Message::ServerHistoryReloaded(session, key, library) => {
+                self.handle_server_history_reloaded(session, key, library)
+            }
             Message::DeleteSelected if self.clipboard.active => self.handle_clipboard_delete(),
             Message::DeleteSelected => self.handle_command_list_close(),
             Message::WindowsChanged => self.handle_windows_changed(),
@@ -1843,6 +1852,7 @@ impl LauncherApp {
         if self.view.current_modifiers.alt() && !self.history.search_in_progress {
             return Task::none();
         }
+        self.server.notice = None;
 
         let fido = self.addons.file_browser.enabled
             && self.addons.file_browser.fido_style
@@ -2360,7 +2370,7 @@ impl LauncherApp {
         }
     }
 
-    fn handle_script_filter_query(
+    pub(super) fn handle_script_filter_query(
         &mut self,
         config_index: usize,
         query: String,
@@ -3341,7 +3351,7 @@ impl LauncherApp {
         )
     }
 
-    fn handle_command_list_loaded(
+    pub(super) fn handle_command_list_loaded(
         &mut self,
         generation: u64,
         result: Result<Vec<super::command_list::CommandItem>, String>,

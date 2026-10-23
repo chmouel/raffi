@@ -204,11 +204,15 @@ impl LauncherApp {
 
     /// Re-fetch the current Slack view and its previews from Slack.
     pub(super) fn refresh_slack(&mut self) -> Task<Message> {
+        self.mark_slack_previews_stale();
+        self.load_slack(true).chain(self.ensure_slack_preview())
+    }
+
+    pub(super) fn mark_slack_previews_stale(&mut self) {
         self.slack
             .stale_previews
             .extend(self.command_list.previews.keys().cloned());
         self.command_list.preview_inflight = None;
-        self.load_slack(true).chain(self.ensure_slack_preview())
     }
 
     /// Show the cached rows, if any, while loading the fresh ones.

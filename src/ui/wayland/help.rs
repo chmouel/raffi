@@ -405,6 +405,26 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             "Reloads the current list, search, or directory",
         ),
     ];
+    let server_cached = addons.slack.enabled
+        || addons.browser_history.enabled
+        || addons
+            .script_filters
+            .iter()
+            .any(|config| config.cache_ttl().is_some());
+    if server_cached {
+        entries.extend([
+            shortcut(
+                "F5",
+                "Server refresh",
+                "With raffi --cache-daemon: re-fetches Slack, browser history or a cached Script Filter",
+            ),
+            shortcut(
+                "Ctrl+Shift+F5",
+                "Server refresh all",
+                "With raffi --cache-daemon: re-fetches every source the service caches",
+            ),
+        ]);
+    }
     let file_browser = &addons.file_browser;
     if file_browser.enabled {
         entries.extend([

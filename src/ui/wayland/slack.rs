@@ -1843,6 +1843,12 @@ pub(super) fn load_home(
     if let Some(account) = account.filter(|_| answered || badges.is_some()) {
         slack_api::write_cache(slack_api::LIVE_FILE, account, &live);
     }
+    // cached_home orders and badges Home from this file.
+    if let (Some(account), Some(unread)) = (account, &unread) {
+        let mut stored = unread.clone();
+        sort_unread(&mut stored);
+        slack_api::write_cache(slack_api::UNREAD_FILE, account, &stored);
+    }
     let mut rows = home_list(&directory, &live, unread.as_deref(), config.open_in);
     if let Some(muted) = muted {
         dim_muted_home_rows(&mut rows, &directory, &muted);

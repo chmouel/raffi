@@ -34,6 +34,7 @@ mod preview;
 mod recent;
 mod script_filters;
 mod secret_io;
+mod server_refresh;
 mod slack;
 mod slack_api;
 mod slack_emoji;
@@ -292,7 +293,10 @@ fn run_wayland_ui(
             if show_tips {
                 app.show_search_tip();
             }
-            (app, Task::batch([task, preload]))
+            let server = Task::perform(browser_data::off_thread(cache::probe), |info| {
+                types::Message::CacheServerStatus(info.flatten())
+            });
+            (app, Task::batch([task, preload, server]))
         },
         LauncherApp::update,
         LauncherApp::view,

@@ -69,7 +69,9 @@ addons:
 so these queries are already fresh when Raffi opens. `warm_interval_seconds`
 defaults to `cache_seconds`. Pressing Ctrl+R runs the script again with
 `RAFFI_REFRESH=1` in its environment, which the bundled GitHub script uses to
-bypass the `gh` CLI cache and fetch live state.
+bypass the `gh` CLI cache and fetch live state. When the cache service is
+running, F5 asks it to do the same refresh and Raffi reads the new snapshot
+it writes.
 
 Cached item lists and dynamic previews live under
 `$XDG_CACHE_HOME/raffi/script-filters/`. `raffi --refresh-cache` removes them.

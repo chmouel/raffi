@@ -279,6 +279,27 @@ behind your back: run it from a terminal or a user service such as
   snapshots directly, so cached rows still show immediately; only the
   periodic warming while Raffi is closed is lost.
 
+  When Raffi opens and finds the service running, the footer shows
+  `server`. On a Slack view, browser history or a Script Filter with
+  `cache_seconds`, it shows `F5 server refresh` instead: F5 asks the
+  service to fetch that source again, waits for it, and reloads the list
+  from the new snapshot. Ctrl+Shift+F5 does the same for every source the
+  service caches, from any view, and has no footer hint.
+
+  The footer warns `server config differs, restart it` when the service
+  was started with a different addons configuration, and
+  `server outdated, restart it` when it comes from an older Raffi. F5 is
+  disabled in the second case. If the service stops while Raffi is open,
+  F5 shows `server not reachable`.
+
+  The service prints a line to its output each time F5 or Ctrl+Shift+F5
+  asks for a refresh, then another with how long it took or why it failed:
+
+  ```text
+  raffi: refreshing slack:unread
+  raffi: refreshed slack:unread in 0.7s
+  ```
+
 
 ## Examples
 

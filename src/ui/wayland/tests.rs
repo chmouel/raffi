@@ -2072,6 +2072,8 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "Ctrl+K",
             "Ctrl+P",
             "Ctrl+R",
+            "F5",
+            "Ctrl+Shift+F5",
             "Ctrl+H",
             "Ctrl+O",
             "Ctrl+B",
@@ -10810,4 +10812,283 @@ fn test_main_view_lists_browser_history_and_opens_pages() {
         deferred_action(&app),
         Some(DeferredAction::Command(argv)) if argv == ["firefox", "https://github.com/chmouel/raffi?utm_source=news"]
     ));
+}
+
+fn connect_server(app: &mut LauncherApp) {
+    let info = super::cache::ServerInfo {
+        protocol: super::cache::PROTOCOL,
+        config_digest: super::cache::addons_digest(&app.addons),
+    };
+    let _ = app.update(Message::CacheServerStatus(Some(info)));
+}
+
+fn server_hint_labels(app: &LauncherApp) -> Vec<String> {
+    app.server_hints()
+        .into_iter()
+        .map(|hint| format!("{}{}", hint.key.unwrap_or_default(), hint.label))
+        .collect()
+}
+
+fn slack_unread_app() -> LauncherApp {
+    let mut addons = AddonsConfig::default();
+    addons.slack.enabled = true;
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+    let _ = app.update(Message::SearchChanged("slack unread ".into()));
+    let generation = app.command_list.generation;
+    let rows = vec![super::command_list::CommandItem::info(
+        "slack:unread:C1:1.0",
+        "#general".into(),
+        "icon",
+    )];
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(rows)));
+    app
+}
+
+#[test]
+fn test_f5_maps_only_bare_and_ctrl_shift() {
+    use super::view::server_refresh_message;
+    use iced::keyboard::Modifiers;
+    assert!(matches!(
+        server_refresh_message(Modifiers::empty()),
+        Some(Message::ServerRefresh(false))
+    ));
+    assert!(matches!(
+        server_refresh_message(Modifiers::CTRL | Modifiers::SHIFT),
+        Some(Message::ServerRefresh(true))
+    ));
+    assert!(server_refresh_message(Modifiers::CTRL).is_none());
+    assert!(server_refresh_message(Modifiers::SHIFT).is_none());
+}
+
+#[test]
+fn test_f5_does_nothing_without_server() {
+    let mut app = slack_unread_app();
+    let generation = app.command_list.generation;
+    for all in [false, true] {
+        let task = app.update(Message::ServerRefresh(all));
+        assert_eq!(task.units(), 0);
+    }
+    assert_eq!(app.command_list.generation, generation);
+    assert!(app.server_hints().is_empty(), "no hint without a server");
+}
+
+#[test]
+fn test_f5_refreshes_slack_through_server_and_keeps_rows_on_failure() {
+    let mut app = slack_unread_app();
+    assert!(
+        !app.offers_f5(),
+        "without the server the footer keeps Ctrl+R"
+    );
+    connect_server(&mut app);
+    assert!(app.offers_f5());
+    assert_eq!(server_hint_labels(&app), vec!["F5 server refresh"]);
+
+    let generation = app.command_list.generation;
+    let task = app.update(Message::ServerRefresh(false));
+    assert!(task.units() > 0);
+    assert_eq!(
+        app.command_list.generation, generation,
+        "the list is left alone until the server replies"
+    );
+    assert_eq!(command_list_titles(&app), vec!["#general"]);
+    assert_eq!(server_hint_labels(&app), vec!["server refreshing…"]);
+    let token = app.server.token;
+
+    // A second F5 while the server works is ignored.
+    assert_eq!(app.update(Message::ServerRefresh(false)).units(), 0);
+    // A reply for another refresh is ignored.
+    let _ = app.update(Message::ServerRefreshDone(token + 1, Ok(())));
+    assert!(app.server.pending.is_some());
+
+    let _ = app.update(Message::ServerRefreshDone(
+        token,
+        Err(super::cache::CallError::Failed("token revoked".into())),
+    ));
+    assert!(!app.command_list.refreshing);
+    assert_eq!(command_list_titles(&app), vec!["#general"]);
+    assert_eq!(
+        server_hint_labels(&app),
+        vec!["server: token revoked", "F5 server refresh"]
+    );
+
+    let _ = app.update(Message::ServerRefresh(false));
+    let _ = app.update(Message::ServerRefreshDone(
+        app.server.token,
+        Err(super::cache::CallError::Unreachable),
+    ));
+    assert!(app.server.info.is_none());
+    assert_eq!(server_hint_labels(&app), vec!["server not reachable"]);
+    assert!(!app.offers_f5());
+    assert_eq!(app.update(Message::ServerRefresh(false)).units(), 0);
+}
+
+#[test]
+fn test_server_refresh_leaves_a_pending_load_alone() {
+    let mut addons = AddonsConfig::default();
+    addons.slack.enabled = true;
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+    let _ = app.update(Message::SearchChanged("slack unread ".into()));
+    connect_server(&mut app);
+    assert!(app.command_list.loading);
+    let generation = app.command_list.generation;
+
+    for (all, result) in [
+        (
+            false,
+            Err(super::cache::CallError::Failed("offline".into())),
+        ),
+        (true, Ok(())),
+    ] {
+        assert!(app.update(Message::ServerRefresh(all)).units() > 0);
+        assert_eq!(app.command_list.generation, generation);
+        let _ = app.update(Message::ServerRefreshDone(app.server.token, result));
+        assert!(app.command_list.loading);
+        assert_eq!(app.command_list.generation, generation);
+    }
+
+    let rows = vec![super::command_list::CommandItem::info(
+        "slack:unread:C1:1.0",
+        "#general".into(),
+        "icon",
+    )];
+    let _ = app.update(Message::CommandListLoaded(generation, Ok(rows)));
+    assert_eq!(command_list_titles(&app), vec!["#general"]);
+}
+
+#[test]
+fn test_f5_on_browser_history_survives_a_filter_change() {
+    let mut app = browser_history_app("hist ");
+    connect_server(&mut app);
+    assert!(app.update(Message::ServerRefresh(false)).units() > 0);
+
+    // Filtering while the server works rebuilds the rows.
+    let _ = app.update(Message::SearchChanged("hist site:github.com".into()));
+    let session = app.browser_history.session;
+    let generation = app.browser_history.search_generation;
+    let _ = app.update(Message::BrowserHistorySearchDue(session, generation));
+    assert_eq!(command_list_titles(&app), ["Raffi"]);
+
+    let task = app.update(Message::ServerRefreshDone(app.server.token, Ok(())));
+    assert!(task.units() > 0, "the fresh snapshot is read again");
+    let key = app.browser_history.active_group().unwrap().key.clone();
+    let _ = app.update(Message::ServerHistoryReloaded(
+        app.command_list.session,
+        key.clone(),
+        Some(Arc::new(super::browser_history::fixture_group_library(
+            "Brave",
+        ))),
+    ));
+    assert_eq!(
+        command_list_titles(&app),
+        ["Raffi on GitHub"],
+        "the fresh rows keep the filter"
+    );
+
+    // A reload for a list that is gone is dropped.
+    let _ = app.update(Message::ServerHistoryReloaded(
+        app.command_list.session.wrapping_add(1),
+        key,
+        Some(Arc::new(super::browser_history::fixture_group_library(
+            "Firefox",
+        ))),
+    ));
+    assert_eq!(command_list_titles(&app), ["Raffi on GitHub"]);
+}
+
+#[test]
+fn test_ctrl_shift_f5_refreshes_everything_from_any_view() {
+    let mut addons = AddonsConfig::default();
+    addons.kill.enabled = true;
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+    let _ = app.update(Message::SearchChanged("kill ".into()));
+    connect_server(&mut app);
+    assert_eq!(server_hint_labels(&app), vec!["server"]);
+
+    assert_eq!(
+        app.update(Message::ServerRefresh(false)).units(),
+        0,
+        "the process list is not cached by the server"
+    );
+    assert!(app.update(Message::ServerRefresh(true)).units() > 0);
+    let token = app.server.token;
+    let _ = app.update(Message::ServerRefreshDone(token, Ok(())));
+    assert_eq!(server_hint_labels(&app), vec!["server refreshed"]);
+    assert!(server_hint_labels(&app)
+        .iter()
+        .all(|label| !label.contains("Ctrl+Shift+F5")));
+
+    let _ = app.update(Message::SearchChanged("kill a".into()));
+    assert_eq!(server_hint_labels(&app), vec!["server"]);
+}
+
+#[test]
+fn test_f5_needs_a_current_server() {
+    let mut app = slack_unread_app();
+    let _ = app.update(Message::CacheServerStatus(Some(super::cache::ServerInfo {
+        protocol: 0,
+        config_digest: super::cache::addons_digest(&app.addons),
+    })));
+    assert_eq!(app.update(Message::ServerRefresh(false)).units(), 0);
+    assert_eq!(app.update(Message::ServerRefresh(true)).units(), 0);
+    assert_eq!(
+        server_hint_labels(&app),
+        vec!["server outdated, restart it"]
+    );
+
+    let _ = app.update(Message::CacheServerStatus(Some(super::cache::ServerInfo {
+        protocol: super::cache::PROTOCOL,
+        config_digest: "other".into(),
+    })));
+    assert_eq!(
+        server_hint_labels(&app),
+        vec!["server config differs, restart it", "F5 server refresh"]
+    );
+    assert!(app.update(Message::ServerRefresh(false)).units() > 0);
+}
+
+#[test]
+fn test_f5_reloads_cached_script_filter_unless_query_moved_on() {
+    let mut addons = AddonsConfig::default();
+    addons.script_filters.push(ScriptFilterConfig {
+        name: "Search".into(),
+        command: "true".into(),
+        keyword: "gh".into(),
+        cache_seconds: Some(300),
+        ..Default::default()
+    });
+    addons.script_filters.push(ScriptFilterConfig {
+        name: "Live".into(),
+        command: "true".into(),
+        keyword: "live".into(),
+        ..Default::default()
+    });
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+    connect_server(&mut app);
+
+    let _ = app.update(Message::SearchChanged("live x".into()));
+    assert_eq!(server_hint_labels(&app), vec!["server"]);
+    assert_eq!(app.update(Message::ServerRefresh(false)).units(), 0);
+
+    let _ = app.update(Message::SearchChanged("gh rust".into()));
+    assert_eq!(server_hint_labels(&app), vec!["F5 server refresh"]);
+    assert!(app.update(Message::ServerRefresh(false)).units() > 0);
+    let generation = app.script_filter.generation;
+    let _ = app.update(Message::ServerRefreshDone(app.server.token, Ok(())));
+    assert_ne!(
+        app.script_filter.generation, generation,
+        "the script filter reloads once the server is done"
+    );
+
+    let _ = app.update(Message::ServerRefresh(false));
+    let _ = app.update(Message::SearchChanged("gh iced".into()));
+    let generation = app.script_filter.generation;
+    let _ = app.update(Message::ServerRefreshDone(app.server.token, Ok(())));
+    assert_eq!(
+        app.script_filter.generation, generation,
+        "a refresh for an older query does not reload the new one"
+    );
 }

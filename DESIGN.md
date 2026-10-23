@@ -209,7 +209,12 @@ An optional foreground service, `raffi --cache-daemon`, speaks
 newline-delimited JSON over `$XDG_RUNTIME_DIR/raffi/cache.sock`. It warms
 opted-in Script Filters, Slack views and browser history while Raffi is
 closed. The UI never blocks on it: it reads the same snapshots directly and
-falls back to running sources itself when the socket is absent or slow. See
+falls back to running sources itself when the socket is absent or slow. At
+startup the UI sends a short `status` probe; when it answers with a recent
+enough `protocol`, F5 sends `refresh_source` (`slack:<view>` for one Slack
+view) or `get_script_filter` with `wait: true` (Ctrl+Shift+F5 sends
+`refresh_all`), and the UI reloads the
+view from the snapshot once the service replies. See
 `src/ui/wayland/cache.rs` and `misc/systemd/raffi-cache.service`.
 
 On startup, `run()` writes `raffi-schema.json` and `launchers-schema.json` next

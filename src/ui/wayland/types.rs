@@ -606,6 +606,19 @@ pub(crate) enum Message {
         std::result::Result<Option<super::hyprland::Hyprland>, String>,
     ),
     ClipboardRefresh,
+    /// The startup probe of the cache service answered, or not.
+    CacheServerStatus(Option<super::cache::ServerInfo>),
+    /// F5, or Ctrl+Shift+F5 to refresh every source: refresh through the
+    /// cache service.
+    ServerRefresh(bool),
+    /// The cache service finished the refresh with this token.
+    ServerRefreshDone(u64, std::result::Result<(), super::cache::CallError>),
+    /// Browser history read again after a server refresh: list session, group key.
+    ServerHistoryReloaded(
+        u64,
+        String,
+        Option<std::sync::Arc<super::browser_history::Library>>,
+    ),
     /// Ctrl+D: delete the clipboard entry, or run the row's close action.
     DeleteSelected,
     /// The compositor reported windows or workspaces changing while the

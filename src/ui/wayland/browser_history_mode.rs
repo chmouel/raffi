@@ -205,6 +205,15 @@ impl LauncherApp {
         {
             return Task::none();
         }
+        self.apply_browser_history_library(key, library)
+    }
+
+    /// Show `library` as the active group's history.
+    pub(super) fn apply_browser_history_library(
+        &mut self,
+        key: String,
+        library: Option<Arc<Library>>,
+    ) -> Task<Message> {
         let Some(library) = library else {
             self.command_list
                 .set_notice("Loading browser history stopped unexpectedly".to_string());

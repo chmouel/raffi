@@ -260,6 +260,19 @@ impl Widget<Message, iced::Theme, iced::Renderer> for TreeGuides<'_> {
     }
 }
 
+/// F5 refreshes the view through the cache service, Ctrl+Shift+F5 every
+/// source it knows.
+pub(super) fn server_refresh_message(modifiers: iced::keyboard::Modifiers) -> Option<Message> {
+    use iced::keyboard::Modifiers;
+    if modifiers.is_empty() {
+        Some(Message::ServerRefresh(false))
+    } else if modifiers == Modifiers::CTRL | Modifiers::SHIFT {
+        Some(Message::ServerRefresh(true))
+    } else {
+        None
+    }
+}
+
 pub(super) fn file_browser_shortcut_message(
     character: &str,
     modifiers: iced::keyboard::Modifiers,
@@ -3157,9 +3170,11 @@ impl LauncherApp {
                 );
                 hint_spans.push(sep.clone());
             }
-            hint_spans.push(span("Ctrl+R").size(fs.hint).color(t.accent));
-            hint_spans.push(span(" refresh").size(fs.hint).color(t.text_muted));
-            hint_spans.push(sep.clone());
+            if !self.offers_f5() {
+                hint_spans.push(span("Ctrl+R").size(fs.hint).color(t.accent));
+                hint_spans.push(span(" refresh").size(fs.hint).color(t.text_muted));
+                hint_spans.push(sep.clone());
+            }
             hint_spans.push(span("Ctrl+D").size(fs.hint).color(t.accent));
             hint_spans.push(span(" delete").size(fs.hint).color(t.text_muted));
         }
@@ -3192,12 +3207,28 @@ impl LauncherApp {
                 hint_spans.push(span(label).size(fs.hint).color(t.text_muted));
             }
         }
-        if self.command_list.addon == Some(super::command_list::CommandListAddon::Slack) {
+        if self.command_list.addon == Some(super::command_list::CommandListAddon::Slack)
+            && !self.offers_f5()
+        {
             if !hint_spans.is_empty() {
                 hint_spans.push(sep.clone());
             }
             hint_spans.push(span("Ctrl+R").size(fs.hint).color(t.accent));
             hint_spans.push(span(" refresh").size(fs.hint).color(t.text_muted));
+        }
+        for hint in self.server_hints() {
+            if !hint_spans.is_empty() {
+                hint_spans.push(sep.clone());
+            }
+            if let Some(key) = hint.key {
+                hint_spans.push(span(key).size(fs.hint).color(t.accent));
+            }
+            let color = match hint.tone {
+                super::server_refresh::Tone::Muted => t.text_muted,
+                super::server_refresh::Tone::Warning => t.ansi[3],
+                super::server_refresh::Tone::Error => t.ansi[1],
+            };
+            hint_spans.push(span(hint.label).size(fs.hint).color(color));
         }
         if !hint_spans.is_empty() {
             hint_spans.push(sep.clone());
@@ -3265,6 +3296,12 @@ impl LauncherApp {
                 key: keyboard::Key::Named(Named::Tab),
                 ..
             }) => Some(Message::TabComplete),
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(Named::F5),
+                modifiers,
+                repeat: false,
+                ..
+            }) => server_refresh_message(modifiers),
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Character(ref c),
                 modifiers,
