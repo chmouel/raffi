@@ -44,6 +44,15 @@ Override any YAML configuration setting from the command line.
   ```
 
 
+**`--vim-mode`** `boolean` (default: `false`)
+
+Start with modal vim keybindings in normal mode. Equivalent to `general.vim_mode: true`; the flag wins when both are set. `Ctrl+Alt+V` toggles vim mode at runtime.
+
+  ```bash
+  raffi --vim-mode
+  ```
+
+
 **`--keep-open`** `boolean` (default: `false`)
 
 Keep the Raffi window open after executing an action (shorthand for `-o general.close_on_action=false`). Individual addons or entries can still override this via `-o addons.<name>.close_on_action=true`.

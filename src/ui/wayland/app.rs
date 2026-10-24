@@ -3,7 +3,7 @@ use std::path::Path;
 
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
-use iced::widget::operation::{focus, move_cursor_to_end, scroll_by};
+use iced::widget::operation::{focus, move_cursor_to_end, move_cursor_to_front, scroll_by};
 use iced::widget::scrollable::{self, AbsoluteOffset};
 use iced::Task;
 
@@ -29,6 +29,7 @@ use super::emoji::{
 };
 use super::help::{
     add_cycle_view_shortcut, filter_help_entries, help_entries, help_suggestions, search_tips,
+    vim_shortcut_entries,
 };
 use super::main_view::{Block, Focus, Source, MAIN_VIEW_SESSION};
 use super::pass::PassContext;
@@ -473,6 +474,7 @@ fn is_user_input(message: &Message) -> bool {
         Message::SearchChanged(_)
             | Message::MoveUp
             | Message::MoveDown
+            | Message::VimKey(_)
             | Message::ChipMove(_)
             | Message::ChipClicked(_)
             | Message::ChipScroll(_)
@@ -1026,6 +1028,7 @@ impl LauncherApp {
         font_sizes: FontSizes,
         sort_mode: SortMode,
         fallback_paths: Vec<String>,
+        vim_mode: bool,
     ) -> (Self, Task<Message>) {
         crate::debug_log!(
             "LauncherApp::new: configs={} no_icons={} sort_mode={sort_mode:?} initial_query={:?}",
@@ -1135,6 +1138,12 @@ impl LauncherApp {
                 view: {
                     let mut view = ViewState::new(theme, font_sizes);
                     view.search_input_id = search_input_id.clone();
+                    view.vim.enabled = vim_mode;
+                    view.vim.mode = if vim_mode {
+                        super::state::VimMode::Normal
+                    } else {
+                        super::state::VimMode::Insert
+                    };
                     view
                 },
                 history: HistoryState {
@@ -1169,12 +1178,16 @@ impl LauncherApp {
                 close_on_action: None,
                 print_only: false,
             },
-            if initial_query.is_empty() {
-                focus(search_input_id).chain(fetch_wayland_handles())
-            } else {
-                focus(search_input_id)
-                    .chain(Task::done(Message::SearchChanged(initial_query)))
-                    .chain(fetch_wayland_handles())
+            {
+                let mut task = if vim_mode {
+                    Task::none()
+                } else {
+                    focus(search_input_id)
+                };
+                if !initial_query.is_empty() {
+                    task = task.chain(Task::done(Message::SearchChanged(initial_query)));
+                }
+                task.chain(fetch_wayland_handles())
             },
         )
     }
@@ -1195,6 +1208,7 @@ impl LauncherApp {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.update_inner(message);
         self.sync_vault();
+        let prompt_insert = self.ensure_text_prompt_insert();
         let select_1 = self.maybe_auto_select_1();
         let preview = self.ensure_clipboard_preview();
         let file_preview = self.ensure_file_browser_preview();
@@ -1202,6 +1216,7 @@ impl LauncherApp {
         let slack_images = self.ensure_slack_images();
         Task::batch([
             task,
+            prompt_insert,
             select_1,
             preview,
             file_preview,
@@ -1452,10 +1467,18 @@ impl LauncherApp {
             Message::SearchChanged(query) => self.handle_search_changed(query),
             Message::MoveUp => self.move_selection(-1),
             Message::MoveDown => self.move_selection(1),
+            Message::ToggleVimMode => self.handle_toggle_vim_mode(),
+            Message::VimKey(key) => self.handle_vim_key(key),
             Message::Submit => self.activate_index(self.selected_index),
             Message::SubmitRepeat if self.command_list.is_active() => Task::none(),
             Message::SubmitRepeat => self.activate_index(self.selected_index),
             Message::Cancel => {
+                if self.view.vim.enabled
+                    && self.view.vim.mode == super::state::VimMode::Insert
+                    && !self.text_prompt_active()
+                {
+                    return self.enter_vim_normal();
+                }
                 if self.view.help_active {
                     return self.close_help();
                 }
@@ -2180,6 +2203,9 @@ impl LauncherApp {
                 !self.main_view.stops.is_empty(),
                 self.main_view.chips != crate::MainViewChips::Off,
             );
+            if self.view.vim.enabled {
+                self.help_entries.extend(vim_shortcut_entries());
+            }
         }
     }
 
@@ -3577,18 +3603,28 @@ impl LauncherApp {
             return Task::none();
         }
 
-        if delta < 0 {
+        let target = if delta < 0 {
             if self.selected_index > 0 {
-                self.selected_index -= 1;
+                self.selected_index - 1
             } else {
-                self.selected_index = total - 1;
+                total - 1
             }
         } else if self.selected_index < total.saturating_sub(1) {
-            self.selected_index += 1;
+            self.selected_index + 1
         } else {
-            self.selected_index = 0;
-        }
+            0
+        };
+        self.select_index(target)
+    }
 
+    /// Select `index`, clamped to the current list, with the same side effects
+    /// as stepping the selection.
+    fn select_index(&mut self, index: usize) -> Task<Message> {
+        let total = self.total_items();
+        if total == 0 {
+            return Task::none();
+        }
+        self.selected_index = index.min(total - 1);
         self.command_list.armed = None;
         self.follow_clipboard_selection();
         self.refresh_file_preview_cache();
@@ -3597,6 +3633,86 @@ impl LauncherApp {
             self.snap_to_selection(),
             self.request_script_filter_preview(),
         ])
+    }
+
+    /// Whether a password or bookmark-search prompt owns the text field.
+    pub(super) fn text_prompt_active(&self) -> bool {
+        self.vault.prompt.is_some() || (self.bookmarks.prompt.is_some() && !self.view.help_active)
+    }
+
+    /// A text prompt must always be typeable, even when vim normal mode was
+    /// active when it opened.
+    fn ensure_text_prompt_insert(&mut self) -> Task<Message> {
+        if self.text_prompt_active()
+            && self.view.vim.enabled
+            && self.view.vim.mode == super::state::VimMode::Normal
+        {
+            return self.enter_vim_insert(false);
+        }
+        Task::none()
+    }
+
+    fn handle_vim_key(&mut self, key: char) -> Task<Message> {
+        if !self.view.vim.is_normal() || self.text_prompt_active() {
+            return Task::none();
+        }
+        let pending_g = std::mem::take(&mut self.view.vim.pending_g);
+        match key {
+            'j' => self.move_selection(1),
+            'k' => self.move_selection(-1),
+            'h' => self.update(Message::ChipMove(true)),
+            'l' => self.update(Message::ChipMove(false)),
+            'g' if pending_g => self.select_index(0),
+            'g' => {
+                self.view.vim.pending_g = true;
+                Task::none()
+            }
+            'G' => self.select_index(self.total_items().saturating_sub(1)),
+            'q' => self.update(Message::Cancel),
+            'i' | 'a' | 'A' | '/' => self.enter_vim_insert(false),
+            'I' => self.enter_vim_insert(true),
+            _ => Task::none(),
+        }
+    }
+
+    fn enter_vim_normal(&mut self) -> Task<Message> {
+        self.view.vim.mode = super::state::VimMode::Normal;
+        self.view.vim.pending_g = false;
+        self.unfocus_search()
+    }
+
+    fn enter_vim_insert(&mut self, front: bool) -> Task<Message> {
+        self.view.vim.mode = super::state::VimMode::Insert;
+        self.view.vim.pending_g = false;
+        let id = self.view.search_input_id.clone();
+        if front {
+            focus(id.clone()).chain(move_cursor_to_front(id))
+        } else {
+            focus(id)
+        }
+    }
+
+    fn handle_toggle_vim_mode(&mut self) -> Task<Message> {
+        let enabled = !self.view.vim.enabled;
+        self.view.vim.enabled = enabled;
+        // The help list gains or loses the vim rows with the mode.
+        self.help_entries.clear();
+        if self.view.help_active {
+            self.ensure_help_entries();
+            self.refresh_help_filter();
+        }
+        if enabled {
+            self.enter_vim_normal()
+        } else {
+            self.enter_vim_insert(false)
+        }
+    }
+
+    fn unfocus_search(&self) -> Task<Message> {
+        iced::advanced::widget::operate::<()>(UnfocusSearch {
+            id: self.view.search_input_id.clone(),
+        })
+        .discard()
     }
 
     /// Scrolls the list just enough to show the selected row. Rows differ in
@@ -5580,10 +5696,13 @@ impl LauncherApp {
         self.view.help_active = false;
         self.help_filtered.clear();
         crate::debug_log!("help: closed");
+        let task = self.handle_search_changed(query);
+        if self.view.vim.is_normal() {
+            return task;
+        }
         // Escape also unfocuses the text input, which would swallow typing.
         let input_id = self.view.search_input_id.clone();
-        self.handle_search_changed(query)
-            .chain(focus(input_id.clone()))
+        task.chain(focus(input_id.clone()))
             .chain(move_cursor_to_end(input_id))
     }
 
@@ -5765,6 +5884,28 @@ impl<T: 'static> iced::advanced::widget::Operation<T> for RevealSelection {
                 },
             ))),
             None => Outcome::None,
+        }
+    }
+}
+
+/// Unfocuses the search field when vim normal mode takes over the keyboard.
+struct UnfocusSearch {
+    id: super::state::TextInputId,
+}
+
+impl<T: 'static> iced::advanced::widget::Operation<T> for UnfocusSearch {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn iced::advanced::widget::Operation<T>)) {
+        operate(self);
+    }
+
+    fn focusable(
+        &mut self,
+        id: Option<&iced::advanced::widget::Id>,
+        _bounds: iced::Rectangle,
+        state: &mut dyn iced::advanced::widget::operation::Focusable,
+    ) {
+        if id == Some(&self.id) {
+            state.unfocus();
         }
     }
 }

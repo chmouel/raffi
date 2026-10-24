@@ -505,6 +505,26 @@ impl FileBrowserState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum VimMode {
+    Normal,
+    #[default]
+    Insert,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct VimState {
+    pub enabled: bool,
+    pub mode: VimMode,
+    pub pending_g: bool,
+}
+
+impl VimState {
+    pub fn is_normal(&self) -> bool {
+        self.enabled && self.mode == VimMode::Normal
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct ViewState {
     pub search_input_id: TextInputId,
@@ -535,6 +555,7 @@ pub(super) struct ViewState {
     pub raise_via: Option<crate::compositor::Compositor>,
     /// Text shown in the empty search box.
     pub placeholder: String,
+    pub vim: VimState,
 }
 
 impl ViewState {
@@ -565,6 +586,7 @@ impl ViewState {
             raise_running: false,
             raise_via: None,
             placeholder: super::help::DEFAULT_PLACEHOLDER.to_string(),
+            vim: VimState::default(),
         }
     }
 

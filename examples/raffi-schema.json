@@ -1196,6 +1196,14 @@
           ],
           "default": null
         },
+        "vim_mode": {
+          "description": "Start with modal vim keybindings in normal mode (default: false).\nToggle at runtime with Ctrl+Alt+V.",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
         "window_height": {
           "type": [
             "number",

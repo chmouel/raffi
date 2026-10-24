@@ -512,7 +512,11 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
     }
     entries.extend([
         shortcut("Ctrl+/", "Keyword and shortcut help", "Opens this list"),
-        shortcut("Esc", "Close help or quit", "Closes help, otherwise exits"),
+        shortcut(
+            "Esc",
+            "Close help, normal mode or quit",
+            "Closes help or exits; in vim insert mode, returns to normal mode first",
+        ),
     ]);
     let (enter_usage, ctrl_enter_usage) = if file_browser.enabled {
         (
@@ -534,8 +538,51 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
     entries.extend([
         shortcut("Enter", "Use selected entry", &enter_usage),
         shortcut("Ctrl+Enter", "Secondary action", &ctrl_enter_usage),
+        shortcut(
+            "Ctrl+Alt+V",
+            "Toggle vim mode",
+            "Modal vim keys, starting in normal mode",
+        ),
     ]);
     entries
+}
+
+/// Vim normal-mode keys, shown only while vim mode is enabled.
+pub(super) fn vim_shortcut_entries() -> Vec<HelpEntry> {
+    let shortcut = |trigger: &str, title: &str, usage: &str| HelpEntry {
+        section: HelpSection::KeyboardShortcuts,
+        trigger: trigger.to_string(),
+        title: title.to_string(),
+        usage: usage.to_string(),
+        icon: None,
+        completion: None,
+    };
+
+    vec![
+        shortcut(
+            "j/k",
+            "Move selection",
+            "Vim normal mode: next / previous result",
+        ),
+        shortcut(
+            "h/l",
+            "Move chips",
+            "Vim normal mode: previous / next plugin chip",
+        ),
+        shortcut("g g", "First result", "Vim normal mode: press g twice"),
+        shortcut("G", "Last result", "Vim normal mode"),
+        shortcut(
+            "i / a / /",
+            "Insert mode",
+            "Vim mode: focuses the search field at the end",
+        ),
+        shortcut(
+            "I",
+            "Insert at start",
+            "Vim mode: focuses the search field at the start",
+        ),
+        shortcut("q", "Quit", "Vim normal mode: closes Raffi"),
+    ]
 }
 
 /// List Ctrl+Tab after Tab with the views it cycles through, and the chip

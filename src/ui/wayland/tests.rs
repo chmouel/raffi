@@ -4,7 +4,9 @@ use super::app::{
     route_query, tilde_path, QueryMode,
 };
 use super::command_list::CommandListAddon;
-use super::help::{filter_help_entries, help_entries, search_tips, HelpSection};
+use super::help::{
+    filter_help_entries, help_entries, search_tips, vim_shortcut_entries, HelpSection,
+};
 use super::hyprland::HyprAction;
 use super::placeholders::Expanded;
 use super::preview::{
@@ -12,7 +14,7 @@ use super::preview::{
 };
 use super::state::{
     ClipboardData, CurrencyConversionRequest, CurrencyResult, EmojiEntry, FallbackAction,
-    KeywordSuggestion, LauncherApp, Message, ScriptFilterResult,
+    KeywordSuggestion, LauncherApp, Message, ScriptFilterResult, VimMode,
 };
 use super::system::system_entries;
 use super::theme::ThemeColors;
@@ -43,6 +45,7 @@ fn test_app_with_fallbacks(addons: AddonsConfig, fallback_paths: Vec<String>) ->
         FontSizes::default_sizes(),
         SortMode::Hybrid,
         fallback_paths,
+        false,
     );
     // Keep the user's snippet usage cache out of tests, both ways.
     app.text_snippets.mru_map.clear();
@@ -2206,7 +2209,8 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "Ctrl+/",
             "Esc",
             "Enter",
-            "Ctrl+Enter"
+            "Ctrl+Enter",
+            "Ctrl+Alt+V"
         ]
     );
     let shortcut_start = entries
@@ -2278,7 +2282,8 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
             "Ctrl+/",
             "Esc",
             "Enter",
-            "Ctrl+Enter"
+            "Ctrl+Enter",
+            "Ctrl+Alt+V"
         ]
     );
 
@@ -2294,7 +2299,8 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
             "Ctrl+P",
             "Ctrl+R",
             "Ctrl+/",
-            "Ctrl+Enter"
+            "Ctrl+Enter",
+            "Ctrl+Alt+V"
         ]
     );
 
@@ -2335,7 +2341,7 @@ fn test_help_entries_skip_disabled_addons() {
     assert!(entries
         .iter()
         .all(|entry| entry.section == HelpSection::KeyboardShortcuts));
-    assert_eq!(entries.len(), 11);
+    assert_eq!(entries.len(), 12);
 }
 
 #[test]
@@ -2585,6 +2591,7 @@ fn test_launcher_preview_is_opt_in() {
         FontSizes::default_sizes(),
         SortMode::Hybrid,
         Vec::new(),
+        false,
     );
     super::configure_preview_visibility(&mut app.view, Some(false));
     assert!(app.view.show_preview);
@@ -2768,6 +2775,7 @@ fn test_preview_launcher_binary_and_script() {
         FontSizes::default_sizes(),
         SortMode::Hybrid,
         Vec::new(),
+        false,
     );
     app.view.show_launcher_preview = true;
 
@@ -5188,6 +5196,7 @@ fn alias_app(configs: Vec<RaffiConfig>, addons: AddonsConfig) -> LauncherApp {
         FontSizes::default_sizes(),
         SortMode::Hybrid,
         Vec::new(),
+        false,
     );
     app.text_snippets.mru_map.clear();
     app.text_snippets.mru_path = None;
@@ -6322,6 +6331,7 @@ fn devtools_app() -> LauncherApp {
         FontSizes::default_sizes(),
         SortMode::Hybrid,
         Vec::new(),
+        false,
     );
     app.mru_map.clear();
     app.text_snippets.mru_map.clear();
@@ -7743,6 +7753,7 @@ fn main_view_app(entries: &[&str], configs: Vec<RaffiConfig>, addons: AddonsConf
         FontSizes::default_sizes(),
         SortMode::Hybrid,
         Vec::new(),
+        false,
     );
     app.text_snippets.mru_map.clear();
     app.text_snippets.mru_path = None;
@@ -11207,4 +11218,165 @@ fn test_f5_reloads_cached_script_filter_unless_query_moved_on() {
         app.script_filter.generation, generation,
         "a refresh for an older query does not reload the new one"
     );
+}
+
+fn vim_app_with_three_rows() -> LauncherApp {
+    let mut app = test_app(AddonsConfig::default());
+    app.history.max_items = 0;
+    app.search_query.clear();
+    app.configs = (0..3)
+        .map(|index| RaffiConfig {
+            binary: Some(format!("app{index}")),
+            description: Some(format!("App {index}")),
+            ..Default::default()
+        })
+        .collect();
+    app.filtered_configs = vec![0, 1, 2];
+    app.selected_index = 1;
+    app.view.vim.enabled = true;
+    app.view.vim.mode = VimMode::Normal;
+    app
+}
+
+#[test]
+fn test_vim_toggle_and_mode_transitions() {
+    let mut app = test_app(AddonsConfig::default());
+    assert!(!app.view.vim.enabled);
+    assert_eq!(app.view.vim.mode, VimMode::Insert);
+
+    let _ = app.update(Message::ToggleVimMode);
+    assert!(app.view.vim.enabled);
+    assert_eq!(app.view.vim.mode, VimMode::Normal);
+    assert!(!app.view.vim.pending_g);
+
+    let _ = app.update(Message::VimKey('i'));
+    assert_eq!(app.view.vim.mode, VimMode::Insert);
+
+    // Escape in insert mode returns to normal instead of quitting.
+    let _ = app.update(Message::Cancel);
+    assert_eq!(app.view.vim.mode, VimMode::Normal);
+
+    let _ = app.update(Message::ToggleVimMode);
+    assert!(!app.view.vim.enabled);
+    assert_eq!(app.view.vim.mode, VimMode::Insert);
+
+    let _ = app.update(Message::ToggleVimMode);
+    assert!(app.view.vim.enabled);
+    assert_eq!(app.view.vim.mode, VimMode::Normal);
+    let _ = app.update(Message::VimKey('I'));
+    assert_eq!(app.view.vim.mode, VimMode::Insert);
+    let _ = app.update(Message::Cancel);
+    assert_eq!(app.view.vim.mode, VimMode::Normal);
+    let _ = app.update(Message::VimKey('/'));
+    assert_eq!(app.view.vim.mode, VimMode::Insert);
+}
+
+#[test]
+fn test_vim_normal_keys_move_the_selection() {
+    let mut app = vim_app_with_three_rows();
+
+    let _ = app.update(Message::VimKey('j'));
+    assert_eq!(app.selected_index, 2);
+    let _ = app.update(Message::VimKey('k'));
+    assert_eq!(app.selected_index, 1);
+
+    let _ = app.update(Message::VimKey('g'));
+    assert_eq!(app.selected_index, 1, "one g is only a prefix");
+    let _ = app.update(Message::VimKey('g'));
+    assert_eq!(app.selected_index, 0, "g g jumps to the first result");
+
+    let _ = app.update(Message::VimKey('G'));
+    assert_eq!(app.selected_index, 2, "G jumps to the last result");
+}
+
+#[test]
+fn test_vim_key_message_keeps_shifted_characters() {
+    use iced::keyboard::{self, key::Code, Location, Modifiers};
+
+    let key_press =
+        |modified_key: keyboard::Key, modifiers: Modifiers| keyboard::Event::KeyPressed {
+            key: keyboard::Key::Character("g".into()),
+            modified_key,
+            physical_key: keyboard::key::Physical::Code(Code::KeyG),
+            location: Location::Standard,
+            modifiers,
+            text: None,
+            repeat: false,
+        };
+
+    assert!(matches!(
+        super::view::vim_key_message(&key_press(
+            keyboard::Key::Character("G".into()),
+            Modifiers::SHIFT,
+        )),
+        Some(Message::VimKey('G'))
+    ));
+    assert!(matches!(
+        super::view::vim_key_message(&key_press(
+            keyboard::Key::Character("g".into()),
+            Modifiers::default(),
+        )),
+        Some(Message::VimKey('g'))
+    ));
+}
+
+#[test]
+fn test_vim_unknown_key_clears_pending_g() {
+    let mut app = vim_app_with_three_rows();
+
+    let _ = app.update(Message::VimKey('g'));
+    let _ = app.update(Message::VimKey('x'));
+    assert!(!app.view.vim.pending_g);
+
+    let _ = app.update(Message::VimKey('g'));
+    assert_eq!(app.selected_index, 1, "the second g starts a new prefix");
+    let _ = app.update(Message::VimKey('g'));
+    assert_eq!(app.selected_index, 0);
+}
+
+#[test]
+fn test_vim_quit_and_escape_exit_in_normal_mode() {
+    let mut app = vim_app_with_three_rows();
+    assert!(app.update(Message::VimKey('q')).units() > 0);
+
+    let mut app = vim_app_with_three_rows();
+    assert!(app.update(Message::Cancel).units() > 0);
+}
+
+#[test]
+fn test_vim_help_rows_follow_the_mode() {
+    assert!(vim_shortcut_entries()
+        .iter()
+        .any(|entry| entry.trigger == "j/k"));
+
+    let mut app = test_app(AddonsConfig::default());
+    let _ = app.update(Message::ToggleHelp);
+    assert!(!app.help_entries.iter().any(|entry| entry.trigger == "j/k"));
+    let _ = app.update(Message::ToggleVimMode);
+    assert!(app.view.help_active);
+    assert!(app.help_entries.iter().any(|entry| entry.trigger == "j/k"));
+}
+
+#[test]
+fn test_vim_text_prompt_forces_insert_mode() {
+    let mut app = test_app(AddonsConfig::default());
+    app.view.vim.enabled = true;
+    app.view.vim.mode = VimMode::Normal;
+    app.bookmarks.prompt = Some(super::bookmarks::SearchPrompt::new(
+        super::bookmarks::SearchTarget {
+            identity: "search".into(),
+            keyword: None,
+            title: "Search".into(),
+            url: "https://example.com".into(),
+            source: "Test".into(),
+            icon_names: Vec::new(),
+            opener: super::browser_data::Opener::Missing("unavailable".into()),
+        },
+        "",
+        String::new(),
+        String::new(),
+    ));
+
+    let _ = app.update(Message::MoveDown);
+    assert_eq!(app.view.vim.mode, VimMode::Insert);
 }

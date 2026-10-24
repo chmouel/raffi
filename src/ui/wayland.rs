@@ -220,6 +220,7 @@ fn run_wayland_ui(
     let clipboard_history = settings.clipboard_history;
     let show_preview = settings.show_preview;
     let show_tips = settings.show_tips;
+    let vim_mode = settings.vim_mode;
     let close_on_action = settings.close_on_action;
     let print_only = settings.print_only;
     let select_1 = settings.select_1;
@@ -268,6 +269,7 @@ fn run_wayland_ui(
                 font_sizes,
                 sort_mode.clone(),
                 fallbacks.clone(),
+                vim_mode,
             );
             if select_1 && !app.search_query.is_empty() {
                 app.select_1_query = Some(app.search_query.clone());

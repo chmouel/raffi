@@ -438,6 +438,10 @@ pub(crate) enum Message {
     /// Enter held down; never confirms an armed command list action.
     SubmitRepeat,
     Cancel,
+    /// Ctrl+Alt+V: enable or disable modal vim keybindings.
+    ToggleVimMode,
+    /// A printable key that vim normal mode may act on.
+    VimKey(char),
     ItemClicked(usize),
     InlineSelected(usize),
     /// A checked copy of an inline or currency row started at the given

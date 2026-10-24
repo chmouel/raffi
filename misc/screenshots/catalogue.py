@@ -98,6 +98,10 @@ def solarized_light(config):
     config["general"]["theme_colors"] = SOLARIZED_LIGHT
 
 
+def vim_mode(config):
+    config["general"]["vim_mode"] = True
+
+
 SHOTS = [
     # Main view and built-in addons, 1120x560.
     Shot("main", theme="dark"),
@@ -147,6 +151,7 @@ SHOTS = [
     Shot("file-browser-code-preview", "~/Projects/raffi/Cargo.toml", classic=True),
     Shot("file-browser-image-preview", "~/Projects/raffi/assets/logo.png", classic=True),
     Shot("file-browser-image-scrolled", "~/Projects/raffi/assets/logo.png", ("ctrl+j",) * 3, classic=True),
+    Shot("vim-mode", "fi", classic=True, tweak=vim_mode),
     Shot("keyword-help", "", ("ctrl+slash",), classic=True),
     Shot("keyword-help-shortcuts", "", ("ctrl+slash", "type:preview"), classic=True),
     Shot("keyword-suggestion", "sn", classic=True),

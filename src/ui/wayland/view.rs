@@ -35,6 +35,27 @@ pub(super) fn indent_left(indent: u32) -> f32 {
     indent.min(MAX_INDENT) as f32 * INDENT_STEP
 }
 
+/// Maps a printable key press to a vim command. `modified_key` carries the
+/// shifted character, so `G` and `I` stay distinct from `g` and `i`.
+pub(super) fn vim_key_message(event: &iced::keyboard::Event) -> Option<Message> {
+    use iced::keyboard;
+
+    match event {
+        keyboard::Event::KeyPressed {
+            modified_key: keyboard::Key::Character(c),
+            modifiers,
+            ..
+        } if !modifiers.control() && !modifiers.alt() && !modifiers.logo() => {
+            let mut characters = c.as_str().chars();
+            match (characters.next(), characters.next()) {
+                (Some(character), None) => Some(Message::VimKey(character)),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct TreeGuideSegments {
     pub(super) above: bool,
@@ -1025,17 +1046,11 @@ impl LauncherApp {
             (None, None) => (placeholder, self.search_query.as_str()),
         };
         let secure = prompt.is_some();
-        let search_input = text_input(placeholder, value)
+        // Normal mode takes the keyboard: a disabled input cannot insert typed
+        // characters, and focus is removed by the vim mode handlers.
+        let vim_normal = self.view.vim.is_normal() && prompt.is_none() && search.is_none();
+        let mut search_input = text_input(placeholder, value)
             .id(self.view.search_input_id.clone())
-            // Enter is handled by the subscription alone, which knows about
-            // key autorepeat; an `on_submit` here would deliver it twice.
-            .on_input(move |value| {
-                if secure {
-                    Message::PromptChanged(crate::secret::Secret::new(value))
-                } else {
-                    Message::SearchChanged(value)
-                }
-            })
             .secure(secure)
             .padding(fs.input_padding)
             .size(fs.input)
@@ -1063,6 +1078,44 @@ impl LauncherApp {
                 }
             })
             .width(Length::Fill);
+        if !vim_normal {
+            // Enter is handled by the subscription alone, which knows about
+            // key autorepeat; an `on_submit` here would deliver it twice.
+            search_input = search_input.on_input(move |value| {
+                if secure {
+                    Message::PromptChanged(crate::secret::Secret::new(value))
+                } else {
+                    Message::SearchChanged(value)
+                }
+            });
+        }
+
+        let search_control: Element<'a, Message> = if self.view.vim.enabled {
+            let (label, background, foreground) = if vim_normal {
+                ("NORMAL", t.accent, t.bg_input)
+            } else {
+                ("INSERT", t.bg_input, t.text_muted)
+            };
+            let badge = container(text(label).size(fs.hint).color(foreground))
+                .padding([4, 8])
+                .style(move |_theme| container::Style {
+                    background: Some(iced::Background::Color(background)),
+                    border: iced::Border {
+                        color: t.border,
+                        width: 1.0,
+                        radius: 8.0.into(),
+                    },
+                    ..Default::default()
+                });
+            Row::new()
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .push(badge)
+                .push(container(search_input).width(Length::Fill))
+                .into()
+        } else {
+            search_input.into()
+        };
 
         let items_container = container(items_column)
             .id(self.view.items_container_id.clone())
@@ -1154,7 +1207,7 @@ impl LauncherApp {
             .spacing(10)
             .width(Length::Fill)
             .height(Length::Fill)
-            .push(search_input)
+            .push(search_control)
             .push(body_area)
             .push(footer);
 
@@ -3300,6 +3353,13 @@ impl LauncherApp {
                 key: keyboard::Key::Character(ref c),
                 modifiers,
                 ..
+            }) if c.as_str() == "v" && modifiers.control() && modifiers.alt() => {
+                Some(Message::ToggleVimMode)
+            }
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Character(ref c),
+                modifiers,
+                ..
             }) if c.as_str() == "p" && modifiers.alt() => Some(Message::HistoryPrevious),
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Character(ref c),
@@ -3362,6 +3422,11 @@ impl LauncherApp {
             }) if c.as_str() == "u" && modifiers.control() => Some(Message::VaultShortcut(
                 super::vault::EntryAction::Copy(super::vault::Field::Username),
             )),
+            Event::Keyboard(ref key_event)
+                if matches!(key_event, keyboard::Event::KeyPressed { .. }) =>
+            {
+                vim_key_message(key_event)
+            }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 Some(Message::MouseReleased)
             }

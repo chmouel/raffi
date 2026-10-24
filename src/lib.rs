@@ -1788,6 +1788,10 @@ pub struct GeneralConfig {
     /// `clip for Clipboard history` (default: true).
     #[serde(default)]
     pub show_tips: Option<bool>,
+    /// Start with modal vim keybindings in normal mode (default: false).
+    /// Toggle at runtime with Ctrl+Alt+V.
+    #[serde(default)]
+    pub vim_mode: Option<bool>,
     /// Close Raffi after executing an action (default: true).
     /// Addon and launcher `close_on_action` settings override this.
     #[serde(default)]
@@ -2048,6 +2052,8 @@ pub struct Args {
     pub force: bool,
     #[options(help = "run the background cache service in the foreground", no_short)]
     pub cache_daemon: bool,
+    #[options(help = "start with vim keybindings in normal mode", no_short)]
+    pub vim_mode: bool,
 }
 
 fn resolve_window_dimensions(general: &GeneralConfig) -> (f32, f32) {
@@ -2066,6 +2072,11 @@ fn resolve_opacity(args: &Args, general: &GeneralConfig) -> f32 {
         .filter(|o| o.is_finite())
         .unwrap_or(DEFAULT_OPACITY)
         .clamp(0.0, 1.0)
+}
+
+/// Vim mode: `--vim-mode` wins over `general.vim_mode`.
+fn resolve_vim_mode(args: &Args, general: &GeneralConfig) -> bool {
+    args.vim_mode || general.vim_mode.unwrap_or(false)
 }
 
 fn resolve_renderer(renderer: Renderer, opacity: f32) -> Renderer {
@@ -4374,6 +4385,7 @@ pub fn run(args: Args) -> Result<()> {
         terminal_classes: general.terminal_classes.clone(),
         show_preview: general.show_preview,
         show_tips: general.show_tips.unwrap_or(true),
+        vim_mode: resolve_vim_mode(&args, general),
         close_on_action: general.close_on_action,
         print_only: args.print_only,
         preview: general.preview.clone(),
@@ -4730,6 +4742,7 @@ mod tests {
             keep_open: false,
             cache_daemon: false,
             options: Vec::new(),
+            vim_mode: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.entries.len(), 2);
@@ -4815,6 +4828,7 @@ mod tests {
             keep_open: false,
             cache_daemon: false,
             options: Vec::new(),
+            vim_mode: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -4902,6 +4916,7 @@ mod tests {
             keep_open: false,
             cache_daemon: false,
             options: Vec::new(),
+            vim_mode: false,
         };
         let env_provider = MockEnvProvider {
             vars: {
@@ -5060,6 +5075,7 @@ mod tests {
             keep_open: false,
             cache_daemon: false,
             options: Vec::new(),
+            vim_mode: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -5162,6 +5178,7 @@ mod tests {
             keep_open: false,
             cache_daemon: false,
             options: Vec::new(),
+            vim_mode: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -5365,6 +5382,7 @@ mod tests {
             keep_open: false,
             cache_daemon: false,
             options: Vec::new(),
+            vim_mode: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -5409,6 +5427,7 @@ mod tests {
             keep_open: false,
             cache_daemon: false,
             options: Vec::new(),
+            vim_mode: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -5489,6 +5508,7 @@ mod tests {
             keep_open: false,
             cache_daemon: false,
             options: Vec::new(),
+            vim_mode: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -5535,6 +5555,7 @@ mod tests {
             keep_open: false,
             cache_daemon: false,
             options: Vec::new(),
+            vim_mode: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.general.font_size, Some(16.0));
@@ -5577,6 +5598,7 @@ mod tests {
             keep_open: false,
             cache_daemon: false,
             options: Vec::new(),
+            vim_mode: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.general.theme, Some("light".to_string()));
@@ -5633,6 +5655,26 @@ mod tests {
         let parsed: GeneralConfig = serde_yaml::from_str("opacity: 0.7\nblur: false\n").unwrap();
         assert_eq!(parsed.opacity, Some(0.7));
         assert_eq!(parsed.blur, Some(false));
+    }
+
+    #[test]
+    fn test_vim_mode_resolution() {
+        let args = Args::parse_args_default::<&str>(&["--vim-mode"]).unwrap();
+        assert!(args.vim_mode);
+        assert!(resolve_vim_mode(&args, &GeneralConfig::default()));
+
+        assert!(!resolve_vim_mode(
+            &Args::default(),
+            &GeneralConfig::default()
+        ));
+        let general = GeneralConfig {
+            vim_mode: Some(true),
+            ..Default::default()
+        };
+        assert!(resolve_vim_mode(&Args::default(), &general));
+
+        let parsed: GeneralConfig = serde_yaml::from_str("vim_mode: true\n").unwrap();
+        assert_eq!(parsed.vim_mode, Some(true));
     }
 
     #[test]
@@ -5749,6 +5791,7 @@ mod tests {
             keep_open: false,
             cache_daemon: false,
             options: Vec::new(),
+            vim_mode: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -5820,6 +5863,7 @@ mod tests {
             keep_open: false,
             cache_daemon: false,
             options: Vec::new(),
+            vim_mode: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -5905,6 +5949,7 @@ mod tests {
             keep_open: false,
             cache_daemon: false,
             options: Vec::new(),
+            vim_mode: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -5955,6 +6000,7 @@ mod tests {
             keep_open: false,
             cache_daemon: false,
             options: Vec::new(),
+            vim_mode: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert!(parsed_config.addons.text_snippets.is_empty());
@@ -6001,6 +6047,7 @@ mod tests {
             keep_open: false,
             cache_daemon: false,
             options: Vec::new(),
+            vim_mode: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -6050,6 +6097,7 @@ mod tests {
                 keep_open: false,
                 cache_daemon: false,
                 options: Vec::new(),
+                vim_mode: false,
             };
             read_config_from_reader(Cursor::new(yaml), &args)
         };
@@ -6356,6 +6404,7 @@ shell:
             keep_open: false,
             cache_daemon: false,
             options: Vec::new(),
+            vim_mode: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -6408,6 +6457,7 @@ shell:
             keep_open: false,
             cache_daemon: false,
             options: Vec::new(),
+            vim_mode: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -6459,6 +6509,7 @@ shell:
             keep_open: false,
             cache_daemon: false,
             options: Vec::new(),
+            vim_mode: false,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 

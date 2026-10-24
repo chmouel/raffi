@@ -99,6 +99,8 @@ pub struct UISettings {
     pub terminal_classes: Vec<String>,
     pub show_preview: Option<bool>,
     pub show_tips: bool,
+    /// Start with modal vim keybindings in normal mode.
+    pub vim_mode: bool,
     pub close_on_action: Option<bool>,
     pub print_only: bool,
     pub preview: PreviewConfig,
@@ -134,6 +136,7 @@ impl Default for UISettings {
             terminal_classes: Vec::new(),
             show_preview: None,
             show_tips: true,
+            vim_mode: false,
             close_on_action: None,
             print_only: false,
             preview: PreviewConfig::default(),

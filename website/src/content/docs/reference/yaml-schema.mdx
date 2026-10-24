@@ -103,6 +103,17 @@ Show a keyword tip, picked from your enabled addons, in the empty search box.
 ```
 
 
+**`general.vim_mode`** `boolean` (default: `false`)
+
+Start with modal vim keybindings in normal mode. Press `i`, `a` or `/` to focus the search field, `j`/`k` to move, `g g`/`G` for the first or last result and `q` to quit. `Ctrl+Alt+V` toggles it at runtime, and `--vim-mode` enables it from the command line.
+
+  ```yaml
+  general:
+    vim_mode: true
+
+```
+
+
 **`general.preview`** `object`
 
 Appearance of the preview pane: `font_size` (default `16`), `font_family`, `mono_font_family`, `width_percent` (default `50`, 10–80) and `colors` (`bg`, `bg_block`, `text_main`, `text_muted`, `accent`, `border`).

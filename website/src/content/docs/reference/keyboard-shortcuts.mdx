@@ -7,6 +7,7 @@ import { Image } from 'astro:assets';
 import mainSourceScreenshot from '../../../assets/screenshots/main-source.png';
 import keywordHelpScreenshot from '../../../assets/screenshots/keyword-help.png';
 import keywordShortcutScreenshot from '../../../assets/screenshots/keyword-help-shortcuts.png';
+import vimModeScreenshot from '../../../assets/screenshots/vim-mode.png';
 
 You can drive Raffi from the keyboard alone. If you forget a key, press
 **Ctrl+/** or type `?` on its own, and Raffi lists the keywords and shortcuts
@@ -30,7 +31,8 @@ your config turns on. Typing narrows the list.
 | **F5** | Ask the [cache service](../cli-options/#cache-management) to fetch the current Slack view, browser history or cached Script Filter again, then show the result. Only offered while the service runs |
 | **Ctrl+Shift+F5** | Ask the cache service to fetch everything it caches again, from any view |
 | **Ctrl+/**, or `?` typed alone | Open the help list. Escape closes it and puts your search back. If one of your keywords is `?`, use Ctrl+/ |
-| **Escape** | Close the help list, or close Raffi |
+| **Ctrl+Alt+V** | Enable or disable vim mode for this run |
+| **Escape** | Close the help list, or close Raffi. In vim insert mode, return to normal mode instead |
 
 ## Switching views with Ctrl+Tab
 
@@ -58,6 +60,41 @@ In the help list, Ctrl+Tab completes the selected keyword, like Tab.
 
 With `main_view` set and an empty search, **Left** and **Right** move along
 the row of addon chips at the top, and Enter starts the one you picked.
+
+## Vim mode
+
+Vim mode is opt-in. Turn it on with
+`general.vim_mode: true`, `raffi --vim-mode`, or **Ctrl+Alt+V** at runtime.
+The command-line toggle does not rewrite your config. A `NORMAL` or `INSERT`
+badge beside the search field shows the current mode.
+
+When vim mode starts, it begins in normal mode. In normal mode the search
+field does not take typed text; use an insert key to focus it and type again.
+
+| Key | What it does |
+| --- | --- |
+| **j** / **k** | Move to the next or previous result |
+| **h** / **l** | Move to the previous or next plugin chip |
+| **g g** | Jump to the first result |
+| **G** | Jump to the last result |
+| **Enter** | Activate the selection |
+| **i**, **a**, **A**, **/** | Enter insert mode with the cursor at the end |
+| **I** | Enter insert mode with the cursor at the start |
+| **q** | Quit Raffi |
+| **Esc** | In insert mode, return to normal mode; in normal mode, quit Raffi |
+| **Ctrl+Alt+V** | Disable vim mode and return to normal typing |
+
+All the other shortcuts above still work in normal mode, including
+**Ctrl+Tab**, **Ctrl+P**, **Ctrl+R**, **Alt+P/N** and the addon keys. Vault and
+bookmark search prompts always open in insert mode so you can type into them.
+
+```yaml
+# raffi.yaml
+general:
+  vim_mode: true
+```
+
+<Image src={vimModeScreenshot} alt="Vim normal mode badge beside the search field" width={800} />
 
 ## File browser
 
