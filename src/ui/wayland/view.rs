@@ -1989,6 +1989,7 @@ impl LauncherApp {
             ));
         }
         match self.selected_main_row()? {
+            MainRowRef::More(_) => None,
             MainRowRef::Launcher(index) => {
                 let config = self.configs.get(index)?;
                 Some(format!(
@@ -3110,6 +3111,21 @@ impl LauncherApp {
             for (idx, reference) in self.main_view.ordered_rows.iter().enumerate() {
                 let display_idx = idx + special_item_idx;
                 let config_idx = match *reference {
+                    MainRowRef::More(source) => {
+                        let label = format!(
+                            "More from {}… ({} more)",
+                            self.main_source_label(source),
+                            self.main_view.more_count(source)
+                        );
+                        let selected = self.selected_index == display_idx;
+                        let item = button(text(label).size(fs.subtitle).color(t.accent))
+                            .on_press(Message::ItemClicked(display_idx))
+                            .padding(fs.item_padding)
+                            .width(Length::Fill)
+                            .style(item_button_style(t, selected, t.text_main));
+                        items_column = items_column.push(self.selectable(item, selected));
+                        continue;
+                    }
                     MainRowRef::Source { source, row } => {
                         if let Some(item) =
                             self.main_view_row(source, row, display_idx, &main_view_guides[source])

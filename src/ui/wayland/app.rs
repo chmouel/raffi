@@ -1384,7 +1384,7 @@ impl LauncherApp {
             }
             for row in &self.main_view.ordered_rows {
                 let selectable = match *row {
-                    MainRowRef::Launcher(_) => true,
+                    MainRowRef::Launcher(_) | MainRowRef::More(_) => true,
                     MainRowRef::Source { source, row } => match &self.main_view.sources[source] {
                         Source::List(list) => {
                             self.selectable_command_item(list.addon, list.item(row))
@@ -3915,6 +3915,13 @@ impl LauncherApp {
             .copied()
         {
             let real_config_index = match reference {
+                MainRowRef::More(source) => {
+                    self.main_view.focus = Some(super::main_view::Focus::Source(source));
+                    self.main_view.sync_slack_channel_filter();
+                    let task = self.handle_search_changed(self.search_query.clone());
+                    self.selected_index = self.main_rows_offset();
+                    return task.chain(self.snap_to_selection());
+                }
                 MainRowRef::Source { source, row } => return self.activate_main_view(source, row),
                 MainRowRef::Launcher(index) => index,
             };

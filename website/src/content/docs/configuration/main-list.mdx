@@ -3,6 +3,7 @@ title: The Main List
 description: Choose what shows up when you type in Raffi without a keyword
 ---
 
+import moreResultsScreenshot from '../../../assets/screenshots/main-more.png';
 import { Aside } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import mainSearchScreenshot from '../../../assets/screenshots/main-search.png';
@@ -88,6 +89,8 @@ Typing a keyword (`tabs gmail`) still opens the addon's full list, and
 fallbacks still show below the main list. Unknown or disabled sources print a
 warning when Raffi starts.
 
+<Image src={moreResultsScreenshot} alt="Five matching notes followed by More from Notes showing three additional matches" width={800} />
+
 ## How results are arranged
 
 When you type, apps and local addon rows share one relevance-ranked list.
@@ -96,7 +99,10 @@ of which source comes first in `main_view`. Matching the domain of a pasted
 URL ranks first. Within equally relevant matches, Raffi uses your configured
 source order, then past use within that source. Each addon contributes at most
 5 of its best matches; apps have no such limit. Addon rows carry a badge
-showing their source.
+showing their source. If more loaded matches are available, a **More from …**
+row follows that source's last visible result and shows how many are hidden.
+Select it and press Enter, or click it, to see all matches from that source
+with your search preserved. Ctrl+Tab still cycles between source views.
 
 Search is case- and accent-insensitive and matches words in any order across
 fields. Titles and executable names also accept word-initial abbreviations

@@ -366,6 +366,7 @@ pub(super) enum Source {
 pub(super) enum MainRowRef {
     Launcher(usize),
     Source { source: usize, row: usize },
+    More(usize),
 }
 
 /// What Ctrl+Tab narrows the main view to; None in `MainViewState::focus`
@@ -666,25 +667,34 @@ impl MainViewState {
         }
     }
 
-    /// Rows `source` shows for the current query, all of its matches when
-    /// it has the focus.
-    pub fn source_rows(&self, source: usize) -> usize {
+    pub fn source_match_count(&self, source: usize) -> usize {
         if !self.shows(source) {
             return 0;
         }
-        let count = match &self.sources[source] {
+        match &self.sources[source] {
             Source::List(list) if list.status().is_some() => 0,
             Source::List(list) => list.filtered.len(),
             Source::Snippets { filtered, .. } => filtered.len(),
             Source::ScriptFilter { results, .. } => {
                 results.as_ref().map_or(0, |result| result.items.len())
             }
-        };
+        }
+    }
+
+    pub fn source_rows(&self, source: usize) -> usize {
+        let count = self.source_match_count(source);
         if self.focus.is_some() {
             count
         } else {
             count.min(MAX_ROWS)
         }
+    }
+
+    pub fn more_count(&self, source: usize) -> usize {
+        if self.query.is_empty() || self.focus.is_some() {
+            return 0;
+        }
+        self.source_match_count(source).saturating_sub(MAX_ROWS)
     }
 
     pub fn source_order(&self, source: usize) -> usize {
@@ -1407,6 +1417,7 @@ impl LauncherApp {
 
     pub(super) fn main_row_key(&self, row: MainRowRef) -> Option<MainRowKey> {
         match row {
+            MainRowRef::More(source) => Some(MainRowKey::More(source)),
             MainRowRef::Launcher(index) => {
                 Some(MainRowKey::Launcher(*self.launcher_ordinals.get(index)?))
             }
@@ -1659,6 +1670,21 @@ impl LauncherApp {
                 ));
             }
             self.main_view.ordered_rows = rows;
+        }
+        let rows = std::mem::take(&mut self.main_view.ordered_rows);
+        let mut last = vec![None; self.main_view.sources.len()];
+        for (index, row) in rows.iter().enumerate() {
+            if let MainRowRef::Source { source, .. } = row {
+                last[*source] = Some(index);
+            }
+        }
+        for (index, row) in rows.into_iter().enumerate() {
+            self.main_view.ordered_rows.push(row);
+            if let MainRowRef::Source { source, .. } = row {
+                if last[source] == Some(index) && self.main_view.more_count(source) > 0 {
+                    self.main_view.ordered_rows.push(MainRowRef::More(source));
+                }
+            }
         }
     }
 
@@ -2218,6 +2244,10 @@ impl LauncherApp {
             };
             return label.to_string();
         };
+        self.main_source_label(source)
+    }
+
+    pub(super) fn main_source_label(&self, source: usize) -> String {
         match &self.main_view.sources[source] {
             Source::List(list) => match (list.addon, list.slack_source) {
                 (Some(CommandListAddon::Slack), Some(slack)) => slack.focus_label(),
@@ -2257,7 +2287,7 @@ impl LauncherApp {
     pub(super) fn selected_main_view(&self) -> Option<(usize, usize)> {
         match self.selected_main_row()? {
             MainRowRef::Source { source, row } => Some((source, row)),
-            MainRowRef::Launcher(_) => None,
+            MainRowRef::Launcher(_) | MainRowRef::More(_) => None,
         }
     }
 

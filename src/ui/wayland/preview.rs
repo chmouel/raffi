@@ -1078,6 +1078,7 @@ impl LauncherApp {
             .get(index.saturating_sub(current_index))
         {
             return match *row {
+                MainRowRef::More(_) => None,
                 MainRowRef::Source { source, row } => {
                     self.build_main_view_preview(source, row, actions)
                 }

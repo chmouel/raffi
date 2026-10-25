@@ -87,6 +87,14 @@ def classic(config):
     })
 
 
+def more_results(config):
+    config["general"]["main_view"] = ["text_snippets.Notes"]
+    config["addons"]["text_snippets"][0]["snippets"] = [
+        {"name": f"Release task {index}", "value": f"Review release item {index}"}
+        for index in range(1, 9)
+    ]
+
+
 def check_disk(config):
     config["launchers"]["Check Disk Usage"] = {
         "binary": "python3", "script": CHECK_DISK_SCRIPT, "icon": "python", "description": "Check Disk Usage",
@@ -108,6 +116,7 @@ SHOTS = [
     Shot("main-recent", height=720),
     Shot("main-search", "raffi"),
     Shot("main-source", "raffi", ("ctrl+Tab",)),
+    Shot("main-more", "release", height=720, tweak=more_results),
     Shot("action-menu", "~/Documents/preview.py", ("Right",)),
     Shot("unit-conversion", "100 km/h to mph"),
     Shot("color-converter", "#89b4fa"),

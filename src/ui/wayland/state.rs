@@ -218,6 +218,7 @@ pub(super) enum MainViewSelectedRow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum MainRowKey {
     Launcher(usize),
+    More(usize),
     SourceRow {
         source: usize,
         row: MainViewSelectedRow,

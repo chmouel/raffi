@@ -8428,9 +8428,9 @@ fn test_main_view_groups_sources_in_config_order_and_caps_them() {
     assert_eq!(app.filtered_configs, vec![0]);
     assert_eq!(
         app.main_view.ordered_rows.len(),
-        2 + super::main_view::MAX_ROWS
+        3 + super::main_view::MAX_ROWS
     );
-    assert_eq!(app.total_items(), 1 + 1 + super::main_view::MAX_ROWS);
+    assert_eq!(app.total_items(), 1 + 2 + super::main_view::MAX_ROWS);
 
     let _ = app.update(Message::MoveDown);
     assert_eq!(app.resolve_selected_preview().unwrap().title, "mail 0");
@@ -9015,7 +9015,7 @@ fn main_view_titles(app: &LauncherApp) -> Vec<String> {
         .iter()
         .filter_map(|reference| {
             let (source, row) = match *reference {
-                MainRowRef::Launcher(_) => return None,
+                MainRowRef::Launcher(_) | MainRowRef::More(_) => return None,
                 MainRowRef::Source { source, row } => (source, row),
             };
             Some(match &app.main_view.sources[source] {
@@ -9803,7 +9803,7 @@ fn test_main_view_focus_lists_every_match_without_inline_rows() {
         .collect();
     let _ = app.update(Message::MainViewSnippetsLoaded(0, Ok(snippets)));
     let _ = app.update(Message::SearchChanged("mail".into()));
-    assert_eq!(app.total_items(), super::main_view::MAX_ROWS);
+    assert_eq!(app.total_items(), super::main_view::MAX_ROWS + 1);
 
     let _ = app.update(Message::CycleView(false));
     let _ = app.update(Message::CycleView(false));
@@ -12163,4 +12163,80 @@ fn action_menu_runs_the_browser_tab_secondary_action() {
         matches!(app.deferred_action.lock().unwrap().as_ref(), Some(DeferredAction::Copy(value)) if value == "close")
     );
     assert!(app.view.current_modifiers.is_empty());
+}
+
+#[test]
+fn main_view_more_rows_follow_sources_and_preserve_query() {
+    use super::main_view::{Focus, MainRowRef};
+    let addons = AddonsConfig {
+        text_snippets: ["First", "Second"]
+            .map(|name| TextSnippetSourceConfig {
+                name: name.into(),
+                keyword: name.to_lowercase(),
+                snippets: Some(Vec::new()),
+                ..Default::default()
+            })
+            .to_vec(),
+        ..Default::default()
+    };
+    let mut app = main_view_app(
+        &["text_snippets.First", "text_snippets.Second"],
+        Vec::new(),
+        addons,
+    );
+    let snippets = |count| {
+        (0..count)
+            .map(|index| TextSnippet {
+                name: format!("mail {index}"),
+                value: format!("message {index}"),
+                keyword: None,
+                icon: None,
+            })
+            .collect()
+    };
+    let _ = app.update(Message::MainViewSnippetsLoaded(0, Ok(snippets(5))));
+    let _ = app.update(Message::MainViewSnippetsLoaded(1, Ok(snippets(6))));
+    let _ = app.update(Message::SearchChanged("mail".into()));
+    assert_eq!(app.main_view.more_count(0), 0);
+    assert_eq!(app.main_view.more_count(1), 1);
+    assert_eq!(app.total_items(), 11);
+    assert!(!app.main_view.ordered_rows.contains(&MainRowRef::More(0)));
+    let more = app
+        .main_view
+        .ordered_rows
+        .iter()
+        .position(|row| *row == MainRowRef::More(1))
+        .unwrap();
+    for _ in 0..more {
+        let _ = app.update(Message::MoveDown);
+    }
+    assert_eq!(app.selected_main_row(), Some(MainRowRef::More(1)));
+    let _ = app.update(Message::MainViewSnippetsLoaded(0, Ok(snippets(8))));
+    assert_eq!(
+        app.selected_main_row(),
+        Some(MainRowRef::More(1)),
+        "async inserts keep the selected source"
+    );
+    assert!(app.selected_actions().is_empty());
+    let index = app.selected_index;
+    let _ = app.update(Message::ItemClicked(index));
+    assert_eq!(app.search_query, "mail");
+    assert_eq!(app.main_view.focus, Some(Focus::Source(1)));
+    assert_eq!(app.total_items(), 6);
+    assert_eq!(
+        app.selected_main_row(),
+        Some(MainRowRef::Source { source: 1, row: 0 })
+    );
+    let _ = app.update(Message::CycleView(false));
+    assert_eq!(app.main_view.focus, None);
+    let more = app
+        .main_view
+        .ordered_rows
+        .iter()
+        .position(|row| *row == MainRowRef::More(0))
+        .unwrap();
+    app.selected_index = app.main_rows_offset() + more;
+    let _ = app.update(Message::Submit);
+    assert_eq!(app.main_view.focus, Some(Focus::Source(0)));
+    assert_eq!(app.total_items(), 8);
 }
