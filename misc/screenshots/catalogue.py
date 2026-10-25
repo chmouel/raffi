@@ -29,6 +29,7 @@ class Shot:
     crop: tuple | None = None
     needs: frozenset = field(default_factory=frozenset)
     unset_env: tuple = ()
+    new_user: bool = False
     settle: float = 2.0
     palette: str | None = None
 
@@ -114,8 +115,10 @@ def vim_mode(config):
 SHOTS = [
     # Main view and built-in addons, 1120x560.
     Shot("main", theme="dark"),
-    Shot("onboarding", "?", ("type:getting started", "Return"), height=640),
+    Shot("onboarding", height=640, new_user=True),
     Shot("onboarding-binding", "?", ("type:getting started", "Return", "Tab", "Tab", "Tab", "Tab", "Return"), height=640),
+    Shot("onboarding-config", "?", ("type:getting started", "Return", "Tab", "Tab", "Tab", "Tab", "Tab", "Return"), height=720, new_user=True),
+    Shot("onboarding-config-created", "?", ("type:getting started", "Return", "Tab", "Tab", "Tab", "Tab", "Tab", "Return", "Down", "Return"), height=720, new_user=True),
     Shot("main-recent", height=720),
     Shot("main-search", "raffi"),
     Shot("main-source", "raffi", ("ctrl+Tab",)),

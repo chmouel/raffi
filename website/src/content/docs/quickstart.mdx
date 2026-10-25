@@ -7,6 +7,8 @@ import { Aside, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import onboardingScreenshot from '../../assets/screenshots/onboarding.png';
 import bindingSetupScreenshot from '../../assets/screenshots/onboarding-binding.png';
+import configSetupScreenshot from '../../assets/screenshots/onboarding-config.png';
+import configCreatedScreenshot from '../../assets/screenshots/onboarding-config-created.png';
 import emptyResultsScreenshot from '../../assets/screenshots/empty-results.png';
 import unavailableScreenshot from '../../assets/screenshots/addon-unavailable.png';
 import keywordSuggestionScreenshot from '../../assets/screenshots/keyword-suggestion.png';
@@ -143,7 +145,20 @@ switcher to password managers.
 
 ## Make it yours
 
-Settings live in `~/.config/raffi/raffi.yaml`. Create the folder first:
+Choose **Create starter config** in Getting started to preview a small config
+and its destination. **Create file** creates it only when no file exists;
+existing configs are preserved. **Copy config** copies the example without
+writing a file. The starter enables installed apps and keeps the default
+search sources. Changes take effect the next time you launch Raffi.
+
+If you started Raffi with `-c`, the preview uses that config path. Command-line
+overrides are not saved into the starter file.
+
+<Image src={configSetupScreenshot} alt="Starter config preview with Copy config and Create file controls" width={800} />
+<Image src={configCreatedScreenshot} alt="Confirmation that the starter config was created for the next launch" width={800} />
+
+Settings normally live in `~/.config/raffi/raffi.yaml`. To create one manually,
+start with the folder:
 
 ```bash
 mkdir -p ~/.config/raffi

@@ -12421,6 +12421,10 @@ fn onboarding_help_restores_query_and_controls_preserve_selection() {
     let selection = app.selected_index;
     let _ = app.update(Message::TabComplete);
     assert_eq!(app.onboarding.focused, Some(0));
+    assert_eq!(
+        app.empty_search_enter_hint().as_deref(),
+        Some("Calculate: 2 + 2")
+    );
     assert_eq!(app.selected_index, selection);
     let _ = app.update(Message::BackTabComplete);
     assert_eq!(app.onboarding.focused, None);
@@ -12474,6 +12478,7 @@ fn onboarding_examples_use_real_queries_without_executing_results() {
         vec![
             WelcomeAction::Explore,
             WelcomeAction::BindShortcut,
+            WelcomeAction::CreateConfig,
             WelcomeAction::Dismiss
         ]
     );
@@ -12512,9 +12517,15 @@ fn onboarding_binding_setup_cycles_and_keeps_launcher_actions_out() {
         ]
     );
     let _ = app.update(Message::CycleView(false));
-    assert_eq!(app.onboarding.setup, Some(BindingVariant::Niri));
+    assert_eq!(
+        app.onboarding.setup,
+        Some(super::onboarding::SetupPage::Binding(BindingVariant::Niri))
+    );
     let _ = app.update(Message::CycleView(true));
-    assert_eq!(app.onboarding.setup, Some(BindingVariant::Other));
+    assert_eq!(
+        app.onboarding.setup,
+        Some(super::onboarding::SetupPage::Binding(BindingVariant::Other))
+    );
     let _ = app.update(Message::MoveDown);
     assert_eq!(app.selected_index, original_selection);
     assert_eq!(app.onboarding.setup_selected, 1);
@@ -12556,4 +12567,76 @@ fn onboarding_copy_feedback_stays_open_and_ignores_stale_completions() {
     let _ = app.update(Message::SearchChanged("firefox".into()));
     assert!(app.onboarding.setup.is_none());
     assert_eq!(app.search_query, "firefox");
+}
+
+#[test]
+fn onboarding_starter_config_creates_defaults_without_overwriting() {
+    use super::onboarding::{write_starter_config, STARTER_CONFIG};
+    let dir = updir_test_dir();
+    let path = dir.join("nested/raffi.yaml");
+    write_starter_config(&path).unwrap();
+    let contents = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(contents, STARTER_CONFIG);
+    let config: crate::Config = serde_yaml::from_str(&contents).unwrap();
+    assert_eq!(config.general.main_view, crate::default_main_view());
+    assert!(config.addons.apps.enabled);
+    assert_eq!(config.general.theme.as_deref(), Some("dark"));
+    std::fs::write(&path, "existing user config").unwrap();
+    assert!(write_starter_config(&path).is_err());
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "existing user config"
+    );
+    assert!(write_starter_config(&path.join("child")).is_err());
+    let link = dir.join("symlink.yaml");
+    std::os::unix::fs::symlink(&path, &link).unwrap();
+    assert!(write_starter_config(&link).is_err());
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "existing user config"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn onboarding_config_preview_is_explicit_and_preserves_the_active_file() {
+    use super::onboarding::{write_starter_config, SetupPage};
+    let dir = updir_test_dir();
+    let path = dir.join("custom.yaml");
+    let mut app = test_app(AddonsConfig::default());
+    app.onboarding.config_path = Some(path.clone());
+    let _ = app.update(Message::OpenOnboarding);
+    let _ = app.update(Message::OpenConfigSetup);
+    assert!(app.can_create_starter_config());
+    assert!(!path.exists(), "opening the preview writes nothing");
+    assert_eq!(
+        app.onboarding.setup_selected, 0,
+        "Enter defaults to Copy config"
+    );
+    assert!(app.update(Message::CreateStarterConfig).units() > 0);
+    assert!(app.onboarding.saving);
+    assert_eq!(app.update(Message::CreateStarterConfig).units(), 0);
+    let generation = app.onboarding.generation;
+    let _ = app.update(Message::StarterConfigCreated(
+        generation,
+        Err("Permission denied".into()),
+    ));
+    assert_eq!(
+        app.onboarding.feedback,
+        Some(Err("Permission denied".into()))
+    );
+    assert_eq!(app.onboarding.setup, Some(SetupPage::Config));
+    assert!(!app.onboarding.saving);
+    write_starter_config(&path).unwrap();
+    let _ = app.update(Message::StarterConfigCreated(generation, Ok(())));
+    assert!(app.onboarding.config_created);
+    assert!(!app.can_create_starter_config());
+    let contents = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(app.update(Message::CreateStarterConfig).units(), 0);
+    assert!(app.update(Message::CopyOnboarding).units() > 0);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), contents);
+    let _ = app.update(Message::Cancel);
+    assert!(app.welcome_visible());
+    assert_eq!(app.search_query, "");
+    std::fs::remove_dir_all(dir).unwrap();
 }

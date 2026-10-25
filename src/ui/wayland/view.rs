@@ -1982,6 +1982,15 @@ impl LauncherApp {
     }
 
     pub(super) fn empty_search_enter_hint(&self) -> Option<String> {
+        if self.welcome_visible() {
+            if let Some(action) = self
+                .onboarding
+                .focused
+                .and_then(|row| self.welcome_actions().get(row).copied())
+            {
+                return Some(action.label().into());
+            }
+        }
         if !self.search_query.is_empty() || self.view.help_active {
             return None;
         }

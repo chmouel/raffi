@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use iced::widget::operation::{focus, move_cursor_to_end};
@@ -13,16 +14,18 @@ pub(super) enum WelcomeAction {
     BrowseFiles,
     Explore,
     BindShortcut,
+    CreateConfig,
     Dismiss,
 }
 
 impl WelcomeAction {
-    fn label(self) -> &'static str {
+    pub(super) fn label(self) -> &'static str {
         match self {
             Self::Calculate => "Calculate: 2 + 2",
             Self::BrowseFiles => "Browse files: ~/",
             Self::Explore => "Explore features",
             Self::BindShortcut => "Bind a shortcut",
+            Self::CreateConfig => "Create starter config",
             Self::Dismiss => "Dismiss",
         }
     }
@@ -34,7 +37,10 @@ pub(super) struct Onboarding {
     pub focused: Option<usize>,
     pub saved_query: Option<String>,
     pub marker: Option<PathBuf>,
-    pub setup: Option<BindingVariant>,
+    pub setup: Option<SetupPage>,
+    pub config_path: Option<PathBuf>,
+    pub saving: bool,
+    pub config_created: bool,
     pub setup_selected: usize,
     pub generation: u64,
     pub copying: bool,
@@ -94,6 +100,7 @@ impl LauncherApp {
                 marker.as_deref(),
             ),
             marker,
+            config_path,
             ..Default::default()
         };
     }
@@ -156,6 +163,7 @@ impl LauncherApp {
         actions.extend([
             WelcomeAction::Explore,
             WelcomeAction::BindShortcut,
+            WelcomeAction::CreateConfig,
             WelcomeAction::Dismiss,
         ]);
         actions
@@ -166,8 +174,13 @@ impl LauncherApp {
         let query = match self.welcome_actions().get(index) {
             Some(WelcomeAction::Calculate) => "2 + 2",
             Some(WelcomeAction::BrowseFiles) => "~/",
-            Some(WelcomeAction::Explore) => return self.update(Message::ToggleHelp),
+            Some(WelcomeAction::Explore) => {
+                return self
+                    .update(Message::ToggleHelp)
+                    .chain(focus(self.view.search_input_id.clone()));
+            }
             Some(WelcomeAction::BindShortcut) => return self.update(Message::OpenBindingSetup),
+            Some(WelcomeAction::CreateConfig) => return self.update(Message::OpenConfigSetup),
             Some(WelcomeAction::Dismiss) => return self.update(Message::DismissOnboarding),
             None => return Task::none(),
         };
@@ -186,20 +199,26 @@ impl LauncherApp {
                 | Message::MoveDown
                 | Message::TabComplete
                 | Message::BackTabComplete => {
-                    self.onboarding.setup_selected = 1 - self.onboarding.setup_selected;
+                    let count = self.onboarding_setup_actions().len();
+                    self.onboarding.setup_selected =
+                        if matches!(message, Message::MoveUp | Message::BackTabComplete) {
+                            (self.onboarding.setup_selected + count - 1) % count
+                        } else {
+                            (self.onboarding.setup_selected + 1) % count
+                        };
                     return Some(Task::none());
                 }
                 Message::Submit => {
-                    return Some(if self.onboarding.setup_selected == 0 {
-                        self.copy_onboarding()
-                    } else {
-                        self.close_onboarding_setup()
-                    })
+                    let message = self
+                        .onboarding_setup_actions()
+                        .get(self.onboarding.setup_selected)
+                        .map(|(_, message)| message.clone());
+                    return Some(message.map_or_else(Task::none, |message| self.update(message)));
                 }
                 Message::SearchChanged(_) | Message::ToggleHelp | Message::OpenOnboarding => {
                     self.close_onboarding_setup_state()
                 }
-                Message::CycleView(_) | Message::CopyOnboarding => {}
+                Message::CycleView(_) | Message::CopyOnboarding | Message::CreateStarterConfig => {}
                 message if super::app::is_user_input(message) => return Some(Task::none()),
                 _ => {}
             }
@@ -380,6 +399,7 @@ impl LauncherApp {
     pub(super) fn reset_onboarding_feedback(&mut self) {
         self.onboarding.generation = self.onboarding.generation.wrapping_add(1);
         self.onboarding.copying = false;
+        self.onboarding.saving = false;
         self.onboarding.feedback = None;
     }
 
@@ -389,7 +409,8 @@ impl LauncherApp {
     }
 
     pub(super) fn open_binding_setup(&mut self) -> Task<Message> {
-        self.onboarding.setup = Some(BindingVariant::detected((self.compositor)()));
+        let variant = BindingVariant::detected((self.compositor)());
+        self.onboarding.setup = Some(SetupPage::Binding(variant));
         self.onboarding.setup_selected = 0;
         self.onboarding.focused = None;
         self.reset_onboarding_feedback();
@@ -412,12 +433,13 @@ impl LauncherApp {
         self.onboarding.feedback = None;
         let copy = self.copy_job(variant.snippet().into());
         let generation = self.onboarding.generation;
-        Task::perform(super::browser_data::off_thread(copy), move |result| {
+        let task = Task::perform(super::browser_data::off_thread(copy), move |result| {
             Message::OnboardingCopied(
                 generation,
                 result.unwrap_or_else(|| Err("Copy worker stopped unexpectedly".into())),
             )
-        })
+        });
+        Task::batch([task, focus(self.view.search_input_id.clone())])
     }
 
     pub(super) fn onboarding_copied(
@@ -433,32 +455,49 @@ impl LauncherApp {
     }
 
     pub(super) fn render_onboarding_setup(&self) -> Element<'_, Message> {
-        let variant = self.onboarding.setup.unwrap();
+        let page = self.onboarding.setup.unwrap();
         let fs = self.view.font_sizes;
         let t = self.view.theme;
+        let (title, destination, instructions) = match page {
+            SetupPage::Binding(variant) => (
+                format!("Bind a shortcut · {}", variant.label()),
+                variant.destination().into(),
+                variant.instructions(),
+            ),
+            SetupPage::Config => (
+                "Create starter config".into(),
+                self.onboarding
+                    .config_path
+                    .as_ref()
+                    .map(|path| {
+                        super::app::tilde_path(
+                            &path.to_string_lossy(),
+                            &std::env::var("HOME").unwrap_or_default(),
+                        )
+                    })
+                    .unwrap_or_else(|| "Configuration path unavailable".into()),
+                if self.onboarding.config_created {
+                    "Created. Your config takes effect the next time you launch Raffi."
+                } else if self.onboarding.config_path.is_none() {
+                    "The config path is unavailable. You can copy this example."
+                } else if !self.can_create_starter_config() {
+                    "Your existing config is preserved. You can copy this example."
+                } else {
+                    "This starter keeps the default search sources and installed apps."
+                },
+            ),
+        };
         let mut content = Column::new()
             .spacing(16)
+            .push(text(title).size(fs.item).color(t.text_main))
+            .push(text(destination).size(fs.subtitle).color(t.accent))
             .push(
-                text(format!("Bind a shortcut · {}", variant.label()))
-                    .size(fs.item)
-                    .color(t.text_main),
-            )
-            .push(
-                text(variant.destination())
-                    .size(fs.subtitle)
-                    .color(t.accent),
-            )
-            .push(
-                text(variant.snippet())
+                text(page.snippet())
                     .font(iced::Font::MONOSPACE)
                     .size(fs.subtitle)
                     .color(t.text_main),
             )
-            .push(
-                text(variant.instructions())
-                    .size(fs.subtitle)
-                    .color(t.text_muted),
-            );
+            .push(text(instructions).size(fs.subtitle).color(t.text_muted));
         if let Some(feedback) = &self.onboarding.feedback {
             let (label, color) = match feedback {
                 Ok(label) => (label, t.accent),
@@ -466,46 +505,162 @@ impl LauncherApp {
             };
             content = content.push(text(label).size(fs.subtitle).color(color));
         }
-        for (index, (label, message)) in [
-            (
-                if self.onboarding.copying {
-                    "Copying…"
-                } else {
-                    "Copy snippet"
-                },
-                Message::CopyOnboarding,
-            ),
-            ("Back to getting started", Message::CloseOnboardingSetup),
-        ]
-        .into_iter()
-        .enumerate()
-        {
+        for (index, (label, message)) in self.onboarding_setup_actions().into_iter().enumerate() {
             let selected = index == self.onboarding.setup_selected;
-            content = content.push(
-                button(text(label).size(fs.subtitle))
-                    .on_press(message)
-                    .padding([8, 12])
-                    .style(move |_, _| button::Style {
-                        background: Some(if selected { t.selection_bg } else { t.bg_input }.into()),
-                        text_color: t.accent,
-                        border: iced::Border {
-                            width: 1.0,
-                            color: if selected { t.accent } else { t.border },
-                            radius: 6.0.into(),
-                        },
-                        ..Default::default()
-                    }),
-            );
+            let enabled = match message {
+                Message::CopyOnboarding => !self.onboarding.copying,
+                Message::CreateStarterConfig => !self.onboarding.saving,
+                _ => true,
+            };
+            let mut control = button(text(label).size(fs.subtitle))
+                .padding([8, 12])
+                .style(move |_, _| button::Style {
+                    background: Some(if selected { t.selection_bg } else { t.bg_input }.into()),
+                    text_color: if enabled { t.accent } else { t.text_muted },
+                    border: iced::Border {
+                        width: 1.0,
+                        color: if selected { t.accent } else { t.border },
+                        radius: 6.0.into(),
+                    },
+                    ..Default::default()
+                });
+            if enabled {
+                control = control.on_press(message);
+            }
+            content = content.push(control);
         }
+        let hint = match self.cycle_view_label() {
+            Some(label) => format!("Ctrl+Tab: {label} · Enter: Choose · Esc: Back"),
+            None => "Enter: Choose · Esc: Back".into(),
+        };
         self.shell(
             "Type to search…",
-            vec![span(format!(
-                "Ctrl+Tab: {} · Enter: Choose · Esc: Back",
-                self.cycle_view_label().unwrap()
-            ))
-            .size(fs.hint)
-            .color(t.text_muted)],
+            vec![span(hint).size(fs.hint).color(t.text_muted)],
             content,
         )
+    }
+}
+
+pub(super) const STARTER_CONFIG: &str =
+    "version: 1\ngeneral:\n  theme: dark\naddons:\n  apps:\n    enabled: true\n";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SetupPage {
+    Binding(BindingVariant),
+    Config,
+}
+
+impl SetupPage {
+    pub(super) fn snippet(self) -> &'static str {
+        match self {
+            Self::Binding(variant) => variant.snippet(),
+            Self::Config => STARTER_CONFIG,
+        }
+    }
+}
+
+pub(super) fn write_starter_config(path: &Path) -> Result<(), String> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("Cannot create config directory: {error}"))?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|error| format!("Cannot create {}: {error}", path.display()))?;
+    if let Err(error) = file.write_all(STARTER_CONFIG.as_bytes()) {
+        drop(file);
+        let _ = std::fs::remove_file(path);
+        return Err(format!("Cannot write {}: {error}", path.display()));
+    }
+    Ok(())
+}
+
+impl LauncherApp {
+    pub(super) fn open_config_setup(&mut self) -> Task<Message> {
+        self.onboarding.setup = Some(SetupPage::Config);
+        self.onboarding.setup_selected = 0;
+        self.onboarding.focused = None;
+        self.onboarding.config_created = false;
+        self.reset_onboarding_feedback();
+        focus(self.view.search_input_id.clone())
+    }
+
+    pub(super) fn can_create_starter_config(&self) -> bool {
+        self.onboarding
+            .config_path
+            .as_ref()
+            .is_some_and(|path| !exists_or_unreadable(path))
+    }
+
+    fn onboarding_setup_actions(&self) -> Vec<(&'static str, Message)> {
+        let config = self.onboarding.setup == Some(SetupPage::Config);
+        let mut actions = vec![(
+            if self.onboarding.copying {
+                "Copying…"
+            } else if config {
+                "Copy config"
+            } else {
+                "Copy snippet"
+            },
+            Message::CopyOnboarding,
+        )];
+        if config && (self.onboarding.saving || self.can_create_starter_config()) {
+            actions.push((
+                if self.onboarding.saving {
+                    "Creating…"
+                } else {
+                    "Create file"
+                },
+                Message::CreateStarterConfig,
+            ));
+        }
+        actions.push(("Back to getting started", Message::CloseOnboardingSetup));
+        actions
+    }
+
+    pub(super) fn create_starter_config(&mut self) -> Task<Message> {
+        if self.onboarding.setup != Some(SetupPage::Config)
+            || self.onboarding.saving
+            || !self.can_create_starter_config()
+        {
+            return Task::none();
+        }
+        let Some(path) = self.onboarding.config_path.clone() else {
+            return Task::none();
+        };
+        self.onboarding.saving = true;
+        self.onboarding.feedback = None;
+        let generation = self.onboarding.generation;
+        let task = Task::perform(
+            super::browser_data::off_thread(move || write_starter_config(&path)),
+            move |result| {
+                Message::StarterConfigCreated(
+                    generation,
+                    result.unwrap_or_else(|| Err("Config worker stopped unexpectedly".into())),
+                )
+            },
+        );
+        Task::batch([task, focus(self.view.search_input_id.clone())])
+    }
+
+    pub(super) fn starter_config_created(
+        &mut self,
+        generation: u64,
+        result: Result<(), String>,
+    ) -> Task<Message> {
+        if self.onboarding.setup == Some(SetupPage::Config)
+            && generation == self.onboarding.generation
+        {
+            self.onboarding.saving = false;
+            self.onboarding.config_created = result.is_ok();
+            self.onboarding.setup_selected = 0;
+            self.onboarding.feedback = result.err().map(Err);
+        }
+        Task::none()
     }
 }

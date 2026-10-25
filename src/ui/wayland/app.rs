@@ -472,6 +472,8 @@ pub(super) fn is_user_input(message: &Message) -> bool {
     matches!(
         message,
         Message::SearchChanged(_)
+            | Message::OpenConfigSetup
+            | Message::CreateStarterConfig
             | Message::OpenBindingSetup
             | Message::CloseOnboardingSetup
             | Message::CopyOnboarding
@@ -1498,6 +1500,11 @@ impl LauncherApp {
         }
         match message {
             Message::OpenOnboarding => self.open_onboarding(),
+            Message::OpenConfigSetup => self.open_config_setup(),
+            Message::CreateStarterConfig => self.create_starter_config(),
+            Message::StarterConfigCreated(generation, result) => {
+                self.starter_config_created(generation, result)
+            }
             Message::OpenBindingSetup => self.open_binding_setup(),
             Message::CloseOnboardingSetup => self.close_onboarding_setup(),
             Message::CopyOnboarding => self.copy_onboarding(),
@@ -4856,9 +4863,14 @@ impl LauncherApp {
     /// Ctrl+Tab, backwards with Shift: switch to the next view of what is
     /// showing. Tab completion where nothing has views.
     fn handle_cycle_view(&mut self, backwards: bool) -> Task<Message> {
-        if let Some(variant) = self.onboarding.setup {
-            self.onboarding.setup = Some(variant.cycle(backwards));
+        if let Some(super::onboarding::SetupPage::Binding(variant)) = self.onboarding.setup {
+            self.onboarding.setup = Some(super::onboarding::SetupPage::Binding(
+                variant.cycle(backwards),
+            ));
             self.reset_onboarding_feedback();
+            return Task::none();
+        }
+        if self.onboarding.setup.is_some() {
             return Task::none();
         }
         if self.view.help_active {
@@ -4909,8 +4921,12 @@ impl LauncherApp {
     /// Name of the view Ctrl+Tab switched to, for the footer; None where
     /// Ctrl+Tab has no views.
     pub(super) fn cycle_view_label(&self) -> Option<String> {
-        if let Some(variant) = self.onboarding.setup {
-            return Some(variant.label().into());
+        match self.onboarding.setup {
+            Some(super::onboarding::SetupPage::Binding(variant)) => {
+                return Some(variant.label().into())
+            }
+            Some(super::onboarding::SetupPage::Config) => return None,
+            None => {}
         }
         if self.view.help_active {
             return None;

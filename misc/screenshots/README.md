@@ -53,7 +53,9 @@ Edit `catalogue.py`. A `Shot` has a name (the PNG file name), a query, keys
 to press after the window maps (`ctrl+j`, `Down`, `type:some text`), a theme,
 the window size and an optional `tweak` that edits the config. `classic=True`
 uses the smaller window and the extra demo sources from the older shots.
-`needs` starts helpers such as the browser socket. Demo data shared by
+`needs` starts helpers such as the browser socket. `new_user=True` removes
+the fixture config and usage caches, applying demo settings through CLI
+overrides so the first-run flow can be captured. Demo data shared by
 several shots lives in `fixtures/demo.py`.
 
 Run the shot on its own, look at the PNG, then reference it from the docs.

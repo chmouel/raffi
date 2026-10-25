@@ -155,11 +155,23 @@ class Session:
             (self.home / ".cache/raffi/mru.cache").write_text(f"Check Disk Usage|19|{catalogue.CHECK_DISK_LAST_USED}\n")
 
         config = self.config(shot)
-        path = self.root / "config.json"
-        path.write_text(json.dumps(config, ensure_ascii=False))
+        path = self.home / ".config/raffi/raffi.yaml" if shot.new_user else self.root / "config.json"
+        saved_usage = None
+        if shot.new_user:
+            path.unlink(missing_ok=True)
+            cache = self.home / ".cache/raffi"
+            usage_files = [*cache.glob("*.cache"), cache / "onboarding-dismissed"]
+            saved_usage = {usage: usage.read_bytes() for usage in usage_files if usage.exists()}
+            for usage in usage_files:
+                usage.unlink(missing_ok=True)
+        else:
+            path.write_text(json.dumps(config, ensure_ascii=False))
         log = (self.root / "logs" / f"{shot.name}.log").open("w")
         command = [str(self.binary), "-u", "native", "-c", str(path), "-i", shot.query.format(**context),
                    "--app-name", "raffi-screenshots"]
+        if shot.new_user:
+            for key, value in config.items():
+                command.extend(["-o", f"{key}={json.dumps(value, ensure_ascii=False)}"])
         env = {key: value for key, value in self.env.items() if key not in shot.unset_env}
         process = subprocess.Popen(command, env=env, stdout=log, stderr=log)
         conn = display.Display(self.display)
@@ -180,6 +192,11 @@ class Session:
                     helper.terminate()
                     helper.wait(timeout=5)
             (self.home / ".cache/raffi/mru.cache").unlink(missing_ok=True)
+            if saved_usage is not None:
+                for usage in [*cache.glob("*.cache"), cache / "onboarding-dismissed"]:
+                    usage.unlink(missing_ok=True)
+                for usage, contents in saved_usage.items():
+                    usage.write_bytes(contents)
         theme = config["general"]["theme"]
         return composite.compose(pixels, theme, palette=shot.palette, crop=shot.crop)
 
