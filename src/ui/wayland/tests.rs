@@ -2222,6 +2222,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "color",
             "time",
             "uuid/pw",
+            "Getting started",
             "↑/↓",
             "Ctrl+J",
             "Ctrl+K",
@@ -2258,7 +2259,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
         .all(|entry| entry.section == HelpSection::KeywordsAndActions));
     assert!(entries[shortcut_start..]
         .iter()
-        .all(|entry| entry.section == HelpSection::KeyboardShortcuts));
+        .all(|entry| entry.section == HelpSection::KeyboardShortcuts || entry.action.is_some()));
     assert_eq!(entries[1].icon.as_deref(), Some("gist-icon"));
     assert_eq!(entries[1].completion.as_deref(), Some("gist "));
     assert_eq!(entries[0].completion.as_deref(), Some("~/"));
@@ -2300,14 +2301,15 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
     addons.terminal.enabled = false;
     let entries = help_entries(&addons);
 
-    // With every addon disabled only the general shortcut rows remain.
+    // Getting started remains available with every addon disabled
     assert!(entries
         .iter()
-        .all(|entry| entry.section == HelpSection::KeyboardShortcuts));
+        .all(|entry| entry.section == HelpSection::KeyboardShortcuts || entry.action.is_some()));
     let triggers: Vec<&str> = entries.iter().map(|entry| entry.trigger.as_str()).collect();
     assert_eq!(
         triggers,
         vec![
+            "Getting started",
             "↑/↓",
             "Ctrl+J",
             "Ctrl+K",
@@ -2376,8 +2378,8 @@ fn test_help_entries_skip_disabled_addons() {
     assert!(entries.iter().all(|entry| entry.completion.is_none()));
     assert!(entries
         .iter()
-        .all(|entry| entry.section == HelpSection::KeyboardShortcuts));
-    assert_eq!(entries.len(), 12);
+        .all(|entry| entry.section == HelpSection::KeyboardShortcuts || entry.action.is_some()));
+    assert_eq!(entries.len(), 13);
 }
 
 #[test]
@@ -12378,4 +12380,60 @@ fn empty_state_waits_for_main_sources_before_offering_recovery() {
     assert_eq!(app.total_items(), 0);
     assert_eq!(app.empty_state_message(), "Searching sources…");
     assert!(app.empty_state_recovery().is_none());
+}
+
+#[test]
+fn onboarding_detects_existing_use_and_remembers_dismissal() {
+    use super::onboarding::is_new_user;
+    let dir = updir_test_dir();
+    let marker = dir.join("onboarding-dismissed");
+    assert!(is_new_user(false, Some(&marker)));
+    assert!(!is_new_user(true, Some(&marker)));
+    assert!(!is_new_user(false, None));
+    std::fs::write(dir.join("history.cache"), "firefox\n").unwrap();
+    assert!(!is_new_user(false, Some(&marker)));
+    std::fs::remove_file(dir.join("history.cache")).unwrap();
+    let mut app = test_app(AddonsConfig::default());
+    app.onboarding.enabled = true;
+    app.onboarding.marker = Some(marker.clone());
+    let _ = app.update(Message::DismissOnboarding);
+    assert!(!app.welcome_visible());
+    assert!(!is_new_user(false, Some(&marker)));
+    app.onboarding.marker = Some(dir.join("missing/marker"));
+    app.onboarding.enabled = true;
+    let _ = app.update(Message::DismissOnboarding);
+    assert!(
+        !app.onboarding.enabled,
+        "failed persistence still dismisses locally"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn onboarding_help_restores_query_and_controls_preserve_selection() {
+    let mut app = test_app(AddonsConfig::default());
+    let _ = app.update(Message::SearchChanged("original query".into()));
+    let _ = app.update(Message::ToggleHelp);
+    let _ = app.update(Message::SearchChanged("getting started".into()));
+    let _ = app.update(Message::Submit);
+    assert!(app.welcome_visible());
+    assert!(!app.view.help_active);
+    let selection = app.selected_index;
+    let _ = app.update(Message::TabComplete);
+    assert_eq!(app.onboarding.focused, Some(0));
+    assert_eq!(app.selected_index, selection);
+    let _ = app.update(Message::BackTabComplete);
+    assert_eq!(app.onboarding.focused, None);
+    let _ = app.update(Message::BackTabComplete);
+    assert_eq!(app.onboarding.focused, Some(1));
+    assert!(app.update(Message::Cancel).units() > 0);
+    assert_eq!(app.search_query, "original query");
+    assert!(!app.welcome_visible());
+    let _ = app.update(Message::OpenOnboarding);
+    let _ = app.update(Message::TabComplete);
+    let _ = app.update(Message::SearchChanged("firefox".into()));
+    assert!(!app.welcome_visible());
+    assert_eq!(app.onboarding.focused, None);
+    let _ = app.update(Message::SearchChanged(String::new()));
+    assert!(app.welcome_visible());
 }

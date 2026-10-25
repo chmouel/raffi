@@ -755,6 +755,7 @@ pub(super) struct LauncherApp {
     pub filtered_config_scores: Vec<Option<super::ranking::ScoredMatch>>,
     pub search_query: String,
     pub action_menu: Option<super::action_menu::ActionMenu>,
+    pub onboarding: super::onboarding::Onboarding,
     pub select_1_query: Option<String>,
     pub select_1_ready: bool,
     pub selected_index: usize,

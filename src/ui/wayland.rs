@@ -31,6 +31,7 @@ mod hyprland;
 mod kill;
 mod main_view;
 mod media;
+mod onboarding;
 mod pass;
 mod placeholders;
 mod preview;
@@ -212,6 +213,8 @@ fn run_wayland_ui(
     let addons_for_new = addons_owned.clone();
     let selected_item_for_new = selected_item_clone.clone();
     let initial_query_owned = settings.initial_query.clone();
+    let config_path = settings.config_path.clone();
+    let existing_configuration = settings.existing_configuration;
     let no_icons = settings.no_icons;
     let max_history = settings.max_history;
     let font_sizes = settings.font_sizes;
@@ -278,6 +281,7 @@ fn run_wayland_ui(
             if select_1 && !app.search_query.is_empty() {
                 app.select_1_query = Some(app.search_query.clone());
             }
+            app.initialize_onboarding(config_path.clone(), existing_configuration);
             app.text_snippets.clipboard_history = clipboard_history;
             app.close_on_action = close_on_action;
             app.print_only = print_only;

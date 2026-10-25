@@ -4369,6 +4369,15 @@ pub fn run(args: Args) -> Result<()> {
 
     // Build UI settings
     let ui_settings = ui::UISettings {
+        #[cfg(feature = "wayland")]
+        config_path: Some(PathBuf::from(configfile)),
+        #[cfg(feature = "wayland")]
+        existing_configuration: [Path::new(configfile), &launchers_path].iter().any(|path| {
+            path.symlink_metadata().map_or_else(
+                |error| error.kind() != std::io::ErrorKind::NotFound,
+                |_| true,
+            )
+        }),
         no_icons,
         initial_query: args.initial_query.clone(),
         select_1: args.select_1,

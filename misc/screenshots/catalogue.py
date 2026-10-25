@@ -114,6 +114,7 @@ def vim_mode(config):
 SHOTS = [
     # Main view and built-in addons, 1120x560.
     Shot("main", theme="dark"),
+    Shot("onboarding", "?", ("type:getting started", "Return"), height=640),
     Shot("main-recent", height=720),
     Shot("main-search", "raffi"),
     Shot("main-source", "raffi", ("ctrl+Tab",)),

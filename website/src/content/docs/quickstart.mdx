@@ -5,6 +5,7 @@ description: Bind Raffi to a key, find your way around, try the addons and make 
 
 import { Aside, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
+import onboardingScreenshot from '../../assets/screenshots/onboarding.png';
 import emptyResultsScreenshot from '../../assets/screenshots/empty-results.png';
 import unavailableScreenshot from '../../assets/screenshots/addon-unavailable.png';
 import keywordSuggestionScreenshot from '../../assets/screenshots/keyword-suggestion.png';
@@ -15,6 +16,17 @@ You can run `raffi` before writing any config. With no config, typing
 searches your installed applications, open windows and system commands in one
 list. This page walks you through binding Raffi to a key, finding your way
 around, trying a few addons, and then setting it up the way you like.
+
+## Your first launch
+
+New users see a welcome panel above the results. Search stays ready: start
+typing to find an app, or choose **Explore features** to browse keywords.
+Tab and Shift+Tab move through the welcome controls; Enter chooses one.
+**Dismiss** hides the panel on future launches. You can reopen it through
+**Getting started** in Ctrl+/ help. Existing configurations and usage history
+keep the panel from appearing automatically.
+
+<Image src={onboardingScreenshot} alt="Raffi welcome panel above the normal launcher results" width={800} />
 
 ## Bind it to a key
 

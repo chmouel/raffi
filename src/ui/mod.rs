@@ -76,6 +76,10 @@ impl FontSizes {
 /// Bundled UI settings to avoid proliferating arguments.
 #[derive(Debug, Clone)]
 pub struct UISettings {
+    #[cfg(feature = "wayland")]
+    pub config_path: Option<PathBuf>,
+    #[cfg(feature = "wayland")]
+    pub existing_configuration: bool,
     pub no_icons: bool,
     pub initial_query: Option<String>,
     pub select_1: bool,
@@ -114,6 +118,10 @@ pub struct UISettings {
 impl Default for UISettings {
     fn default() -> Self {
         Self {
+            #[cfg(feature = "wayland")]
+            config_path: None,
+            #[cfg(feature = "wayland")]
+            existing_configuration: true,
             no_icons: false,
             initial_query: None,
             select_1: false,

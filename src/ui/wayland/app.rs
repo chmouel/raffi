@@ -472,6 +472,10 @@ pub(super) fn is_user_input(message: &Message) -> bool {
     matches!(
         message,
         Message::SearchChanged(_)
+            | Message::OpenOnboarding
+            | Message::DismissOnboarding
+            | Message::WelcomeSelected(_)
+            | Message::BackTabComplete
             | Message::OpenActions
             | Message::ClearFilter
             | Message::RetryLoad
@@ -1123,6 +1127,7 @@ impl LauncherApp {
                 launcher_documents,
                 configs,
                 action_menu: None,
+                onboarding: Default::default(),
                 search_query: initial_query.clone(),
                 select_1_query: None,
                 select_1_ready: false,
@@ -1464,6 +1469,9 @@ impl LauncherApp {
     }
 
     fn update_inner(&mut self, message: Message) -> Task<Message> {
+        if let Some(task) = self.update_onboarding(&message) {
+            return task;
+        }
         if self.action_menu.is_some() {
             if let Some(task) = self.update_action_menu(&message) {
                 return task;
@@ -1486,6 +1494,10 @@ impl LauncherApp {
             }
         }
         match message {
+            Message::OpenOnboarding => self.open_onboarding(),
+            Message::DismissOnboarding => self.dismiss_onboarding(),
+            Message::WelcomeSelected(index) => self.activate_welcome(index),
+            Message::BackTabComplete => self.handle_tab_complete(),
             Message::ClearFilter => self.clear_filter(),
             Message::RetryLoad => {
                 let task = self.handle_refresh();
@@ -5786,6 +5798,14 @@ impl LauncherApp {
     }
 
     fn handle_help_entry_selected(&mut self, index: usize) -> Task<Message> {
+        if self
+            .help_filtered
+            .get(index)
+            .and_then(|&row| self.help_entries.get(row))
+            .is_some_and(|entry| entry.action == Some(super::help::HelpAction::GettingStarted))
+        {
+            return self.update(Message::OpenOnboarding);
+        }
         let Some(entry) = self.help_filtered.get(index).and_then(|&entry_index| {
             self.help_entries
                 .get(entry_index)

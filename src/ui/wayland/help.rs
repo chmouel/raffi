@@ -17,7 +17,11 @@ impl HelpSection {
     }
 }
 
-/// A single row of the keyword help list shown with `Ctrl+/`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum HelpAction {
+    GettingStarted,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct HelpEntry {
     pub section: HelpSection,
@@ -25,9 +29,8 @@ pub(super) struct HelpEntry {
     pub title: String,
     pub usage: String,
     pub icon: Option<String>,
-    /// Text placed in the search input when the row is selected. `None` marks
-    /// an informational row that cannot be armed, such as the calculator.
     pub completion: Option<String>,
+    pub action: Option<HelpAction>,
 }
 
 /// Keys of the password manager lists, shown in their help rows.
@@ -49,6 +52,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             usage: "~/ or /path/to/dir".to_string(),
             icon: Some(super::app::FILE_BROWSER_ICON.to_string()),
             completion: Some("~/".to_string()),
+            action: None,
         });
     }
 
@@ -63,6 +67,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
                 .clone()
                 .or(Some(super::app::SEARCH_ICON.to_string())),
             completion: Some(format!("{} ", config.keyword)),
+            action: None,
         });
     }
 
@@ -77,6 +82,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
                 .clone()
                 .or(Some(super::app::SNIPPET_ICON.to_string())),
             completion: Some(format!("{} ", config.keyword)),
+            action: None,
         });
     }
 
@@ -89,6 +95,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             usage: format!("{trigger} <name>"),
             icon: Some(super::app::EMOJI_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
+            action: None,
         });
     }
 
@@ -101,6 +108,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             usage: format!("{trigger} <text>"),
             icon: Some(super::app::CLIPBOARD_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
+            action: None,
         });
     }
 
@@ -115,6 +123,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
                 .clone()
                 .or(Some(super::app::SEARCH_ICON.to_string())),
             completion: Some(format!("{} ", config.keyword)),
+            action: None,
         });
     }
 
@@ -129,6 +138,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             ),
             icon: Some(super::app::SYSTEM_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
+            action: None,
         });
     }
 
@@ -141,6 +151,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             usage: format!("{trigger} <title or app>, Ctrl+Enter brings it here"),
             icon: Some(super::app::WINDOWS_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
+            action: None,
         });
     }
 
@@ -153,6 +164,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             usage: format!("{trigger} <title or URL>, Enter switches, Ctrl+Enter closes"),
             icon: Some(super::app::BROWSER_TABS_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
+            action: None,
         });
     }
 
@@ -167,6 +179,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             ),
             icon: Some(super::app::BOOKMARKS_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
+            action: None,
         });
     }
 
@@ -181,6 +194,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             ),
             icon: Some(super::app::BROWSER_HISTORY_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
+            action: None,
         });
     }
 
@@ -193,6 +207,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             usage: format!("{trigger} <action or player>, Enter plays, pauses or skips"),
             icon: Some(super::app::MEDIA_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
+            action: None,
         });
     }
 
@@ -207,6 +222,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             ),
             icon: Some(super::app::AUDIO_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
+            action: None,
         });
     }
 
@@ -219,6 +235,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             usage: format!("{trigger} <name>, Enter twice sends SIGTERM, Ctrl+Enter twice SIGKILL"),
             icon: Some(super::app::KILL_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
+            action: None,
         });
     }
 
@@ -231,6 +248,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             usage: format!("{trigger} <device>, Enter connects, or disconnects when pressed twice"),
             icon: Some(super::app::BLUETOOTH_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
+            action: None,
         });
     }
 
@@ -243,6 +261,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             usage: format!("{trigger} <entry>, {VAULT_KEYS}"),
             icon: Some(super::app::PASS_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
+            action: None,
         });
     }
 
@@ -255,6 +274,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             usage: format!("{trigger} <item>, {VAULT_KEYS}"),
             icon: Some(super::app::BITWARDEN_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
+            action: None,
         });
     }
 
@@ -269,6 +289,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             ),
             icon: Some(super::slack::SLACK_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
+            action: None,
         });
     }
 
@@ -281,6 +302,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             usage: format!("{trigger} <text> to encode, decode, hash or reformat it"),
             icon: Some(super::app::DEVTOOLS_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
+            action: None,
         });
     }
 
@@ -293,6 +315,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             usage: format!("{trigger} <command>, Enter runs it in a terminal"),
             icon: Some(super::terminal::TERMINAL_ICON.to_string()),
             completion: Some(format!("{trigger} ")),
+            action: None,
         });
     }
 
@@ -304,6 +327,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             usage: "2+2*3 or (10/4)^2".to_string(),
             icon: Some(super::app::CALCULATOR_ICON.to_string()),
             completion: None,
+            action: None,
         });
     }
 
@@ -316,6 +340,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             usage: "100 usd to eur".to_string(),
             icon: Some("💱".to_string()),
             completion: Some(format!("{trigger} ")),
+            action: None,
         });
     }
 
@@ -327,6 +352,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             usage: "10 km to mi or 70f to c".to_string(),
             icon: Some("📏".to_string()),
             completion: None,
+            action: None,
         });
     }
 
@@ -338,6 +364,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             usage: "#ff8800, rgb(255 136 0) or hsl(32 100% 50%)".to_string(),
             icon: Some(super::app::COLOR_ICON.to_string()),
             completion: None,
+            action: None,
         });
     }
 
@@ -349,6 +376,7 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             usage: "time tokyo or 15:00 paris to nyc".to_string(),
             icon: Some(super::app::WORLD_CLOCK_ICON.to_string()),
             completion: None,
+            action: None,
         });
     }
 
@@ -360,8 +388,19 @@ pub(super) fn help_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             usage: "uuid, pw or pw 32".to_string(),
             icon: Some("🎲".to_string()),
             completion: None,
+            action: None,
         });
     }
+
+    entries.push(HelpEntry {
+        section: HelpSection::KeywordsAndActions,
+        trigger: "Getting started".into(),
+        title: "Getting started".into(),
+        usage: "Welcome and setup".into(),
+        icon: None,
+        completion: None,
+        action: Some(HelpAction::GettingStarted),
+    });
 
     entries.extend(keyboard_shortcut_entries(addons));
 
@@ -378,6 +417,7 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         usage: usage.to_string(),
         icon: None,
         completion: None,
+        action: None,
     };
 
     let mut entries = vec![
@@ -558,6 +598,7 @@ pub(super) fn vim_shortcut_entries() -> Vec<HelpEntry> {
         usage: usage.to_string(),
         icon: None,
         completion: None,
+        action: None,
     };
 
     vec![
@@ -640,6 +681,7 @@ pub(super) fn add_cycle_view_shortcut(
         usage: usage.to_string(),
         icon: None,
         completion: None,
+        action: None,
     };
     let mut rows = Vec::new();
     if !views.is_empty() {

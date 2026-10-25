@@ -1217,13 +1217,15 @@ impl LauncherApp {
                 left_pane.width(Length::Fill).into()
             };
 
-        let content = Column::new()
+        let mut content = Column::new()
             .spacing(10)
             .width(Length::Fill)
             .height(Length::Fill)
-            .push(search_control)
-            .push(body_area)
-            .push(footer);
+            .push(search_control);
+        if self.welcome_visible() {
+            content = content.push(self.render_welcome());
+        }
+        let content = content.push(body_area).push(footer);
 
         container(content)
             .padding(fs.outer_padding)
@@ -3460,8 +3462,13 @@ impl LauncherApp {
             }) if modifiers.control() => Some(Message::CycleView(modifiers.shift())),
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Named(Named::Tab),
+                modifiers,
                 ..
-            }) => Some(Message::TabComplete),
+            }) => Some(if modifiers.shift() {
+                Message::BackTabComplete
+            } else {
+                Message::TabComplete
+            }),
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Named(Named::F5),
                 modifiers,
