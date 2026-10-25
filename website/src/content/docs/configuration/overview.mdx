@@ -31,10 +31,10 @@ raffi --configfile /path/to/custom/raffi.yaml
 Raffi writes `raffi-schema.json` and `launchers-schema.json` next to your config so editors can validate both files as you type, and warns on stderr about unknown or invalid keys when it starts. Run `raffi --check-config` to validate them on demand. See [Validation](../../reference/yaml-schema/#validation) for details.
 
 <Aside type="note">
-With no config file at all, Raffi mixes windows, system commands and other
-addons into the main list. Once a config file exists, the main list shows
-only your apps and entries until you set
-[`main_view`](../main-list/).
+Raffi mixes available windows, system commands and other addons into the main
+list by default, even after you add a config file. Set
+[`main_view`](../main-list/) to choose your sources, or use `null` or `[]`
+to show only apps and your entries.
 </Aside>
 
 ## raffi.yaml

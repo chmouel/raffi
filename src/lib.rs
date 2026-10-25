@@ -1773,7 +1773,7 @@ pub struct GeneralConfig {
     /// `slack.channels`, `text_snippets.<name>` and `script_filters.<name>`.
     /// Slack shows its Home rows on an empty query and searches messages when
     /// typing. When set, launchers only show if `launchers` is listed.
-    #[serde(default)]
+    #[serde(default = "default_main_view")]
     pub main_view: Option<Vec<String>>,
     /// What the chips row above the apps shows on an empty query when
     /// `main_view` is set: `name` (default), `keyword` or `off`
@@ -1818,7 +1818,7 @@ pub struct GeneralConfig {
     pub preview: PreviewConfig,
 }
 
-/// Main view sources used when there is no config file. They need no setup,
+/// Default main view sources. They need no setup,
 /// and each one hides itself when its tool or compositor is missing.
 #[cfg(feature = "wayland")]
 const FIRST_RUN_MAIN_VIEW: &[&str] = &[
@@ -1837,16 +1837,21 @@ const FIRST_RUN_MAIN_VIEW: &[&str] = &[
     "emoji",
 ];
 
-/// General settings used when there is no config file at all.
+fn default_main_view() -> Option<Vec<String>> {
+    #[cfg(feature = "wayland")]
+    return Some(
+        FIRST_RUN_MAIN_VIEW
+            .iter()
+            .map(|name| name.to_string())
+            .collect(),
+    );
+    #[cfg(not(feature = "wayland"))]
+    None
+}
+
 fn first_run_general() -> GeneralConfig {
     GeneralConfig {
-        #[cfg(feature = "wayland")]
-        main_view: Some(
-            FIRST_RUN_MAIN_VIEW
-                .iter()
-                .map(|name| name.to_string())
-                .collect(),
-        ),
+        main_view: default_main_view(),
         ..GeneralConfig::default()
     }
 }
@@ -1865,7 +1870,7 @@ struct Config {
     #[serde(default)]
     #[allow(dead_code)]
     version: u32,
-    #[serde(default)]
+    #[serde(default = "first_run_general")]
     general: GeneralConfig,
     #[serde(default)]
     addons: AddonsConfig,
@@ -4261,15 +4266,7 @@ pub fn run(args: Args) -> Result<()> {
     } else {
         let mut raw = Value::Mapping(serde_yaml::Mapping::new());
         apply_cli_overrides(&mut raw, &args)?;
-        let has_main_view_override = raw
-            .as_mapping()
-            .and_then(|m| m.get(Value::String("general".to_string())))
-            .and_then(Value::as_mapping)
-            .is_some_and(|g| g.contains_key(Value::String("main_view".to_string())));
-        let mut config: Config = serde_yaml::from_value(raw).context("cannot parse config")?;
-        if !has_main_view_override {
-            config.general.main_view = first_run_general().main_view;
-        }
+        let config: Config = serde_yaml::from_value(raw).context("cannot parse config")?;
         process_config(config, &args)?
     };
     debug_log!("config: loaded {} entries", parsed_config.entries.len());
@@ -4713,6 +4710,36 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn main_view_defaults_survive_config_and_overrides() {
+        for yaml in [
+            "",
+            "{}",
+            "general: {theme: light}",
+            "version: 1\nlaunchers: {}",
+            "shell: {binary: sh}",
+        ] {
+            let parsed = read_config_from_reader(yaml.as_bytes(), &Args::default()).unwrap();
+            assert_eq!(parsed.general.main_view, default_main_view(), "{yaml}");
+        }
+        for (value, expected) in [
+            ("null", None),
+            ("[]", Some(vec![])),
+            ("[launchers]", Some(vec!["launchers".into()])),
+        ] {
+            let yaml = format!("general: {{main_view: {value}}}");
+            let parsed = read_config_from_reader(yaml.as_bytes(), &Args::default()).unwrap();
+            assert_eq!(parsed.general.main_view, expected);
+            let args = Args {
+                options: vec![format!("general.main_view={value}")],
+                ..Args::default()
+            };
+            let parsed =
+                read_config_from_reader("general: {theme: light}".as_bytes(), &args).unwrap();
+            assert_eq!(parsed.general.main_view, expected);
+        }
     }
 
     #[test]

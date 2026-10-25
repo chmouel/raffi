@@ -51,17 +51,16 @@ You can put sources before `all` to bring them first, for example
 `main_view: [windows, all]`. Duplicates are skipped, and newly configured sources
 are included automatically on the next launch.
 
-With no config file at all, Raffi picks a set for you: `launchers`,
+When `main_view` is omitted, Raffi picks a set for you: `launchers`,
 `windows`, `browser_tabs`, `bookmarks`, `system`, `media`, `audio`,
 `bluetooth`, `pass`,
 `clipboard`, `bitwarden`, `terminal` and `emoji`. Each one stays hidden when
 its compositor or tool is missing.
 
-<Aside type="caution">
-Once a config file exists, even an empty one, that automatic set goes away.
-Without `main_view` the main list then shows only your apps and entries. When
-you do set it, only the sources you list appear, so include `launchers` or
-`all` if you still want your apps.
+<Aside type="note">
+Adding a config file keeps these defaults. Set `main_view: null` or
+`main_view: []` to show only apps and your custom entries. An explicit list
+replaces the defaults, so include `launchers` or `all` to keep your apps.
 </Aside>
 
 These sources are accepted:

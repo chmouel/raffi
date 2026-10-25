@@ -131,7 +131,7 @@ addons:
       url: "https://google.com/search?q={query}"
 ```
 
-`main_view` picks what shows up in the main list as you type. Once you have a config file, the main list shows only apps and your own entries unless you set it. `apps` keeps installed applications listed after you add entries of your own, and `web_searches` turns `g rust` into a Google search.
+`main_view` picks what shows up in the main list as you type. Omitting it keeps the default sources even after you add a config file; `null` or `[]` shows only apps and your own entries. `apps` keeps installed applications listed after you add entries of your own, and `web_searches` turns `g rust` into a Google search.
 
 Commands and scripts of your own go in `~/.config/raffi/launchers.yaml`:
 

@@ -1085,7 +1085,21 @@
             "array",
             "null"
           ],
-          "default": null,
+          "default": [
+            "launchers",
+            "windows",
+            "browser_tabs",
+            "bookmarks",
+            "system",
+            "media",
+            "audio",
+            "bluetooth",
+            "pass",
+            "clipboard",
+            "bitwarden",
+            "terminal",
+            "emoji"
+          ],
           "items": {
             "type": "string"
           }

@@ -131,11 +131,9 @@ addons:
 Then `g wayland protocol` or `wiki rust` opens the search in your browser.
 
 <Aside type="note">
-With no config file, Raffi mixes windows, system commands and other addons
-into the main list for you. Once you create a config file, the main list
-shows only your apps and entries until you set
-[`main_view`](../configuration/main-list/) to the sources
-you want.
+Adding a config file keeps Raffi's default main-list sources unless you set
+[`main_view`](../configuration/main-list/). An explicit list replaces those
+defaults; use `null` or `[]` to show only apps and your custom entries.
 </Aside>
 
 Every addon can be turned off, or given another keyword, under its own name
