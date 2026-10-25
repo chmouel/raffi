@@ -357,10 +357,10 @@ fn chip_style(
         let accent = |a: f32| iced::Color { a, ..t.accent };
         let (background, border) = if is_active {
             (
-                row_selected.then_some(iced::Background::Color(accent(0.16))),
+                row_selected.then_some(iced::Background::Color(accent(0.28))),
                 iced::Border {
-                    color: accent(if row_selected { 0.7 } else { 0.35 }),
-                    width: 1.0,
+                    color: accent(if row_selected { 1.0 } else { 0.35 }),
+                    width: if row_selected { 2.0 } else { 1.0 },
                     radius: 999.0.into(),
                 },
             )
@@ -1963,6 +1963,46 @@ impl LauncherApp {
             .into()
     }
 
+    pub(super) fn empty_search_enter_hint(&self) -> Option<String> {
+        if !self.search_query.is_empty() || self.view.help_active {
+            return None;
+        }
+        if self.keyword_chips && self.selected_index == 0 {
+            let chip = self.keyword_suggestions.get(self.chip_index)?;
+            return Some(format!(
+                "Open {}",
+                super::main_view::chip_label(&chip.keyword, &self.addons)
+            ));
+        }
+        match self.selected_main_row()? {
+            MainRowRef::Launcher(index) => {
+                let config = self.configs.get(index)?;
+                Some(format!(
+                    "Launch {}",
+                    config.description.as_deref().or(config.binary.as_deref())?
+                ))
+            }
+            MainRowRef::Source { source, row } => match self.main_view.sources.get(source)? {
+                MainViewSource::List(list) => {
+                    let item = list.item(row)?;
+                    if item.unavailable.is_some() || item.primary.is_none() {
+                        return None;
+                    }
+                    item.details
+                        .iter()
+                        .find(|(key, _)| key == "Enter")
+                        .map(|(_, label)| label.clone())
+                }
+                _ => self
+                    .resolve_selected_preview()?
+                    .metadata
+                    .into_iter()
+                    .find(|(key, _)| key == "Enter")
+                    .map(|(_, label)| label),
+            },
+        }
+    }
+
     /// What each chip shows, per `general.main_view_chips`.
     pub(super) fn chip_labels(&self) -> Vec<String> {
         self.keyword_suggestions
@@ -3128,6 +3168,16 @@ impl LauncherApp {
             span("Ctrl+/").size(fs.hint).color(t.accent),
             span(" keywords").size(fs.hint).color(t.text_muted),
         ];
+
+        if let Some(action) = self.empty_search_enter_hint() {
+            hint_spans.insert(0, sep.clone());
+            hint_spans.insert(
+                0,
+                span(format!("Enter: {action}"))
+                    .size(fs.hint)
+                    .color(t.text_main),
+            );
+        }
 
         if self.keyword_chips && self.keyword_suggestions.len() > 1 && self.selected_index == 0 {
             hint_spans.push(sep.clone());

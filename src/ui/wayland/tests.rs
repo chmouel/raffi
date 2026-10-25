@@ -8956,9 +8956,24 @@ fn test_main_view_offers_plugins_as_one_row_of_chips() {
         "keyword-only entries are no Ctrl+Tab stop"
     );
 
+    assert_eq!(
+        app.empty_search_enter_hint().as_deref(),
+        Some("Open System")
+    );
     let _ = app.update(Message::ChipMove(false));
+    assert_eq!(
+        app.empty_search_enter_hint().as_deref(),
+        Some("Open Clipboard")
+    );
+    let _ = app.update(Message::MoveDown);
+    assert_eq!(
+        app.empty_search_enter_hint().as_deref(),
+        Some("Launch Firefox mail")
+    );
+    let _ = app.update(Message::MoveUp);
     let _ = app.update(Message::Submit);
     assert_eq!(app.search_query, "clip ", "Enter arms the active chip");
+    assert_eq!(app.empty_search_enter_hint(), None);
 
     let _ = app.update(Message::SearchChanged(String::new()));
     let _ = app.update(Message::ChipMove(true));
