@@ -2158,6 +2158,9 @@ fn help_addons() -> AddonsConfig {
 fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
     let entries = help_entries(&help_addons());
     let triggers: Vec<&str> = entries.iter().map(|entry| entry.trigger.as_str()).collect();
+    assert!(entries
+        .iter()
+        .any(|entry| entry.trigger == "sys" && entry.usage.contains("display off")));
 
     assert_eq!(
         triggers,
@@ -4733,14 +4736,18 @@ fn test_default_triggers_do_not_shadow_each_other_or_web_searches() {
         subtitles,
         vec![
             "Search Sysdig",
-            "Lock, suspend, hibernate, log out, reboot or shut down"
+            "Lock, display off, suspend, hibernate, log out, reboot or shut down"
         ]
     );
+    assert!(keyword_suggestions("display", &addons)
+        .iter()
+        .any(|suggestion| suggestion.keyword == "sys"));
 }
 
 #[test]
 fn test_system_list_filters_entries() {
     let mut app = test_app(AddonsConfig::default());
+    app.compositor = || None;
     open_system(&mut app, "sys ");
     assert_eq!(
         command_list_titles(&app),
@@ -4800,6 +4807,7 @@ fn test_system_power_actions_need_a_second_enter() {
 #[test]
 fn test_system_confirmation_resets_on_selection_query_and_modifiers() {
     let mut app = test_app(AddonsConfig::default());
+    app.compositor = || None;
     open_system(&mut app, "sys ");
     app.selected_index = 4;
 
@@ -4871,8 +4879,9 @@ fn test_system_commands_overrides_and_hide() {
     let entries = system_entries(&addons.system, Some(Compositor::Hyprland), None, |_| true);
     let ids: Vec<crate::SystemCommand> = entries.iter().map(|entry| entry.id).collect();
     use crate::SystemCommand::*;
-    assert_eq!(ids, vec![Lock, Logout, Reboot, Shutdown]);
-    assert!(matches!(&entries[1].action, DeferredAction::Command(argv) if argv == &["my-logout"]));
+    assert_eq!(ids, vec![Lock, DisplayOff, Logout, Reboot, Shutdown]);
+    let logout = entries.iter().find(|entry| entry.id == Logout).unwrap();
+    assert!(matches!(&logout.action, DeferredAction::Command(argv) if argv == &["my-logout"]));
 
     let mut app = test_app(addons);
     open_system(&mut app, "sys lock");
@@ -4881,6 +4890,91 @@ fn test_system_commands_overrides_and_hide() {
         deferred_argv(&app),
         Some(vec!["hyprlock".into(), "--immediate".into()])
     );
+}
+
+#[test]
+fn test_system_display_off_defaults_and_overrides() {
+    let mut config = crate::SystemAddonConfig::default();
+    let cases: [(Compositor, &[&str]); 2] = [
+        (Compositor::Sway, &["swaymsg", "output * power off"]),
+        (
+            Compositor::Niri,
+            &["niri", "msg", "action", "power-off-monitors"],
+        ),
+    ];
+
+    for (compositor, expected) in cases {
+        let expected: Vec<String> = expected.iter().map(|arg| (*arg).to_string()).collect();
+        let entry = system_entries(&config, Some(compositor), None, |_| true)
+            .into_iter()
+            .find(|entry| entry.id == crate::SystemCommand::DisplayOff)
+            .unwrap();
+        assert!(matches!(
+            &entry.action,
+            DeferredAction::Command(argv) if argv == &expected
+        ));
+        assert_eq!(entry.command_line(), expected.join(" "));
+        assert!(entry.needs_confirmation());
+        assert!(entry.missing.is_none());
+    }
+
+    let hypr = system_entries(&config, Some(Compositor::Hyprland), None, |_| true)
+        .into_iter()
+        .find(|entry| entry.id == crate::SystemCommand::DisplayOff)
+        .unwrap();
+    assert!(matches!(
+        &hypr.action,
+        DeferredAction::Hypr(HyprAction::DisplayOff)
+    ));
+    assert_eq!(
+        hypr.command_line(),
+        "Hyprland dpms off dispatcher via hyprctl"
+    );
+    assert_eq!(
+        HyprAction::DisplayOff.lua(),
+        r#"hl.dispatch(hl.dsp.dpms({ action = "off" }))"#
+    );
+    assert_eq!(HyprAction::DisplayOff.legacy(), vec![vec!["dpms", "off"]]);
+    assert!(hypr.needs_confirmation());
+    assert!(hypr.missing.is_none());
+
+    assert!(!system_entries(&config, None, None, |_| true)
+        .iter()
+        .any(|entry| entry.id == crate::SystemCommand::DisplayOff));
+
+    config.commands.display_off = Some(vec!["custom-display-off".into(), "--now".into()]);
+    let entry = system_entries(&config, None, None, |_| true)
+        .into_iter()
+        .find(|entry| entry.id == crate::SystemCommand::DisplayOff)
+        .unwrap();
+    let expected = vec!["custom-display-off".to_string(), "--now".to_string()];
+    assert!(matches!(
+        &entry.action,
+        DeferredAction::Command(argv) if argv == &expected
+    ));
+
+    config.hide.push(crate::SystemCommand::DisplayOff);
+    assert!(!system_entries(&config, None, None, |_| true)
+        .iter()
+        .any(|entry| entry.id == crate::SystemCommand::DisplayOff));
+}
+
+#[test]
+fn test_system_display_off_requires_a_second_enter() {
+    let mut app = test_app(AddonsConfig::default());
+    app.compositor = || Some(Compositor::Hyprland);
+    open_system(&mut app, "sys display");
+    assert_eq!(command_list_titles(&app), vec!["Display off"]);
+
+    assert_eq!(app.update(Message::Submit).units(), 0);
+    assert!(app.command_list.armed.is_some());
+    assert!(app.deferred_action.lock().unwrap().is_none());
+
+    assert!(app.update(Message::Submit).units() > 0);
+    assert!(matches!(
+        app.deferred_action.lock().unwrap().as_ref(),
+        Some(DeferredAction::Hypr(HyprAction::DisplayOff))
+    ));
 }
 
 #[test]

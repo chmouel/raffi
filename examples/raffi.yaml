@@ -354,12 +354,13 @@ addons:
   #   action: copy
   #   secondary_action: hypr_paste
 
-  # System commands. Type "sys " to list lock, suspend,
+  # System commands. Type "sys " to list lock, display off, suspend,
   # hibernate, log out, reboot and shut down. Everything except lock asks
-  # for a second Enter. Commands are argument lists run without a shell;
-  # an empty list hides the entry, like `hide`. The "sys " keyword takes
-  # over launcher searches starting with "sys "; change `trigger` or set
-  # `enabled: false` to keep them.
+  # for a second Enter. Display off uses the detected compositor's native
+  # command and is omitted when none is detected. Commands are argument lists
+  # run without a shell; an empty list hides the entry, like `hide`. The
+  # "sys " keyword takes over launcher searches starting with "sys "; change
+  # `trigger` or set `enabled: false` to keep them.
   # system:
   #   enabled: true
   #   trigger: sys

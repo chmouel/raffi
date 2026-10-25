@@ -689,6 +689,7 @@ impl Default for ClipboardAddonConfig {
 #[serde(rename_all = "snake_case")]
 pub enum SystemCommand {
     Lock,
+    DisplayOff,
     Suspend,
     Hibernate,
     Logout,
@@ -704,6 +705,12 @@ pub struct SystemCommandsConfig {
     /// Default: `loginctl lock-session`.
     #[serde(default)]
     pub lock: Option<Vec<String>>,
+    /// Default: Hyprland's dpms dispatcher on Hyprland (through `hyprctl eval`
+    /// with a Lua config, `hyprctl dispatch dpms off` otherwise),
+    /// `niri msg action power-off-monitors` on niri,
+    /// `swaymsg 'output * power off'` on sway; omitted without a supported compositor.
+    #[serde(default)]
+    pub display_off: Option<Vec<String>>,
     /// Default: `systemctl suspend`.
     #[serde(default)]
     pub suspend: Option<Vec<String>>,
@@ -729,6 +736,7 @@ impl SystemCommandsConfig {
     pub fn get(&self, command: SystemCommand) -> Option<&Vec<String>> {
         match command {
             SystemCommand::Lock => self.lock.as_ref(),
+            SystemCommand::DisplayOff => self.display_off.as_ref(),
             SystemCommand::Suspend => self.suspend.as_ref(),
             SystemCommand::Hibernate => self.hibernate.as_ref(),
             SystemCommand::Logout => self.logout.as_ref(),
@@ -6357,13 +6365,22 @@ shell:
         assert_eq!(defaults.trigger(), "sys");
 
         let config: SystemAddonConfig = serde_yaml::from_str(
-            "trigger: power\ncommands:\n  lock: [hyprlock]\nhide: [hibernate, logout]\n",
+            "trigger: power\ncommands:\n  lock: [hyprlock]\n  display_off: [hyprctl, dispatch, dpms, off]\nhide: [hibernate, logout]\n",
         )
         .unwrap();
         assert_eq!(config.trigger(), "power");
         assert_eq!(
             config.commands.get(SystemCommand::Lock),
             Some(&vec!["hyprlock".to_string()])
+        );
+        assert_eq!(
+            config.commands.get(SystemCommand::DisplayOff),
+            Some(&vec![
+                "hyprctl".to_string(),
+                "dispatch".to_string(),
+                "dpms".to_string(),
+                "off".to_string()
+            ])
         );
         assert_eq!(config.commands.get(SystemCommand::Reboot), None);
         assert_eq!(

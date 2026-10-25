@@ -35,6 +35,10 @@ impl SystemEntry {
             DeferredAction::Hypr(HyprAction::Exit) => {
                 "Hyprland exit dispatcher via hyprctl".to_string()
             }
+            // `hyprctl eval` with a Lua config, `hyprctl dispatch dpms off` otherwise.
+            DeferredAction::Hypr(HyprAction::DisplayOff) => {
+                "Hyprland dpms off dispatcher via hyprctl".to_string()
+            }
             DeferredAction::NiriQuit => super::windows::NIRI_QUIT.join(" "),
             DeferredAction::SwayExit => super::windows::SWAY_EXIT.join(" "),
             DeferredAction::Hypr(_)
@@ -52,8 +56,14 @@ impl SystemEntry {
     }
 }
 
-const ENTRIES: [(SystemCommand, &str, &str, &str); 6] = [
+const ENTRIES: [(SystemCommand, &str, &str, &str); 7] = [
     (SystemCommand::Lock, "Lock", "lock", "system-lock-screen"),
+    (
+        SystemCommand::DisplayOff,
+        "Display off",
+        "turn the display off",
+        "video-display",
+    ),
     (
         SystemCommand::Suspend,
         "Suspend",
@@ -85,14 +95,20 @@ fn default_action(
     id: SystemCommand,
     compositor: Option<Compositor>,
     session_id: Option<&str>,
-) -> DeferredAction {
+) -> Option<DeferredAction> {
     let argv =
         |args: &[&str]| DeferredAction::Command(args.iter().map(|s| s.to_string()).collect());
     match id {
-        SystemCommand::Lock => argv(&["loginctl", "lock-session"]),
-        SystemCommand::Suspend => argv(&["systemctl", "suspend"]),
-        SystemCommand::Hibernate => argv(&["systemctl", "hibernate"]),
-        SystemCommand::Logout => match compositor {
+        SystemCommand::Lock => Some(argv(&["loginctl", "lock-session"])),
+        SystemCommand::DisplayOff => match compositor {
+            Some(Compositor::Hyprland) => Some(DeferredAction::Hypr(HyprAction::DisplayOff)),
+            Some(Compositor::Niri) => Some(argv(&["niri", "msg", "action", "power-off-monitors"])),
+            Some(Compositor::Sway) => Some(argv(&["swaymsg", "output * power off"])),
+            None => None,
+        },
+        SystemCommand::Suspend => Some(argv(&["systemctl", "suspend"])),
+        SystemCommand::Hibernate => Some(argv(&["systemctl", "hibernate"])),
+        SystemCommand::Logout => Some(match compositor {
             Some(Compositor::Hyprland) => DeferredAction::Hypr(HyprAction::Exit),
             Some(Compositor::Niri) => DeferredAction::NiriQuit,
             Some(Compositor::Sway) => DeferredAction::SwayExit,
@@ -101,9 +117,9 @@ fn default_action(
                 args.extend(session_id);
                 argv(&args)
             }
-        },
-        SystemCommand::Reboot => argv(&["systemctl", "reboot"]),
-        SystemCommand::Shutdown => argv(&["systemctl", "poweroff"]),
+        }),
+        SystemCommand::Reboot => Some(argv(&["systemctl", "reboot"])),
+        SystemCommand::Shutdown => Some(argv(&["systemctl", "poweroff"])),
     }
 }
 
@@ -127,8 +143,8 @@ fn program(action: &DeferredAction) -> Option<&str> {
     }
 }
 
-/// The visible entries for `config`. `compositor` and `session_id` pick the
-/// default log out command; `exists` reports whether a program is installed.
+/// The visible entries for `config`. `compositor` and `session_id` select
+/// context-specific defaults; `exists` reports whether a program is installed.
 pub(super) fn system_entries(
     config: &SystemAddonConfig,
     compositor: Option<Compositor>,
@@ -142,7 +158,7 @@ pub(super) fn system_entries(
             let (action, overridden) = match config.commands.get(id) {
                 Some(argv) if argv.is_empty() => return None,
                 Some(argv) => (DeferredAction::Command(argv.clone()), true),
-                None => (default_action(id, compositor, session_id), false),
+                None => (default_action(id, compositor, session_id)?, false),
             };
             let no_session = id == SystemCommand::Logout
                 && !overridden

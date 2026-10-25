@@ -166,6 +166,8 @@ pub(super) enum HyprAction {
         workspace: String,
     },
     Exit,
+    /// Turn every display off.
+    DisplayOff,
 }
 
 impl HyprAction {
@@ -204,6 +206,7 @@ impl HyprAction {
                 lua_quote(workspace)
             ),
             Self::Exit => "hl.dispatch(hl.dsp.exit())".into(),
+            Self::DisplayOff => "hl.dispatch(hl.dsp.dpms({ action = \"off\" }))".into(),
         }
     }
 
@@ -231,6 +234,7 @@ impl HyprAction {
                 format!("{workspace},address:{address}"),
             ]],
             Self::Exit => vec![vec!["exit".into()]],
+            Self::DisplayOff => vec![vec!["dpms".into(), "off".into()]],
         }
     }
 
@@ -841,6 +845,12 @@ printf '%s|' "$@" > "$OUT"
 
         assert_eq!(HyprAction::Exit.lua(), "hl.dispatch(hl.dsp.exit())");
         assert_eq!(HyprAction::Exit.legacy(), vec![vec!["exit"]]);
+
+        assert_eq!(
+            HyprAction::DisplayOff.lua(),
+            r#"hl.dispatch(hl.dsp.dpms({ action = "off" }))"#
+        );
+        assert_eq!(HyprAction::DisplayOff.legacy(), vec![vec!["dpms", "off"]]);
     }
 
     #[test]
@@ -917,6 +927,34 @@ printf '%s|' "$@" > "$OUT"
 
         let (result, _) = run("ok", false, "ok");
         assert_eq!(result.unwrap_err(), "hyprctl failed");
+
+        let run_off = |eval_reply: &'static str| {
+            let calls = std::cell::RefCell::new(Vec::new());
+            let result = HyprAction::DisplayOff.run_with(|args| {
+                calls.borrow_mut().push(args.join(" "));
+                if args[0] == "eval" {
+                    Ok((true, eval_reply.to_string()))
+                } else {
+                    Ok((true, "ok".to_string()))
+                }
+            });
+            (result, calls.into_inner())
+        };
+        let (result, calls) = run_off("ok\n");
+        assert!(result.is_ok());
+        assert_eq!(
+            calls,
+            vec!["eval hl.dispatch(hl.dsp.dpms({ action = \"off\" }))"]
+        );
+        let (result, calls) = run_off("eval is only supported with the lua config manager");
+        assert!(result.is_ok());
+        assert_eq!(
+            calls,
+            vec![
+                "eval hl.dispatch(hl.dsp.dpms({ action = \"off\" }))",
+                "dispatch dpms off",
+            ]
+        );
     }
 
     /// Exercises the real deferred path on a throwaway window, which it

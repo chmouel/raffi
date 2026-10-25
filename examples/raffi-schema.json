@@ -1954,6 +1954,7 @@
       "type": "string",
       "enum": [
         "lock",
+        "display_off",
         "suspend",
         "hibernate",
         "logout",
@@ -1965,6 +1966,17 @@
       "description": "Commands replacing the built-in ones of the system commands addon, as\nargument lists run without a shell. An empty list hides the entry.",
       "type": "object",
       "properties": {
+        "display_off": {
+          "description": "Default: Hyprland's dpms dispatcher on Hyprland (through `hyprctl eval`\nwith a Lua config, `hyprctl dispatch dpms off` otherwise),\n`niri msg action power-off-monitors` on niri,\n`swaymsg 'output * power off'` on sway; omitted without a supported compositor.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "type": "string"
+          }
+        },
         "hibernate": {
           "description": "Default: `systemctl hibernate`.",
           "type": [

@@ -1,29 +1,30 @@
 ---
 title: System Commands
-description: Lock, suspend, hibernate, log out, reboot or shut down from Raffi
+description: Lock, turn off displays, suspend, hibernate, log out, reboot or shut down from Raffi
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import systemScreenshot from '../../../assets/screenshots/system-commands.png';
 
-<Image src={systemScreenshot} alt="System commands including Lock, Suspend, Hibernate, Log out and Reboot, with the Lock command preview" width={800} />
+<Image src={systemScreenshot} alt="System commands with Lock selected and Display off, Suspend, Hibernate and Log out visible" width={800} />
 
-Type `sys ` (with the trailing space) to list session and power commands.
+Type `sys ` (with the trailing space) to list session, display and power commands.
 Words after the keyword filter the list, so `sys reb` leaves only Reboot.
 
 <Aside type="note">
 System commands are on by default.
 </Aside>
 
-| Entry     | Default command                                   |
-|-----------|---------------------------------------------------|
-| Lock      | `loginctl lock-session`                           |
-| Suspend   | `systemctl suspend`                               |
-| Hibernate | `systemctl hibernate`                             |
-| Log out   | Hyprland's exit dispatcher on Hyprland, `niri msg action quit --skip-confirmation` on niri, `swaymsg exit` on sway, otherwise `loginctl terminate-session $XDG_SESSION_ID` |
-| Reboot    | `systemctl reboot`                                |
-| Shut down | `systemctl poweroff`                              |
+| Entry       | Default command |
+|-------------|-----------------|
+| Lock        | `loginctl lock-session` |
+| Display off | Hyprland's dpms dispatcher on Hyprland (through `hyprctl eval` with a Lua config, `hyprctl dispatch dpms off` otherwise), `swaymsg 'output * power off'` on sway, `niri msg action power-off-monitors` on niri; hidden elsewhere |
+| Suspend     | `systemctl suspend` |
+| Hibernate   | `systemctl hibernate` |
+| Log out     | Hyprland's exit dispatcher on Hyprland, `niri msg action quit --skip-confirmation` on niri, `swaymsg exit` on sway, otherwise `loginctl terminate-session $XDG_SESSION_ID` |
+| Reboot      | `systemctl reboot` |
+| Shut down   | `systemctl poweroff` |
 
 To open the list from a key binding, pass the keyword as the initial query:
 
@@ -74,8 +75,8 @@ the same keyword take precedence.
 
 **`addons.system.commands`** `object`
 
-Replaces built-in commands. Keys are `lock`, `suspend`, `hibernate`,
-`logout`, `reboot` and `shutdown`. Each value is an argument list, run
+Replaces built-in commands. Keys are `lock`, `display_off`, `suspend`, `hibernate`, `logout`, `reboot` and
+`shutdown`. Each value is an argument list, run
 directly without a shell. An empty list hides the entry.
 
 **`addons.system.hide`** `list` (default: `[]`)
@@ -86,7 +87,8 @@ Entries to leave out, using the same names as `commands`.
 
 Close Raffi before running a command. Leave it unset to follow
 `general.close_on_action`. Setting it to `false` keeps Raffi open after
-Lock, Suspend and Hibernate; Log out, Reboot and Shut down always close it.
+Lock, Suspend and Hibernate; Display off, Log out, Reboot and Shut down always
+close it.
 
 ```yaml
 addons:

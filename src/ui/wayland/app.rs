@@ -825,6 +825,8 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
         && (matches(addons.system.trigger())
             || intent(&[
                 "lock",
+                "display",
+                "monitor",
                 "logout",
                 "suspend",
                 "sleep",
@@ -837,7 +839,8 @@ pub(super) fn keyword_suggestions(query: &str, addons: &AddonsConfig) -> Vec<Key
     {
         suggestions.push(KeywordSuggestion {
             keyword: addons.system.trigger().to_string(),
-            subtitle: "Lock, suspend, hibernate, log out, reboot or shut down".to_string(),
+            subtitle: "Lock, display off, suspend, hibernate, log out, reboot or shut down"
+                .to_string(),
             icon: Some(SYSTEM_ICON.to_string()),
         });
     }
