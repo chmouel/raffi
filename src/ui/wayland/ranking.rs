@@ -493,6 +493,12 @@ fn has_abbreviation(word_initials: &str, term: &str) -> bool {
     term.chars().count() >= 2 && word_initials.contains(term)
 }
 
+/// Largest score matrix reporting match positions may allocate: it needs
+/// `(term + 1) * (word + 1)` cells, so a long unbroken token would ask for
+/// hundreds of millions of them before the span checks reject it. Words past
+/// this budget skip the compact path instead of stalling the UI thread.
+const MAX_POSITION_MATRIX_CELLS: usize = 100_000;
+
 fn compact_subsequence_skips(
     normalized: &str,
     word_ranges: &[(usize, usize)],
@@ -508,7 +514,11 @@ fn compact_subsequence_skips(
 
     for &(start, end) in word_ranges {
         let word = &normalized[start..end];
-        if word.len() < term.len() || word.chars().count() < term_len {
+        let word_len = word.chars().count();
+        if word.len() < term.len() || word_len < term_len {
+            continue;
+        }
+        if (term_len + 1).saturating_mul(word_len + 1) > MAX_POSITION_MATRIX_CELLS {
             continue;
         }
         let Some((_, indices)) = matcher.fuzzy_indices(word, term) else {
@@ -718,6 +728,25 @@ mod tests {
                 "{title}: {query}"
             );
         }
+    }
+
+    #[test]
+    fn test_compact_subsequence_skips_words_past_the_position_budget() {
+        let long = "axb".repeat(10_000);
+        let doc = SearchDocument::new().with_field(SearchFieldKind::Title, &long);
+        assert!(
+            score(&doc, &"ab".repeat(10_000)).is_none(),
+            "a huge word and term are rejected without a matching matrix"
+        );
+
+        // Under the budget the position path still runs, so a compact cluster
+        // inside a long word keeps matching.
+        let cluster = format!("{}alcr", "axb".repeat(50));
+        let doc = SearchDocument::new().with_field(SearchFieldKind::Title, &cluster);
+        assert_eq!(
+            score(&doc, "acr").expect("compact cluster").quality,
+            MatchQuality::PrimaryMatch
+        );
     }
 
     #[test]

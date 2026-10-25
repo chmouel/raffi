@@ -103,10 +103,12 @@ Search is case- and accent-insensitive and matches words in any order across
 fields. Titles and executable names also accept word-initial abbreviations
 and short, closely spaced letter sequences. Other fields require literal
 matches. An app's command arguments, scripts and routing alias are not
-searched. Browser history keeps literal substring matching; snippet keywords
-and pasted URL domains keep their special rules. Script filter results and
-Slack server searches stay in their own blocks after the ranked local rows,
-before fallbacks. They are not rescored by Raffi.
+searched. Browser history is the exception: it keeps literal substring
+matching on lowercased text, so accents still have to be typed there
+(`cafe` does not find a page titled `Café`). Snippet keywords and pasted URL
+domains keep their special rules. Script filter results and Slack server
+searches stay in their own blocks after the ranked local rows, before
+fallbacks. They are not rescored by Raffi.
 
 Pressing Enter on an addon row switches to that addon with your query (the
 input becomes `tabs gmail`, for instance) and runs the row there.

@@ -1991,9 +1991,22 @@ impl LauncherApp {
                 _ => None,
             };
             if let Some(slack_source) = slack_source {
+                let searching = slack_source == SlackSource::Default
+                    && query.chars().count() >= super::slack_mode::MIN_SEARCH_CHARS;
+                // Default Slack rows come from a server search that sees the
+                // whole Slack history, so the typed query never filters them:
+                // keeping their local query empty leaves them unscored and in
+                // their own block while the replacement search is pending.
+                let server_rows = slack_source == SlackSource::Default
+                    && (searching || self.main_view.slack_search_active);
                 if let Some(Source::List(list)) = self.main_view.sources.get_mut(source) {
                     if query_changed {
-                        list.set_query(query.to_string());
+                        // Clear a query an earlier keystroke below the server
+                        // search threshold left behind: scored rows would leave
+                        // their block, and a failed refresh would keep them
+                        // there.
+                        let local = if server_rows { "" } else { query };
+                        list.set_query(local.to_string());
                     }
                     if !shows && query_changed {
                         list.generation = list.generation.wrapping_add(1);
@@ -2008,13 +2021,7 @@ impl LauncherApp {
                     continue;
                 }
                 let stale = self.main_view.stale.remove(&source);
-                let searching = slack_source == SlackSource::Default
-                    && query.chars().count() >= super::slack_mode::MIN_SEARCH_CHARS;
-                if stale
-                    || (slack_source == SlackSource::Default
-                        && query_changed
-                        && (searching || self.main_view.slack_search_active))
-                {
+                if stale || (server_rows && query_changed) {
                     tasks.push(self.load_main_view_source(source, false));
                 }
                 continue;
@@ -2472,13 +2479,20 @@ impl LauncherApp {
                 self.text_snippets.items = items;
                 let mut tasks = Vec::new();
                 self.finish_text_snippet_load(&query, &mut tasks);
-                let Some(position) = self
+                // The main view matches fields the snippets' own filter keeps
+                // apart, so the row the user picked may not be listed there.
+                // Keep their explicit pick at the top rather than dropping it.
+                let position = match self
                     .text_snippets
                     .filtered
                     .iter()
                     .position(|&index| index == item)
-                else {
-                    return Task::batch(tasks);
+                {
+                    Some(position) => position,
+                    None => {
+                        self.text_snippets.filtered.insert(0, item);
+                        0
+                    }
                 };
                 self.selected_index = self.keyword_rows() + self.script_filter_offset() + position;
                 let selected = self.handle_text_snippet_selected(position);

@@ -9083,7 +9083,7 @@ fn test_main_view_server_search_follows_local_rows() {
     addons.slack.enabled = true;
     let launcher = RaffiConfig {
         binary: Some("deploy".into()),
-        description: Some("Deployment".into()),
+        description: Some("Deployment dashboard".into()),
         ..Default::default()
     };
     let mut app = main_view_app(&["slack", "launchers"], vec![launcher], addons);
@@ -9094,10 +9094,10 @@ fn test_main_view_server_search_follows_local_rows() {
     };
     let mut item = super::command_list::CommandItem::info(
         "slack:message:fixture",
-        "Deployment update".into(),
+        "Deployment".into(),
         "mail-message-new",
     );
-    item.match_text = "Deployment update deploy".into();
+    item.match_text = "Deployment deploy".into();
     item.primary = Some(super::command_list::CommandAction {
         action: super::actions::DeferredAction::Slack(super::slack::SlackAction::Open(
             "slack://channel?team=T1&id=C1".into(),
@@ -9113,6 +9113,113 @@ fn test_main_view_server_search_follows_local_rows() {
             MainRowRef::Launcher(0),
             MainRowRef::Source { source: 0, row: 0 },
         ]
+    );
+
+    // A second query keeps the retained server rows in their own block while
+    // the replacement search is out: they are never scored by the local
+    // query, which would promote an exact title above the local rows.
+    let _ = app.update(Message::SearchChanged("deployment".into()));
+    assert_eq!(
+        app.main_view.ordered_rows,
+        [
+            MainRowRef::Launcher(0),
+            MainRowRef::Source { source: 0, row: 0 },
+        ],
+        "a retained server row stays below the local rows"
+    );
+
+    // The same holds when the replacement search fails and the old rows stay.
+    let generation = match &app.main_view.sources[0] {
+        super::main_view::Source::List(list) => list.generation,
+        _ => panic!("Slack source"),
+    };
+    let _ = app.update(Message::MainViewLoaded(
+        0,
+        generation,
+        Err("offline".into()),
+    ));
+    assert_eq!(
+        app.main_view.ordered_rows,
+        [
+            MainRowRef::Launcher(0),
+            MainRowRef::Source { source: 0, row: 0 },
+        ],
+        "a failed search leaves the retained rows in their block"
+    );
+}
+
+#[test]
+fn test_main_view_server_rows_drop_a_stale_local_query() {
+    use super::main_view::MainRowRef;
+    let mut addons = AddonsConfig::default();
+    addons.slack.enabled = true;
+    let launcher = RaffiConfig {
+        binary: Some("deploy".into()),
+        description: Some("Deployment dashboard".into()),
+        ..Default::default()
+    };
+    let mut app = main_view_app(&["slack", "launchers"], vec![launcher], addons);
+    let generation = match &app.main_view.sources[0] {
+        super::main_view::Source::List(list) => list.generation,
+        _ => panic!("Slack source"),
+    };
+    let mut item = super::command_list::CommandItem::info(
+        "slack:message:fixture",
+        "Deployment".into(),
+        "mail-message-new",
+    );
+    item.match_text = "Deployment deploy".into();
+    item.primary = Some(super::command_list::CommandAction {
+        action: super::actions::DeferredAction::Slack(super::slack::SlackAction::Open(
+            "slack://channel?team=T1&id=C1".into(),
+        )),
+        confirm: None,
+        keep_open: false,
+        progress: None,
+    });
+    let _ = app.update(Message::MainViewLoaded(0, generation, Ok(vec![item])));
+
+    // A keystroke below the server search threshold filters these rows
+    // locally; the next one starts a server search. The rows have to drop
+    // that stale local query, or their scores keep them among the local rows
+    // and a failed refresh leaves them there for good.
+    let _ = app.update(Message::SearchChanged("d".into()));
+    let _ = app.update(Message::SearchChanged("de".into()));
+    match &app.main_view.sources[0] {
+        super::main_view::Source::List(list) => {
+            assert_eq!(list.query, "", "server rows never keep a local query");
+            assert!(
+                list.filtered_scores.iter().all(Option::is_none),
+                "server rows are never scored"
+            );
+        }
+        _ => panic!("Slack source"),
+    }
+    assert_eq!(
+        app.main_view.ordered_rows,
+        [
+            MainRowRef::Launcher(0),
+            MainRowRef::Source { source: 0, row: 0 },
+        ],
+        "a stale score would keep the server row above the local one"
+    );
+
+    let generation = match &app.main_view.sources[0] {
+        super::main_view::Source::List(list) => list.generation,
+        _ => panic!("Slack source"),
+    };
+    let _ = app.update(Message::MainViewLoaded(
+        0,
+        generation,
+        Err("offline".into()),
+    ));
+    assert_eq!(
+        app.main_view.ordered_rows,
+        [
+            MainRowRef::Launcher(0),
+            MainRowRef::Source { source: 0, row: 0 },
+        ],
+        "a failed search keeps the retained rows out of the ranked block"
     );
 }
 
@@ -9269,6 +9376,41 @@ fn test_main_view_lists_groups_starting_with_the_query_first() {
 
     let _ = app.update(Message::SearchChanged("people".into()));
     assert_eq!(main_view_titles(&app), vec!["Meeting notes"]);
+}
+
+#[test]
+fn test_main_view_snippet_submit_runs_a_cross_field_match() {
+    use super::main_view::MainRowRef;
+    let mut addons = AddonsConfig::default();
+    addons
+        .text_snippets
+        .push(snippet_source("Notes", "sn", Vec::new()));
+    let mut app = main_view_app(&["launchers", "text_snippets.Notes"], Vec::new(), addons);
+    let _ = app.update(Message::MainViewSnippetsLoaded(
+        0,
+        Ok(vec![snippet("Alpha", "Beta"), snippet("Gamma", "Delta")]),
+    ));
+
+    // Words in any order across fields: the snippets' own filter matches name
+    // and value separately, so it would list neither for this query.
+    let _ = app.update(Message::SearchChanged("beta alpha".into()));
+    assert_eq!(main_view_titles(&app), ["Alpha"]);
+    assert_eq!(
+        app.selected_main_row(),
+        Some(MainRowRef::Source { source: 0, row: 0 })
+    );
+
+    let task = app.update(Message::Submit);
+    assert!(task.units() > 0, "the picked snippet starts expanding");
+    assert_eq!(
+        app.text_snippets.filtered.first().copied(),
+        Some(0),
+        "the picked snippet leads the list it was handed to"
+    );
+    assert!(
+        app.text_snippets.pending.is_some(),
+        "pressing Enter runs the snippet instead of switching to an empty list"
+    );
 }
 
 #[test]
