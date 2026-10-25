@@ -11,7 +11,7 @@ use super::vault::{EntryAction, Field, VaultAddon};
 enum Target {
     Main(MainRowKey),
     Command(u64, String),
-    Other(String, usize, String),
+    Other(String, usize, String, [u64; 3]),
 }
 
 #[derive(Debug, Clone)]
@@ -76,10 +76,21 @@ impl LauncherApp {
                 .then(|| Target::Command(self.command_list.session, item.identity.clone()));
         }
         let preview = self.selected_preview_data(true)?;
+        let identity = if self.clipboard.active {
+            let row = self.selected_index.checked_sub(self.keyword_rows())?;
+            self.clipboard.items.get(row)?.id.clone()
+        } else {
+            preview.title
+        };
         Some(Target::Other(
             self.search_query.clone(),
             self.selected_index,
-            preview.title,
+            identity,
+            [
+                self.script_filter.generation,
+                self.text_snippets.generation,
+                self.clipboard.session,
+            ],
         ))
     }
 
@@ -104,6 +115,11 @@ impl LauncherApp {
             });
         let mut metadata = preview.metadata;
         if let Some((list, row)) = list_row {
+            if let Some(item) = list.item(row) {
+                if item.primary.is_some() && !metadata.iter().any(|(key, _)| key == "Enter") {
+                    metadata.push(("Enter".into(), item.title.clone()));
+                }
+            }
             if let Some(addon) = list.addon.and_then(VaultAddon::of) {
                 if let Some(item) = list.item(row) {
                     let entry = match addon {

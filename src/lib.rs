@@ -1772,7 +1772,8 @@ pub struct GeneralConfig {
     /// `slack.activity`, `slack.actions`, `slack.directs` (`slack.dms`),
     /// `slack.channels`, `text_snippets.<name>` and `script_filters.<name>`.
     /// Slack shows its Home rows on an empty query and searches messages when
-    /// typing. When set, launchers only show if `launchers` is listed.
+    /// typing. Nonempty lists replace the default sources; include `launchers`
+    /// to keep apps. Null or an empty list shows only apps and custom entries.
     #[serde(default = "default_main_view")]
     pub main_view: Option<Vec<String>>,
     /// What the chips row above the apps shows on an empty query when

@@ -473,6 +473,9 @@ pub(super) fn is_user_input(message: &Message) -> bool {
         message,
         Message::SearchChanged(_)
             | Message::OpenActions
+            | Message::ClearFilter
+            | Message::RetryLoad
+            | Message::OpenAddonSetup
             | Message::ActionSelected(_)
             | Message::MoveUp
             | Message::MoveDown
@@ -1483,6 +1486,12 @@ impl LauncherApp {
             }
         }
         match message {
+            Message::ClearFilter => self.clear_filter(),
+            Message::RetryLoad => {
+                let task = self.handle_refresh();
+                task.chain(focus(self.view.search_input_id.clone()))
+            }
+            Message::OpenAddonSetup => self.open_addon_setup(),
             Message::OpenActions => self.open_action_menu(),
             Message::ActionSelected(index) => self.execute_menu_action(index),
             Message::SearchChanged(query) => self.handle_search_changed(query),
@@ -2713,13 +2722,14 @@ impl LauncherApp {
             CommandListAddon::Windows if !entered => Task::none(),
             CommandListAddon::Windows => {
                 let Some(compositor) = (self.compositor)() else {
-                    self.command_list
-                        .set_notice("Window switching needs Hyprland, niri or sway".to_string());
+                    self.command_list.set_unavailable(
+                        "Window switching needs Hyprland, niri or sway".to_string(),
+                    );
                     return Task::none();
                 };
                 if !(self.program_exists)(compositor.program()) {
                     self.command_list
-                        .set_notice(format!("{} not found", compositor.program()));
+                        .set_unavailable(format!("{} not found", compositor.program()));
                     return Task::none();
                 }
                 self.load_windows(compositor, false)
@@ -2744,7 +2754,7 @@ impl LauncherApp {
             CommandListAddon::Media => {
                 if !(self.program_exists)("playerctl") {
                     self.command_list
-                        .set_notice("playerctl not found".to_string());
+                        .set_unavailable("playerctl not found".to_string());
                     return Task::none();
                 }
                 self.load_media(false)
@@ -2752,7 +2762,8 @@ impl LauncherApp {
             CommandListAddon::Audio if !entered => Task::none(),
             CommandListAddon::Audio => {
                 if !(self.program_exists)("pactl") {
-                    self.command_list.set_notice("pactl not found".to_string());
+                    self.command_list
+                        .set_unavailable("pactl not found".to_string());
                     return Task::none();
                 }
                 self.load_audio(false)
@@ -2760,7 +2771,8 @@ impl LauncherApp {
             CommandListAddon::Kill if !entered => Task::none(),
             CommandListAddon::Kill => {
                 if !(self.program_exists)("kill") {
-                    self.command_list.set_notice("kill not found".to_string());
+                    self.command_list
+                        .set_unavailable("kill not found".to_string());
                     return Task::none();
                 }
                 let keep_open = !self.addons.kill.close_on_action(self.close_on_action);
@@ -2770,7 +2782,7 @@ impl LauncherApp {
             CommandListAddon::Bluetooth => {
                 if !(self.program_exists)("bluetoothctl") {
                     self.command_list
-                        .set_notice("bluetoothctl not found".to_string());
+                        .set_unavailable("bluetoothctl not found".to_string());
                     return Task::none();
                 }
                 self.load_bluetooth(false)
@@ -2783,8 +2795,9 @@ impl LauncherApp {
                     env_terminal.as_deref(),
                     &self.program_exists,
                 ) else {
-                    self.command_list
-                        .set_notice("No terminal found, set addons.terminal.command".to_string());
+                    self.command_list.set_unavailable(
+                        "No terminal found, set addons.terminal.command".to_string(),
+                    );
                     return Task::none();
                 };
                 let shell = self.view.default_script_shell.clone();
@@ -2822,7 +2835,8 @@ impl LauncherApp {
                     _ => None,
                 };
                 if let Some(tool) = missing {
-                    self.command_list.set_notice(format!("{tool} not found"));
+                    self.command_list
+                        .set_unavailable(format!("{tool} not found"));
                     return Task::none();
                 }
                 let Some(vault) = VaultAddon::of(addon) else {
@@ -3146,7 +3160,7 @@ impl LauncherApp {
             Outcome::Failed(error) => {
                 crate::debug_log!("vault: {} failed: {}", op.log_name(), error.message());
                 if op.kind == OpKind::Load {
-                    self.command_list.set_notice(error.message());
+                    self.command_list.load_failed(error.message());
                 } else {
                     self.set_command_list_front(super::command_list::CommandItem::info(
                         "error",
@@ -3432,7 +3446,7 @@ impl LauncherApp {
             Ok(items) => self.set_command_list_items(items),
             Err(error) => {
                 crate::debug_log!("command list: load failed: {error}");
-                self.command_list.set_notice(error);
+                self.command_list.load_failed(error);
             }
         }
         self.selected_index = match selected.and_then(|id| self.command_list.position(&id)) {
@@ -3780,6 +3794,30 @@ impl LauncherApp {
     }
 
     fn activate_index(&mut self, index: usize) -> Task<Message> {
+        if !self.view.help_active
+            && self.clipboard.active
+            && self.clipboard.items.is_empty()
+            && index == self.keyword_rows()
+        {
+            if let Some((_, message)) = self.clipboard_status_recovery() {
+                return self.update(message);
+            }
+            return Task::none();
+        }
+        if !self.view.help_active && self.total_items() == 0 {
+            if let Some((_, message)) = self.empty_state_recovery() {
+                return self.update(message);
+            }
+        }
+        if !self.view.help_active
+            && self.command_list.status().is_some()
+            && index == self.command_list_offset()
+        {
+            if let Some((_, message)) = self.command_status_recovery() {
+                return self.update(message);
+            }
+            return Task::none();
+        }
         if self.view.help_active {
             return self.update(Message::HelpEntrySelected(index));
         }

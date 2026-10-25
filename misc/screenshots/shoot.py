@@ -160,7 +160,8 @@ class Session:
         log = (self.root / "logs" / f"{shot.name}.log").open("w")
         command = [str(self.binary), "-u", "native", "-c", str(path), "-i", shot.query.format(**context),
                    "--app-name", "raffi-screenshots"]
-        process = subprocess.Popen(command, env=self.env, stdout=log, stderr=log)
+        env = {key: value for key, value in self.env.items() if key not in shot.unset_env}
+        process = subprocess.Popen(command, env=env, stdout=log, stderr=log)
         conn = display.Display(self.display)
         try:
             window = self._wait_for_window(conn, process, shot)

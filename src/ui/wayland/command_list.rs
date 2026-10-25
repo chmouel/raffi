@@ -250,6 +250,8 @@ pub(super) struct CommandListState {
     pub closing: Option<String>,
     /// A reload keeping the current rows until the new ones arrive.
     pub refreshing: bool,
+    pub refresh_error: Option<String>,
+    pub unavailable: bool,
     /// Error row from an action, kept above the rows of a refresh started
     /// before it failed.
     pub error: Option<CommandItem>,
@@ -310,6 +312,8 @@ impl CommandListState {
         self.query.clear();
         self.loading = false;
         self.notice = None;
+        self.refresh_error = None;
+        self.unavailable = false;
         self.armed = None;
         self.closing = None;
         self.refreshing = false;
@@ -424,8 +428,24 @@ impl CommandListState {
         self.loading = false;
         self.refreshing = false;
         self.notice = None;
+        self.refresh_error = None;
+        self.unavailable = false;
         self.armed = None;
         self.refilter();
+    }
+
+    pub fn load_failed(&mut self, error: String) {
+        if self.refreshing && !self.items.is_empty() {
+            self.refreshing = false;
+            self.refresh_error = Some(error);
+        } else {
+            self.set_notice(error);
+        }
+    }
+
+    pub fn set_unavailable(&mut self, notice: String) {
+        self.set_notice(notice);
+        self.unavailable = true;
     }
 
     pub fn set_notice(&mut self, notice: String) {
@@ -436,6 +456,8 @@ impl CommandListState {
         self.loading = false;
         self.refreshing = false;
         self.notice = Some(notice);
+        self.refresh_error = None;
+        self.unavailable = false;
         self.armed = None;
     }
 
@@ -473,6 +495,8 @@ impl CommandListState {
         self.refreshing = false;
         self.error = None;
         self.notice = None;
+        self.refresh_error = None;
+        self.unavailable = false;
         self.armed = None;
         self.extra = None;
         self.generation
@@ -481,6 +505,10 @@ impl CommandListState {
     /// Start reloading after a successful action while the current rows
     /// stay usable. Earlier errors are dropped once it lands.
     pub fn begin_refresh(&mut self) -> u64 {
+        if self.items.is_empty() {
+            return self.begin_load();
+        }
+        self.refresh_error = None;
         self.generation = self.generation.wrapping_add(1);
         self.refreshing = true;
         self.error = None;

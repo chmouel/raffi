@@ -2224,23 +2224,6 @@ impl LauncherApp {
             })
             .collect();
 
-        let has_script_filter = self.script_filter.results.is_some()
-            || self.script_filter.loading
-            || self.script_filter.help_message.is_some();
-        let has_text_snippet = self.text_snippets.active || self.text_snippets.loading;
-        let has_emoji = self.emoji.active;
-        let has_clipboard = self.clipboard.active;
-        let has_file_browser = self.file_browser.active;
-        let has_web_search = self.web_search.active.is_some();
-        let has_currency = self.currency.result.is_some()
-            || self.currency.loading
-            || self.currency.multi_result.is_some()
-            || self.currency.multi_loading;
-        let has_inline = self
-            .inline_result
-            .as_ref()
-            .is_some_and(|inline| !inline.rows.is_empty());
-
         let mut special_item_idx = 0;
 
         if self.keyword_chips && !self.keyword_suggestions.is_empty() {
@@ -2423,26 +2406,26 @@ impl LauncherApp {
             special_item_idx += 1;
         } else if self.text_snippets.active {
             if let Some(error) = &self.text_snippets.error {
-                let error_row = Row::new()
-                    .spacing(16)
-                    .align_y(iced::Alignment::Center)
-                    .push(
-                        text(format!("Snippet failed: {error}"))
-                            .size(fs.item)
-                            .color(t.ansi[1]),
-                    );
+                let error_row = Column::new().spacing(16).push(
+                    text(format!("Snippet failed: {error}"))
+                        .size(fs.item)
+                        .color(t.ansi[1]),
+                );
 
-                let error_button = button(error_row)
-                    .padding(fs.item_padding)
-                    .width(Length::Fill)
-                    .style(move |_theme, _status| button::Style {
-                        text_color: t.ansi[1],
-                        border: iced::Border {
-                            radius: 8.0.into(),
-                            ..Default::default()
-                        },
+                let error_button = button(
+                    error_row.push(text("Retry · Ctrl+R").size(fs.subtitle).color(t.accent)),
+                )
+                .on_press(Message::RetryLoad)
+                .padding(fs.item_padding)
+                .width(Length::Fill)
+                .style(move |_theme, _status| button::Style {
+                    text_color: t.ansi[1],
+                    border: iced::Border {
+                        radius: 8.0.into(),
                         ..Default::default()
-                    });
+                    },
+                    ..Default::default()
+                });
 
                 items_column = items_column.push(error_button);
             }
@@ -2538,19 +2521,25 @@ impl LauncherApp {
             let state = &self.clipboard;
             if state.items.is_empty() {
                 let is_selected = self.selected_index == special_item_idx;
-                let status_row = Row::new()
-                    .spacing(16)
-                    .align_y(iced::Alignment::Center)
+                let mut status = Column::new()
+                    .spacing(8)
                     .push(text(state.status()).size(fs.item).color(t.text_muted));
-                items_column = items_column.push(
-                    self.selectable(
-                        button(status_row)
-                            .padding(fs.item_padding)
-                            .width(Length::Fill)
-                            .style(item_button_style(t, is_selected, t.text_muted)),
-                        is_selected,
-                    ),
-                );
+                let recovery = self.clipboard_status_recovery();
+                if let Some((label, _)) = &recovery {
+                    status = status.push(
+                        text(format!("Enter: {label}"))
+                            .size(fs.subtitle)
+                            .color(t.accent),
+                    );
+                }
+                let mut control = button(status)
+                    .padding(fs.item_padding)
+                    .width(Length::Fill)
+                    .style(item_button_style(t, is_selected, t.text_muted));
+                if let Some((_, message)) = recovery {
+                    control = control.on_press(message);
+                }
+                items_column = items_column.push(self.selectable(control, is_selected));
                 special_item_idx += 1;
             }
 
@@ -2579,19 +2568,26 @@ impl LauncherApp {
 
         if let Some(status) = self.command_list.status() {
             let is_selected = self.selected_index == special_item_idx;
-            let status_row = Row::new()
-                .spacing(16)
-                .align_y(iced::Alignment::Center)
+            let mut status = Column::new()
+                .spacing(8)
                 .push(text(status.to_string()).size(fs.item).color(t.text_muted));
-            items_column = items_column.push(
-                self.selectable(
-                    button(status_row)
-                        .padding(fs.item_padding)
-                        .width(Length::Fill)
-                        .style(item_button_style(t, is_selected, t.text_muted)),
-                    is_selected,
-                ),
-            );
+            let mut item = None;
+            if let Some((label, message)) = self.command_status_recovery() {
+                status = status.push(
+                    text(format!("Enter: {label}"))
+                        .size(fs.subtitle)
+                        .color(t.accent),
+                );
+                item = Some(message);
+            }
+            let mut control = button(status)
+                .padding(fs.item_padding)
+                .width(Length::Fill)
+                .style(item_button_style(t, is_selected, t.text_muted));
+            if let Some(message) = item {
+                control = control.on_press(message);
+            }
+            items_column = items_column.push(self.selectable(control, is_selected));
             special_item_idx += 1;
         } else if self.command_list.is_active() {
             // Section headings only while nothing is typed: a filter lists
@@ -2740,24 +2736,17 @@ impl LauncherApp {
 
         if self.file_browser.active {
             if let Some(error) = &self.file_browser.error {
-                let error_row = Row::new()
-                    .spacing(16)
-                    .align_y(iced::Alignment::Center)
-                    .push(text(error.clone()).size(fs.item).color(t.text_muted));
-
-                let error_button = button(error_row)
-                    .padding(fs.item_padding)
-                    .width(Length::Fill)
-                    .style(move |_theme, _status| button::Style {
-                        text_color: t.text_muted,
-                        border: iced::Border {
-                            radius: 8.0.into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    });
-
-                items_column = items_column.push(error_button);
+                let error = Column::new()
+                    .spacing(8)
+                    .push(text(error.clone()).size(fs.item).color(t.ansi[1]))
+                    .push(text("Retry · Ctrl+R").size(fs.subtitle).color(t.accent));
+                items_column = items_column.push(
+                    button(error)
+                        .on_press(Message::RetryLoad)
+                        .padding(fs.item_padding)
+                        .width(Length::Fill)
+                        .style(item_button_style(t, false, t.text_muted)),
+                );
             }
 
             for entry in self.file_browser.entries.iter() {
@@ -3079,34 +3068,33 @@ impl LauncherApp {
         }
 
         let has_fallbacks = self.fallback_count() > 0;
-        let has_keyword_suggestions = !self.keyword_suggestions.is_empty();
 
-        if self.filtered_configs.is_empty()
-            && !has_inline
-            && !has_currency
-            && !has_script_filter
-            && !has_text_snippet
-            && !has_emoji
-            && !has_clipboard
-            && self.command_list.row_count() == 0
-            && self.devtools.rows.is_empty()
-            && !has_file_browser
-            && !has_web_search
-            && !has_fallbacks
-            && !has_keyword_suggestions
-            && self.main_view.ordered_rows.is_empty()
+        if self.total_items() == 0
+            && self.file_browser.error.is_none()
+            && self.text_snippets.error.is_none()
+            && self.script_filter.help_message.is_none()
         {
-            let message = if matches!(self.query_class.mode, super::app::QueryMode::Standard) {
-                "No matching results found. Ctrl+/ lists every keyword."
-            } else {
-                "No matching results found."
-            };
-            let no_results = container(text(message).size(fs.subtitle).color(t.text_muted))
-                .width(Length::Fill)
-                .height(Length::Fill)
+            let mut empty = Column::new()
+                .spacing(12)
                 .align_x(iced::Alignment::Center)
-                .align_y(iced::Alignment::Center);
-            items_column = items_column.push(no_results);
+                .push(
+                    text(self.empty_state_message())
+                        .size(fs.subtitle)
+                        .color(t.text_muted),
+                );
+            if let Some((label, message)) = self.empty_state_recovery() {
+                empty = empty.push(
+                    button(text(label).size(fs.subtitle).color(t.accent))
+                        .on_press(message)
+                        .padding(8),
+                );
+            }
+            items_column = items_column.push(
+                container(empty)
+                    .width(Length::Fill)
+                    .padding(16)
+                    .align_x(iced::Alignment::Center),
+            );
         } else {
             for (idx, reference) in self.main_view.ordered_rows.iter().enumerate() {
                 let display_idx = idx + special_item_idx;
@@ -3236,7 +3224,6 @@ impl LauncherApp {
         }
 
         let sep = span("  ·  ").size(fs.hint).color(t.border);
-        // Keywords come first so a narrow window never cuts this hint off.
         let mut hint_spans: Vec<HintSpan<'_>> = vec![
             span("Ctrl+/").size(fs.hint).color(t.accent),
             span(" keywords").size(fs.hint).color(t.text_muted),
@@ -3260,6 +3247,23 @@ impl LauncherApp {
             hint_spans.push(sep.clone());
             hint_spans.push(span("Left/Right").size(fs.hint).color(t.accent));
             hint_spans.push(span(" plugins").size(fs.hint).color(t.text_muted));
+        }
+        if let Some(list) = self.visible_command_list() {
+            if let Some(error) = &list.refresh_error {
+                hint_spans.push(sep.clone());
+                hint_spans.push(
+                    span(format!("Refresh failed: {error} · Ctrl+R: Retry"))
+                        .size(fs.hint)
+                        .color(t.ansi[1]),
+                );
+            } else if list.refreshing {
+                hint_spans.push(sep.clone());
+                hint_spans.push(
+                    span("Refreshing… showing previous results")
+                        .size(fs.hint)
+                        .color(t.text_muted),
+                );
+            }
         }
         if let Some(label) = self.cycle_view_label() {
             hint_spans.push(sep.clone());

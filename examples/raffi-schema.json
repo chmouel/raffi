@@ -1080,7 +1080,7 @@
           "$ref": "#/$defs/LaunchMode"
         },
         "main_view": {
-          "description": "Sources mixed into the main view, in display order, when typing without\nan addon trigger. Entries: `launchers`, `browser_tabs`,\n`bookmarks`, `browser_history`, `windows`, `system`, `media`, `audio`,\n`bluetooth`, `pass`,\n`kill`, `slack`, `slack.unread`, `slack.threads` (`slack.unread_threads`),\n`slack.activity`, `slack.actions`, `slack.directs` (`slack.dms`),\n`slack.channels`, `text_snippets.<name>` and `script_filters.<name>`.\nSlack shows its Home rows on an empty query and searches messages when\ntyping. When set, launchers only show if `launchers` is listed.",
+          "description": "Sources mixed into the main view, in display order, when typing without\nan addon trigger. Entries: `launchers`, `browser_tabs`,\n`bookmarks`, `browser_history`, `windows`, `system`, `media`, `audio`,\n`bluetooth`, `pass`,\n`kill`, `slack`, `slack.unread`, `slack.threads` (`slack.unread_threads`),\n`slack.activity`, `slack.actions`, `slack.directs` (`slack.dms`),\n`slack.channels`, `text_snippets.<name>` and `script_filters.<name>`.\nSlack shows its Home rows on an empty query and searches messages when\ntyping. Nonempty lists replace the default sources; include `launchers`\nto keep apps. Null or an empty list shows only apps and custom entries.",
           "type": [
             "array",
             "null"

@@ -28,6 +28,7 @@ class Shot:
     # Window-relative (left, top, right, bottom) to keep instead of the framed window.
     crop: tuple | None = None
     needs: frozenset = field(default_factory=frozenset)
+    unset_env: tuple = ()
     settle: float = 2.0
     palette: str | None = None
 
@@ -117,6 +118,9 @@ SHOTS = [
     Shot("main-search", "raffi"),
     Shot("main-source", "raffi", ("ctrl+Tab",)),
     Shot("main-more", "release", height=720, tweak=more_results),
+    Shot("empty-results", "no-such-result-zzz", tweak=lambda config: config["general"].update({"main_view": ["launchers"], "fallbacks": []})),
+    Shot("addon-unavailable", "win ", unset_env=("NIRI_SOCKET",)),
+    Shot("file-browser-error", "~/missing-demo-directory/"),
     Shot("action-menu", "~/Documents/preview.py", ("Right",)),
     Shot("unit-conversion", "100 km/h to mph"),
     Shot("color-converter", "#89b4fa"),

@@ -118,7 +118,7 @@ impl LauncherApp {
         }
         let Some(library) = library else {
             self.command_list
-                .set_notice("Loading bookmarks stopped unexpectedly".to_string());
+                .load_failed("Loading bookmarks stopped unexpectedly".to_string());
             return Task::none();
         };
         if self

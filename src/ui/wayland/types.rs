@@ -433,6 +433,9 @@ pub(crate) struct EmojiEntry {
 pub(crate) enum Message {
     SearchChanged(String),
     OpenActions,
+    ClearFilter,
+    RetryLoad,
+    OpenAddonSetup,
     ActionSelected(usize),
     MoveUp,
     MoveDown,

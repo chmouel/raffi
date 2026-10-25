@@ -878,7 +878,7 @@ impl LauncherApp {
 
     /// Set up `general.main_view` and start loading its addons.
     pub(super) fn configure_main_view(&mut self, entries: Option<&[String]>) -> Task<Message> {
-        let Some(entries) = entries else {
+        let Some(entries) = entries.filter(|entries| !entries.is_empty()) else {
             return Task::none();
         };
         let entries = resolve(entries, &self.addons);
@@ -1089,6 +1089,7 @@ impl LauncherApp {
                 return Task::none();
             };
             list.generation = list.generation.wrapping_add(1);
+            list.refresh_error = None;
             if list.items.is_empty() {
                 list.loading = true;
             } else {
@@ -1315,7 +1316,14 @@ impl LauncherApp {
             Ok(items) => items,
             Err(error) => {
                 crate::debug_log!("main_view: {} hidden: {error}", addon.name());
-                self.update_main_view(|main_view| main_view.loaded_nothing(source));
+                self.update_main_view(|main_view| {
+                    if let Some(Source::List(list)) = main_view.sources.get_mut(source) {
+                        if list.refreshing {
+                            list.refresh_error = Some(error);
+                        }
+                    }
+                    main_view.loaded_nothing(source);
+                });
                 return Task::none();
             }
         };

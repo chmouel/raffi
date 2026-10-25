@@ -23,6 +23,7 @@ mod currency;
 mod devtools;
 mod dnd;
 mod emoji;
+mod empty_states;
 mod favicons;
 mod file_preview;
 mod help;

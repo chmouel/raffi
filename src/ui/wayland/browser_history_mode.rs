@@ -140,7 +140,7 @@ impl LauncherApp {
         }
         let Some(init) = init else {
             self.command_list
-                .set_notice("Loading browser history stopped unexpectedly".to_string());
+                .load_failed("Loading browser history stopped unexpectedly".to_string());
             return Task::none();
         };
         let init = Arc::try_unwrap(init).unwrap_or_else(|init| (*init).clone());
@@ -216,7 +216,7 @@ impl LauncherApp {
     ) -> Task<Message> {
         let Some(library) = library else {
             self.command_list
-                .set_notice("Loading browser history stopped unexpectedly".to_string());
+                .load_failed("Loading browser history stopped unexpectedly".to_string());
             return Task::none();
         };
         if let Some(slot) = self

@@ -3982,9 +3982,16 @@ fn test_clipboard_errors_show_as_status_row() {
     assert_eq!(app.total_items(), 1);
     assert_eq!(app.clipboard.status(), "CopyQ is not running");
     let _ = app.update(Message::Submit);
-    assert!(!app.clipboard.pending, "status row does nothing");
+    assert!(
+        !app.clipboard.pending,
+        "retry does not run a clipboard action"
+    );
+    assert!(app.clipboard.loading, "Enter retries the load");
     let preview = app.resolve_selected_preview().unwrap();
-    assert_eq!(preview.subtitle.as_deref(), Some("CopyQ is not running"));
+    assert_eq!(
+        preview.subtitle.as_deref(),
+        Some("Loading clipboard history...")
+    );
 }
 
 #[test]
@@ -5698,7 +5705,7 @@ fn test_windows_reload_on_compositor_changes_keeps_the_selection() {
 }
 
 #[test]
-fn test_windows_status_rows_are_not_actionable() {
+fn test_windows_status_rows_offer_setup_or_retry() {
     let mut app = windows_app();
     app.compositor = || None;
     let task = app.update(Message::SearchChanged("win ".into()));
@@ -5709,7 +5716,13 @@ fn test_windows_status_rows_are_not_actionable() {
     );
     assert_eq!(app.total_items(), 1);
     let _ = app.update(Message::Submit);
-    assert!(deferred_action(&app).is_none());
+    assert_eq!(
+        deferred_argv(&app),
+        Some(vec![
+            "xdg-open".into(),
+            "https://chmouel.github.io/raffi/features/window-switcher/".into()
+        ])
+    );
 
     let mut app = windows_app();
     app.program_exists = |program| program != "hyprctl";
@@ -6043,7 +6056,13 @@ fn test_media_missing_playerctl_and_no_players() {
     assert!(task.units() > 0, "the list scrolls to the status row");
     assert_eq!(app.command_list.status(), Some("playerctl not found"));
     let _ = app.update(Message::Submit);
-    assert!(deferred_action(&app).is_none());
+    assert_eq!(
+        deferred_argv(&app),
+        Some(vec![
+            "xdg-open".into(),
+            "https://chmouel.github.io/raffi/features/media-controls/".into()
+        ])
+    );
 
     let mut app = test_app(AddonsConfig::default());
     let _ = app.update(Message::SearchChanged("media next".into()));
@@ -6292,7 +6311,13 @@ fn test_audio_missing_pactl() {
     assert!(task.units() > 0, "the list scrolls to the status row");
     assert_eq!(app.command_list.status(), Some("pactl not found"));
     let _ = app.update(Message::Submit);
-    assert!(deferred_action(&app).is_none());
+    assert_eq!(
+        deferred_argv(&app),
+        Some(vec![
+            "xdg-open".into(),
+            "https://chmouel.github.io/raffi/features/audio-switcher/".into()
+        ])
+    );
 }
 
 fn terminal_addons() -> AddonsConfig {
@@ -6343,7 +6368,13 @@ fn test_terminal_without_a_terminal_says_how_to_set_one() {
         Some("No terminal found, set addons.terminal.command")
     );
     let _ = app.update(Message::Submit);
-    assert!(deferred_action(&app).is_none());
+    assert_eq!(
+        deferred_argv(&app),
+        Some(vec![
+            "xdg-open".into(),
+            "https://chmouel.github.io/raffi/features/terminal/".into()
+        ])
+    );
 }
 
 #[test]
@@ -12239,4 +12270,112 @@ fn main_view_more_rows_follow_sources_and_preserve_query() {
     let _ = app.update(Message::Submit);
     assert_eq!(app.main_view.focus, Some(Focus::Source(0)));
     assert_eq!(app.total_items(), 8);
+}
+
+#[test]
+fn empty_state_clear_filter_keeps_addon_and_file_location() {
+    let mut app = test_app(AddonsConfig::default());
+    let _ = app.update(Message::SearchChanged("sys no-such-action".into()));
+    assert_eq!(
+        app.empty_state_message(),
+        "No system results match your search."
+    );
+    assert_eq!(app.cleared_filter_query().as_deref(), Some("sys "));
+    assert!(app.update(Message::ClearFilter).units() > 0);
+    assert_eq!(app.search_query, "sys ");
+    assert_eq!(app.command_list.addon, Some(CommandListAddon::System));
+
+    let _ = app.update(Message::SearchChanged("/tmp/no-such-raffi-file".into()));
+    assert_eq!(app.cleared_filter_query().as_deref(), Some("/tmp/"));
+    let _ = app.update(Message::ClearFilter);
+    assert_eq!(app.search_query, "/tmp/");
+}
+
+#[test]
+fn empty_state_loading_is_informational_and_retry_keeps_query() {
+    let mut app = test_app(AddonsConfig::default());
+    let _ = app.update(Message::SearchChanged("tabs needle".into()));
+    assert!(app.command_status_recovery().is_none());
+    let _ = app.update(Message::Submit);
+    assert!(app.deferred_action.lock().unwrap().is_none());
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(
+        generation,
+        Err("Connection timed out".into()),
+    ));
+    assert!(matches!(
+        app.command_status_recovery(),
+        Some((_, Message::RetryLoad))
+    ));
+    let _ = app.update(Message::RetryLoad);
+    assert_eq!(app.search_query, "tabs needle");
+    assert!(app.command_list.loading);
+    assert_eq!(app.command_list.status(), Some("Loading browser tabs..."));
+
+    let mut app = test_app(AddonsConfig::default());
+    app.emoji.active = true;
+    app.emoji.data_loading = true;
+    assert_eq!(app.empty_state_message(), "Loading emoji…");
+    assert!(app.empty_state_recovery().is_none());
+}
+
+#[test]
+fn empty_state_failed_refresh_keeps_results_and_selection() {
+    let mut app = browser_tabs_app("tabs ");
+    let _ = app.update(Message::MoveDown);
+    let selected = app.selected_index;
+    let titles = command_list_titles(&app)
+        .iter()
+        .map(|title| title.to_string())
+        .collect::<Vec<_>>();
+    let generation = app.command_list.begin_refresh();
+    let _ = app.update(Message::CommandListLoaded(
+        generation,
+        Err("Connection timed out".into()),
+    ));
+    assert_eq!(command_list_titles(&app), titles);
+    assert_eq!(app.selected_index, selected);
+    assert_eq!(
+        app.command_list.refresh_error.as_deref(),
+        Some("Connection timed out")
+    );
+    assert!(app.command_list.status().is_none());
+    let generation = app.command_list.begin_refresh();
+    let _ = app.update(Message::CommandListLoaded(
+        generation,
+        Ok(super::browser_tabs::fixture_items()),
+    ));
+    assert!(app.command_list.refresh_error.is_none());
+    assert_eq!(app.selected_index, selected);
+}
+
+#[test]
+fn empty_main_view_keeps_launchers_without_mixing_sources() {
+    let mut app = main_view_app(&[], firefox_launcher(), AddonsConfig::default());
+    let _ = app.update(Message::SearchChanged("fire".into()));
+    assert_eq!(app.total_items(), 1);
+    assert_eq!(
+        app.selected_main_row(),
+        Some(super::main_view::MainRowRef::Launcher(0))
+    );
+    assert!(app.main_view.sources.is_empty());
+}
+
+#[test]
+fn action_menu_includes_primary_actions_without_preview_shortcuts() {
+    let mut app = test_app(terminal_addons());
+    let _ = app.update(Message::SearchChanged("> htop".into()));
+    assert!(app
+        .selected_actions()
+        .iter()
+        .any(|action| action.label == "Run htop" && action.shortcut == "Enter"));
+}
+
+#[test]
+fn empty_state_waits_for_main_sources_before_offering_recovery() {
+    let mut app = main_view_app(&["browser_tabs"], Vec::new(), AddonsConfig::default());
+    let _ = app.update(Message::SearchChanged("needle".into()));
+    assert_eq!(app.total_items(), 0);
+    assert_eq!(app.empty_state_message(), "Searching sources…");
+    assert!(app.empty_state_recovery().is_none());
 }

@@ -5,6 +5,8 @@ description: Bind Raffi to a key, find your way around, try the addons and make 
 
 import { Aside, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
+import emptyResultsScreenshot from '../../assets/screenshots/empty-results.png';
+import unavailableScreenshot from '../../assets/screenshots/addon-unavailable.png';
 import keywordSuggestionScreenshot from '../../assets/screenshots/keyword-suggestion.png';
 import keywordHelpScreenshot from '../../assets/screenshots/keyword-help.png';
 import mainSourceScreenshot from '../../assets/screenshots/main-source.png';
@@ -61,6 +63,22 @@ it.
 <Image src={keywordSuggestionScreenshot} alt="Raffi suggesting an addon while typing" width={800} />
 
 <Image src={keywordHelpScreenshot} alt="Keyword and shortcut help list" width={800} />
+
+### When a list is empty or unavailable
+
+An empty search result offers **Clear filter**, which keeps you in the current
+addon or folder. Loading messages wait for the source; failed loads offer
+**Retry** with Ctrl+R. A missing program or unsupported integration offers
+**Open setup help** for that addon. Select the recovery control with Enter or
+click it.
+
+While a list refreshes, the previous results remain usable. If the refresh
+fails, the footer reports the failure and Ctrl+R retries without losing your
+search. Password managers keep their existing unlock prompts; Escape cancels
+an unlock.
+
+<Image src={emptyResultsScreenshot} alt="No matching results with a Clear filter control" width={800} />
+<Image src={unavailableScreenshot} alt="Unsupported window integration with an Open setup help recovery action" width={800} />
 
 ### Switch views with Ctrl+Tab
 
