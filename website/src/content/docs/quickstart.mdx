@@ -6,6 +6,7 @@ description: Bind Raffi to a key, find your way around, try the addons and make 
 import { Aside, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import onboardingScreenshot from '../../assets/screenshots/onboarding.png';
+import bindingSetupScreenshot from '../../assets/screenshots/onboarding-binding.png';
 import emptyResultsScreenshot from '../../assets/screenshots/empty-results.png';
 import unavailableScreenshot from '../../assets/screenshots/addon-unavailable.png';
 import keywordSuggestionScreenshot from '../../assets/screenshots/keyword-suggestion.png';
@@ -32,6 +33,14 @@ keep the panel from appearing automatically.
 <Image src={onboardingScreenshot} alt="Raffi welcome panel above the normal launcher results" width={800} />
 
 ## Bind it to a key
+
+Choose **Bind a shortcut** in Getting started for a snippet matching your
+compositor. Ctrl+Tab cycles the available variants, including both Hyprland
+configuration formats. **Copy snippet** keeps Raffi open and reports whether
+copying succeeded. Add the snippet to the file shown; Raffi does not edit or
+reload your compositor configuration. Escape returns to Getting started.
+
+<Image src={bindingSetupScreenshot} alt="Shortcut setup showing a niri binding and Copy snippet control" width={800} />
 
 <Tabs>
   <TabItem label="Sway">

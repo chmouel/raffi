@@ -1023,7 +1023,7 @@ fn render_chat_feed<'a>(entries: Vec<ChatEntry>, ps: &PreviewStyle) -> Element<'
 
 impl LauncherApp {
     /// Wrap the shared window chrome around an already built item list.
-    fn shell<'a>(
+    pub(super) fn shell<'a>(
         &'a self,
         placeholder: &'a str,
         hint_spans: Vec<HintSpan<'a>>,
@@ -1180,42 +1180,44 @@ impl LauncherApp {
             })
             .height(Length::Fill);
 
-        let body_area: Element<'a, Message> =
-            if let Some(preview_data) = self.resolve_selected_preview() {
-                let (left_portion, right_portion) =
-                    preview_fill_portions(self.view.preview_style.width_fraction);
-                let divider = container(Space::new())
-                    .width(Length::Fixed(PREVIEW_DIVIDER_WIDTH))
-                    .height(Length::Fill)
-                    .style(move |_theme| container::Style {
-                        background: Some(iced::Background::Color(iced::Color {
-                            a: 0.55,
-                            ..t.border
-                        })),
-                        ..Default::default()
-                    });
+        let body_area: Element<'a, Message> = if let Some(preview_data) = self
+            .resolve_selected_preview()
+            .filter(|_| self.onboarding.setup.is_none())
+        {
+            let (left_portion, right_portion) =
+                preview_fill_portions(self.view.preview_style.width_fraction);
+            let divider = container(Space::new())
+                .width(Length::Fixed(PREVIEW_DIVIDER_WIDTH))
+                .height(Length::Fill)
+                .style(move |_theme| container::Style {
+                    background: Some(iced::Background::Color(iced::Color {
+                        a: 0.55,
+                        ..t.border
+                    })),
+                    ..Default::default()
+                });
 
-                let right_pane = container(self.render_preview_pane(preview_data))
-                    .padding(iced::Padding {
-                        top: fs.scroll_top_padding,
-                        right: 0.0,
-                        bottom: 0.0,
-                        left: 0.0,
-                    })
-                    .width(Length::FillPortion(right_portion))
-                    .height(Length::Fill);
+            let right_pane = container(self.render_preview_pane(preview_data))
+                .padding(iced::Padding {
+                    top: fs.scroll_top_padding,
+                    right: 0.0,
+                    bottom: 0.0,
+                    left: 0.0,
+                })
+                .width(Length::FillPortion(right_portion))
+                .height(Length::Fill);
 
-                Row::new()
-                    .spacing(PREVIEW_ROW_SPACING)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .push(left_pane.width(Length::FillPortion(left_portion)))
-                    .push(divider)
-                    .push(right_pane)
-                    .into()
-            } else {
-                left_pane.width(Length::Fill).into()
-            };
+            Row::new()
+                .spacing(PREVIEW_ROW_SPACING)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .push(left_pane.width(Length::FillPortion(left_portion)))
+                .push(divider)
+                .push(right_pane)
+                .into()
+        } else {
+            left_pane.width(Length::Fill).into()
+        };
 
         let mut content = Column::new()
             .spacing(10)
@@ -2157,6 +2159,9 @@ impl LauncherApp {
     }
 
     pub(super) fn view(&self) -> Element<'_, Message> {
+        if self.onboarding.setup.is_some() {
+            return self.render_onboarding_setup();
+        }
         let t = self.view.theme;
         let fs = self.view.font_sizes;
 

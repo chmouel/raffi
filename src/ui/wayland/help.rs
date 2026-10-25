@@ -638,6 +638,7 @@ pub(super) fn add_cycle_view_shortcut(
     chips: bool,
 ) {
     let views = [
+        (true, "shortcut setup: compositor configuration"),
         (main_view, "main view: each source, then all"),
         (
             addons.clipboard.is_enabled(),

@@ -12471,6 +12471,89 @@ fn onboarding_examples_use_real_queries_without_executing_results() {
     app.addons.file_browser.enabled = false;
     assert_eq!(
         app.welcome_actions(),
-        vec![WelcomeAction::Explore, WelcomeAction::Dismiss]
+        vec![
+            WelcomeAction::Explore,
+            WelcomeAction::BindShortcut,
+            WelcomeAction::Dismiss
+        ]
     );
+}
+
+#[test]
+fn onboarding_binding_setup_cycles_and_keeps_launcher_actions_out() {
+    use super::onboarding::BindingVariant;
+    use crate::compositor::Compositor;
+    assert_eq!(
+        BindingVariant::detected(Some(Compositor::Hyprland)),
+        BindingVariant::HyprlandLua
+    );
+    assert_eq!(BindingVariant::detected(None), BindingVariant::Other);
+    let mut app = test_app(AddonsConfig::default());
+    app.compositor = || Some(Compositor::Niri);
+    let _ = app.update(Message::OpenOnboarding);
+    let _ = app.update(Message::OpenBindingSetup);
+    assert!(!app.welcome_visible());
+    assert_eq!(app.cycle_view_label().as_deref(), Some("niri"));
+    let original_selection = app.selected_index;
+    let mut snippets = vec![app.onboarding.setup.unwrap().snippet()];
+    for label in ["Sway", "Hyprland Lua", "Hyprland legacy", "Other"] {
+        let _ = app.update(Message::CycleView(false));
+        assert_eq!(app.cycle_view_label().as_deref(), Some(label));
+        snippets.push(app.onboarding.setup.unwrap().snippet());
+    }
+    assert_eq!(
+        snippets,
+        vec![
+            "binds {\n    Mod+R { spawn \"raffi\"; }\n}",
+            "set $super Mod4\nbindsym $super+Space exec raffi",
+            "hl.bind(\"SUPER + R\", hl.dsp.exec_cmd(\"raffi\"))",
+            "bind = SUPER, R, exec, raffi",
+            "raffi",
+        ]
+    );
+    let _ = app.update(Message::CycleView(false));
+    assert_eq!(app.onboarding.setup, Some(BindingVariant::Niri));
+    let _ = app.update(Message::CycleView(true));
+    assert_eq!(app.onboarding.setup, Some(BindingVariant::Other));
+    let _ = app.update(Message::MoveDown);
+    assert_eq!(app.selected_index, original_selection);
+    assert_eq!(app.onboarding.setup_selected, 1);
+    let _ = app.update(Message::SubmitRepeat);
+    assert!(deferred_action(&app).is_none());
+    assert!(app.update(Message::Cancel).units() > 0);
+    assert!(app.welcome_visible());
+}
+
+#[test]
+fn onboarding_copy_feedback_stays_open_and_ignores_stale_completions() {
+    let mut app = test_app(AddonsConfig::default());
+    let _ = app.update(Message::OpenBindingSetup);
+    assert!(app.update(Message::CopyOnboarding).units() > 0);
+    let generation = app.onboarding.generation;
+    assert_eq!(app.update(Message::CopyOnboarding).units(), 0);
+    let _ = app.update(Message::OnboardingCopied(
+        generation,
+        Err("Clipboard unavailable".into()),
+    ));
+    assert_eq!(
+        app.onboarding.feedback,
+        Some(Err("Clipboard unavailable".into()))
+    );
+    assert!(app.onboarding.setup.is_some());
+    let _ = app.update(Message::CopyOnboarding);
+    let _ = app.update(Message::CycleView(false));
+    let _ = app.update(Message::OnboardingCopied(generation, Ok(())));
+    assert!(app.onboarding.feedback.is_none());
+    let _ = app.update(Message::CopyOnboarding);
+    let generation = app.onboarding.generation;
+    let _ = app.update(Message::OnboardingCopied(generation, Ok(())));
+    assert_eq!(
+        app.onboarding.feedback,
+        Some(Ok("Copied to clipboard".into()))
+    );
+    assert!(app.onboarding.setup.is_some());
+    assert!(deferred_action(&app).is_none());
+    let _ = app.update(Message::SearchChanged("firefox".into()));
+    assert!(app.onboarding.setup.is_none());
+    assert_eq!(app.search_query, "firefox");
 }

@@ -472,6 +472,9 @@ pub(super) fn is_user_input(message: &Message) -> bool {
     matches!(
         message,
         Message::SearchChanged(_)
+            | Message::OpenBindingSetup
+            | Message::CloseOnboardingSetup
+            | Message::CopyOnboarding
             | Message::OpenOnboarding
             | Message::DismissOnboarding
             | Message::WelcomeSelected(_)
@@ -1495,6 +1498,12 @@ impl LauncherApp {
         }
         match message {
             Message::OpenOnboarding => self.open_onboarding(),
+            Message::OpenBindingSetup => self.open_binding_setup(),
+            Message::CloseOnboardingSetup => self.close_onboarding_setup(),
+            Message::CopyOnboarding => self.copy_onboarding(),
+            Message::OnboardingCopied(generation, result) => {
+                self.onboarding_copied(generation, result)
+            }
             Message::DismissOnboarding => self.dismiss_onboarding(),
             Message::WelcomeSelected(index) => self.activate_welcome(index),
             Message::BackTabComplete => self.handle_tab_complete(),
@@ -4847,6 +4856,11 @@ impl LauncherApp {
     /// Ctrl+Tab, backwards with Shift: switch to the next view of what is
     /// showing. Tab completion where nothing has views.
     fn handle_cycle_view(&mut self, backwards: bool) -> Task<Message> {
+        if let Some(variant) = self.onboarding.setup {
+            self.onboarding.setup = Some(variant.cycle(backwards));
+            self.reset_onboarding_feedback();
+            return Task::none();
+        }
         if self.view.help_active {
             return self.handle_tab_complete();
         }
@@ -4895,6 +4909,9 @@ impl LauncherApp {
     /// Name of the view Ctrl+Tab switched to, for the footer; None where
     /// Ctrl+Tab has no views.
     pub(super) fn cycle_view_label(&self) -> Option<String> {
+        if let Some(variant) = self.onboarding.setup {
+            return Some(variant.label().into());
+        }
         if self.view.help_active {
             return None;
         }
