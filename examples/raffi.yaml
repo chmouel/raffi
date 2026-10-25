@@ -60,6 +60,8 @@ version: 1
 #     - addons.web_searches."DuckDuckGo"       # Opens DuckDuckGo search with the current query
 #     - addons.script_filters."Search Google"  # Switches to the script filter mode
 #     - addons.terminal                        # Runs the query in a terminal
+#   # Use main_view: [all] for every enabled source, including all snippets and script filters
+#   # Sources before all keep priority, e.g. main_view: [windows, all]
 #   main_view:               # Mix addon results into the main list; Ctrl+Tab shows one source at a time.
 #                            # An empty query shows one row of chips with each detected entry's name
 #                            # (Tabs, System, Clipboard...) above the apps; Left/Right pick one, Enter arms it.

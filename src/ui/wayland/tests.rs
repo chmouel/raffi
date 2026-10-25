@@ -7859,6 +7859,75 @@ fn main_view_app(entries: &[&str], configs: Vec<RaffiConfig>, addons: AddonsConf
 }
 
 #[test]
+fn test_main_view_all_expands_enabled_sources_and_named_sources() {
+    use super::main_view::{Entry, KeywordAddon, SlackSource};
+
+    let mut addons = AddonsConfig::default();
+    addons.kill.enabled = true;
+    addons.slack.enabled = true;
+    addons.text_snippets = vec![crate::TextSnippetSourceConfig {
+        name: "Emails".into(),
+        ..Default::default()
+    }];
+    addons.script_filters = vec![crate::ScriptFilterConfig {
+        name: "Issues".into(),
+        ..Default::default()
+    }];
+    let explicit = [
+        "launchers",
+        "windows",
+        "browser_tabs",
+        "bookmarks",
+        "browser_history",
+        "system",
+        "media",
+        "audio",
+        "bluetooth",
+        "kill",
+        "pass",
+        "slack",
+        "text_snippets.Emails",
+        "script_filters.Issues",
+        "clipboard",
+        "bitwarden",
+        "terminal",
+        "emoji",
+    ]
+    .map(String::from);
+    let all = super::main_view::resolve(&["all".into()], &addons);
+    assert_eq!(all, super::main_view::resolve(&explicit, &addons));
+    assert!(all.contains(&Entry::Snippets(0)));
+    assert!(all.contains(&Entry::ScriptFilter(0)));
+    assert!(all.contains(&Entry::Slack(SlackSource::Default)));
+    assert!(!all.contains(&Entry::Slack(SlackSource::Threads)));
+
+    addons.kill.enabled = false;
+    addons.slack.enabled = false;
+    addons.emoji.enabled = false;
+    let resolved = super::main_view::resolve(
+        &[
+            "system".into(),
+            "all".into(),
+            "launchers".into(),
+            "all".into(),
+        ],
+        &addons,
+    );
+    assert_eq!(
+        resolved.first(),
+        Some(&Entry::List(CommandListAddon::System))
+    );
+    assert_eq!(
+        resolved.iter().filter(|e| **e == Entry::Launchers).count(),
+        1
+    );
+    assert!(!resolved.contains(&Entry::List(CommandListAddon::Kill)));
+    assert!(!resolved.contains(&Entry::Slack(SlackSource::Default)));
+    assert!(!resolved.contains(&Entry::Keyword(KeywordAddon::Emoji)));
+    assert_eq!(resolved.len(), all.len() - 3);
+}
+
+#[test]
 fn test_main_view_resolves_kill_and_enabled_slack_in_order() {
     use super::main_view::{Entry, SlackSource};
 

@@ -140,6 +140,45 @@ pub(super) enum Offer {
     Keyword(KeywordAddon),
 }
 
+fn all_entries(addons: &AddonsConfig) -> Vec<Entry> {
+    let mut entries = vec![Entry::Launchers];
+    for (enabled, addon) in [
+        (addons.windows.enabled, CommandListAddon::Windows),
+        (addons.browser_tabs.enabled, CommandListAddon::BrowserTabs),
+        (addons.bookmarks.enabled, CommandListAddon::Bookmarks),
+        (
+            addons.browser_history.enabled,
+            CommandListAddon::BrowserHistory,
+        ),
+        (addons.system.enabled, CommandListAddon::System),
+        (addons.media.enabled, CommandListAddon::Media),
+        (addons.audio.enabled, CommandListAddon::Audio),
+        (addons.bluetooth.enabled, CommandListAddon::Bluetooth),
+        (addons.kill.enabled, CommandListAddon::Kill),
+        (addons.pass.enabled, CommandListAddon::Pass),
+    ] {
+        if enabled {
+            entries.push(Entry::List(addon));
+        }
+    }
+    if addons.slack.enabled {
+        entries.push(Entry::Slack(SlackSource::Default));
+    }
+    entries.extend((0..addons.text_snippets.len()).map(Entry::Snippets));
+    entries.extend((0..addons.script_filters.len()).map(Entry::ScriptFilter));
+    for (enabled, addon) in [
+        (addons.clipboard.is_enabled(), KeywordAddon::Clipboard),
+        (addons.bitwarden.enabled, KeywordAddon::Bitwarden),
+        (addons.terminal.enabled, KeywordAddon::Terminal),
+        (addons.emoji.enabled, KeywordAddon::Emoji),
+    ] {
+        if enabled {
+            entries.push(Entry::Keyword(addon));
+        }
+    }
+    entries
+}
+
 /// Resolve `main_view` entries in order, warning about and skipping the ones
 /// naming an unknown or disabled addon.
 pub(super) fn resolve(entries: &[String], addons: &AddonsConfig) -> Vec<Entry> {
@@ -147,6 +186,14 @@ pub(super) fn resolve(entries: &[String], addons: &AddonsConfig) -> Vec<Entry> {
     for raw in entries {
         let name = raw.trim();
         let name = name.strip_prefix("addons.").unwrap_or(name);
+        if name == "all" {
+            for entry in all_entries(addons) {
+                if !resolved.contains(&entry) {
+                    resolved.push(entry);
+                }
+            }
+            continue;
+        }
         let enabled = |enabled: bool, entry: Entry| {
             if enabled {
                 Ok(entry)
