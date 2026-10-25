@@ -12423,7 +12423,7 @@ fn onboarding_help_restores_query_and_controls_preserve_selection() {
     assert_eq!(app.onboarding.focused, Some(0));
     assert_eq!(
         app.empty_search_enter_hint().as_deref(),
-        Some("Calculate: 2 + 2")
+        Some("Do quick math")
     );
     assert_eq!(app.selected_index, selection);
     let _ = app.update(Message::BackTabComplete);
@@ -12529,6 +12529,11 @@ fn onboarding_binding_setup_cycles_and_keeps_launcher_actions_out() {
     let _ = app.update(Message::MoveDown);
     assert_eq!(app.selected_index, original_selection);
     assert_eq!(app.onboarding.setup_selected, 1);
+    let _ = app.update(Message::ChipMove(true));
+    assert_eq!(app.onboarding.setup_selected, 0);
+    let _ = app.update(Message::ChipMove(false));
+    assert_eq!(app.selected_index, original_selection);
+    assert_eq!(app.onboarding.setup_selected, 1);
     let _ = app.update(Message::SubmitRepeat);
     assert!(deferred_action(&app).is_none());
     assert!(app.update(Message::Cancel).units() > 0);
@@ -12609,10 +12614,7 @@ fn onboarding_config_preview_is_explicit_and_preserves_the_active_file() {
     let _ = app.update(Message::OpenConfigSetup);
     assert!(app.can_create_starter_config());
     assert!(!path.exists(), "opening the preview writes nothing");
-    assert_eq!(
-        app.onboarding.setup_selected, 0,
-        "Enter defaults to Copy config"
-    );
+    assert_eq!(app.onboarding.setup_selected, 0, "Enter defaults to Copy");
     assert!(app.update(Message::CreateStarterConfig).units() > 0);
     assert!(app.onboarding.saving);
     assert_eq!(app.update(Message::CreateStarterConfig).units(), 0);

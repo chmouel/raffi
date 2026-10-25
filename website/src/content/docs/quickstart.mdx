@@ -23,12 +23,13 @@ around, trying a few addons, and then setting it up the way you like.
 ## Your first launch
 
 New users see a welcome panel above the results. Search stays ready: start
-typing to find an app, choose **Calculate: 2 + 2** or **Browse files: ~/** to
-try a working example, or choose **Explore features** to browse keywords.
+typing to find an app, choose **Do quick math** (`2 + 2`) or **Browse your
+files** (`~/`) to try a working example, or choose **See everything Raffi can
+do** to browse keywords.
 Examples fill the search box and show results; Enter then copies the answer
 or opens the selected file. Disabled addons do not appear as examples.
 Tab and Shift+Tab move through the welcome controls; Enter chooses one.
-**Dismiss** hides the panel on future launches. You can reopen it through
+**Hide this** hides the panel on future launches. You can reopen it through
 **Getting started** in Ctrl+/ help. Existing configurations and usage history
 keep the panel from appearing automatically.
 
@@ -36,13 +37,13 @@ keep the panel from appearing automatically.
 
 ## Bind it to a key
 
-Choose **Bind a shortcut** in Getting started for a snippet matching your
-compositor. Ctrl+Tab cycles the available variants, including both Hyprland
-configuration formats. **Copy snippet** keeps Raffi open and reports whether
+Choose **Open Raffi with a shortcut** in Getting started for a snippet matching
+your compositor, with steps for where to paste it. Ctrl+Tab cycles the
+available variants, including both Hyprland configuration formats. **Copy** keeps Raffi open and reports whether
 copying succeeded. Add the snippet to the file shown; Raffi does not edit or
 reload your compositor configuration. Escape returns to Getting started.
 
-<Image src={bindingSetupScreenshot} alt="Shortcut setup showing a niri binding and Copy snippet control" width={800} />
+<Image src={bindingSetupScreenshot} alt="Shortcut setup showing the niri binding, the steps to add it, and the Copy button" width={800} />
 
 <Tabs>
   <TabItem label="Sway">
@@ -145,16 +146,16 @@ switcher to password managers.
 
 ## Make it yours
 
-Choose **Create starter config** in Getting started to preview a small config
-and its destination. **Create file** creates it only when no file exists;
-existing configs are preserved. **Copy config** copies the example without
+Choose **Save your settings** in Getting started to preview a small config
+and its destination. **Create the file** creates it only when no file exists;
+existing configs are preserved. **Copy** copies the example without
 writing a file. The starter enables installed apps and keeps the default
 search sources. Changes take effect the next time you launch Raffi.
 
 If you started Raffi with `-c`, the preview uses that config path. Command-line
 overrides are not saved into the starter file.
 
-<Image src={configSetupScreenshot} alt="Starter config preview with Copy config and Create file controls" width={800} />
+<Image src={configSetupScreenshot} alt="Starter config preview with Copy and Create the file buttons" width={800} />
 <Image src={configCreatedScreenshot} alt="Confirmation that the starter config was created for the next launch" width={800} />
 
 Settings normally live in `~/.config/raffi/raffi.yaml`. To create one manually,
