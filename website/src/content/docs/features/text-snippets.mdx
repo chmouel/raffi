@@ -604,6 +604,8 @@ More rules:
   preview.
 - Previews leave `{shell:...}` and `{random:...}` untouched. The preview reads
   the clipboard once when the source opens; the final value reads it again.
+  The preview pane shows at most the first 8 KiB or 100 lines of a snippet and
+  says when it cut the rest.
 - Only the first `{cursor}` counts, and it only moves the caret with
   `insert`. The caret moves one Left key per character, which can be off by a
   few for emoji sequences or combining accents.

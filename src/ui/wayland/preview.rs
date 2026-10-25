@@ -30,6 +30,35 @@ pub(super) const MAX_FILE_PREVIEW_LINES: usize = 100;
 /// Maximum number of directory entries shown in a directory preview.
 pub(super) const MAX_DIR_PREVIEW_ENTRIES: usize = 25;
 
+/// Cut a preview body to the byte and line budget file and clipboard previews
+/// use, keeping whole characters and reporting whether anything was dropped.
+pub(super) fn bound_preview_text(text: &str) -> (String, bool) {
+    let mut content = String::new();
+    let mut truncated = false;
+    for (index, line) in text.lines().enumerate() {
+        if index == MAX_FILE_PREVIEW_LINES {
+            truncated = true;
+            break;
+        }
+        if !content.is_empty() {
+            content.push('\n');
+        }
+        content.push_str(line);
+        if content.len() >= MAX_FILE_PREVIEW_BYTES {
+            truncated = true;
+            break;
+        }
+    }
+    if content.len() > MAX_FILE_PREVIEW_BYTES {
+        let mut end = MAX_FILE_PREVIEW_BYTES;
+        while !content.is_char_boundary(end) {
+            end -= 1;
+        }
+        content.truncate(end);
+    }
+    (content, truncated)
+}
+
 /// Icon or hero visual for the preview header.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PreviewIcon {
@@ -845,6 +874,7 @@ impl LauncherApp {
             current_index += 1;
         } else if let Some(help_msg) = &self.script_filter.help_message {
             if index == current_index {
+                let (content, truncated) = bound_preview_text(help_msg);
                 return Some(PreviewData {
                     title: "Script Filter".to_string(),
                     subtitle: None,
@@ -852,8 +882,8 @@ impl LauncherApp {
                     icon: None,
                     bodies: vec![PreviewBody::Prose {
                         heading: None,
-                        content: help_msg.clone(),
-                        truncated: false,
+                        content,
+                        truncated,
                     }],
                     metadata: Vec::new(),
                 });
@@ -1103,18 +1133,20 @@ impl LauncherApp {
         });
         let expanded_value = expanded.unwrap_or(&snippet.value);
 
+        let (content, truncated) = bound_preview_text(expanded_value);
         let mut bodies = vec![PreviewBody::Prose {
             heading: Some("Snippet Content".to_string()),
-            content: expanded_value.to_string(),
-            truncated: false,
+            content,
+            truncated,
         }];
 
         // Expansions are only computed when placeholders are enabled.
         if expanded_value != snippet.value {
+            let (content, truncated) = bound_preview_text(&snippet.value);
             bodies.push(PreviewBody::Prose {
                 heading: Some("Raw Template".to_string()),
-                content: snippet.value.clone(),
-                truncated: false,
+                content,
+                truncated,
             });
         }
 

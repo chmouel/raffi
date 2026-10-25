@@ -918,6 +918,39 @@ fn test_snippet_previews_use_fetched_clipboard_and_ignore_stale_results() {
 }
 
 #[test]
+fn test_snippet_preview_caps_long_content() {
+    let mut addons = AddonsConfig::default();
+    addons.emoji.enabled = false;
+    let wide = "x".repeat(MAX_FILE_PREVIEW_BYTES * 2);
+    let tall = (0..MAX_FILE_PREVIEW_LINES * 3)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    addons.text_snippets.push(snippet_source(
+        "Snippets",
+        "sn",
+        vec![snippet("Wide", &wide), snippet("Tall", &tall)],
+    ));
+    let mut app = test_app(addons);
+    open_snippets(&mut app, "sn ");
+
+    let preview = app.resolve_selected_preview().unwrap();
+    assert!(matches!(
+        preview.bodies.as_slice(),
+        [PreviewBody::Prose { content, truncated: true, .. }]
+            if content.len() == MAX_FILE_PREVIEW_BYTES
+    ));
+
+    let _ = app.update(Message::MoveDown);
+    let preview = app.resolve_selected_preview().unwrap();
+    assert!(matches!(
+        preview.bodies.as_slice(),
+        [PreviewBody::Prose { content, truncated: true, .. }]
+            if content.lines().count() == MAX_FILE_PREVIEW_LINES
+    ));
+}
+
+#[test]
 fn test_snippet_expansion_error_keeps_launcher_open() {
     let mut addons = AddonsConfig::default();
     addons.emoji.enabled = false;
