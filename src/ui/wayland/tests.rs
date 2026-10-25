@@ -12425,7 +12425,10 @@ fn onboarding_help_restores_query_and_controls_preserve_selection() {
     let _ = app.update(Message::BackTabComplete);
     assert_eq!(app.onboarding.focused, None);
     let _ = app.update(Message::BackTabComplete);
-    assert_eq!(app.onboarding.focused, Some(1));
+    assert_eq!(
+        app.onboarding.focused,
+        Some(app.welcome_actions().len() - 1)
+    );
     assert!(app.update(Message::Cancel).units() > 0);
     assert_eq!(app.search_query, "original query");
     assert!(!app.welcome_visible());
@@ -12436,4 +12439,38 @@ fn onboarding_help_restores_query_and_controls_preserve_selection() {
     assert_eq!(app.onboarding.focused, None);
     let _ = app.update(Message::SearchChanged(String::new()));
     assert!(app.welcome_visible());
+}
+
+#[test]
+fn onboarding_examples_use_real_queries_without_executing_results() {
+    use super::onboarding::WelcomeAction;
+    let mut app = test_app(AddonsConfig::default());
+    app.onboarding.enabled = true;
+    let index = app
+        .welcome_actions()
+        .iter()
+        .position(|action| *action == WelcomeAction::Calculate)
+        .unwrap();
+    assert!(app.update(Message::WelcomeSelected(index)).units() > 0);
+    assert_eq!(app.search_query, "2 + 2");
+    assert!(app.inline_result.is_some());
+    assert!(!app.welcome_visible());
+    assert!(deferred_action(&app).is_none());
+    assert!(app.selected_item.lock().unwrap().is_none());
+    let index = app
+        .welcome_actions()
+        .iter()
+        .position(|action| *action == WelcomeAction::BrowseFiles)
+        .unwrap();
+    let _ = app.update(Message::WelcomeSelected(index));
+    assert_eq!(app.search_query, "~/");
+    assert!(app.file_browser.active);
+    assert!(deferred_action(&app).is_none());
+
+    app.addons.calculator.enabled = false;
+    app.addons.file_browser.enabled = false;
+    assert_eq!(
+        app.welcome_actions(),
+        vec![WelcomeAction::Explore, WelcomeAction::Dismiss]
+    );
 }

@@ -7,6 +7,25 @@ use iced::{Element, Length, Task};
 use super::state::LauncherApp;
 use super::types::Message;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum WelcomeAction {
+    Calculate,
+    BrowseFiles,
+    Explore,
+    Dismiss,
+}
+
+impl WelcomeAction {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Calculate => "Calculate: 2 + 2",
+            Self::BrowseFiles => "Browse files: ~/",
+            Self::Explore => "Explore features",
+            Self::Dismiss => "Dismiss",
+        }
+    }
+}
+
 #[derive(Default)]
 pub(super) struct Onboarding {
     pub enabled: bool,
@@ -117,20 +136,37 @@ impl LauncherApp {
             .chain(move_cursor_to_end(self.view.search_input_id.clone()))
     }
 
+    pub(super) fn welcome_actions(&self) -> Vec<WelcomeAction> {
+        let mut actions = Vec::new();
+        if self.addons.calculator.enabled {
+            actions.push(WelcomeAction::Calculate);
+        }
+        if self.addons.file_browser.enabled {
+            actions.push(WelcomeAction::BrowseFiles);
+        }
+        actions.extend([WelcomeAction::Explore, WelcomeAction::Dismiss]);
+        actions
+    }
+
     pub(super) fn activate_welcome(&mut self, index: usize) -> Task<Message> {
         self.onboarding.focused = None;
-        match index {
-            0 => self.update(Message::ToggleHelp),
-            1 => self.update(Message::DismissOnboarding),
-            _ => Task::none(),
-        }
+        let query = match self.welcome_actions().get(index) {
+            Some(WelcomeAction::Calculate) => "2 + 2",
+            Some(WelcomeAction::BrowseFiles) => "~/",
+            Some(WelcomeAction::Explore) => return self.update(Message::ToggleHelp),
+            Some(WelcomeAction::Dismiss) => return self.update(Message::DismissOnboarding),
+            None => return Task::none(),
+        };
+        self.update(Message::SearchChanged(query.into()))
+            .chain(focus(self.view.search_input_id.clone()))
+            .chain(move_cursor_to_end(self.view.search_input_id.clone()))
     }
 
     pub(super) fn update_onboarding(&mut self, message: &Message) -> Option<Task<Message>> {
         if self.welcome_visible() {
             match message {
                 Message::TabComplete | Message::BackTabComplete => {
-                    let count = 2;
+                    let count = self.welcome_actions().len();
                     self.onboarding.focused = if matches!(message, Message::BackTabComplete) {
                         self.onboarding
                             .focused
@@ -171,10 +207,10 @@ impl LauncherApp {
         let t = self.view.theme;
         let fs = self.view.font_sizes;
         let mut controls = Row::new().spacing(8);
-        for (index, label) in ["Explore features", "Dismiss"].into_iter().enumerate() {
+        for (index, action) in self.welcome_actions().into_iter().enumerate() {
             let selected = self.onboarding.focused == Some(index);
             controls = controls.push(
-                button(text(label).size(fs.subtitle))
+                button(text(action.label()).size(fs.subtitle))
                     .on_press(Message::WelcomeSelected(index))
                     .padding([6, 10])
                     .style(move |_, _| button::Style {
