@@ -108,6 +108,7 @@ SHOTS = [
     Shot("main-recent", height=720),
     Shot("main-search", "raffi"),
     Shot("main-source", "raffi", ("ctrl+Tab",)),
+    Shot("action-menu", "~/Documents/preview.py", ("Right",)),
     Shot("unit-conversion", "100 km/h to mph"),
     Shot("color-converter", "#89b4fa"),
     Shot("developer-tools", "dev hello world"),

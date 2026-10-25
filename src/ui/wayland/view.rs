@@ -1045,10 +1045,18 @@ impl LauncherApp {
             (None, Some(search)) => (search.placeholder.as_str(), search.term.as_str()),
             (None, None) => (placeholder, self.search_query.as_str()),
         };
+        let (placeholder, value) = self
+            .action_menu
+            .as_ref()
+            .map(|menu| ("Search actions...", menu.query.as_str()))
+            .unwrap_or((placeholder, value));
         let secure = prompt.is_some();
         // Normal mode takes the keyboard: a disabled input cannot insert typed
         // characters, and focus is removed by the vim mode handlers.
-        let vim_normal = self.view.vim.is_normal() && prompt.is_none() && search.is_none();
+        let vim_normal = self.view.vim.is_normal()
+            && prompt.is_none()
+            && search.is_none()
+            && self.action_menu.is_none();
         let mut search_input = text_input(placeholder, value)
             .id(self.view.search_input_id.clone())
             .secure(secure)
@@ -1090,6 +1098,12 @@ impl LauncherApp {
             });
         }
 
+        let search_input: Element<'a, Message> = Element::new(super::action_input::ActionInput {
+            content: search_input.into(),
+            value,
+            enabled: self.action_menu.is_none() && !self.selected_actions().is_empty(),
+        });
+
         let search_control: Element<'a, Message> = if self.view.vim.enabled {
             let (label, background, foreground) = if vim_normal {
                 ("NORMAL", t.accent, t.bg_input)
@@ -1114,7 +1128,7 @@ impl LauncherApp {
                 .push(container(search_input).width(Length::Fill))
                 .into()
         } else {
-            search_input.into()
+            search_input
         };
 
         let items_container = container(items_column)
@@ -2143,6 +2157,49 @@ impl LauncherApp {
         let t = self.view.theme;
         let fs = self.view.font_sizes;
 
+        if let Some(menu) = &self.action_menu {
+            let mut items = Column::new().spacing(ITEM_SPACING).push(
+                text(format!("Actions for {}", menu.title))
+                    .size(fs.subtitle)
+                    .color(t.text_muted),
+            );
+            let filtered = menu.filtered();
+            if filtered.is_empty() {
+                items = items.push(
+                    text("No matching actions. Clear the filter to see all actions.")
+                        .size(fs.item)
+                        .color(t.text_muted),
+                );
+            }
+            for (row, index) in filtered.into_iter().enumerate() {
+                let entry = &menu.entries[index];
+                items = items.push(
+                    button(
+                        Row::new()
+                            .spacing(12)
+                            .align_y(iced::Alignment::Center)
+                            .push(text(&entry.label).size(fs.item).width(Length::Fill))
+                            .push(text(&entry.shortcut).size(fs.hint).color(t.text_muted)),
+                    )
+                    .on_press(Message::ActionSelected(index))
+                    .padding(fs.item_padding)
+                    .width(Length::Fill)
+                    .style(item_button_style(
+                        t,
+                        row == menu.selected,
+                        t.text_main,
+                    )),
+                );
+            }
+            return self.shell(
+                "Search actions...",
+                vec![span("Enter: Run action · Esc: Back to results")
+                    .size(fs.hint)
+                    .color(t.text_main)],
+                items,
+            );
+        }
+
         if self.view.help_active {
             return self.shell(
                 "Search help...",
@@ -3169,6 +3226,10 @@ impl LauncherApp {
             span(" keywords").size(fs.hint).color(t.text_muted),
         ];
 
+        if !self.selected_actions().is_empty() {
+            hint_spans.insert(0, sep.clone());
+            hint_spans.insert(0, span("→ Actions").size(fs.hint).color(t.accent));
+        }
         if let Some(action) = self.empty_search_enter_hint() {
             hint_spans.insert(0, sep.clone());
             hint_spans.insert(

@@ -742,6 +742,13 @@ pub(super) fn calculator_preview(calc: &CalculatorResult) -> PreviewData {
     }
 }
 
+#[derive(Clone, Copy)]
+enum ScriptPreviewMode {
+    Dynamic,
+    Static,
+    Actions,
+}
+
 impl LauncherApp {
     /// Refresh the cached file preview whenever the selected File Browser item or
     /// Script Filter QuickLook file changes.
@@ -831,7 +838,11 @@ impl LauncherApp {
 
     /// Resolve the preview data for the currently selected item across all modes.
     pub(super) fn resolve_selected_preview(&self) -> Option<PreviewData> {
-        if !self.view.show_preview {
+        self.selected_preview_data(false)
+    }
+
+    pub(super) fn selected_preview_data(&self, actions: bool) -> Option<PreviewData> {
+        if !actions && !self.view.show_preview {
             return None;
         }
 
@@ -899,7 +910,11 @@ impl LauncherApp {
                     sf_result,
                     self.script_filter.action.as_deref(),
                     self.script_filter.secondary_action.as_deref(),
-                    true,
+                    if actions {
+                        ScriptPreviewMode::Actions
+                    } else {
+                        ScriptPreviewMode::Dynamic
+                    },
                 ));
             }
             current_index += count;
@@ -987,7 +1002,7 @@ impl LauncherApp {
             let count = self.file_browser.entries.len();
             if count > 0 && index >= current_index && index < current_index + count {
                 let entry = &self.file_browser.entries[index - current_index];
-                return Some(self.build_file_browser_preview(entry));
+                return Some(self.build_file_browser_preview(entry, actions));
             }
             current_index += count;
         }
@@ -1063,13 +1078,15 @@ impl LauncherApp {
             .get(index.saturating_sub(current_index))
         {
             return match *row {
-                MainRowRef::Source { source, row } => self.build_main_view_preview(source, row),
+                MainRowRef::Source { source, row } => {
+                    self.build_main_view_preview(source, row, actions)
+                }
                 MainRowRef::Launcher(config_idx) => {
                     let config = self.configs.get(config_idx)?;
                     let enabled = config
                         .show_preview
                         .unwrap_or(self.view.show_launcher_preview);
-                    enabled.then(|| self.build_launcher_preview(config_idx, config))
+                    (enabled || actions).then(|| self.build_launcher_preview(config_idx, config))
                 }
             };
         }
@@ -1187,7 +1204,7 @@ impl LauncherApp {
         }
     }
 
-    fn build_file_browser_preview(&self, entry: &FileBrowserEntry) -> PreviewData {
+    fn build_file_browser_preview(&self, entry: &FileBrowserEntry, actions: bool) -> PreviewData {
         let icon = if self.no_icons {
             None
         } else {
@@ -1203,17 +1220,25 @@ impl LauncherApp {
                 .map(PreviewIcon::File)
         };
 
-        let inspected = self
-            .file_browser
-            .cached_preview
-            .as_ref()
-            .filter(|c| c.path == entry.full_path && c.show_hidden == self.file_browser.show_hidden)
-            .cloned()
-            .unwrap_or_else(|| inspect_path(&entry.full_path, self.file_browser.show_hidden));
+        let (bodies, file_metadata) = if actions {
+            (Vec::new(), Vec::new())
+        } else {
+            let inspected = self
+                .file_browser
+                .cached_preview
+                .as_ref()
+                .filter(|c| {
+                    c.path == entry.full_path && c.show_hidden == self.file_browser.show_hidden
+                })
+                .cloned()
+                .unwrap_or_else(|| inspect_path(&entry.full_path, self.file_browser.show_hidden));
+
+            (inspected.bodies, inspected.metadata)
+        };
 
         let config = &self.addons.file_browser;
         let mut metadata = vec![("Path".to_string(), entry.full_path.clone())];
-        metadata.extend(inspected.metadata);
+        metadata.extend(file_metadata);
         metadata.push((
             "Enter".to_string(),
             if entry.is_dir {
@@ -1243,9 +1268,13 @@ impl LauncherApp {
             subtitle: None,
             badge: Some(if entry.is_dir { "Directory" } else { "File" }.to_string()),
             icon,
-            bodies: inspected.bodies,
+            bodies,
             metadata,
         };
+
+        if actions {
+            return data;
+        }
 
         // The preview command's output replaces the built-in body once it
         // has answered; until then the built-in preview stays on screen.
@@ -1275,8 +1304,25 @@ impl LauncherApp {
         sf_result: &ScriptFilterResult,
         action: Option<&str>,
         secondary_action: Option<&str>,
-        dynamic: bool,
+        mode: ScriptPreviewMode,
     ) -> PreviewData {
+        if matches!(mode, ScriptPreviewMode::Actions) {
+            let mut metadata = Vec::new();
+            if item.valid {
+                metadata.push(("Enter".into(), describe_action(action.unwrap_or("copy"))));
+                if let Some(secondary) = secondary_action {
+                    metadata.push(("Ctrl+Enter".into(), describe_action(secondary)));
+                }
+            }
+            return PreviewData {
+                title: super::ansi::strip_ansi(&item.title),
+                subtitle: None,
+                badge: None,
+                icon: None,
+                bodies: Vec::new(),
+                metadata,
+            };
+        }
         let icon_path = if self.no_icons {
             None
         } else {
@@ -1367,7 +1413,7 @@ impl LauncherApp {
         };
 
         // A dynamic preview replaces the item's own rich preview.
-        let dynamic = dynamic
+        let dynamic = matches!(mode, ScriptPreviewMode::Dynamic)
             .then(|| self.script_filter.previews.get(&index))
             .flatten();
         if let Some(rich) = dynamic
@@ -1601,7 +1647,12 @@ impl LauncherApp {
         }
     }
 
-    fn build_main_view_preview(&self, source: usize, row: usize) -> Option<PreviewData> {
+    fn build_main_view_preview(
+        &self,
+        source: usize,
+        row: usize,
+        actions: bool,
+    ) -> Option<PreviewData> {
         match self.main_view.sources.get(source)? {
             MainViewSource::List(list) => list
                 .item(row)
@@ -1642,7 +1693,11 @@ impl LauncherApp {
                     result,
                     config.action.as_deref(),
                     config.secondary_action.as_deref(),
-                    false,
+                    if actions {
+                        ScriptPreviewMode::Actions
+                    } else {
+                        ScriptPreviewMode::Static
+                    },
                 ))
             }
         }

@@ -1,3 +1,5 @@
+mod action_input;
+mod action_menu;
 mod actions;
 mod ansi;
 mod app;

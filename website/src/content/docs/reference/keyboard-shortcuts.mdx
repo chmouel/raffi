@@ -3,6 +3,7 @@ title: Keyboard Shortcuts
 description: Every key Raffi understands, and how Ctrl+Tab switches views
 ---
 
+import actionMenuScreenshot from '../../../assets/screenshots/action-menu.png';
 import { Image } from 'astro:assets';
 import mainSourceScreenshot from '../../../assets/screenshots/main-source.png';
 import keywordHelpScreenshot from '../../../assets/screenshots/keyword-help.png';
@@ -21,6 +22,7 @@ your config turns on. Typing narrows the list.
 | --- | --- |
 | **Up** / **Down** | Move through the results |
 | **Enter** | Launch the selected entry, or start the addon whose keyword is selected |
+| **Right** | With the cursor at the end, open actions for the selected result |
 | **Ctrl+Enter** | Run the addon's second action, such as typing a password or closing a browser tab |
 | **Tab** | Complete the selected keyword or file path |
 | **Ctrl+Tab** / **Ctrl+Shift+Tab** | Switch to the next or previous view (see below) |
@@ -33,6 +35,19 @@ your config turns on. Typing narrows the list.
 | **Ctrl+/**, or `?` typed alone | Open the help list. Escape closes it and puts your search back. If one of your keywords is `?`, use Ctrl+/ |
 | **Ctrl+Alt+V** | Enable or disable vim mode for this run |
 | **Escape** | Close the help list, or close Raffi. In vim insert mode, return to normal mode instead |
+
+## Actions for a result
+
+Press **Right** with the search cursor at the end to see the selected result's
+available actions and shortcuts. Type to filter the actions, use Up/Down to
+choose one, and press Enter to run it. Escape returns to your original search
+and selection. Actions that require confirmation still ask before running.
+
+Right keeps moving the cursor when you are editing the middle of a query or
+have text selected. On the addon chips row it keeps selecting the next chip.
+The footer shows `→ Actions` when the selected result has actions.
+
+<Image src={actionMenuScreenshot} alt="Actions for a file, with opening, file manager and copy path options" width={800} />
 
 ## Switching views with Ctrl+Tab
 

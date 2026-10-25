@@ -432,6 +432,8 @@ pub(crate) struct EmojiEntry {
 #[derive(Debug, Clone)]
 pub(crate) enum Message {
     SearchChanged(String),
+    OpenActions,
+    ActionSelected(usize),
     MoveUp,
     MoveDown,
     Submit,

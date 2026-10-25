@@ -468,10 +468,12 @@ pub(super) fn fallback_emoji(icon: &str) -> Option<&'static str> {
 
 /// Whether `message` comes from the user acting on the list or the query,
 /// which the password prompt must not let through.
-fn is_user_input(message: &Message) -> bool {
+pub(super) fn is_user_input(message: &Message) -> bool {
     matches!(
         message,
         Message::SearchChanged(_)
+            | Message::OpenActions
+            | Message::ActionSelected(_)
             | Message::MoveUp
             | Message::MoveDown
             | Message::VimKey(_)
@@ -1117,6 +1119,7 @@ impl LauncherApp {
                 launcher_ordinals,
                 launcher_documents,
                 configs,
+                action_menu: None,
                 search_query: initial_query.clone(),
                 select_1_query: None,
                 select_1_ready: false,
@@ -1458,6 +1461,11 @@ impl LauncherApp {
     }
 
     fn update_inner(&mut self, message: Message) -> Task<Message> {
+        if self.action_menu.is_some() {
+            if let Some(task) = self.update_action_menu(&message) {
+                return task;
+            }
+        }
         if self.vault.prompt.is_some() {
             match message {
                 Message::Submit => return self.submit_vault_prompt(),
@@ -1475,6 +1483,8 @@ impl LauncherApp {
             }
         }
         match message {
+            Message::OpenActions => self.open_action_menu(),
+            Message::ActionSelected(index) => self.execute_menu_action(index),
             Message::SearchChanged(query) => self.handle_search_changed(query),
             Message::MoveUp => self.move_selection(-1),
             Message::MoveDown => self.move_selection(1),
@@ -1749,6 +1759,11 @@ impl LauncherApp {
             Message::FallbackSelected(index) => self.handle_fallback_selected(index),
             Message::KeywordSuggestionSelected(index) => {
                 self.handle_keyword_suggestion_selected(index)
+            }
+            Message::ChipMove(false)
+                if self.view.vim.is_normal() && !self.selected_actions().is_empty() =>
+            {
+                self.open_action_menu()
             }
             Message::ChipMove(backwards) => self.handle_chip_move(backwards),
             Message::ChipScroll(backwards) => {

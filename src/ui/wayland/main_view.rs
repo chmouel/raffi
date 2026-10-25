@@ -1405,7 +1405,7 @@ impl LauncherApp {
         )
     }
 
-    fn main_row_key(&self, row: MainRowRef) -> Option<MainRowKey> {
+    pub(super) fn main_row_key(&self, row: MainRowRef) -> Option<MainRowKey> {
         match row {
             MainRowRef::Launcher(index) => {
                 Some(MainRowKey::Launcher(*self.launcher_ordinals.get(index)?))

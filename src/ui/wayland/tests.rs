@@ -12013,3 +12013,154 @@ fn test_vim_text_prompt_forces_insert_mode() {
     let _ = app.update(Message::MoveDown);
     assert_eq!(app.view.vim.mode, VimMode::Insert);
 }
+
+#[test]
+fn action_menu_preserves_search_filters_and_restores_focus() {
+    let mut app = main_view_app(&["launchers"], firefox_launcher(), AddonsConfig::default());
+    app.view.show_preview = false;
+    let _ = app.update(Message::SearchChanged("fire".into()));
+    assert!(
+        !app.selected_actions().is_empty(),
+        "actions work with previews hidden"
+    );
+    assert!(app.update(Message::OpenActions).units() > 0);
+    let _ = app.update(Message::SearchChanged("no such action".into()));
+    assert!(app.action_menu.as_ref().unwrap().filtered().is_empty());
+    let _ = app.update(Message::Submit);
+    assert!(app.action_menu.is_some());
+    assert_eq!(app.search_query, "fire");
+    assert!(
+        app.update(Message::Cancel).units() > 0,
+        "Escape restores input focus"
+    );
+    assert_eq!(app.search_query, "fire");
+    assert_eq!(app.selected_index, 0);
+    assert!(app.action_menu.is_none());
+}
+
+#[test]
+fn action_menu_keeps_system_confirmation_and_rejects_changed_target() {
+    let mut app = test_app(AddonsConfig::default());
+    open_system(&mut app, "sys reboot");
+    let _ = app.update(Message::OpenActions);
+    assert!(app.action_menu.is_some());
+    let _ = app.update(Message::SubmitRepeat);
+    assert!(app.action_menu.is_some());
+    let _ = app.update(Message::Submit);
+    assert!(app.action_menu.is_none());
+    assert!(app.command_list.armed.is_some());
+    assert!(app.deferred_action.lock().unwrap().is_none());
+    let _ = app.update(Message::Submit);
+    assert_eq!(
+        deferred_argv(&app),
+        Some(vec!["systemctl".into(), "reboot".into()])
+    );
+
+    let mut app = test_app(AddonsConfig::default());
+    open_system(&mut app, "sys ");
+    let _ = app.update(Message::OpenActions);
+    app.selected_index += 1;
+    let _ = app.update(Message::Submit);
+    assert!(app.action_menu.is_none());
+    assert!(app.deferred_action.lock().unwrap().is_none());
+    assert!(app.command_list.armed.is_none());
+}
+
+#[test]
+fn action_menu_exposes_file_and_vault_actions_without_secrets() {
+    let mut app = test_app(AddonsConfig::default());
+    app.keyword_suggestions.clear();
+    app.file_browser.active = true;
+    app.file_browser
+        .entries
+        .push(super::state::FileBrowserEntry {
+            name: "test.txt".into(),
+            full_path: "/tmp/test.txt".into(),
+            is_dir: false,
+        });
+    let actions = app.selected_actions();
+    assert!(actions.iter().any(|action| action.shortcut == "Ctrl+Y"));
+    assert!(actions.iter().any(|action| action.shortcut == "Ctrl+B"));
+    assert!(!actions.iter().any(|action| action.shortcut == "Ctrl+Alt+Y"));
+
+    let mut app = test_app(AddonsConfig::default());
+    let _ = app.update(Message::SearchChanged("pass ".into()));
+    let items = vec![super::pass::command_item(
+        "pass:entry:web/github",
+        "github",
+        "",
+        "dialog-password",
+    )];
+    let generation = app.vault.generation;
+    let _ = app.update(Message::VaultDone(
+        generation,
+        vault_report(super::vault::Outcome::Loaded(items)),
+    ));
+    select_identity(&mut app, "pass:entry:web/github");
+    let _ = app.update(Message::OpenActions);
+    let menu = app.action_menu.as_ref().unwrap();
+    assert_eq!(menu.entries.len(), 4);
+    let index = menu
+        .entries
+        .iter()
+        .position(|entry| entry.shortcut == "Ctrl+U")
+        .unwrap();
+    let _ = app.update(Message::ActionSelected(index));
+    assert_eq!(
+        app.vault.running.as_ref().map(|op| op.kind.clone()),
+        Some(super::vault::OpKind::Entry(
+            super::vault::EntryAction::Copy(super::vault::Field::Username),
+            "web/github".into()
+        ))
+    );
+}
+
+#[test]
+fn action_menu_right_arrow_only_opens_at_end_without_selection() {
+    use iced::widget::text_input::cursor::State;
+    assert!(super::action_input::at_end(State::Index(4), 4));
+    assert!(!super::action_input::at_end(State::Index(2), 4));
+    assert!(!super::action_input::at_end(
+        State::Selection { start: 0, end: 4 },
+        4
+    ));
+    let mut app = main_view_app(
+        &["system", "launchers"],
+        firefox_launcher(),
+        AddonsConfig::default(),
+    );
+    assert!(
+        app.selected_actions().is_empty(),
+        "chips keep Right Arrow navigation"
+    );
+    let _ = app.update(Message::ChipMove(false));
+    assert!(app.action_menu.is_none());
+}
+
+#[test]
+fn action_menu_runs_the_browser_tab_secondary_action() {
+    use super::command_list::{CommandAction, CommandItem};
+    let mut app = test_app(AddonsConfig::default());
+    app.command_list.enter(CommandListAddon::BrowserTabs);
+    let mut item = CommandItem::info("tab:42", "Inbox".into(), "web-browser");
+    let action = |value: &str| CommandAction {
+        action: DeferredAction::Copy(value.into()),
+        confirm: None,
+        keep_open: false,
+        progress: None,
+    };
+    item.primary = Some(action("focus"));
+    item.secondary = Some(action("close"));
+    item.details = vec![
+        ("Enter".into(), "Switch to the tab".into()),
+        ("Ctrl+Enter".into(), "Close the tab".into()),
+    ];
+    app.command_list.set_items(vec![item]);
+    let _ = app.update(Message::OpenActions);
+    let _ = app.update(Message::SearchChanged("close".into()));
+    let _ = app.update(Message::Submit);
+    assert!(
+        matches!(app.deferred_action.lock().unwrap().as_ref(), Some(DeferredAction::Copy(value)) if value == "close")
+    );
+    assert!(app.view.current_modifiers.is_empty());
+}
