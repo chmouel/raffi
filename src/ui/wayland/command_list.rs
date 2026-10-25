@@ -3,10 +3,13 @@ use std::process::Command;
 use std::time::Duration;
 
 use fuzzy_matcher::skim::SkimMatcherV2;
-use fuzzy_matcher::FuzzyMatcher;
 use iced::keyboard::Modifiers;
 
 use super::actions::{run_bounded, DeferredAction};
+use super::ranking::{
+    score_document, score_document_literal_only, MatchQuality, PreparedQuery, ScoredMatch,
+    SearchDocument,
+};
 use super::url_match::{base_domain, query_host, uri_host};
 
 const KEPT_OPEN_TIMEOUT: Duration = Duration::from_secs(5);
@@ -232,7 +235,9 @@ pub(super) type QueryRow = std::sync::Arc<dyn Fn(&str) -> Option<CommandItem> + 
 pub(super) struct CommandListState {
     pub addon: Option<CommandListAddon>,
     pub items: Vec<CommandItem>,
+    pub documents: Vec<SearchDocument>,
     pub filtered: Vec<usize>,
+    pub filtered_scores: Vec<Option<ScoredMatch>>,
     pub query: String,
     pub matcher: SkimMatcherV2,
     pub loading: bool,
@@ -299,7 +304,9 @@ impl CommandListState {
     pub fn clear(&mut self) {
         self.addon = None;
         self.items.clear();
+        self.documents.clear();
         self.filtered.clear();
+        self.filtered_scores.clear();
         self.query.clear();
         self.loading = false;
         self.notice = None;
@@ -409,6 +416,11 @@ impl CommandListState {
             _ => self.error = None,
         }
         self.items = items;
+        self.documents = self
+            .items
+            .iter()
+            .map(SearchDocument::from_command_item)
+            .collect();
         self.loading = false;
         self.refreshing = false;
         self.notice = None;
@@ -418,7 +430,9 @@ impl CommandListState {
 
     pub fn set_notice(&mut self, notice: String) {
         self.items.clear();
+        self.documents.clear();
         self.filtered.clear();
+        self.filtered_scores.clear();
         self.loading = false;
         self.refreshing = false;
         self.notice = Some(notice);
@@ -431,6 +445,11 @@ impl CommandListState {
         self.items
             .retain(|existing| existing.identity != item.identity);
         self.items.insert(0, item.clone());
+        self.documents = self
+            .items
+            .iter()
+            .map(SearchDocument::from_command_item)
+            .collect();
         self.error = Some(item);
         self.armed = None;
         self.refilter();
@@ -447,7 +466,9 @@ impl CommandListState {
     pub fn begin_load(&mut self) -> u64 {
         self.generation = self.generation.wrapping_add(1);
         self.items.clear();
+        self.documents.clear();
         self.filtered.clear();
+        self.filtered_scores.clear();
         self.loading = true;
         self.refreshing = false;
         self.error = None;
@@ -477,38 +498,67 @@ impl CommandListState {
             if let Some(row) = build(&self.query) {
                 self.items.insert(0, row);
             }
+            self.documents = self
+                .items
+                .iter()
+                .map(SearchDocument::from_command_item)
+                .collect();
+        } else if self.documents.len() != self.items.len() {
+            self.documents = self
+                .items
+                .iter()
+                .map(SearchDocument::from_command_item)
+                .collect();
         }
         let mode = if self.addon == Some(CommandListAddon::BrowserHistory) {
             MatchMode::Substring
         } else {
             MatchMode::Fuzzy
         };
-        filter_items_into(
+        filter_items_with_documents_into(
             &self.items,
+            Some(&self.documents),
             &self.query,
             &self.matcher,
             &self.usage,
             self.strict,
             mode,
             &mut self.filtered,
+            Some(&mut self.filtered_scores),
         );
         if self.audio_view != super::audio::View::All {
             let view = self.audio_view;
             let items = &self.items;
-            self.filtered
-                .retain(|&index| view.keeps(&items[index].identity));
+            let mut idx = 0;
+            self.filtered.retain(|&index| {
+                let keep = view.keeps(&items[index].identity);
+                if !keep && idx < self.filtered_scores.len() {
+                    self.filtered_scores.remove(idx);
+                } else {
+                    idx += 1;
+                }
+                keep
+            });
         }
         if self.slack_hide_cold_channels && self.query.is_empty() {
             let items = &self.items;
             let usage = &self.usage;
+            let mut idx = 0;
             self.filtered.retain(|&index| {
                 let item = &items[index];
-                if !item.identity.starts_with("slack:conv:") {
-                    return true;
+                let keep = if !item.identity.starts_with("slack:conv:") {
+                    true
+                } else {
+                    !item.dimmed
+                        && (item.sort_priority > 0
+                            || usage.get(&item.identity).copied().unwrap_or(0) > 0)
+                };
+                if !keep && idx < self.filtered_scores.len() {
+                    self.filtered_scores.remove(idx);
+                } else {
+                    idx += 1;
                 }
-                !item.dimmed
-                    && (item.sort_priority > 0
-                        || usage.get(&item.identity).copied().unwrap_or(0) > 0)
+                keep
             });
         }
         self.extra_start = self.filtered.len();
@@ -516,11 +566,16 @@ impl CommandListState {
             return;
         };
         let shown: HashSet<usize> = self.filtered.iter().copied().collect();
-        let extra =
-            self.items.iter().enumerate().filter(|(index, item)| {
-                identities.contains(&item.identity) && !shown.contains(index)
-            });
-        self.filtered.extend(extra.map(|(index, _)| index));
+        let extra: Vec<usize> = self
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(index, item)| identities.contains(&item.identity) && !shown.contains(index))
+            .map(|(index, _)| index)
+            .collect();
+        self.filtered_scores
+            .extend(std::iter::repeat_n(None, extra.len()));
+        self.filtered.extend(extra);
     }
 
     /// The confirmation verb shown on `item` while it is armed.
@@ -594,6 +649,7 @@ pub(super) fn run_kept_open(action: &DeferredAction) -> Result<(), String> {
     }
 }
 
+#[allow(dead_code)]
 pub(super) fn filter_items_into(
     items: &[CommandItem],
     query: &str,
@@ -603,9 +659,27 @@ pub(super) fn filter_items_into(
     mode: MatchMode,
     out: &mut Vec<usize>,
 ) {
+    filter_items_with_documents_into(items, None, query, matcher, usage, strict, mode, out, None);
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn filter_items_with_documents_into(
+    items: &[CommandItem],
+    documents: Option<&[SearchDocument]>,
+    query: &str,
+    matcher: &SkimMatcherV2,
+    usage: &HashMap<String, u64>,
+    _strict: bool,
+    mode: MatchMode,
+    out: &mut Vec<usize>,
+    mut out_scores: Option<&mut Vec<Option<ScoredMatch>>>,
+) {
     out.clear();
+    if let Some(scores) = out_scores.as_deref_mut() {
+        scores.clear();
+    }
     let used = |item: &CommandItem| usage.get(&item.identity).copied().unwrap_or(0);
-    if query.is_empty() {
+    let Some(prepared) = PreparedQuery::new(query) else {
         out.extend((0..items.len()).filter(|&index| !items[index].typed_only));
         if !usage.is_empty()
             || items
@@ -627,30 +701,47 @@ pub(super) fn filter_items_into(
                 )
             });
         }
+        if let Some(scores) = out_scores {
+            scores.resize(out.len(), None);
+        }
         return;
-    }
+    };
     let domain = query_host(query).map(|host| base_domain(&host));
     let terms: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
-    // Rows without match text, then rows for the site a URL names, then
-    // matches by score; past use breaks ties.
-    let rank = |index: usize, item: &CommandItem| {
+    // Rows without match text stay on top in dedicated lists; domain matches
+    // precede ordinary text matches; past use breaks ties.
+    let rank = |index: usize,
+                item: &CommandItem|
+     -> Option<(usize, u8, u32, u64, Option<ScoredMatch>)> {
         if item.match_text.is_empty() {
-            return Some((index, 0, 0, used(item)));
+            return Some((index, 0, 0, used(item), None));
         }
         if domain
             .as_ref()
             .is_some_and(|domain| item.domains.contains(domain))
         {
-            return Some((index, 1, 0, used(item)));
+            let scored = ScoredMatch::domain();
+            return Some((index, 1, scored.score, used(item), Some(scored)));
         }
+        let owned_doc;
+        let doc = if let Some(doc) = documents.and_then(|docs| docs.get(index)) {
+            doc
+        } else {
+            owned_doc = SearchDocument::from_command_item(item);
+            &owned_doc
+        };
         match mode {
             MatchMode::Fuzzy => {
-                if strict && !super::support::contains_words(&item.match_text, query) {
-                    return None;
-                }
-                matcher
-                    .fuzzy_match(&item.match_text, query)
-                    .map(|score| (index, 2, score, used(item)))
+                let scored = score_document(doc, &prepared, matcher)?;
+                let bucket = match scored.quality {
+                    MatchQuality::DomainMatch => 1,
+                    MatchQuality::ExactPrimary => 2,
+                    MatchQuality::PrimaryWordPrefix => 3,
+                    MatchQuality::PrimaryMatch => 4,
+                    MatchQuality::MixedFields => 5,
+                    MatchQuality::SecondaryOnly => 6,
+                };
+                Some((index, bucket, scored.score, used(item), Some(scored)))
             }
             MatchMode::Substring => {
                 if terms.is_empty() {
@@ -674,7 +765,12 @@ pub(super) fn filter_items_into(
                 } else {
                     6
                 };
-                Some((index, rank, 0, used(item)))
+                let scored =
+                    score_document_literal_only(doc, &prepared, matcher).or(Some(ScoredMatch {
+                        quality: MatchQuality::SecondaryOnly,
+                        score: 2_800,
+                    }));
+                Some((index, rank, 0, used(item), scored))
             }
         }
     };
@@ -689,7 +785,7 @@ pub(super) fn filter_items_into(
             .unwrap_or(1)
             .min(8)
     };
-    let mut ranked: Vec<(usize, u8, i64, u64)> = if threads == 1 {
+    let mut ranked: Vec<(usize, u8, u32, u64, Option<ScoredMatch>)> = if threads == 1 {
         items
             .iter()
             .enumerate()
@@ -719,10 +815,13 @@ pub(super) fn filter_items_into(
                 .collect()
         })
     };
-    ranked.sort_by_key(|&(_, rank, score, used)| {
+    ranked.sort_by_key(|&(_, rank, score, used, _)| {
         (rank, std::cmp::Reverse(score), std::cmp::Reverse(used))
     });
-    out.extend(ranked.iter().map(|&(index, _, _, _)| index));
+    out.extend(ranked.iter().map(|&(index, _, _, _, _)| index));
+    if let Some(scores) = out_scores {
+        scores.extend(ranked.into_iter().map(|(_, _, _, _, scored)| scored));
+    }
 }
 
 /// Whether `term` appears at the start of `text` or after a non-alphanumeric
@@ -798,6 +897,103 @@ mod tests {
         );
         assert_eq!(first.len(), items.len());
         assert_eq!(first, second);
+    }
+
+    #[test]
+    #[ignore = "manual filtering benchmark; run in release mode"]
+    fn benchmark_relevance_filter_against_previous_strict_scan() {
+        use fuzzy_matcher::FuzzyMatcher;
+        use std::time::Instant;
+
+        let matcher = SkimMatcherV2::default();
+        let usage = HashMap::new();
+        for size in [1_000, 10_000, 50_000] {
+            let items: Vec<_> = (0..size).map(item).collect();
+            let documents: Vec<_> = items
+                .iter()
+                .map(SearchDocument::from_command_item)
+                .collect();
+            let mut output = Vec::new();
+            let mut scores = Vec::new();
+            let mut timings = [Vec::new(), Vec::new()];
+            for _ in 0..15 {
+                let start = Instant::now();
+                let rank = |index: usize, item: &CommandItem| {
+                    let text = item.match_text.to_lowercase();
+                    (text.contains("page") && text.contains("browser"))
+                        .then(|| {
+                            matcher
+                                .fuzzy_match(&item.match_text, "page browser")
+                                .map(|score| (index, score))
+                        })
+                        .flatten()
+                };
+                let threads = if size < 10_000 {
+                    1
+                } else {
+                    std::thread::available_parallelism()
+                        .map(|count| count.get())
+                        .unwrap_or(1)
+                        .min(8)
+                };
+                let mut old: Vec<_> = if threads == 1 {
+                    items
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(index, item)| rank(index, item))
+                        .collect()
+                } else {
+                    let chunk_size = items.len().div_ceil(threads);
+                    std::thread::scope(|scope| {
+                        let handles: Vec<_> = items
+                            .chunks(chunk_size)
+                            .enumerate()
+                            .map(|(chunk_index, chunk)| {
+                                let rank = &rank;
+                                scope.spawn(move || {
+                                    chunk
+                                        .iter()
+                                        .enumerate()
+                                        .filter_map(|(offset, item)| {
+                                            rank(chunk_index * chunk_size + offset, item)
+                                        })
+                                        .collect::<Vec<_>>()
+                                })
+                            })
+                            .collect();
+                        handles
+                            .into_iter()
+                            .flat_map(|handle| handle.join().unwrap())
+                            .collect()
+                    })
+                };
+                old.sort_by_key(|&(_, score)| std::cmp::Reverse(score));
+                timings[0].push(start.elapsed());
+
+                let start = Instant::now();
+                filter_items_with_documents_into(
+                    &items,
+                    Some(&documents),
+                    "page browser",
+                    &matcher,
+                    &usage,
+                    true,
+                    MatchMode::Fuzzy,
+                    &mut output,
+                    Some(&mut scores),
+                );
+                timings[1].push(start.elapsed());
+            }
+            for samples in &mut timings {
+                samples.sort();
+            }
+            let previous = timings[0][timings[0].len() / 2].as_secs_f64() * 1_000.0;
+            let current = timings[1][timings[1].len() / 2].as_secs_f64() * 1_000.0;
+            println!(
+                "{size} items: previous {previous:.2} ms, relevance {current:.2} ms, ratio {:.2}x",
+                current / previous
+            );
+        }
     }
 
     fn substring_item(identity: &str, title: &str, url: &str) -> CommandItem {

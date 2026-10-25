@@ -8,8 +8,8 @@ use evalexpr::{
     HashMapContext, Value,
 };
 use fuzzy_matcher::skim::SkimMatcherV2;
-use fuzzy_matcher::FuzzyMatcher;
 
+use super::ranking::{score_document, PreparedQuery, ScoredMatch, SearchDocument};
 use super::state::CalculatorResult;
 use super::types::{InlineProvider, InlineResult, InlineRow};
 use crate::ui::{get_history_cache_path, get_last_query_cache_path};
@@ -185,17 +185,9 @@ pub(super) fn calculator_inline_result(calc: &CalculatorResult) -> InlineResult 
     }
 }
 
-/// Whether every word of `query` appears in `text`, ignoring case, so a
-/// fuzzy match scattered over unrelated words is turned down.
-pub(super) fn contains_words(text: &str, query: &str) -> bool {
-    let text = text.to_lowercase();
-    query
-        .split_whitespace()
-        .all(|word| text.contains(&word.to_lowercase()))
-}
-
 /// Whether `title` starts with `query`, or has a word that does, ignoring
 /// case.
+#[cfg(test)]
 pub(super) fn word_prefix_match(title: &str, query: &str) -> bool {
     let query = query.trim().to_lowercase();
     if query.is_empty() {
@@ -213,31 +205,46 @@ pub(super) fn word_prefix_match(title: &str, query: &str) -> bool {
 
 /// `log_query` is what the debug log shows in place of `query`, so
 /// sensitive queries can be redacted.
+#[cfg(test)]
 pub(super) fn fuzzy_match_configs(
     configs: &[RaffiConfig],
     query: &str,
     log_query: &str,
 ) -> Vec<usize> {
+    score_configs_with_documents(configs, None, query, log_query)
+        .into_iter()
+        .map(|(idx, _)| idx)
+        .collect()
+}
+
+pub(super) fn score_configs_with_documents(
+    configs: &[RaffiConfig],
+    documents: Option<&[SearchDocument]>,
+    query: &str,
+    log_query: &str,
+) -> Vec<(usize, ScoredMatch)> {
+    let Some(prepared) = PreparedQuery::new(query) else {
+        return Vec::new();
+    };
     let matcher = SkimMatcherV2::default();
-    let mut matches: Vec<(usize, i64)> = configs
+    let mut matches: Vec<(usize, ScoredMatch)> = configs
         .iter()
         .enumerate()
         .filter_map(|(idx, config)| {
-            let description = config
-                .description
-                .as_deref()
-                .or(config.binary.as_deref())
-                .unwrap_or_default();
-            matcher
-                .fuzzy_match(description, query)
-                .map(|score| (idx, score))
+            let owned_doc;
+            let doc = if let Some(doc) = documents.and_then(|docs| docs.get(idx)) {
+                doc
+            } else {
+                owned_doc = SearchDocument::from_launcher(config);
+                &owned_doc
+            };
+            score_document(doc, &prepared, &matcher).map(|scored| (idx, scored))
         })
         .collect();
 
-    matches.sort_by_key(|b| std::cmp::Reverse(b.1));
-    let result: Vec<usize> = matches.into_iter().map(|(idx, _)| idx).collect();
-    crate::debug_log!("fuzzy_match: query={log_query:?} results={}", result.len());
-    result
+    matches.sort_by_key(|(_, scored)| scored.sort_key());
+    crate::debug_log!("fuzzy_match: query={log_query:?} results={}", matches.len());
+    matches
 }
 
 /// Parse MRU cache lines. Fields are split from the right so keys may

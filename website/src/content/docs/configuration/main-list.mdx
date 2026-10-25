@@ -91,19 +91,22 @@ warning when Raffi starts.
 
 ## How results are arranged
 
-Results are grouped by source in the order you listed them, and each addon
-row has a small badge saying where it comes from. Each addon adds at most 5
-rows. An addon row only shows when every word you typed appears in it, so
-typing `brave` doesn't bring up a tab whose title just happens to contain
-those letters. A tab for the site in a pasted URL, and a snippet whose
-keyword starts with what you typed, still show. Script filters do their own
-matching and are left alone.
+When you type, apps and local addon rows share one relevance-ranked list.
+An exact app or tab title ranks above a match in a subtitle or URL, regardless
+of which source comes first in `main_view`. Matching the domain of a pasted
+URL ranks first. Within equally relevant matches, Raffi uses your configured
+source order, then past use within that source. Each addon contributes at most
+5 of its best matches; apps have no such limit. Addon rows carry a badge
+showing their source.
 
-A group whose row title starts with what you typed, or has a word that does,
-moves ahead of groups that only match further in. Typing `brave` lists your
-Brave Browser app before tabs and snippets that only mention Brave in their
-text, even when `browser_tabs` comes first in `main_view`. Otherwise groups
-keep the order you gave them.
+Search is case- and accent-insensitive and matches words in any order across
+fields. Titles and executable names also accept word-initial abbreviations
+and short, closely spaced letter sequences. Other fields require literal
+matches. An app's command arguments, scripts and routing alias are not
+searched. Browser history keeps literal substring matching; snippet keywords
+and pasted URL domains keep their special rules. Script filter results and
+Slack server searches stay in their own blocks after the ranked local rows,
+before fallbacks. They are not rescored by Raffi.
 
 Pressing Enter on an addon row switches to that addon with your query (the
 input becomes `tabs gmail`, for instance) and runs the row there.
@@ -133,7 +136,7 @@ nothing.
 Below the chips come your apps, Slack Home rows if listed, and the 5 things
 you picked most recently from `browser_tabs`, `bookmarks`, `browser_history`,
 `windows`, `pass`, text snippets and script filters.
-Each sits with its own source, newest first. A tab or window that has been
+Empty searches keep the configured source order; recent picks sit with their own source, newest first. A tab or window that has been
 closed since is skipped, and so are windows from before you last logged in.
 A tab is found again by its address after a browser restart. Picks count
 whether you made them from the main list or the addon itself, but only for

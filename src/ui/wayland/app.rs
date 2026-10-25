@@ -31,7 +31,7 @@ use super::help::{
     add_cycle_view_shortcut, filter_help_entries, help_entries, help_suggestions, search_tips,
     vim_shortcut_entries,
 };
-use super::main_view::{Block, Focus, Source, MAIN_VIEW_SESSION};
+use super::main_view::{Focus, MainRowRef, Source, MAIN_VIEW_SESSION};
 use super::pass::PassContext;
 use super::preview::image_mime_type;
 use super::recent::{RecentPick, StoredItem};
@@ -52,8 +52,8 @@ use super::state::{
     SharedSelection, TextSnippetState, ViewState, WebSearchActiveState, WebSearchState,
 };
 use super::support::{
-    calculator_inline_result, fuzzy_match_configs, load_history, load_mru_map, mru_bounds,
-    mru_sort_key, record_mru_use, save_history, save_last_query, save_mru_map, try_evaluate_math,
+    calculator_inline_result, load_history, load_mru_map, mru_bounds, mru_sort_key, record_mru_use,
+    save_history, save_last_query, save_mru_map, try_evaluate_math,
 };
 use super::system::system_entries;
 use super::types::InlineProvider;
@@ -1021,7 +1021,7 @@ fn fetch_wayland_handles() -> Task<Message> {
 impl LauncherApp {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
-        mut configs: Vec<RaffiConfig>,
+        configs: Vec<RaffiConfig>,
         addons: AddonsConfig,
         no_icons: bool,
         selected_item: SharedSelection,
@@ -1057,7 +1057,9 @@ impl LauncherApp {
         // Pre-compute aggregate stats for hybrid sorting
         let (max_count, min_ts, max_ts) = mru_bounds(&mru_map);
 
-        configs.sort_by_key(|config| {
+        let mut indexed_configs: Vec<(usize, crate::RaffiConfig)> =
+            configs.into_iter().enumerate().collect();
+        indexed_configs.sort_by_key(|(_, config)| {
             let description = config
                 .description
                 .as_deref()
@@ -1071,6 +1073,13 @@ impl LauncherApp {
                 max_ts,
             ))
         });
+        let launcher_ordinals: Vec<usize> = indexed_configs.iter().map(|&(ord, _)| ord).collect();
+        let configs: Vec<crate::RaffiConfig> =
+            indexed_configs.into_iter().map(|(_, cfg)| cfg).collect();
+        let launcher_documents: Vec<super::ranking::SearchDocument> = configs
+            .iter()
+            .map(super::ranking::SearchDocument::from_launcher)
+            .collect();
 
         let launcher_icon_paths = if no_icons {
             vec![None; configs.len()]
@@ -1099,9 +1108,14 @@ impl LauncherApp {
             ..Default::default()
         };
 
+        let mut main_view = super::main_view::MainViewState::default();
+        main_view.ordered_rows = (0..configs.len()).map(MainRowRef::Launcher).collect();
         (
             LauncherApp {
                 filtered_configs: (0..configs.len()).collect(),
+                filtered_config_scores: Vec::new(),
+                launcher_ordinals,
+                launcher_documents,
                 configs,
                 search_query: initial_query.clone(),
                 select_1_query: None,
@@ -1170,7 +1184,7 @@ impl LauncherApp {
                 browser_history: Default::default(),
                 clipboard: ClipboardState::default(),
                 fallbacks,
-                main_view: Default::default(),
+                main_view,
                 keyword_suggestions: Vec::new(),
                 keyword_chips: false,
                 chip_index: 0,
@@ -1365,26 +1379,20 @@ impl LauncherApp {
                     consider(!row.copy_value.is_empty());
                 }
             }
-            for (source, row) in self.main_view.rows(Block::BeforeLaunchers) {
-                let selectable = match &self.main_view.sources[source] {
-                    Source::List(list) => self.selectable_command_item(list.addon, list.item(row)),
-                    Source::Snippets { filtered, .. } => filtered.get(row).is_some(),
-                    Source::ScriptFilter { results, .. } => results
-                        .as_ref()
-                        .is_some_and(|result| result.items.get(row).is_some_and(|item| item.valid)),
-                };
-                consider(selectable);
-            }
-            for _ in &self.filtered_configs {
-                consider(true);
-            }
-            for (source, row) in self.main_view.rows(Block::AfterLaunchers) {
-                let selectable = match &self.main_view.sources[source] {
-                    Source::List(list) => self.selectable_command_item(list.addon, list.item(row)),
-                    Source::Snippets { filtered, .. } => filtered.get(row).is_some(),
-                    Source::ScriptFilter { results, .. } => results
-                        .as_ref()
-                        .is_some_and(|result| result.items.get(row).is_some_and(|item| item.valid)),
+            for row in &self.main_view.ordered_rows {
+                let selectable = match *row {
+                    MainRowRef::Launcher(_) => true,
+                    MainRowRef::Source { source, row } => match &self.main_view.sources[source] {
+                        Source::List(list) => {
+                            self.selectable_command_item(list.addon, list.item(row))
+                        }
+                        Source::Snippets { filtered, .. } => filtered.get(row).is_some(),
+                        Source::ScriptFilter { results, .. } => {
+                            results.as_ref().is_some_and(|result| {
+                                result.items.get(row).is_some_and(|item| item.valid)
+                            })
+                        }
+                    },
                 };
                 consider(selectable);
             }
@@ -1524,6 +1532,7 @@ impl LauncherApp {
                     self.command_list.armed = None;
                 }
                 self.selected_index = index;
+                self.main_view.selection_deliberate = true;
                 self.activate_index(index)
             }
             Message::InlineSelected(index) => self.handle_inline_selected(index),
@@ -1969,6 +1978,7 @@ impl LauncherApp {
         }
         .filter(|_| !focused);
         self.selected_index = 0;
+        self.main_view.selection_deliberate = false;
 
         if let Some(index) = self.history.index {
             if self.history.items.get(index).map(|h| h.as_str()) != Some(typed.as_str()) {
@@ -3628,6 +3638,7 @@ impl LauncherApp {
             return Task::none();
         }
         self.selected_index = index.min(total - 1);
+        self.main_view.selection_deliberate = true;
         self.command_list.armed = None;
         self.follow_clipboard_selection();
         self.refresh_file_preview_cache();
@@ -3883,15 +3894,15 @@ impl LauncherApp {
             current_index += item_count;
         }
 
-        let before = self.main_view.row_count(Block::BeforeLaunchers);
-        if index >= current_index && index < current_index + before {
-            return self.activate_main_view(Block::BeforeLaunchers, index - current_index);
-        }
-        current_index += before;
-
-        let config_index = index.saturating_sub(current_index);
-        if config_index < self.filtered_configs.len() {
-            let real_config_index = self.filtered_configs[config_index];
+        if let Some(reference) = index
+            .checked_sub(current_index)
+            .and_then(|row| self.main_view.ordered_rows.get(row))
+            .copied()
+        {
+            let real_config_index = match reference {
+                MainRowRef::Source { source, row } => return self.activate_main_view(source, row),
+                MainRowRef::Launcher(index) => index,
+            };
             let config = self.configs[real_config_index].clone();
             let description = config
                 .description
@@ -3932,13 +3943,7 @@ impl LauncherApp {
             }
             return self.launch_config(real_config_index);
         }
-        current_index += self.filtered_configs.len();
-
-        let after = self.main_view.row_count(Block::AfterLaunchers);
-        if index >= current_index && index < current_index + after {
-            return self.activate_main_view(Block::AfterLaunchers, index - current_index);
-        }
-        current_index += after;
+        current_index += self.main_view.ordered_rows.len();
 
         let fallback_index = index.saturating_sub(current_index);
         if fallback_index < self.fallback_count() {
@@ -5401,6 +5406,15 @@ impl LauncherApp {
     }
 
     pub(super) fn filter_items(&mut self, query: &str, log_query: &str) {
+        if self.launcher_documents.len() != self.configs.len() {
+            self.launcher_documents = self
+                .configs
+                .iter()
+                .map(super::ranking::SearchDocument::from_launcher)
+                .collect();
+            self.launcher_ordinals = (0..self.configs.len()).collect();
+        }
+        self.filtered_config_scores = vec![None; self.configs.len()];
         if self.main_view.hide_launchers
             || matches!(self.main_view.focused(), Some(Focus::Source(_)))
         {
@@ -5408,18 +5422,17 @@ impl LauncherApp {
         } else if query.is_empty() {
             self.filtered_configs = (0..self.configs.len()).collect();
         } else {
-            self.filtered_configs = fuzzy_match_configs(&self.configs, query, log_query);
+            let scored = super::support::score_configs_with_documents(
+                &self.configs,
+                Some(&self.launcher_documents),
+                query,
+                log_query,
+            );
+            for &(index, score) in &scored {
+                self.filtered_config_scores[index] = Some(score);
+            }
+            self.filtered_configs = scored.into_iter().map(|(index, _)| index).collect();
         }
-        self.main_view.launchers_strong = !query.is_empty()
-            && self.filtered_configs.iter().any(|&index| {
-                let config = &self.configs[index];
-                let title = config
-                    .description
-                    .as_deref()
-                    .or(config.binary.as_deref())
-                    .unwrap_or_default();
-                super::support::word_prefix_match(title, query)
-            });
     }
 
     pub(super) fn total_items(&self) -> usize {
@@ -5465,9 +5478,7 @@ impl LauncherApp {
         if let Some(inline) = &self.inline_result {
             offset += inline.rows.len();
         }
-        offset += self.main_view.row_count(Block::BeforeLaunchers);
-        offset += self.main_view.row_count(Block::AfterLaunchers);
-        self.filtered_configs.len() + offset + self.fallback_count()
+        offset + self.main_view.ordered_rows.len() + self.fallback_count()
     }
 
     fn is_in_addon_mode(&self) -> bool {

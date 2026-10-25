@@ -11,7 +11,7 @@ use iced::{Element, Length};
 
 use super::ansi::ansi_to_spans;
 use super::browser::mimetype_icon_name;
-use super::main_view::{Block, Source as MainViewSource};
+use super::main_view::{MainRowRef, Source as MainViewSource};
 use super::preview::{
     parse_mrkdwn_blocks, parse_mrkdwn_spans, ChatEntry, ChatMessageGroup, MrkdwnBlock, MrkdwnStyle,
     PreviewBody, PreviewData, PreviewIcon,
@@ -2980,17 +2980,6 @@ impl LauncherApp {
             );
         }
 
-        let main_view_before = self.main_view.row_count(Block::BeforeLaunchers);
-        let main_view_after = self.main_view.row_count(Block::AfterLaunchers);
-        for (source, row) in self.main_view.rows(Block::BeforeLaunchers) {
-            if let Some(row) =
-                self.main_view_row(source, row, special_item_idx, &main_view_guides[source])
-            {
-                items_column = items_column.push(row);
-            }
-            special_item_idx += 1;
-        }
-
         let has_fallbacks = self.fallback_count() > 0;
         let has_keyword_suggestions = !self.keyword_suggestions.is_empty();
 
@@ -3007,7 +2996,7 @@ impl LauncherApp {
             && !has_web_search
             && !has_fallbacks
             && !has_keyword_suggestions
-            && main_view_before + main_view_after == 0
+            && self.main_view.ordered_rows.is_empty()
         {
             let message = if matches!(self.query_class.mode, super::app::QueryMode::Standard) {
                 "No matching results found. Ctrl+/ lists every keyword."
@@ -3021,8 +3010,19 @@ impl LauncherApp {
                 .align_y(iced::Alignment::Center);
             items_column = items_column.push(no_results);
         } else {
-            for (idx, &config_idx) in self.filtered_configs.iter().enumerate() {
+            for (idx, reference) in self.main_view.ordered_rows.iter().enumerate() {
                 let display_idx = idx + special_item_idx;
+                let config_idx = match *reference {
+                    MainRowRef::Source { source, row } => {
+                        if let Some(item) =
+                            self.main_view_row(source, row, display_idx, &main_view_guides[source])
+                        {
+                            items_column = items_column.push(item);
+                        }
+                        continue;
+                    }
+                    MainRowRef::Launcher(config_idx) => config_idx,
+                };
                 let config = &self.configs[config_idx];
                 let description = config
                     .description
@@ -3069,20 +3069,8 @@ impl LauncherApp {
             }
         }
 
-        let after_start_idx = special_item_idx + self.filtered_configs.len();
-        for (offset, (source, row)) in self.main_view.rows(Block::AfterLaunchers).enumerate() {
-            if let Some(row) = self.main_view_row(
-                source,
-                row,
-                after_start_idx + offset,
-                &main_view_guides[source],
-            ) {
-                items_column = items_column.push(row);
-            }
-        }
-
         if has_fallbacks {
-            let fallback_start_idx = after_start_idx + main_view_after;
+            let fallback_start_idx = special_item_idx + self.main_view.ordered_rows.len();
             for (fb_idx, fallback) in self.fallbacks.iter().enumerate() {
                 let display_idx = fallback_start_idx + fb_idx;
                 let is_selected = display_idx == self.selected_index;

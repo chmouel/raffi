@@ -11,7 +11,7 @@ use super::command_list::{CommandItem, CommandListState};
 use super::devtools::DevRow;
 use super::file_preview::FilePreviewOutput;
 use super::help::HelpEntry;
-use super::main_view::{Block as MainViewBlock, Source as MainViewSource};
+use super::main_view::{MainRowRef, Source as MainViewSource};
 use super::snippets::SnippetIcon;
 use super::state::{
     CurrencyConversion, CurrencyResult, EmojiEntry, FallbackAction, FileBrowserEntry,
@@ -1026,29 +1026,24 @@ impl LauncherApp {
             current_index += count;
         }
 
-        if let Some((source, row)) = self.selected_main_view() {
-            return self.build_main_view_preview(source, row);
-        }
-        current_index += self.main_view.row_count(MainViewBlock::BeforeLaunchers);
-
-        // 9. Standard Launcher configs (disabled by default unless explicitly enabled
-        // via `general.show_preview: true`, launcher `show_preview: true`, or toggled with Ctrl+P)
-        let config_offset = index.saturating_sub(current_index);
-        if config_offset < self.filtered_configs.len() {
-            let real_config_idx = self.filtered_configs[config_offset];
-            if let Some(config) = self.configs.get(real_config_idx) {
-                let enabled = match config.show_preview {
-                    Some(explicit) => explicit,
-                    None => self.view.show_launcher_preview,
-                };
-                if enabled {
-                    return Some(self.build_launcher_preview(real_config_idx, config));
+        // 9. Main results
+        if let Some(row) = self
+            .main_view
+            .ordered_rows
+            .get(index.saturating_sub(current_index))
+        {
+            return match *row {
+                MainRowRef::Source { source, row } => self.build_main_view_preview(source, row),
+                MainRowRef::Launcher(config_idx) => {
+                    let config = self.configs.get(config_idx)?;
+                    let enabled = config
+                        .show_preview
+                        .unwrap_or(self.view.show_launcher_preview);
+                    enabled.then(|| self.build_launcher_preview(config_idx, config))
                 }
-                return None;
-            }
+            };
         }
-        current_index += self.filtered_configs.len();
-        current_index += self.main_view.row_count(MainViewBlock::AfterLaunchers);
+        current_index += self.main_view.ordered_rows.len();
 
         // 10. Fallbacks
         let fallback_offset = index.saturating_sub(current_index);

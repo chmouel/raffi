@@ -198,11 +198,30 @@ pub(crate) struct ClipboardSnapshot {
     pub data: ClipboardData,
 }
 
+type ScriptFilterSignature = (String, Option<String>, Vec<(String, String)>);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum MainViewSelectedRow {
     List(String),
-    Snippet(usize),
-    ScriptFilter(String, Option<String>),
+    Snippet {
+        generation: u64,
+        unique_name: Option<String>,
+        row: usize,
+    },
+    ScriptFilter {
+        generation: u64,
+        unique_signature: Option<ScriptFilterSignature>,
+        row: usize,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum MainRowKey {
+    Launcher(usize),
+    SourceRow {
+        source: usize,
+        row: MainViewSelectedRow,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -729,7 +748,10 @@ impl InFlightActions {
 
 pub(super) struct LauncherApp {
     pub configs: Vec<crate::RaffiConfig>,
+    pub launcher_ordinals: Vec<usize>,
+    pub launcher_documents: Vec<super::ranking::SearchDocument>,
     pub filtered_configs: Vec<usize>,
+    pub filtered_config_scores: Vec<Option<super::ranking::ScoredMatch>>,
     pub search_query: String,
     pub select_1_query: Option<String>,
     pub select_1_ready: bool,

@@ -31,6 +31,7 @@ mod media;
 mod pass;
 mod placeholders;
 mod preview;
+mod ranking;
 mod recent;
 mod script_filters;
 mod secret_io;

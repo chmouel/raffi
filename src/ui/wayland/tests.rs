@@ -644,7 +644,7 @@ fn test_keyword_suggestions_skip_disabled_emoji() {
 #[test]
 fn test_total_items_counts_keyword_suggestions() {
     let mut app = test_app(AddonsConfig::default());
-    app.filtered_configs = vec![0, 1];
+    app.main_view.ordered_rows = (0..2).map(super::main_view::MainRowRef::Launcher).collect();
     app.keyword_suggestions = vec![KeywordSuggestion {
         keyword: "sn".into(),
         subtitle: "Browse Snippets".into(),
@@ -1408,7 +1408,7 @@ fn test_enter_on_keyword_suggestion_completes_it() {
 #[test]
 fn test_total_items_uses_grouped_state() {
     let mut app = test_app(AddonsConfig::default());
-    app.filtered_configs = vec![0, 1];
+    app.main_view.ordered_rows = (0..2).map(super::main_view::MainRowRef::Launcher).collect();
     app.script_filter.loading = true;
     app.text_snippets.active = true;
     app.text_snippets.filtered = vec![0, 1, 2];
@@ -3029,7 +3029,7 @@ fn test_script_filter_invalid_headings_do_not_activate_or_record() {
 
 #[test]
 fn test_script_filter_invalid_main_view_heading_preserves_mode() {
-    use super::main_view::{Block, Source};
+    use super::main_view::Source;
     let mut addons = AddonsConfig::default();
     addons.script_filters.push(issues_filter());
     let mut app = main_view_app(&["script_filters.Issues"], Vec::new(), addons);
@@ -3050,7 +3050,7 @@ fn test_script_filter_invalid_main_view_heading_preserves_mode() {
         iced::keyboard::Modifiers::CTRL,
     ] {
         app.view.current_modifiers = modifiers;
-        let task = app.activate_main_view(Block::BeforeLaunchers, 0);
+        let task = app.activate_main_view(0, 0);
         assert_eq!(task.units(), 0);
         assert_eq!(app.search_query, "working");
         assert!(app.script_filter.config_index.is_none());
@@ -8084,7 +8084,7 @@ fn test_main_view_slack_search_hands_off_in_search_view() {
     });
     let _ = app.update(Message::MainViewLoaded(0, generation, Ok(vec![item])));
 
-    let _ = app.activate_main_view(super::main_view::Block::BeforeLaunchers, 0);
+    let _ = app.activate_main_view(0, 0);
 
     assert_eq!(app.search_query, "slack search deploy");
     assert_eq!(app.command_list.addon, Some(CommandListAddon::Slack));
@@ -8286,7 +8286,7 @@ fn test_main_view_slack_subviews_filter_locally_and_hand_off_to_matching_subview
     assert_eq!(app.main_view.source_rows(0), 1);
     assert_eq!(app.main_view.source_rows(1), 0);
 
-    let _ = app.activate_main_view(super::main_view::Block::BeforeLaunchers, 0);
+    let _ = app.activate_main_view(0, 0);
     assert_eq!(app.search_query, "slack threads release");
     assert_eq!(app.command_list.addon, Some(CommandListAddon::Slack));
 }
@@ -8392,27 +8392,20 @@ fn test_main_view_groups_sources_in_config_order_and_caps_them() {
     let _ = app.update(Message::MainViewSnippetsLoaded(1, Ok(snippets)));
 
     let _ = app.update(Message::SearchChanged("mail".into()));
-    use super::main_view::Block;
-    assert_eq!(
-        app.main_view.row_count(Block::BeforeLaunchers),
-        1,
-        "the tab"
-    );
     assert_eq!(app.filtered_configs, vec![0]);
     assert_eq!(
-        app.main_view.row_count(Block::AfterLaunchers),
-        super::main_view::MAX_ROWS
+        app.main_view.ordered_rows.len(),
+        2 + super::main_view::MAX_ROWS
     );
     assert_eq!(app.total_items(), 1 + 1 + super::main_view::MAX_ROWS);
 
     let _ = app.update(Message::MoveDown);
-    assert!(app.resolve_selected_preview().is_none(), "the launcher row");
-    let _ = app.update(Message::MoveDown);
     assert_eq!(app.resolve_selected_preview().unwrap().title, "mail 0");
+    let _ = app.update(Message::MoveDown);
+    assert_eq!(app.resolve_selected_preview().unwrap().title, "mail 1");
 
     let _ = app.update(Message::SearchChanged("tabs mail".into()));
-    assert_eq!(app.main_view.row_count(Block::BeforeLaunchers), 0);
-    assert_eq!(app.main_view.row_count(Block::AfterLaunchers), 0);
+    assert!(app.main_view.ordered_rows.is_empty());
 }
 
 #[test]
@@ -8550,7 +8543,10 @@ fn test_main_view_late_rows_keep_the_selection() {
         })),
     ));
     assert_eq!(app.total_items(), 3);
-    assert_eq!(app.selected_index, 2, "still on the launcher");
+    assert_eq!(
+        app.selected_index, 0,
+        "follow the best result until navigation"
+    );
 }
 
 #[test]
@@ -8670,7 +8666,10 @@ fn test_main_view_selection_follows_launchers_moved_down() {
     }
     let _ = app.update(Message::MainViewScriptFilter(0, run, Some(Ok(result))));
     assert_eq!(app.total_items(), 3);
-    assert_eq!(app.selected_index, 2, "still on the launcher");
+    assert_eq!(
+        app.selected_index, 0,
+        "follow the best result until navigation"
+    );
 }
 
 #[test]
@@ -8962,25 +8961,262 @@ fn test_keyword_icon_falls_back_to_emoji() {
 }
 
 fn main_view_titles(app: &LauncherApp) -> Vec<String> {
-    use super::main_view::{Block, Source};
-    [Block::BeforeLaunchers, Block::AfterLaunchers]
-        .into_iter()
-        .flat_map(|block| app.main_view.rows(block))
-        .map(|(source, row)| match &app.main_view.sources[source] {
-            Source::List(list) => list.item(row).unwrap().title.clone(),
-            Source::Snippets {
-                items, filtered, ..
-            } => items[filtered[row]].name.clone(),
-            Source::ScriptFilter { results, .. } => {
-                results.as_ref().unwrap().items[row].title.clone()
-            }
+    use super::main_view::{MainRowRef, Source};
+    app.main_view
+        .ordered_rows
+        .iter()
+        .filter_map(|reference| {
+            let (source, row) = match *reference {
+                MainRowRef::Launcher(_) => return None,
+                MainRowRef::Source { source, row } => (source, row),
+            };
+            Some(match &app.main_view.sources[source] {
+                Source::List(list) => list.item(row).unwrap().title.clone(),
+                Source::Snippets {
+                    items, filtered, ..
+                } => items[filtered[row]].name.clone(),
+                Source::ScriptFilter { results, .. } => {
+                    results.as_ref().unwrap().items[row].title.clone()
+                }
+            })
         })
         .collect()
 }
 
 #[test]
+fn test_main_view_ranks_individual_rows_across_sources() {
+    use super::main_view::MainRowRef;
+    let launchers = ["Mail center", "Mail"]
+        .into_iter()
+        .map(|title| RaffiConfig {
+            description: Some(title.into()),
+            binary: Some("mail-client".into()),
+            ..Default::default()
+        })
+        .collect();
+    let mut app = main_view_app(
+        &["browser_tabs", "launchers"],
+        launchers,
+        AddonsConfig::default(),
+    );
+    load_main_view_tabs(&mut app);
+    let _ = app.update(Message::SearchChanged("mail".into()));
+    assert_eq!(
+        app.main_view.ordered_rows[..3],
+        [
+            MainRowRef::Source { source: 0, row: 0 },
+            MainRowRef::Launcher(1),
+            MainRowRef::Launcher(0),
+        ]
+    );
+    assert_eq!(app.selected_index, 0);
+    assert_eq!(app.resolve_selected_preview().unwrap().title, "Mail");
+    let _ = app.update(Message::MoveDown);
+    assert_eq!(app.selected_index, 1);
+    assert_eq!(app.selected_main_row(), Some(MainRowRef::Launcher(1)));
+}
+
+#[test]
+fn test_main_view_script_filter_follows_local_rows() {
+    use super::main_view::MainRowRef;
+    let mut addons = AddonsConfig::default();
+    addons.script_filters.push(issues_filter());
+    let mut app = main_view_app(
+        &["script_filters.Issues", "launchers"],
+        firefox_launcher(),
+        addons,
+    );
+    let _ = app.update(Message::SearchChanged("mail".into()));
+    let generation = script_filter_generation(&app, 0);
+    let _ = app.update(Message::MainViewScriptFilter(
+        0,
+        generation,
+        Some(Ok(issue_items(1))),
+    ));
+    assert_eq!(
+        app.main_view.ordered_rows,
+        [
+            MainRowRef::Launcher(0),
+            MainRowRef::Source { source: 0, row: 0 },
+        ]
+    );
+}
+
+#[test]
+fn test_main_view_domain_match_precedes_exact_launcher() {
+    use super::main_view::MainRowRef;
+    let url = "https://mail.example.com/inbox";
+    let launcher = RaffiConfig {
+        binary: Some("browser".into()),
+        description: Some(url.into()),
+        ..Default::default()
+    };
+    let mut app = main_view_app(
+        &["launchers", "browser_tabs"],
+        vec![launcher],
+        AddonsConfig::default(),
+    );
+    let generation = match &app.main_view.sources[0] {
+        super::main_view::Source::List(list) => list.generation,
+        _ => panic!("tab source"),
+    };
+    let _ = app.update(Message::MainViewLoaded(
+        0,
+        generation,
+        Ok(super::browser_tabs::fixture_items()),
+    ));
+    let _ = app.update(Message::SearchChanged(url.into()));
+    assert_eq!(
+        app.main_view.ordered_rows.first(),
+        Some(&MainRowRef::Source { source: 0, row: 0 })
+    );
+    assert!(app
+        .main_view
+        .ordered_rows
+        .contains(&MainRowRef::Launcher(0)));
+}
+
+#[test]
+fn test_main_view_server_search_follows_local_rows() {
+    use super::main_view::MainRowRef;
+    let mut addons = AddonsConfig::default();
+    addons.slack.enabled = true;
+    let launcher = RaffiConfig {
+        binary: Some("deploy".into()),
+        description: Some("Deployment".into()),
+        ..Default::default()
+    };
+    let mut app = main_view_app(&["slack", "launchers"], vec![launcher], addons);
+    let _ = app.update(Message::SearchChanged("deploy".into()));
+    let generation = match &app.main_view.sources[0] {
+        super::main_view::Source::List(list) => list.generation,
+        _ => panic!("Slack source"),
+    };
+    let mut item = super::command_list::CommandItem::info(
+        "slack:message:fixture",
+        "Deployment update".into(),
+        "mail-message-new",
+    );
+    item.match_text = "Deployment update deploy".into();
+    item.primary = Some(super::command_list::CommandAction {
+        action: super::actions::DeferredAction::Slack(super::slack::SlackAction::Open(
+            "slack://channel?team=T1&id=C1".into(),
+        )),
+        confirm: None,
+        keep_open: false,
+        progress: None,
+    });
+    let _ = app.update(Message::MainViewLoaded(0, generation, Ok(vec![item])));
+    assert_eq!(
+        app.main_view.ordered_rows,
+        [
+            MainRowRef::Launcher(0),
+            MainRowRef::Source { source: 0, row: 0 },
+        ]
+    );
+}
+
+#[test]
+fn test_main_view_async_relevance_follows_top_until_navigation() {
+    use super::main_view::MainRowRef;
+    let mut app = main_view_app(
+        &["browser_tabs", "launchers"],
+        firefox_launcher(),
+        AddonsConfig::default(),
+    );
+    let _ = app.update(Message::SearchChanged("mail".into()));
+    assert_eq!(app.selected_main_row(), Some(MainRowRef::Launcher(0)));
+    load_main_view_tabs(&mut app);
+    assert_eq!(app.selected_index, 0);
+    assert_eq!(
+        app.selected_main_row(),
+        Some(MainRowRef::Source { source: 0, row: 0 })
+    );
+    let _ = app.update(Message::MoveDown);
+    assert_eq!(app.selected_main_row(), Some(MainRowRef::Launcher(0)));
+    let generation = match &app.main_view.sources[0] {
+        super::main_view::Source::List(list) => list.generation,
+        _ => panic!("tab source"),
+    };
+    let _ = app.update(Message::MainViewLoaded(
+        0,
+        generation,
+        Ok(super::browser_tabs::fixture_items()),
+    ));
+    assert_eq!(app.selected_main_row(), Some(MainRowRef::Launcher(0)));
+}
+
+#[test]
+fn test_main_view_async_load_preserves_deliberate_chip_selection() {
+    let mut app = main_view_app(
+        &["browser_tabs", "launchers"],
+        firefox_launcher(),
+        AddonsConfig::default(),
+    );
+    let _ = app.update(Message::SearchChanged(String::new()));
+    let _ = app.update(Message::MoveDown);
+    let _ = app.update(Message::MoveUp);
+    assert_eq!(app.selected_index, 0);
+    assert!(app.main_view.selection_deliberate);
+    load_main_view_tabs(&mut app);
+    assert_eq!(app.selected_index, 0);
+    assert!(app.selected_main_row().is_none());
+}
+
+#[test]
+fn test_main_view_async_load_preserves_deliberate_keyword_selection() {
+    let mut launchers = firefox_launcher();
+    launchers[0].description = Some("Audio settings".into());
+    let mut app = main_view_app(
+        &["browser_tabs", "launchers"],
+        launchers,
+        AddonsConfig::default(),
+    );
+    let _ = app.update(Message::SearchChanged("aud".into()));
+    assert_eq!(keyword_names(&app), ["audio"]);
+    let _ = app.update(Message::MoveDown);
+    let _ = app.update(Message::MoveUp);
+    assert_eq!(app.selected_index, 0);
+    load_main_view_tabs(&mut app);
+    assert_eq!(app.selected_index, 0);
+    assert!(app.selected_main_row().is_none());
+}
+
+#[test]
+fn test_main_view_async_load_preserves_deliberate_fallback_selection() {
+    let mut addons = AddonsConfig::default();
+    for name in ["Google", "Bing"] {
+        addons.web_searches.push(WebSearchConfig {
+            name: name.into(),
+            keyword: name.to_lowercase(),
+            url: format!("https://{name}.com/search?q={{query}}"),
+            ..Default::default()
+        });
+    }
+    let mut app = test_app_with_fallbacks(
+        addons,
+        vec![
+            "addons.web_searches.Google".into(),
+            "addons.web_searches.Bing".into(),
+        ],
+    );
+    app.configs = firefox_launcher();
+    let entries = ["browser_tabs", "launchers"].map(String::from);
+    let _ = app.configure_main_view(Some(&entries));
+    let _ = app.update(Message::SearchChanged("mail".into()));
+    assert_eq!(app.fallback_count(), 2);
+    let _ = app.update(Message::MoveDown);
+    let _ = app.update(Message::MoveDown);
+    assert_eq!(app.selected_index, app.total_items() - 1);
+    let previous_total = app.total_items();
+    load_main_view_tabs(&mut app);
+    assert!(app.total_items() > previous_total);
+    assert_eq!(app.selected_index, app.total_items() - 1);
+    assert!(app.selected_main_row().is_none());
+}
+
+#[test]
 fn test_main_view_lists_groups_starting_with_the_query_first() {
-    use super::main_view::Block;
     let mut addons = AddonsConfig::default();
     addons.text_snippets.push(TextSnippetSourceConfig {
         name: "Notes".into(),
@@ -9023,7 +9259,6 @@ fn test_main_view_lists_groups_starting_with_the_query_first() {
     ));
 
     let _ = app.update(Message::SearchChanged("brave".into()));
-    assert_eq!(app.main_view.row_count(Block::BeforeLaunchers), 0);
     assert_eq!(app.filtered_configs, vec![0]);
     assert_eq!(app.selected_index, 0, "the launcher comes first");
     assert_eq!(
@@ -9033,11 +9268,7 @@ fn test_main_view_lists_groups_starting_with_the_query_first() {
     );
 
     let _ = app.update(Message::SearchChanged("people".into()));
-    assert_eq!(
-        app.main_view.row_count(Block::BeforeLaunchers),
-        1,
-        "config order when nothing starts with the query"
-    );
+    assert_eq!(main_view_titles(&app), vec!["Meeting notes"]);
 }
 
 #[test]
@@ -9224,6 +9455,7 @@ fn test_main_view_selection_stays_when_recent_rows_move_to_another_source() {
         );
         assert_eq!(keyword_names(&app).len(), 2, "tabs and the loading windows");
         app.selected_index = 2;
+        app.main_view.selection_deliberate = true;
 
         let _ = app.update(Message::MainViewLoaded(1, generation, result));
         assert_eq!(
@@ -11104,6 +11336,53 @@ fn test_main_view_lists_browser_history_and_opens_pages() {
     ));
 }
 
+#[test]
+fn test_main_view_history_caps_after_relevance_without_changing_dedicated_order() {
+    use super::command_list::{CommandItem, MATCH_FIELD_SEPARATOR};
+    let mut app = main_view_app(&["browser_history"], Vec::new(), AddonsConfig::default());
+    let mut items = Vec::new();
+    for index in 0..6 {
+        let title = if index == 5 {
+            "Rust".to_string()
+        } else {
+            format!("Page {index}")
+        };
+        let url = if index == 5 {
+            "https://language.example.com".to_string()
+        } else {
+            format!("https://example.com/rust/{index}")
+        };
+        let mut item = CommandItem::info(&format!("history:{index}"), title.clone(), "web-browser");
+        item.match_text = format!("{url}{MATCH_FIELD_SEPARATOR}{title}");
+        item.primary = Some(super::command_list::CommandAction {
+            action: DeferredAction::Command(vec!["firefox".into(), url]),
+            confirm: None,
+            keep_open: false,
+            progress: None,
+        });
+        items.push(item);
+    }
+    let generation = match &app.main_view.sources[0] {
+        super::main_view::Source::List(list) => list.generation,
+        _ => panic!("history source"),
+    };
+    let _ = app.update(Message::MainViewLoaded(0, generation, Ok(items)));
+    let _ = app.update(Message::SearchChanged("rust".into()));
+    let titles = main_view_titles(&app);
+    assert_eq!(titles.len(), 5);
+    assert_eq!(titles[0], "Rust");
+    let super::main_view::Source::List(list) = &app.main_view.sources[0] else {
+        panic!("history source");
+    };
+    assert_eq!(list.item(0).unwrap().title, "Page 0");
+    assert_eq!(list.item(5).unwrap().title, "Rust");
+    let _ = app.update(Message::CycleView(false));
+    let titles = main_view_titles(&app);
+    assert_eq!(titles.len(), 6);
+    assert_eq!(titles[0], "Page 0");
+    assert_eq!(titles[5], "Rust");
+}
+
 fn connect_server(app: &mut LauncherApp) {
     let info = super::cache::ServerInfo {
         protocol: super::cache::PROTOCOL,
@@ -11395,6 +11674,7 @@ fn vim_app_with_three_rows() -> LauncherApp {
         })
         .collect();
     app.filtered_configs = vec![0, 1, 2];
+    app.main_view.ordered_rows = (0..3).map(super::main_view::MainRowRef::Launcher).collect();
     app.selected_index = 1;
     app.view.vim.enabled = true;
     app.view.vim.mode = VimMode::Normal;

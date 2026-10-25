@@ -141,6 +141,24 @@ Currency handling is layered on top of that routing and is evaluated separately 
 
 This structure matters because several addons can use overlapping prefixes. The tests in `src/ui/wayland/tests.rs` lock down the intended precedence.
 
+## Native Search Ranking
+
+`ranking.rs` normalizes and scores prebuilt search documents for launchers and
+command-list results. The title and executable basename are primary fields;
+keywords, subtitles and metadata have lower weights. Whole-query matches,
+primary word prefixes, accepted compact fuzzy matches, mixed-field matches
+and secondary-only matches form ordered relevance categories. Recognized URL
+domains precede them. The `sort_mode` usage score breaks ties within a source,
+not between relevance categories or configured sources.
+
+`main_view.rs` materializes an ordered list of launcher and addon row references
+for standard searches. Typed local matches interleave across sources and each
+addon is capped after its own matching; provider-owned rows follow the ranked
+ones. Empty queries and Ctrl+Tab focused lists retain their source order. The
+same ordered list drives rendering, selection, actions, previews and row counts.
+After an async load, selection follows the first result until the user moves
+or clicks it; it then follows the row's source-scoped identity if still visible.
+
 ## Addon Design
 
 Native-only addons are configured under `addons` and activated from the search box.

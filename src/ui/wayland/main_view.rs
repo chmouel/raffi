@@ -8,19 +8,21 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use fuzzy_matcher::skim::SkimMatcherV2;
 use iced::widget::operation::move_cursor_to_end;
 use iced::Task;
 
 use super::command_list::{CommandItem, CommandListAddon, CommandListState};
+use super::ranking::{score_snippet_for_main_view, PreparedQuery, ScoredMatch, SearchDocument};
 use super::recent::RecentPick;
 use super::snippets::{
-    compute_previews, fetch_clipboard, filter_snippets, load_snippet_source, missing_clipboard,
-    snippet_mru_key,
+    compute_previews, fetch_clipboard, load_snippet_source, missing_clipboard, snippet_mru_key,
 };
 use super::state::{
-    ClipboardData, ClipboardSnapshot, KeywordSuggestion, LauncherApp, ScriptFilterResult,
+    ClipboardData, ClipboardSnapshot, KeywordSuggestion, LauncherApp, MainRowKey,
+    MainViewSelectedRow, ScriptFilterResult,
 };
-use super::support::{contains_words, mru_bounds, mru_sort_key};
+use super::support::{mru_bounds, mru_sort_key};
 use super::types::Message;
 use crate::{AddonsConfig, TextSnippet};
 
@@ -334,9 +336,12 @@ pub(super) enum Source {
     List(Box<CommandListState>),
     Snippets {
         config_index: usize,
+        generation: u64,
         loading: bool,
         items: Vec<TextSnippet>,
+        documents: Vec<SearchDocument>,
         filtered: Vec<usize>,
+        filtered_scores: Vec<Option<ScoredMatch>>,
         /// Values with their placeholders filled in, indexed like `items`.
         previews: Vec<Option<String>>,
         clipboard: ClipboardSnapshot,
@@ -356,11 +361,11 @@ pub(super) enum Source {
     },
 }
 
-/// Where a group of main view rows sits relative to the launchers.
+/// A row in the unified main results region (launchers + main_view sources).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Block {
-    BeforeLaunchers,
-    AfterLaunchers,
+pub(super) enum MainRowRef {
+    Launcher(usize),
+    Source { source: usize, row: usize },
 }
 
 /// What Ctrl+Tab narrows the main view to; None in `MainViewState::focus`
@@ -399,9 +404,10 @@ pub(super) struct MainViewState {
     pub recent_path: Option<PathBuf>,
     /// Compositor instance window picks must come from.
     pub window_session: Option<String>,
-    /// Whether a launcher matching the query starts with it or has a word
-    /// that does, which lists the launchers ahead of weaker groups.
-    pub launchers_strong: bool,
+    /// Materialized ordered rows for the main results region.
+    pub ordered_rows: Vec<MainRowRef>,
+    /// Whether the user deliberately moved or clicked a selection in the current query/focus.
+    pub selection_deliberate: bool,
     /// What the empty query offers by keyword, in config order.
     pub offers: Vec<Offer>,
     pub chips: crate::MainViewChips,
@@ -447,9 +453,12 @@ impl MainViewState {
                 }
                 Entry::Snippets(config_index) => Source::Snippets {
                     config_index,
+                    generation: 0,
                     loading: false,
                     items: Vec::new(),
+                    documents: Vec::new(),
                     filtered: Vec::new(),
+                    filtered_scores: Vec::new(),
                     previews: Vec::new(),
                     clipboard: ClipboardSnapshot::default(),
                 },
@@ -635,8 +644,18 @@ impl MainViewState {
                 continue;
             }
             match &mut self.sources[source] {
-                Source::List(list) => list.filtered = rows,
-                Source::Snippets { filtered, .. } => *filtered = rows,
+                Source::List(list) => {
+                    list.filtered_scores = vec![None; rows.len()];
+                    list.filtered = rows;
+                }
+                Source::Snippets {
+                    filtered,
+                    filtered_scores,
+                    ..
+                } => {
+                    *filtered_scores = vec![None; rows.len()];
+                    *filtered = rows;
+                }
                 Source::ScriptFilter { results, .. } => {
                     *results = (!stored.is_empty()).then_some(ScriptFilterResult {
                         items: stored,
@@ -644,60 +663,6 @@ impl MainViewState {
                     });
                 }
             }
-        }
-    }
-
-    /// Sources in display order and how many of them come before the
-    /// launchers. Config order, except that while a query is typed with
-    /// nothing focused, the groups with a row whose title starts with the
-    /// query, or has a word that does, move ahead of the others.
-    fn arrangement(&self) -> (Vec<usize>, usize) {
-        if !self.active || self.focus.is_some() || self.query.is_empty() {
-            return ((0..self.sources.len()).collect(), self.launchers_at);
-        }
-        let groups = (0..self.launchers_at)
-            .map(Some)
-            .chain(std::iter::once(None))
-            .chain((self.launchers_at..self.sources.len()).map(Some));
-        let (strong, weak): (Vec<_>, Vec<_>) = groups.partition(|group| match group {
-            Some(source) => self.is_strong(*source),
-            None => self.launchers_strong && !self.hide_launchers,
-        });
-        let groups: Vec<Option<usize>> = strong.into_iter().chain(weak).collect();
-        let split = groups.iter().position(Option::is_none).unwrap_or_default();
-        (groups.into_iter().flatten().collect(), split)
-    }
-
-    /// Whether one of the rows `source` shows has a title starting with the
-    /// query or with a word that does.
-    fn is_strong(&self, source: usize) -> bool {
-        let rows = self.source_rows(source);
-        let strong = |title: &str| super::support::word_prefix_match(title, &self.query);
-        match &self.sources[source] {
-            Source::List(list) => (0..rows)
-                .filter_map(|row| list.item(row))
-                .any(|item| strong(&item.title)),
-            Source::Snippets {
-                items, filtered, ..
-            } => filtered
-                .iter()
-                .take(rows)
-                .any(|&index| strong(&items[index].name)),
-            Source::ScriptFilter { results, .. } => results
-                .iter()
-                .flat_map(|result| result.items.iter().take(rows))
-                .any(|item| strong(&item.title)),
-        }
-    }
-
-    fn block_sources(&self, block: Block) -> Vec<usize> {
-        let (mut order, split) = self.arrangement();
-        match block {
-            Block::BeforeLaunchers => {
-                order.truncate(split);
-                order
-            }
-            Block::AfterLaunchers => order.split_off(split),
         }
     }
 
@@ -722,40 +687,8 @@ impl MainViewState {
         }
     }
 
-    pub fn row_count(&self, block: Block) -> usize {
-        self.block_sources(block)
-            .into_iter()
-            .map(|source| self.source_rows(source))
-            .sum()
-    }
-
-    /// The rows of `block` in display order, as (source, row in source).
-    pub fn rows(&self, block: Block) -> impl Iterator<Item = (usize, usize)> + '_ {
-        self.block_sources(block)
-            .into_iter()
-            .flat_map(move |source| (0..self.source_rows(source)).map(move |row| (source, row)))
-    }
-
-    /// The source and row in it shown at `row` of `block`.
-    pub fn locate(&self, block: Block, row: usize) -> Option<(usize, usize)> {
-        self.rows(block).nth(row)
-    }
-
-    pub fn block_of(&self, source: usize) -> Block {
-        if self.block_sources(Block::BeforeLaunchers).contains(&source) {
-            Block::BeforeLaunchers
-        } else {
-            Block::AfterLaunchers
-        }
-    }
-
-    /// Rows of the sources shown before `source` in its block.
-    fn rows_before(&self, source: usize) -> usize {
-        self.block_sources(self.block_of(source))
-            .into_iter()
-            .take_while(|&other| other != source)
-            .map(|other| self.source_rows(other))
-            .sum()
+    pub fn source_order(&self, source: usize) -> usize {
+        source + usize::from(source >= self.launchers_at)
     }
 }
 
@@ -776,33 +709,53 @@ fn find_pick(items: &[CommandItem], pick: &RecentPick, picked: &[usize]) -> Opti
         })
 }
 
-/// Filter a snippet source with the main view query, ranked by `usage`.
-/// Past the keyword matches, the name or value must hold every word of the
-/// query, a loose fuzzy match being noise next to the other sources.
 fn filter_main_view_snippets(main_view: &mut MainViewState, source: usize, usage: &[u64]) {
     let shows = main_view.shows(source);
-    let query = &main_view.query;
+    let query = PreparedQuery::new(&main_view.query);
     if let Some(Source::Snippets {
-        items, filtered, ..
+        items,
+        documents,
+        filtered,
+        filtered_scores,
+        ..
     }) = main_view.sources.get_mut(source)
     {
-        *filtered = if shows {
-            let lowered = query.to_lowercase();
-            let mut matches = filter_snippets(items, query, usage);
-            matches.retain(|&index| {
-                let snippet = &items[index];
-                query.is_empty()
-                    || snippet
-                        .keyword
-                        .as_deref()
-                        .is_some_and(|keyword| keyword.to_lowercase().starts_with(&lowered))
-                    || contains_words(&snippet.name, query)
-                    || contains_words(&snippet.value, query)
-            });
-            matches
+        if documents.len() != items.len() {
+            *documents = items.iter().map(SearchDocument::from_snippet).collect();
+        }
+        let matcher = SkimMatcherV2::default();
+        let mut matches: Vec<_> = if shows {
+            items
+                .iter()
+                .enumerate()
+                .filter_map(|(index, snippet)| {
+                    let score = query.as_ref().and_then(|query| {
+                        score_snippet_for_main_view(snippet, &documents[index], query, &matcher)
+                    });
+                    (query.is_none() || score.is_some()).then_some((index, score))
+                })
+                .collect()
         } else {
             Vec::new()
         };
+        if query.is_some() {
+            matches.sort_by_key(|(index, score)| {
+                (
+                    score.map(ScoredMatch::sort_key),
+                    std::cmp::Reverse(usage.get(*index).copied().unwrap_or(0)),
+                    *index,
+                )
+            });
+        } else {
+            matches.sort_by_key(|(index, _)| {
+                (
+                    std::cmp::Reverse(usage.get(*index).copied().unwrap_or(0)),
+                    *index,
+                )
+            });
+        }
+        *filtered = matches.iter().map(|(index, _)| *index).collect();
+        *filtered_scores = matches.iter().map(|(_, score)| *score).collect();
     }
 }
 
@@ -966,6 +919,7 @@ impl LauncherApp {
             self.filtered_configs.clear();
         }
         self.main_view.apply_recent();
+        self.rebuild_main_rows();
         let loads: Vec<_> = (0..self.main_view.sources.len())
             .map(|source| self.load_main_view_source(source, true))
             .collect();
@@ -1451,96 +1405,302 @@ impl LauncherApp {
         )
     }
 
-    /// Change the main view with `update`, keeping the selection on the row
-    /// it was on, so rows landing above it never change what Enter runs.
-    /// Recent picks share their rows across sources, so one source loading
-    /// can move the rows of the others.
-    fn update_main_view(&mut self, update: impl FnOnce(&mut MainViewState)) {
-        if self.view.help_active {
-            update(&mut self.main_view);
+    fn main_row_key(&self, row: MainRowRef) -> Option<MainRowKey> {
+        match row {
+            MainRowRef::Launcher(index) => {
+                Some(MainRowKey::Launcher(*self.launcher_ordinals.get(index)?))
+            }
+            MainRowRef::Source { source, row } => {
+                let selected = match self.main_view.sources.get(source)? {
+                    Source::List(list) => {
+                        MainViewSelectedRow::List(list.item(row)?.identity.clone())
+                    }
+                    Source::Snippets {
+                        items,
+                        filtered,
+                        generation,
+                        ..
+                    } => {
+                        let index = *filtered.get(row)?;
+                        let name = &items.get(index)?.name;
+                        MainViewSelectedRow::Snippet {
+                            generation: *generation,
+                            unique_name: (items.iter().filter(|item| item.name == *name).count()
+                                == 1)
+                                .then(|| name.clone()),
+                            row: index,
+                        }
+                    }
+                    Source::ScriptFilter {
+                        results,
+                        generation,
+                        ..
+                    } => {
+                        let items = &results.as_ref()?.items;
+                        let item = items.get(row)?;
+                        let signature = (
+                            item.title.clone(),
+                            item.arg.clone(),
+                            item.variables
+                                .iter()
+                                .map(|(k, v)| (k.clone(), v.clone()))
+                                .collect::<Vec<_>>(),
+                        );
+                        MainViewSelectedRow::ScriptFilter {
+                            generation: *generation,
+                            unique_signature: (items
+                                .iter()
+                                .filter(|other| {
+                                    other.title == item.title
+                                        && other.arg == item.arg
+                                        && other.variables == item.variables
+                                })
+                                .count()
+                                == 1)
+                                .then_some(signature),
+                            row,
+                        }
+                    }
+                };
+                Some(MainRowKey::SourceRow {
+                    source,
+                    row: selected,
+                })
+            }
+        }
+    }
+
+    fn main_row_position(&self, key: &MainRowKey) -> Option<usize> {
+        self.main_view.ordered_rows.iter().position(|&row| {
+            self.main_row_key(row)
+                .as_ref()
+                .is_some_and(|candidate| match (candidate, key) {
+                    (
+                        MainRowKey::SourceRow {
+                            source: a,
+                            row:
+                                MainViewSelectedRow::Snippet {
+                                    unique_name: Some(a_name),
+                                    ..
+                                },
+                        },
+                        MainRowKey::SourceRow {
+                            source: b,
+                            row:
+                                MainViewSelectedRow::Snippet {
+                                    unique_name: Some(b_name),
+                                    ..
+                                },
+                        },
+                    ) => a == b && a_name == b_name,
+                    (
+                        MainRowKey::SourceRow {
+                            source: a,
+                            row:
+                                MainViewSelectedRow::ScriptFilter {
+                                    unique_signature: Some(a_sig),
+                                    ..
+                                },
+                        },
+                        MainRowKey::SourceRow {
+                            source: b,
+                            row:
+                                MainViewSelectedRow::ScriptFilter {
+                                    unique_signature: Some(b_sig),
+                                    ..
+                                },
+                        },
+                    ) => a == b && a_sig == b_sig,
+                    _ => candidate == key,
+                })
+        })
+    }
+
+    fn rebuild_main_rows(&mut self) {
+        if !self.main_view.active {
+            self.main_view.ordered_rows.clear();
             return;
         }
-        let before_total = self.total_items();
-        let selected = self.selected_index;
-        let before_keywords = self.keyword_rows();
-        let selected_keyword = self
-            .keyword_at(selected)
-            .map(|suggestion| suggestion.keyword.clone());
-        let chip = self.active_chip();
-        let launchers = self.launchers_start();
-        let in_launchers = (launchers..launchers + self.filtered_configs.len()).contains(&selected);
-        let before = self.main_view_spans();
-        let within = before
-            .iter()
-            .position(|&(start, count)| (start..start + count).contains(&selected))
-            .map(|source| {
-                let row = selected - before[source].0;
-                let identity = match &self.main_view.sources[source] {
-                    Source::List(list) => list.item(row).map(|item| item.identity.clone()),
-                    _ => None,
+        let mut ranked = Vec::new();
+        let mut auxiliary = Vec::new();
+        let typed = !self.main_view.query.is_empty() && self.main_view.focus.is_none();
+        let (max_count, min_ts, max_ts) = mru_bounds(&self.mru_map);
+        for &config in &self.filtered_configs {
+            let row = MainRowRef::Launcher(config);
+            if typed {
+                if let Some(score) = self.filtered_config_scores.get(config).copied().flatten() {
+                    let config_ref = &self.configs[config];
+                    let description = config_ref
+                        .description
+                        .as_deref()
+                        .or(config_ref.binary.as_deref())
+                        .unwrap_or_default();
+                    let usage = mru_sort_key(
+                        description,
+                        &self.mru_map,
+                        &self.sort_mode,
+                        max_count,
+                        min_ts,
+                        max_ts,
+                    );
+                    ranked.push((
+                        row,
+                        score,
+                        self.main_view.launchers_at,
+                        usage,
+                        self.launcher_ordinals[config],
+                    ));
+                }
+            } else {
+                auxiliary.push(row);
+            }
+        }
+        for source in 0..self.main_view.sources.len() {
+            let snippet_usage = matches!(&self.main_view.sources[source], Source::Snippets { .. })
+                .then(|| self.main_view_snippet_usage(source));
+            let count = self.main_view.source_rows(source);
+            let mut source_rows: Vec<_> = match &self.main_view.sources[source] {
+                Source::List(list)
+                    if typed
+                        && count > 0
+                        && list.addon == Some(CommandListAddon::BrowserHistory) =>
+                {
+                    let mut rows: Vec<_> = (0..list.filtered.len()).collect();
+                    rows.sort_by_key(|&row| {
+                        (
+                            list.filtered_scores[row].map(|score| score.sort_key()),
+                            std::cmp::Reverse(
+                                list.item(row)
+                                    .and_then(|item| list.usage.get(&item.identity))
+                                    .copied()
+                                    .unwrap_or(0),
+                            ),
+                            list.filtered[row],
+                        )
+                    });
+                    rows
+                }
+                _ => (0..count).collect(),
+            };
+            source_rows.truncate(count);
+            for row in source_rows {
+                let reference = MainRowRef::Source { source, row };
+                let (score, usage, ordinal) = match &self.main_view.sources[source] {
+                    Source::List(list) => (
+                        list.filtered_scores.get(row).copied().flatten(),
+                        list.item(row)
+                            .and_then(|item| list.usage.get(&item.identity))
+                            .copied()
+                            .unwrap_or(0),
+                        list.filtered.get(row).copied().unwrap_or(row),
+                    ),
+                    Source::Snippets {
+                        filtered,
+                        filtered_scores,
+                        ..
+                    } => (
+                        filtered_scores.get(row).copied().flatten(),
+                        snippet_usage
+                            .as_ref()
+                            .and_then(|usage| usage.get(*filtered.get(row).unwrap_or(&row)))
+                            .copied()
+                            .unwrap_or(0),
+                        filtered.get(row).copied().unwrap_or(row),
+                    ),
+                    Source::ScriptFilter { .. } => (None, 0, row),
                 };
-                (source, row, identity)
+                if typed {
+                    if let Some(score) = score {
+                        ranked.push((
+                            reference,
+                            score,
+                            self.main_view.source_order(source),
+                            usage,
+                            ordinal,
+                        ));
+                    } else {
+                        auxiliary.push(reference);
+                    }
+                } else {
+                    auxiliary.push(reference);
+                }
+            }
+        }
+        if typed {
+            ranked.sort_by_key(|(_, score, source, usage, ordinal)| {
+                (
+                    score.sort_key(),
+                    *source,
+                    std::cmp::Reverse(*usage),
+                    *ordinal,
+                )
             });
+            self.main_view.ordered_rows = ranked
+                .into_iter()
+                .map(|(row, ..)| row)
+                .chain(auxiliary)
+                .collect();
+        } else {
+            let mut rows = Vec::new();
+            for source in 0..self.main_view.launchers_at {
+                rows.extend(auxiliary.iter().copied().filter(
+                    |row| matches!(row, MainRowRef::Source { source: s, .. } if *s == source),
+                ));
+            }
+            rows.extend(
+                auxiliary
+                    .iter()
+                    .copied()
+                    .filter(|row| matches!(row, MainRowRef::Launcher(_))),
+            );
+            for source in self.main_view.launchers_at..self.main_view.sources.len() {
+                rows.extend(auxiliary.iter().copied().filter(
+                    |row| matches!(row, MainRowRef::Source { source: s, .. } if *s == source),
+                ));
+            }
+            self.main_view.ordered_rows = rows;
+        }
+    }
+
+    fn update_main_view(&mut self, update: impl FnOnce(&mut MainViewState)) {
+        let selected = self.selected_index;
+        let offset = self.main_rows_offset();
+        let prefix_selected = selected < offset;
+        let fallback = selected.checked_sub(offset + self.main_view.ordered_rows.len());
+        let previous = selected
+            .checked_sub(offset)
+            .and_then(|row| self.main_view.ordered_rows.get(row))
+            .copied()
+            .and_then(|row| self.main_row_key(row));
+        let chip = self.active_chip();
         update(&mut self.main_view);
         if self.main_view.query.is_empty() {
             self.offer_main_view_plugins(chip);
         }
-        if selected >= before_total {
+        self.rebuild_main_rows();
+        if !self.main_view.active || self.view.help_active {
             return;
         }
-        let after = self.main_view_spans();
-        self.selected_index = match within {
-            _ if selected < before_keywords && self.keyword_chips => 0,
-            _ if selected < before_keywords => {
-                let keyword = selected_keyword.as_deref();
-                self.keyword_suggestions
-                    .iter()
-                    .position(|suggestion| Some(suggestion.keyword.as_str()) == keyword)
-                    .unwrap_or(selected)
-            }
-            Some((source, row, identity)) => {
-                let (start, count) = after[source];
-                let found = identity
-                    .and_then(|identity| match &self.main_view.sources[source] {
-                        Source::List(list) => list.position(&identity),
-                        _ => None,
-                    })
-                    .filter(|&row| row < count);
-                // When the selected row went away, select what now sits there.
-                start + found.unwrap_or(row.min(count.saturating_sub(1)))
-            }
-            None if in_launchers => self.launchers_start() + selected - launchers,
-            None => {
-                let moved: isize = before
-                    .iter()
-                    .zip(&after)
-                    .filter(|((start, count), _)| start + count <= selected)
-                    .map(|((_, old), (_, new))| *new as isize - *old as isize)
-                    .sum();
-                let keywords = self.keyword_rows() as isize - before_keywords as isize;
-                selected.saturating_add_signed(moved + keywords)
-            }
-        };
-        self.selected_index = self
-            .selected_index
-            .min(self.total_items().saturating_sub(1));
+        if !self.main_view.selection_deliberate {
+            self.selected_index = 0;
+        } else if prefix_selected {
+            self.selected_index = selected.min(self.main_rows_offset().saturating_sub(1));
+        } else if let Some(fallback) = fallback.filter(|&row| row < self.fallback_count()) {
+            self.selected_index =
+                self.main_rows_offset() + self.main_view.ordered_rows.len() + fallback;
+        } else if let Some(position) = previous
+            .as_ref()
+            .and_then(|key| self.main_row_position(key))
+        {
+            self.selected_index = self.main_rows_offset() + position;
+        } else {
+            self.selected_index = selected.min(self.total_items().saturating_sub(1));
+        }
     }
 
-    /// Index of the first launcher row in the whole list.
-    fn launchers_start(&self) -> usize {
-        self.main_view_offset(Block::AfterLaunchers)
-            .saturating_sub(self.filtered_configs.len())
-    }
-
-    /// First row and row count of every source in the whole list.
-    fn main_view_spans(&self) -> Vec<(usize, usize)> {
-        (0..self.main_view.sources.len())
-            .map(|source| {
-                let start = self.main_view_offset(self.main_view.block_of(source))
-                    + self.main_view.rows_before(source);
-                (start, self.main_view.source_rows(source))
-            })
-            .collect()
+    pub(super) fn main_rows_offset(&self) -> usize {
+        self.total_items()
+            .saturating_sub(self.main_view.ordered_rows.len() + self.fallback_count())
     }
 
     /// Reload the main view sources of `addon` after one of its actions
@@ -1650,12 +1810,41 @@ impl LauncherApp {
         }
         match result {
             Ok(snippets) => {
-                if let Some(Source::Snippets { items, .. }) = self.main_view.sources.get_mut(source)
-                {
-                    *items = snippets;
-                }
-                let usage = self.main_view_snippet_usage(source);
+                let keyword = match self.main_view.sources.get(source) {
+                    Some(Source::Snippets { config_index, .. }) => self
+                        .addons
+                        .text_snippets
+                        .get(*config_index)
+                        .map(|config| config.keyword.as_str())
+                        .unwrap_or_default(),
+                    _ => "",
+                };
+                let (max_count, min_ts, max_ts) = mru_bounds(&self.text_snippets.mru_map);
+                let usage: Vec<_> = snippets
+                    .iter()
+                    .map(|snippet| {
+                        mru_sort_key(
+                            &snippet_mru_key(keyword, &snippet.name),
+                            &self.text_snippets.mru_map,
+                            &self.sort_mode,
+                            max_count,
+                            min_ts,
+                            max_ts,
+                        )
+                    })
+                    .collect();
                 self.update_main_view(|main_view| {
+                    if let Some(Source::Snippets {
+                        items,
+                        documents,
+                        generation,
+                        ..
+                    }) = main_view.sources.get_mut(source)
+                    {
+                        *generation = generation.wrapping_add(1);
+                        *documents = snippets.iter().map(SearchDocument::from_snippet).collect();
+                        *items = snippets;
+                    }
                     filter_main_view_snippets(main_view, source, &usage);
                     main_view.apply_recent();
                 });
@@ -1852,6 +2041,7 @@ impl LauncherApp {
             }
         }
         self.main_view.apply_recent();
+        self.rebuild_main_rows();
         Task::batch(tasks)
     }
 
@@ -2048,35 +2238,20 @@ impl LauncherApp {
         }
     }
 
-    /// Index of the first main view row of `block`.
-    pub(super) fn main_view_offset(&self, block: Block) -> usize {
-        let after = self.main_view.row_count(Block::AfterLaunchers);
-        let end = self
-            .total_items()
-            .saturating_sub(self.fallback_count() + after);
-        match block {
-            Block::AfterLaunchers => end,
-            Block::BeforeLaunchers => end.saturating_sub(
-                self.filtered_configs.len() + self.main_view.row_count(Block::BeforeLaunchers),
-            ),
-        }
-    }
-
-    /// The main view source and row in it that is selected, if any.
-    pub(super) fn selected_main_view(&self) -> Option<(usize, usize)> {
+    pub(super) fn selected_main_row(&self) -> Option<MainRowRef> {
         if self.view.help_active {
             return None;
         }
-        [Block::BeforeLaunchers, Block::AfterLaunchers]
-            .into_iter()
-            .find_map(|block| {
-                let row = self
-                    .selected_index
-                    .checked_sub(self.main_view_offset(block))?;
-                (row < self.main_view.row_count(block))
-                    .then(|| self.main_view.locate(block, row))
-                    .flatten()
-            })
+        self.selected_index
+            .checked_sub(self.main_rows_offset())
+            .and_then(|index| self.main_view.ordered_rows.get(index).copied())
+    }
+
+    pub(super) fn selected_main_view(&self) -> Option<(usize, usize)> {
+        match self.selected_main_row()? {
+            MainRowRef::Source { source, row } => Some((source, row)),
+            MainRowRef::Launcher(_) => None,
+        }
     }
 
     /// Fetch the page preview of the selected main view tab, forgetting the
@@ -2116,26 +2291,10 @@ impl LauncherApp {
         row: usize,
     ) -> super::state::MainViewSnapshot {
         let selected_row = self
-            .main_view
-            .sources
-            .get(source)
-            .and_then(|src| match src {
-                Source::List(list) => list
-                    .item(row)
-                    .map(|item| super::state::MainViewSelectedRow::List(item.identity.clone())),
-                Source::Snippets { filtered, .. } => filtered
-                    .get(row)
-                    .copied()
-                    .map(super::state::MainViewSelectedRow::Snippet),
-                Source::ScriptFilter { results, .. } => results
-                    .as_ref()
-                    .and_then(|res| res.items.get(row))
-                    .map(|item| {
-                        super::state::MainViewSelectedRow::ScriptFilter(
-                            item.title.clone(),
-                            item.arg.clone(),
-                        )
-                    }),
+            .main_row_key(MainRowRef::Source { source, row })
+            .and_then(|key| match key {
+                MainRowKey::SourceRow { row, .. } => Some(row),
+                _ => None,
             });
         let script_filters = self
             .main_view
@@ -2174,51 +2333,28 @@ impl LauncherApp {
                 }
             }
         }
+        self.rebuild_main_rows();
         let resolved = snapshot
             .selected_source
-            .and_then(|(source, old_row, selected_row)| {
-                let spans = self.main_view_spans();
-                let &(start, count) = spans.get(source)?;
-                if count == 0 {
-                    return None;
-                }
-                let found =
-                    selected_row.and_then(|sel| match (&self.main_view.sources[source], sel) {
-                        (Source::List(list), super::state::MainViewSelectedRow::List(identity)) => {
-                            list.position(&identity)
-                        }
-                        (
-                            Source::Snippets { filtered, .. },
-                            super::state::MainViewSelectedRow::Snippet(item_idx),
-                        ) => filtered.iter().position(|&idx| idx == item_idx),
-                        (
-                            Source::ScriptFilter { results, .. },
-                            super::state::MainViewSelectedRow::ScriptFilter(title, arg),
-                        ) => results.as_ref().and_then(|res| {
-                            res.items
-                                .iter()
-                                .position(|item| item.title == title && item.arg == arg)
-                        }),
-                        _ => None,
-                    });
-                let row = found
-                    .filter(|&r| r < count)
-                    .unwrap_or_else(|| old_row.min(count - 1));
-                Some(start + row)
+            .and_then(|(source, _, selected_row)| {
+                let key = MainRowKey::SourceRow {
+                    source,
+                    row: selected_row?,
+                };
+                self.main_row_position(&key)
+                    .map(|position| self.main_rows_offset() + position)
             });
         self.selected_index = resolved
             .unwrap_or(snapshot.selected_index)
             .min(self.total_items().saturating_sub(1));
+        self.main_view.selection_deliberate = true;
         task
     }
 
     /// Run a main view row by handing it to its addon's own mode, as if
     /// its trigger had been typed before the query, so it behaves exactly
     /// like there: confirmations, lists kept open, usage and history.
-    pub(super) fn activate_main_view(&mut self, block: Block, row: usize) -> Task<Message> {
-        let Some((source, row)) = self.main_view.locate(block, row) else {
-            return Task::none();
-        };
+    pub(super) fn activate_main_view(&mut self, source: usize, row: usize) -> Task<Message> {
         if self.view.current_modifiers.alt() {
             return Task::none();
         }
