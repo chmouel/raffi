@@ -10,6 +10,7 @@ reference website/src/assets/screenshots/<name>.png from the docs.
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
+import json
 from zoneinfo import ZoneInfo
 
 
@@ -103,6 +104,20 @@ def check_disk(config):
     }
 
 
+def contact_fields(config):
+    fields = [
+        {"title": "Email: alice@example.com", "arg": "alice@example.com"},
+        {"title": "Phone: +44 20 7946 0123", "arg": "+44 20 7946 0123"},
+        {"title": "Organization: Example Studio", "arg": "Example Studio"},
+    ]
+    result = {"items": [{"title": "Alice Martin", "subtitle": "alice@example.com", "children": fields}]}
+    config["addons"]["script_filters"].append({
+        "name": "Google Contacts", "keyword": "contacts", "command": "python3",
+        "args": ["-c", f"print({json.dumps(result)!r})"], "action": "copy",
+        "close_on_action": False, "dynamic_preview": False, "icon": "contact-new",
+    })
+
+
 def solarized_light(config):
     config["general"]["theme"] = "light"
     config["general"]["theme_colors"] = SOLARIZED_LIGHT
@@ -152,6 +167,7 @@ SHOTS = [
     Shot("herdr-tree", "herdr ", down(), height=720),
     Shot("herdr-status", "agents ", down(), height=720),
     Shot("script-filter-pr", "pr review", down(), height=720),
+    Shot("script-filter-contacts", "contacts Alice", ("Return",), tweak=contact_fields),
     Shot("file-browser-rich-preview", "~/Documents/preview.py", height=720),
     Shot("file-browser-pdf", "~/Documents/keyboard-first.pdf", height=720),
     Shot("browser-tabs", "tabs ", height=720, needs=frozenset({"browser"})),

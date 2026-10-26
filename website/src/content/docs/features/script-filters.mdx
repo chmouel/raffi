@@ -7,6 +7,7 @@ import { Aside } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import scriptFilterTzScreenshot from '../../../assets/screenshots/script-filter-tz.png';
 import scriptFilterPrScreenshot from '../../../assets/screenshots/script-filter-pr.png';
+import scriptFilterContactsScreenshot from '../../../assets/screenshots/script-filter-contacts.png';
 import herdrTreeScreenshot from '../../../assets/screenshots/herdr-tree.png';
 import herdrStatusScreenshot from '../../../assets/screenshots/herdr-status.png';
 
@@ -123,6 +124,60 @@ are read by the shell. Prefer `"$RAFFI_VALUE"` when the value comes from
 somewhere you do not control.
 
 ## Examples
+
+### Google Contacts
+
+<Image src={scriptFilterContactsScreenshot} alt="Contact fields with the first field selected and the child search cleared" width={800} />
+
+The [`scripts/google-contacts/contacts.py`](https://github.com/chmouel/raffi/blob/main/scripts/google-contacts/contacts.py)
+filter lists saved contacts, searches their details, and shows contact
+information and photos in the preview. Enter a contact to see its fields;
+Enter a field to copy it. Escape returns to the previous list. Install it:
+
+```bash
+mkdir -p ~/.config/raffi/scripts/google-contacts
+cp scripts/google-contacts/contacts.py ~/.config/raffi/scripts/google-contacts/contacts.py
+chmod +x ~/.config/raffi/scripts/google-contacts/contacts.py
+```
+
+Enable People API in a Google Cloud project and create an OAuth client of type
+Desktop app. Store the downloaded client JSON in `pass` (default entry
+`google/raffi-contacts`), then run
+`~/.config/raffi/scripts/google-contacts/contacts.py --authorize --pass-entry google/raffi-contacts`.
+The command opens browser consent and writes the refresh token back to that
+entry. Only the read-only contacts permission is requested. Set
+`GOOGLE_CONTACTS_PASS_ENTRY` in the filter `env` to use another entry.
+Alternatively, set `args: ["--pass-entry", "google/agenda-credentials"]`;
+use that same `--pass-entry` option for direct script runs.
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Google Contacts"
+      keyword: "contacts"
+      command: "~/.config/raffi/scripts/google-contacts/contacts.py"
+      icon: "contact-new"
+      action: "copy"
+      close_on_action: false
+      dynamic_preview: false
+```
+
+Contact data and downloaded photos are cached separately for each pass entry
+under `$XDG_CACHE_HOME/raffi/google-contacts/<entry-hash>/`. Contact data is
+reused for five minutes. Ctrl+R refreshes from Google; a temporary API failure
+keeps showing that entry's cached list.
+Missing photos download in the background without delaying results. Each
+worker stops after 30 seconds; later runs retry any remaining photos. Empty,
+oversized, or detectably incomplete responses are not cached. Failure to start
+the optional worker does not prevent contact results. Run the filter again to
+pick up newly cached photos.
+
+Script filter items may include a `children` list of ordinary items. Selecting
+a valid parent opens its children with an empty search, and Escape restores
+its parent list, query, and selection. Typing searches the current children
+locally; selecting a leaf uses the filter's configured action. Ctrl+R leaves
+child navigation and refreshes the root list using its original query.
+Switching filters or views also leaves child navigation.
 
 ### GitHub pull requests
 

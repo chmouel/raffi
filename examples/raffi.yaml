@@ -113,6 +113,14 @@ addons:
   # the current query temporarily, and Escape restores it. Enter or Tab on a
   # keyword row applies its completion.
   script_filters:
+    - name: "Google Contacts"
+      keyword: "contacts"
+      command: "~/.config/raffi/scripts/google-contacts/contacts.py"
+      icon: "contact-new"
+      action: "copy"
+      close_on_action: false
+      dynamic_preview: false
+
     # grab batz from https://github.com/chmouel/batzconverter
     - name: "Timezones"
       keyword: "tz"
