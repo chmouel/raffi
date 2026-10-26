@@ -11,6 +11,13 @@ keywords = ["task", "command", "launch"]
 homepage = "https://github.com/chmouel/raffi"
 documentation = "https://github.com/chmouel/raffi"
 repository = "https://github.com/chmouel/raffi"
+include = [
+  "src/**",
+  "tests/**",
+  "examples/**",
+  "assets/default_icon.svg",
+  "scripts/file-preview/file-preview.py",
+]
 
 [features]
 default = ["wayland", "config-validation"]
