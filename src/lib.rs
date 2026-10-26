@@ -1653,6 +1653,100 @@ pub enum SortMode {
     Hybrid,
 }
 
+/// Configuration for the main view: which sources to show and which to exclude.
+#[derive(Serialize, Debug, Clone, Default, PartialEq)]
+pub struct MainViewConfig {
+    #[serde(default)]
+    pub entries: Vec<String>,
+    #[serde(default)]
+    pub exclude: Vec<String>,
+}
+
+impl JsonSchema for MainViewConfig {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "MainViewConfig".into()
+    }
+
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "Main view sources: a list of entry names, or an object with entries and exclude lists",
+            "anyOf": [
+                {
+                    "type": "array",
+                    "items": { "type": "string" }
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "entries": {
+                            "description": "Sources to show in the main view",
+                            "type": "array",
+                            "items": { "type": "string" }
+                        },
+                        "exclude": {
+                            "description": "Sources to exclude from the main view",
+                            "type": "array",
+                            "items": { "type": "string" }
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            ]
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for MainViewConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de;
+
+        struct MainViewVisitor;
+
+        impl<'de> de::Visitor<'de> for MainViewVisitor {
+            type Value = MainViewConfig;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a list of source names or an object with entries/exclude")
+            }
+
+            fn visit_seq<A>(self, seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                let entries =
+                    Vec::<String>::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
+                Ok(MainViewConfig {
+                    entries,
+                    exclude: Vec::new(),
+                })
+            }
+
+            fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::MapAccess<'de>,
+            {
+                #[derive(Deserialize)]
+                struct Inner {
+                    #[serde(default)]
+                    entries: Vec<String>,
+                    #[serde(default)]
+                    exclude: Vec<String>,
+                }
+                let inner = Inner::deserialize(de::value::MapAccessDeserializer::new(map))?;
+                Ok(MainViewConfig {
+                    entries: inner.entries,
+                    exclude: inner.exclude,
+                })
+            }
+        }
+
+        deserializer.deserialize_any(MainViewVisitor)
+    }
+}
+
 /// What the chips on an empty main view query show
 #[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -1764,18 +1858,12 @@ pub struct GeneralConfig {
     pub sort_mode: SortMode,
     #[serde(default)]
     pub fallbacks: Vec<String>,
-    /// Sources mixed into the main view, in display order, when typing without
-    /// an addon trigger. Entries: `launchers`, `browser_tabs`,
-    /// `bookmarks`, `browser_history`, `windows`, `system`, `media`, `audio`,
-    /// `bluetooth`, `pass`,
-    /// `kill`, `slack`, `slack.unread`, `slack.threads` (`slack.unread_threads`),
-    /// `slack.activity`, `slack.actions`, `slack.directs` (`slack.dms`),
-    /// `slack.channels`, `text_snippets.<name>` and `script_filters.<name>`.
-    /// Slack shows its Home rows on an empty query and searches messages when
-    /// typing. Nonempty lists replace the default sources; include `launchers`
-    /// to keep apps. Null or an empty list shows only apps and custom entries.
+    /// Sources mixed into the main view. An object with `entries` (the sources
+    /// to show, in order) and `exclude` (sources to remove after resolving).
+    /// A plain list is accepted as shorthand for `{ entries: <list> }`.
+    /// Null or empty entries shows only apps and custom entries.
     #[serde(default = "default_main_view")]
-    pub main_view: Option<Vec<String>>,
+    pub main_view: Option<MainViewConfig>,
     /// What the chips row above the apps shows on an empty query when
     /// `main_view` is set: `name` (default), `keyword` or `off`
     #[serde(default)]
@@ -1838,14 +1926,15 @@ const FIRST_RUN_MAIN_VIEW: &[&str] = &[
     "emoji",
 ];
 
-fn default_main_view() -> Option<Vec<String>> {
+fn default_main_view() -> Option<MainViewConfig> {
     #[cfg(feature = "wayland")]
-    return Some(
-        FIRST_RUN_MAIN_VIEW
+    return Some(MainViewConfig {
+        entries: FIRST_RUN_MAIN_VIEW
             .iter()
             .map(|name| name.to_string())
             .collect(),
-    );
+        exclude: Vec::new(),
+    });
     #[cfg(not(feature = "wayland"))]
     None
 }
@@ -2310,6 +2399,49 @@ pub fn migrate_config_v0_to_v1(config_path: &str, raw: &mut Value) -> Result<boo
 
     eprintln!("Config migrated to v1 format. Backup saved as {backup_path}");
     Ok(true)
+}
+
+/// Migrate old-style `main_view` (plain list) + `main_view_exclude` (sibling key)
+/// into the new `main_view: { entries, exclude }` object shape, in memory.
+fn migrate_main_view_in_memory(raw: &mut Value) {
+    let general = match raw
+        .as_mapping_mut()
+        .and_then(|m| m.get_mut(Value::String("general".into())))
+        .and_then(Value::as_mapping_mut)
+    {
+        Some(g) => g,
+        None => return,
+    };
+
+    let exclude_key = Value::String("main_view_exclude".into());
+    let exclude_val = general.remove(&exclude_key);
+
+    let mv_key = Value::String("main_view".into());
+    let Some(mv) = general.get_mut(&mv_key) else {
+        if let Some(ex) = exclude_val {
+            let mut obj = serde_yaml::Mapping::new();
+            obj.insert(Value::String("exclude".into()), ex);
+            general.insert(mv_key, Value::Mapping(obj));
+        }
+        return;
+    };
+
+    if mv.is_sequence() {
+        let entries = std::mem::replace(mv, Value::Null);
+        let mut obj = serde_yaml::Mapping::new();
+        obj.insert(Value::String("entries".into()), entries);
+        if let Some(ex) = exclude_val {
+            obj.insert(Value::String("exclude".into()), ex);
+        }
+        *mv = Value::Mapping(obj);
+    } else if mv.is_mapping() {
+        if let Some(ex) = exclude_val {
+            mv.as_mapping_mut()
+                .unwrap()
+                .entry(Value::String("exclude".into()))
+                .or_insert(ex);
+        }
+    }
 }
 
 /// A single problem found while checking a config.
@@ -2925,6 +3057,7 @@ pub fn read_config(filename: &str, args: &Args) -> Result<ParsedConfig> {
     } else {
         report_config_warnings(&raw, &contents, false, filename);
     }
+    migrate_main_view_in_memory(&mut raw);
 
     let launchers_path = launchers_file_for(filename);
     if launchers_path.exists() {
@@ -3028,6 +3161,7 @@ pub fn read_config_from_reader<R: Read>(reader: R, args: &Args) -> Result<Parsed
     // For reader-based configs, do an in-memory migration (no file write)
     let v0 = migrate_config_v0_in_memory(&mut raw);
     report_config_warnings(&raw, &contents, v0, "config");
+    migrate_main_view_in_memory(&mut raw);
     apply_cli_overrides(&mut raw, args)?;
 
     let config: Config = serde_yaml::from_value(raw).context("cannot parse config")?;
@@ -4734,21 +4868,27 @@ mod tests {
             let parsed = read_config_from_reader(yaml.as_bytes(), &Args::default()).unwrap();
             assert_eq!(parsed.general.main_view, default_main_view(), "{yaml}");
         }
+        let mv = |entries: &[&str]| {
+            Some(MainViewConfig {
+                entries: entries.iter().map(|s| s.to_string()).collect(),
+                exclude: Vec::new(),
+            })
+        };
         for (value, expected) in [
             ("null", None),
-            ("[]", Some(vec![])),
-            ("[launchers]", Some(vec!["launchers".into()])),
+            ("[]", mv(&[])),
+            ("[launchers]", mv(&["launchers"])),
         ] {
             let yaml = format!("general: {{main_view: {value}}}");
             let parsed = read_config_from_reader(yaml.as_bytes(), &Args::default()).unwrap();
-            assert_eq!(parsed.general.main_view, expected);
+            assert_eq!(parsed.general.main_view, expected, "yaml: {yaml}");
             let args = Args {
                 options: vec![format!("general.main_view={value}")],
                 ..Args::default()
             };
             let parsed =
                 read_config_from_reader("general: {theme: light}".as_bytes(), &args).unwrap();
-            assert_eq!(parsed.general.main_view, expected);
+            assert_eq!(parsed.general.main_view, expected, "cli: {value}");
         }
     }
 

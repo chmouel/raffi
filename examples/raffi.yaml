@@ -60,26 +60,27 @@ version: 1
 #     - addons.web_searches."DuckDuckGo"       # Opens DuckDuckGo search with the current query
 #     - addons.script_filters."Search Google"  # Switches to the script filter mode
 #     - addons.terminal                        # Runs the query in a terminal
-#   # Use main_view: [all] for every enabled source, including all snippets and script filters
-#   # Sources before all keep priority, e.g. main_view: [windows, all]
 #   main_view:               # Mix addon results into the main list; Ctrl+Tab shows one source at a time.
 #                            # An empty query shows one row of chips with each detected entry's name
 #                            # (Tabs, System, Clipboard...) above the apps; Left/Right pick one, Enter arms it.
 #                            # When main_view is omitted, raffi uses launchers, windows, browser_tabs, bookmarks,
 #                            # system, media, audio, bluetooth, pass, clipboard, bitwarden, terminal, emoji.
 #                            # browser_history is opt-in: add it below to show it in the main view.
-#     - launchers            # Keep launchers; once main_view is set they only show if listed
-#     - browser_tabs         # Typing "gmail" lists matching tabs, up to 5 per addon;
+#     entries:
+#       - launchers          # Keep launchers; once main_view is set they only show if listed
+#       - browser_tabs       # Typing "gmail" lists matching tabs, up to 5 per addon;
 #                            # with no query, your 5 latest addon picks are listed;
 #                            # groups with a title starting with the query come first
-#     - windows              # Also: bookmarks, system, media, audio, bluetooth, kill, pass, slack
-#     - browser_history      # Visited pages; not in the automatic set, add it to opt in
-#     - slack                # Home rows when empty; searches messages as you type (enable and configure below)
+#       - windows            # Also: bookmarks, system, media, audio, bluetooth, kill, pass, slack
+#       - browser_history    # Visited pages; not in the automatic set, add it to opt in
+#       - slack              # Home rows when empty; searches messages as you type (enable and configure below)
 #                            # Sub-views: slack.unread, slack.threads, slack.activity, slack.actions,
 #                            # slack.directs (or slack.dms), slack.channels
-#     - clipboard            # Keyword chip only, no rows: also bitwarden, terminal, emoji
-#     - text_snippets."Emails"       # A snippet source, by name
-#     - script_filters."Bookmarks"   # A script filter, run when typing pauses
+#       - clipboard          # Keyword chip only, no rows: also bitwarden, terminal, emoji
+#       - text_snippets."Emails"     # A snippet source, by name
+#       - script_filters."Bookmarks" # A script filter, run when typing pauses
+#     exclude:               # Sources to omit after resolving entries (useful with entries: [all])
+#       - script_filters."My Pull Requests"
 #   main_view_chips: name    # What those chips show: name (default), keyword, or off for no chips
 #   theme_colors:            # Override individual colours (hex: #RGB, #RRGGBB, or #RRGGBBAA)
 #     bg_base: "#1e1e2e"

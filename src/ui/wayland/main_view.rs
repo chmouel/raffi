@@ -24,7 +24,7 @@ use super::state::{
 };
 use super::support::{mru_bounds, mru_sort_key};
 use super::types::Message;
-use crate::{AddonsConfig, TextSnippet};
+use crate::{AddonsConfig, MainViewConfig, TextSnippet};
 
 /// Most rows a single addon source adds to the main view.
 pub(super) const MAX_ROWS: usize = 5;
@@ -181,9 +181,9 @@ fn all_entries(addons: &AddonsConfig) -> Vec<Entry> {
     entries
 }
 
-/// Resolve `main_view` entries in order, warning about and skipping the ones
-/// naming an unknown or disabled addon.
-pub(super) fn resolve(entries: &[String], addons: &AddonsConfig) -> Vec<Entry> {
+/// Resolve entries in order, warning about and skipping the ones naming an
+/// unknown or disabled addon. `label` identifies the config key in warnings.
+pub(super) fn resolve(entries: &[String], addons: &AddonsConfig, label: &str) -> Vec<Entry> {
     let mut resolved = Vec::new();
     for raw in entries {
         let name = raw.trim();
@@ -200,7 +200,7 @@ pub(super) fn resolve(entries: &[String], addons: &AddonsConfig) -> Vec<Entry> {
             if enabled {
                 Ok(entry)
             } else {
-                Err(format!("main_view entry '{raw}' names a disabled addon"))
+                Err(format!("{label} entry '{raw}' names a disabled addon"))
             }
         };
         let list = |on: bool, addon: CommandListAddon| enabled(on, Entry::List(addon));
@@ -237,7 +237,7 @@ pub(super) fn resolve(entries: &[String], addons: &AddonsConfig) -> Vec<Entry> {
                         .position(|config| config.name == source)
                         .map(Entry::Snippets)
                         .ok_or_else(|| {
-                            format!("main_view text snippet source '{source}' not found in addons")
+                            format!("{label} text snippet source '{source}' not found in addons")
                         })
                 } else if let Some(filter) = name.strip_prefix("script_filters.") {
                     let filter = filter.trim_matches('"');
@@ -247,24 +247,35 @@ pub(super) fn resolve(entries: &[String], addons: &AddonsConfig) -> Vec<Entry> {
                         .position(|config| config.name == filter)
                         .map(Entry::ScriptFilter)
                         .ok_or_else(|| {
-                            format!("main_view script filter '{filter}' not found in addons")
+                            format!("{label} script filter '{filter}' not found in addons")
                         })
                 } else {
-                    Err(format!("unsupported main_view entry '{raw}'"))
+                    Err(format!("unsupported {label} entry '{raw}'"))
                 }
             }
         };
         match entry {
             Ok(entry) if resolved.contains(&entry) => {
-                crate::debug_log!("main_view: duplicate entry '{raw}' skipped");
+                crate::debug_log!("{label}: duplicate entry '{raw}' skipped");
             }
             Ok(entry) => resolved.push(entry),
             Err(warning) => {
-                crate::debug_log!("main_view: {warning}");
+                crate::debug_log!("{label}: {warning}");
                 eprintln!("Warning: {warning}");
             }
         }
     }
+    resolved
+}
+
+pub(super) fn resolve_excluding(
+    entries: &[String],
+    excluded: &[String],
+    addons: &AddonsConfig,
+) -> Vec<Entry> {
+    let mut resolved = resolve(entries, addons, "main_view");
+    let excluded = resolve(excluded, addons, "main_view_exclude");
+    resolved.retain(|entry| !excluded.contains(entry));
     resolved
 }
 
@@ -877,11 +888,11 @@ impl LauncherApp {
     }
 
     /// Set up `general.main_view` and start loading its addons.
-    pub(super) fn configure_main_view(&mut self, entries: Option<&[String]>) -> Task<Message> {
-        let Some(entries) = entries.filter(|entries| !entries.is_empty()) else {
+    pub(super) fn configure_main_view(&mut self, config: Option<&MainViewConfig>) -> Task<Message> {
+        let Some(config) = config.filter(|c| !c.entries.is_empty()) else {
             return Task::none();
         };
-        let entries = resolve(entries, &self.addons);
+        let entries = resolve_excluding(&config.entries, &config.exclude, &self.addons);
         let chips = self.main_view.chips;
         self.main_view = MainViewState::new(&entries);
         self.main_view.chips = chips;

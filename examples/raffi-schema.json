@@ -1080,28 +1080,32 @@
           "$ref": "#/$defs/LaunchMode"
         },
         "main_view": {
-          "description": "Sources mixed into the main view, in display order, when typing without\nan addon trigger. Entries: `launchers`, `browser_tabs`,\n`bookmarks`, `browser_history`, `windows`, `system`, `media`, `audio`,\n`bluetooth`, `pass`,\n`kill`, `slack`, `slack.unread`, `slack.threads` (`slack.unread_threads`),\n`slack.activity`, `slack.actions`, `slack.directs` (`slack.dms`),\n`slack.channels`, `text_snippets.<name>` and `script_filters.<name>`.\nSlack shows its Home rows on an empty query and searches messages when\ntyping. Nonempty lists replace the default sources; include `launchers`\nto keep apps. Null or an empty list shows only apps and custom entries.",
-          "type": [
-            "array",
-            "null"
+          "description": "Sources mixed into the main view. An object with `entries` (the sources\nto show, in order) and `exclude` (sources to remove after resolving).\nA plain list is accepted as shorthand for `{ entries: <list> }`.\nNull or empty entries shows only apps and custom entries.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MainViewConfig"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "default": [
-            "launchers",
-            "windows",
-            "browser_tabs",
-            "bookmarks",
-            "system",
-            "media",
-            "audio",
-            "bluetooth",
-            "pass",
-            "clipboard",
-            "bitwarden",
-            "terminal",
-            "emoji"
-          ],
-          "items": {
-            "type": "string"
+          "default": {
+            "entries": [
+              "launchers",
+              "windows",
+              "browser_tabs",
+              "bookmarks",
+              "system",
+              "media",
+              "audio",
+              "bluetooth",
+              "pass",
+              "clipboard",
+              "bitwarden",
+              "terminal",
+              "emoji"
+            ],
+            "exclude": []
           }
         },
         "main_view_chips": {
@@ -1296,6 +1300,37 @@
           "description": "No chips: an empty query starts with the apps",
           "type": "string",
           "const": "off"
+        }
+      ]
+    },
+    "MainViewConfig": {
+      "description": "Main view sources: a list of entry names, or an object with entries and exclude lists",
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "entries": {
+              "description": "Sources to show in the main view",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "exclude": {
+              "description": "Sources to exclude from the main view",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
         }
       ]
     },

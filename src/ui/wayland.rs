@@ -299,7 +299,7 @@ fn run_wayland_ui(
             app.hyprland = hyprland.clone();
             app.deferred_action = deferred_action_for_new.clone();
             app.main_view.chips = main_view_chips;
-            let preload = app.configure_main_view(main_view.as_deref());
+            let preload = app.configure_main_view(main_view.as_ref());
             if show_tips {
                 app.show_search_tip();
             }

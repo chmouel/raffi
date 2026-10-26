@@ -20,36 +20,51 @@ matching browser tab or bookmark without typing its keyword first.
 
 ## Choosing what it shows
 
-The `main_view` setting lists the sources, in the order you want them:
+The `main_view` setting lists the sources under `entries`, in the order you
+want them:
 
 ```yaml title="raffi.yaml"
 general:
   main_view:
-    - launchers
-    - browser_tabs
-    - windows
-    - kill
-    - slack
-    - text_snippets."Emails"
-    - script_filters."GitHub Issues"
+    entries:
+      - launchers
+      - browser_tabs
+      - windows
+      - kill
+      - slack
+      - text_snippets."Emails"
+      - script_filters."GitHub Issues"
 ```
 
 To include every enabled main-list source automatically, use `all`:
 
 ```yaml title="raffi.yaml"
 general:
-  main_view: [all]
+  main_view:
+    entries: [all]
 ```
 
 This includes launchers, browser history, all configured snippet sources and
 script filters, and the enabled addons listed below. Unavailable addons stay
 hidden. Slack uses its default view, not a separate group for each sub-view.
 The usual five-row limits, keyword behavior and chip-only sources still apply.
-Script filters run as you type, so use an explicit list if some should only run
-through their keyword.
+Script filters run as you type. Use `exclude` to omit selected sources while
+keeping `all`, for example:
+
+```yaml title="raffi.yaml"
+general:
+  main_view:
+    entries: [all]
+    exclude:
+      - script_filters."My Pull Requests"
+```
+
+Exclusions also apply to sources listed explicitly. Unknown or disabled names
+print a warning and are ignored. Excluding a source from the main list does not
+disable its keyword.
 
 You can put sources before `all` to bring them first, for example
-`main_view: [windows, all]`. Duplicates are skipped, and newly configured sources
+`entries: [windows, all]`. Duplicates are skipped, and newly configured sources
 are included automatically on the next launch.
 
 When `main_view` is omitted, Raffi picks a set for you: `launchers`,
@@ -60,8 +75,9 @@ its compositor or tool is missing.
 
 <Aside type="note">
 Adding a config file keeps these defaults. Set `main_view: null` or
-`main_view: []` to show only apps and your custom entries. An explicit list
-replaces the defaults, so include `launchers` or `all` to keep your apps.
+`main_view: { entries: [] }` to show only apps and your custom entries. An
+explicit list replaces the defaults, so include `launchers` or `all` to keep
+your apps.
 </Aside>
 
 These sources are accepted:

@@ -8051,8 +8051,11 @@ fn main_view_app(entries: &[&str], configs: Vec<RaffiConfig>, addons: AddonsConf
     app.text_snippets.mru_path = None;
     app.history.max_items = 0;
     app.program_exists = |_| true;
-    let entries: Vec<String> = entries.iter().map(|entry| entry.to_string()).collect();
-    let _ = app.configure_main_view(Some(&entries));
+    let config = crate::MainViewConfig {
+        entries: entries.iter().map(|entry| entry.to_string()).collect(),
+        exclude: Vec::new(),
+    };
+    let _ = app.configure_main_view(Some(&config));
     app
 }
 
@@ -8092,8 +8095,11 @@ fn test_main_view_all_expands_enabled_sources_and_named_sources() {
         "emoji",
     ]
     .map(String::from);
-    let all = super::main_view::resolve(&["all".into()], &addons);
-    assert_eq!(all, super::main_view::resolve(&explicit, &addons));
+    let all = super::main_view::resolve(&["all".into()], &addons, "main_view");
+    assert_eq!(
+        all,
+        super::main_view::resolve(&explicit, &addons, "main_view")
+    );
     assert!(all.contains(&Entry::Snippets(0)));
     assert!(all.contains(&Entry::ScriptFilter(0)));
     assert!(all.contains(&Entry::Slack(SlackSource::Default)));
@@ -8110,6 +8116,7 @@ fn test_main_view_all_expands_enabled_sources_and_named_sources() {
             "all".into(),
         ],
         &addons,
+        "main_view",
     );
     assert_eq!(
         resolved.first(),
@@ -8123,6 +8130,39 @@ fn test_main_view_all_expands_enabled_sources_and_named_sources() {
     assert!(!resolved.contains(&Entry::Slack(SlackSource::Default)));
     assert!(!resolved.contains(&Entry::Keyword(KeywordAddon::Emoji)));
     assert_eq!(resolved.len(), all.len() - 3);
+}
+
+#[test]
+fn test_main_view_exclusions_remove_sources_and_preserve_order() {
+    use super::main_view::Entry;
+
+    let addons = AddonsConfig {
+        script_filters: vec![crate::ScriptFilterConfig {
+            name: "My Pull Requests".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let excluded_filter = super::main_view::resolve_excluding(
+        &["all".into()],
+        &["script_filters.\"My Pull Requests\"".into()],
+        &addons,
+    );
+    assert!(!excluded_filter.contains(&Entry::ScriptFilter(0)));
+    assert!(excluded_filter.contains(&Entry::Launchers));
+
+    let explicit = super::main_view::resolve_excluding(
+        &["windows".into(), "launchers".into(), "browser_tabs".into()],
+        &["launchers".into()],
+        &addons,
+    );
+    assert_eq!(
+        explicit,
+        vec![
+            Entry::List(CommandListAddon::Windows),
+            Entry::List(CommandListAddon::BrowserTabs),
+        ]
+    );
 }
 
 #[test]
@@ -8145,7 +8185,7 @@ fn test_main_view_resolves_kill_and_enabled_slack_in_order() {
         "slack.channels",
     ]
     .map(String::from);
-    let resolved = super::main_view::resolve(&entries, &addons);
+    let resolved = super::main_view::resolve(&entries, &addons, "main_view");
     assert_eq!(
         resolved,
         vec![
@@ -8161,7 +8201,7 @@ fn test_main_view_resolves_kill_and_enabled_slack_in_order() {
     );
 
     addons.slack.enabled = false;
-    let resolved = super::main_view::resolve(&entries, &addons);
+    let resolved = super::main_view::resolve(&entries, &addons, "main_view");
     assert_eq!(resolved, vec![Entry::List(CommandListAddon::Kill)]);
 }
 
@@ -9000,7 +9040,10 @@ fn test_main_view_offers_detected_plugins_before_apps() {
     let mut app = main_view_app(&[], firefox_launcher(), addons);
     app.program_exists = |program| program != "playerctl";
     let entries = ["media", "system", "launchers"].map(String::from);
-    let _ = app.configure_main_view(Some(&entries));
+    let _ = app.configure_main_view(Some(&crate::MainViewConfig {
+        entries: entries.to_vec(),
+        exclude: Vec::new(),
+    }));
     assert_eq!(keyword_names(&app), ["sys"], "no playerctl, no media row");
     assert_eq!(app.selected_index, 0, "the first plugin row");
     let _ = app.update(Message::SearchChanged(String::new()));
@@ -9054,18 +9097,27 @@ fn test_main_view_chips_setting() {
 
     let mut app = main_view_app(&[], firefox_launcher(), addons.clone());
     app.main_view.chips = crate::MainViewChips::Keyword;
-    let _ = app.configure_main_view(Some(&entries));
+    let _ = app.configure_main_view(Some(&crate::MainViewConfig {
+        entries: entries.to_vec(),
+        exclude: Vec::new(),
+    }));
     let _ = app.update(Message::SearchChanged(String::new()));
     assert_eq!(app.chip_labels(), ["sys", "clip"]);
 
     let mut app = main_view_app(&[], firefox_launcher(), addons.clone());
-    let _ = app.configure_main_view(Some(&entries));
+    let _ = app.configure_main_view(Some(&crate::MainViewConfig {
+        entries: entries.to_vec(),
+        exclude: Vec::new(),
+    }));
     let _ = app.update(Message::SearchChanged(String::new()));
     assert_eq!(app.chip_labels(), ["System", "Clipboard"]);
 
     let mut app = main_view_app(&[], firefox_launcher(), addons);
     app.main_view.chips = crate::MainViewChips::Off;
-    let _ = app.configure_main_view(Some(&entries));
+    let _ = app.configure_main_view(Some(&crate::MainViewConfig {
+        entries: entries.to_vec(),
+        exclude: Vec::new(),
+    }));
     let _ = app.update(Message::SearchChanged(String::new()));
     assert!(!app.keyword_chips);
     assert_eq!(app.total_items(), 1, "off starts with the apps");
@@ -9107,7 +9159,10 @@ fn test_main_view_offers_plugins_as_one_row_of_chips() {
         "launchers",
     ]
     .map(String::from);
-    let _ = app.configure_main_view(Some(&entries));
+    let _ = app.configure_main_view(Some(&crate::MainViewConfig {
+        entries: entries.to_vec(),
+        exclude: Vec::new(),
+    }));
     assert_eq!(
         keyword_names(&app),
         ["sys", "clip", "emoji", ">"],
@@ -9525,7 +9580,10 @@ fn test_main_view_async_load_preserves_deliberate_fallback_selection() {
     );
     app.configs = firefox_launcher();
     let entries = ["browser_tabs", "launchers"].map(String::from);
-    let _ = app.configure_main_view(Some(&entries));
+    let _ = app.configure_main_view(Some(&crate::MainViewConfig {
+        entries: entries.to_vec(),
+        exclude: Vec::new(),
+    }));
     let _ = app.update(Message::SearchChanged("mail".into()));
     assert_eq!(app.fallback_count(), 2);
     let _ = app.update(Message::MoveDown);
@@ -9896,7 +9954,10 @@ fn test_main_view_ctrl_tab_focuses_each_source_then_all() {
     let mut app = test_app_with_fallbacks(addons, vec!["addons.web_searches.Google".into()]);
     app.configs = firefox_launcher();
     let entries = ["browser_tabs", "launchers", "system"].map(String::from);
-    let _ = app.configure_main_view(Some(&entries));
+    let _ = app.configure_main_view(Some(&crate::MainViewConfig {
+        entries: entries.to_vec(),
+        exclude: Vec::new(),
+    }));
     load_main_view_tabs(&mut app);
     let _ = app.update(Message::SearchChanged(String::new()));
     assert_eq!(keyword_names(&app), ["tabs", "sys"], "detected plugins");

@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use anyhow::Result;
 
 use crate::{
-    AddonsConfig, ClipboardHistory, MainViewChips, PreviewConfig, RaffiConfig, Renderer, SortMode,
-    ThemeColorsConfig, ThemeMode, UIType,
+    AddonsConfig, ClipboardHistory, MainViewChips, MainViewConfig, PreviewConfig, RaffiConfig,
+    Renderer, SortMode, ThemeColorsConfig, ThemeMode, UIType,
 };
 
 mod fuzzel;
@@ -97,7 +97,7 @@ pub struct UISettings {
     pub window_height: f32,
     pub sort_mode: SortMode,
     pub fallbacks: Vec<String>,
-    pub main_view: Option<Vec<String>>,
+    pub main_view: Option<MainViewConfig>,
     pub main_view_chips: MainViewChips,
     pub clipboard_history: ClipboardHistory,
     pub terminal_classes: Vec<String>,
