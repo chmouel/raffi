@@ -48,7 +48,7 @@
       "type": "object",
       "properties": {
         "alias": {
-          "description": "Route this launcher to an internal command: picking it types this text\nfor you, such as `mp linus/linux` (an addon keyword\nfollowed by its query). Cannot be combined with `binary`, `script` or\n`args`.",
+          "description": "Route this launcher to an internal command: picking it types this text\nfor you, such as `mp linus/linux` (an addon keyword\nfollowed by its query). Cannot be combined with `binary`, `script`,\n`args` or `env`.",
           "type": [
             "string",
             "null"
@@ -87,6 +87,16 @@
             "boolean",
             "null"
           ]
+        },
+        "env": {
+          "description": "Environment variables set for the binary or script, added to Raffi's\nown environment. Values expand `~/` and `${VAR}`.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
         },
         "icon": {
           "type": [

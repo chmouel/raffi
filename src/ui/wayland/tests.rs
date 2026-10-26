@@ -2795,6 +2795,7 @@ fn test_preview_launcher_binary_and_script() {
             args: Some(vec!["-X".into(), "firefox".into()]),
             description: Some("Firefox".into()),
             ifexist: Some("firefox".into()),
+            env: Some([("MOZ_ENABLE_WAYLAND".into(), "1".into())].into()),
             ..Default::default()
         },
         RaffiConfig {
@@ -2825,8 +2826,12 @@ fn test_preview_launcher_binary_and_script() {
     assert_eq!(preview.badge.as_deref(), Some("Launcher"));
     assert!(preview.bodies.iter().any(|b| matches!(
         b,
-        PreviewBody::Text { content, .. } if content == "jumpapp -X firefox"
+        PreviewBody::Text { content, .. } if content == "MOZ_ENABLE_WAYLAND=1 jumpapp -X firefox"
     )));
+    assert!(preview
+        .metadata
+        .iter()
+        .any(|(k, v)| k == "Environment" && v == "MOZ_ENABLE_WAYLAND=1"));
     assert!(preview
         .metadata
         .iter()

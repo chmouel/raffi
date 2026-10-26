@@ -46,6 +46,27 @@ Command-line arguments passed to the binary.
   Supports path expansion (`~/` and `${VAR}`).
 
 
+**`env`** `map of strings`
+
+Environment variables set for the binary or script, on top of the ones Raffi runs with. Values support `~/` and `${VAR}` expansion, so `PATH: "~/bin:${PATH}"` prepends a directory.
+
+  When Raffi starts the program through the compositor ([`general.launch`](../general-settings/#configuration-options)), or prints it with `--print-only`, the command line starts with `env -- NAME=value ...` so the variables still apply. The values show up in the preview pane and in `--print-only` output, so keep secrets out of them.
+
+  The variables reach the program Raffi starts, not programs it asks the compositor to start. A run-or-raise wrapper that launches the app through `hyprctl`, `niri msg` or `swaymsg` gets them, but the app does not; put `env NAME=value` in the wrapper's own command instead.
+
+  ```yaml title="launchers.yaml"
+  firefox-work:
+    binary: firefox
+    args: ["-P", "work"]
+    description: "Firefox (work)"
+    env:
+      MOZ_ENABLE_WAYLAND: "1"
+      TZ: Europe/Paris
+  ```
+
+  `env` cannot be combined with `alias`; such entries are skipped with a warning, as are entries with an empty variable name or one containing `=`.
+
+
 **`icon`** `string`
 
 Icon name from system theme (e.g., `firefox`, `terminal`).
@@ -91,7 +112,7 @@ The window class (Hyprland, Xwayland apps) or app ID (niri, sway) that `raise` l
 
 Turns the entry into a shortcut for an internal command. Picking it types the alias into the search box, as if you had entered it yourself, and you carry on from there; nothing runs until you choose a result. Any trigger works: script filters, addons such as `audio`, web searches, snippets, and so on.
 
-  `alias` cannot be combined with `binary`, `script` or `args`; such entries are skipped with a warning. Without a `description`, the alias text is shown.
+  `alias` cannot be combined with `binary`, `script`, `args` or `env`; such entries are skipped with a warning. Without a `description`, the alias text is shown.
 
 
 **`keyword`** `string` (requires `alias`)

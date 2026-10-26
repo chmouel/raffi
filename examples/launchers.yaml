@@ -87,6 +87,15 @@ ipython:
   description: "Ipython"
   icon: ipython
 
+# env sets variables for this launcher only; values expand ~/ and ${VAR}.
+ipython-startup:
+  binary: kitty
+  args: ["ipython3"]
+  description: "Ipython with startup file"
+  icon: ipython
+  env:
+    PYTHONSTARTUP: "~/.config/python/startup.py"
+
 ssh-kodi:
   binary: kitty-ctrl
   args: ["jump", "-t", "Kodi", "ssh", "kodi"]

@@ -1520,6 +1520,12 @@ impl LauncherApp {
 
         let mut bodies = Vec::new();
         let mut metadata = Vec::new();
+        let env: Vec<String> = config
+            .env
+            .iter()
+            .flatten()
+            .map(|(name, value)| format!("{name}={value}"))
+            .collect();
 
         if let Some(script) = &config.script {
             let interpreter = config
@@ -1542,6 +1548,12 @@ impl LauncherApp {
             } else {
                 binary.clone()
             };
+            let full_cmd = env
+                .iter()
+                .cloned()
+                .chain(std::iter::once(full_cmd))
+                .collect::<Vec<_>>()
+                .join(" ");
             bodies.push(PreviewBody::Text {
                 heading: Some("Command".to_string()),
                 content: full_cmd,
@@ -1555,6 +1567,10 @@ impl LauncherApp {
                 metadata.push(("Arguments".to_string(), args.join(" ")));
             }
         }
+        metadata.extend(
+            env.into_iter()
+                .map(|variable| ("Environment".to_string(), variable)),
+        );
 
         if let Some(ifexist) = &config.ifexist {
             metadata.push(("Condition".to_string(), format!("ifexist: {ifexist}")));

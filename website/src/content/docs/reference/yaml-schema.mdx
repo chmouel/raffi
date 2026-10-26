@@ -335,6 +335,22 @@ Command-line arguments to pass to the binary.
 ```
 
 
+**`env`** `map of strings`
+
+Environment variables to set for the binary or script, on top of Raffi's own environment.
+
+  Values support tilde and environment variable expansion. Not allowed with `alias`.
+
+  ```yaml title="launchers.yaml"
+  firefox:
+    binary: firefox
+    description: "Firefox"
+    env:
+      MOZ_ENABLE_WAYLAND: "1"
+
+```
+
+
 **`icon`** `string`
 
 Icon name resolved from system icon directories (`$XDG_DATA_DIRS/icons`, `$XDG_DATA_DIRS/pixmaps`). Prefers larger icons (48×48+) as Raffi renders at 48×48. Supports PNG and SVG formats.

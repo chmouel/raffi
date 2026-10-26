@@ -39,8 +39,8 @@ pub struct RaffiConfig {
     pub show_preview: Option<bool>,
     /// Route this launcher to an internal command: picking it types this text
     /// for you, such as `mp linus/linux` (an addon keyword
-    /// followed by its query). Cannot be combined with `binary`, `script` or
-    /// `args`.
+    /// followed by its query). Cannot be combined with `binary`, `script`,
+    /// `args` or `env`.
     pub alias: Option<String>,
     /// Keyword that stands for `alias` while typing: with keyword `linoux`,
     /// typing `linoux torvalds` searches `mp linus/linux torvalds`
@@ -58,6 +58,9 @@ pub struct RaffiConfig {
     /// Window class (Hyprland, Xwayland) or app ID (niri, sway) of the app's
     /// windows, for `raise` (default: the binary name).
     pub window_class: Option<OneOrMany<String>>,
+    /// Environment variables set for the binary or script, added to Raffi's
+    /// own environment. Values expand `~/` and `${VAR}`.
+    pub env: Option<std::collections::BTreeMap<String, String>>,
 }
 
 /// A single value, or a list of them.
@@ -3182,6 +3185,10 @@ fn process_config(config: Config, args: &Args) -> Result<ParsedConfig> {
             mc.args = mc
                 .args
                 .map(|v| v.into_iter().map(|s| expand_config_value(&s)).collect());
+            if let Some(env) = &mut mc.env {
+                env.values_mut()
+                    .for_each(|value| *value = expand_config_value(value));
+            }
             if mc.disabled.unwrap_or(false)
                 || !is_valid_config(&mut mc, args, &DefaultEnvProvider, &DefaultBinaryChecker)
             {
@@ -3252,15 +3259,32 @@ fn is_valid_config(
     env_provider: &impl EnvProvider,
     binary_checker: &impl BinaryChecker,
 ) -> bool {
+    if let Some(env) = &mc.env {
+        if env
+            .keys()
+            .any(|key| key.is_empty() || key.contains(['=', '\0']))
+        {
+            let name = mc
+                .description
+                .as_deref()
+                .or(mc.binary.as_deref())
+                .or(mc.alias.as_deref())
+                .unwrap_or("?");
+            eprintln!(
+                "raffi: config warning: launcher '{name}' has an env variable name that is empty or contains '=', skipped"
+            );
+            return false;
+        }
+    }
     if let Some(alias) = &mc.alias {
         let name = mc.description.as_deref().unwrap_or(alias);
         if alias.trim().is_empty() {
             eprintln!("raffi: config warning: launcher '{name}' has an empty alias, skipped");
             return false;
         }
-        if mc.binary.is_some() || mc.script.is_some() || mc.args.is_some() {
+        if mc.binary.is_some() || mc.script.is_some() || mc.args.is_some() || mc.env.is_some() {
             eprintln!(
-                "raffi: config warning: launcher '{name}' combines alias with binary, script or args, skipped"
+                "raffi: config warning: launcher '{name}' combines alias with binary, script, args or env, skipped"
             );
             return false;
         }
@@ -4116,32 +4140,37 @@ fn format_command_word(value: &str) -> String {
 /// The output is meant to be evaluated by a shell (`sh -c "$cmd"`, `swaymsg exec -- "$cmd"`,
 /// `hyprctl dispatch exec "$cmd"`), not to be word-split by `xargs`. Script entries are rendered as
 /// `<interpreter> -c '<script>' [<interpreter> <args>...]`, mirroring how [`execute_chosen_command`]
-/// spawns them; a multi-line script therefore stays multi-line inside its quotes.
+/// spawns them; a multi-line script therefore stays multi-line inside its quotes. An entry's `env`
+/// is set with an `env -- NAME=value ...` prefix.
 fn format_print_only_command(mc: &RaffiConfig, interpreter: &str) -> Result<String> {
-    let mut parts = Vec::new();
-
-    if let Some(script) = &mc.script {
-        parts.push(format_command_word(interpreter));
-        parts.push("-c".to_string());
-        parts.push(shell_quote(script));
-        if let Some(args) = &mc.args {
-            // Passed as $0 by the exec path, so the script can reference $1..$n.
-            parts.push(shell_quote(interpreter));
-            parts.extend(args.iter().map(|arg| shell_quote(arg)));
-        }
+    let argv = launcher_argv(mc, interpreter)?;
+    let prefix = launcher_env_prefix(mc);
+    let (program, args) = argv.split_first().context("Binary not found")?;
+    // `env` already looks the program up in PATH.
+    let program = if prefix.is_empty() {
+        format_command_word(program)
     } else {
-        let binary = mc.binary.as_deref().context("Binary not found")?;
-        parts.push(format_command_word(binary));
-        parts.extend(
-            mc.args
-                .as_deref()
-                .unwrap_or(&[])
-                .iter()
-                .map(|arg| shell_quote(arg)),
-        );
-    }
-
+        shell_quote(program)
+    };
+    let parts: Vec<String> = prefix
+        .iter()
+        .map(|word| shell_quote(word))
+        .chain(std::iter::once(program))
+        .chain(args.iter().map(|arg| shell_quote(arg)))
+        .collect();
     Ok(parts.join(" "))
+}
+
+/// `env -- NAME=value ...` for a launcher with `env`, so a program started
+/// by someone else (the compositor, or a shell from `--print-only`) gets it.
+fn launcher_env_prefix(mc: &RaffiConfig) -> Vec<String> {
+    match &mc.env {
+        Some(env) if !env.is_empty() => ["env".to_string(), "--".to_string()]
+            .into_iter()
+            .chain(env.iter().map(|(name, value)| format!("{name}={value}")))
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// Spawn `command` and reap the child in a background thread so it never
@@ -4190,6 +4219,7 @@ fn launcher_argv(mc: &RaffiConfig, interpreter: &str) -> Result<Vec<String>> {
     if let Some(script) = &mc.script {
         argv.extend([interpreter.to_string(), "-c".to_string(), script.clone()]);
         if let Some(args) = &mc.args {
+            // Passed as $0, so the script can reference $1..$n.
             argv.push(interpreter.to_string());
             argv.extend(args.iter().cloned());
         }
@@ -4210,7 +4240,9 @@ pub(crate) fn spawn_launcher_command(
     let argv = launcher_argv(mc, interpreter)?;
     if let Some(compositor) = via {
         let shell = format_print_only_command(mc, interpreter)?;
-        match compositor.launch(&argv, &shell) {
+        let mut compositor_argv = launcher_env_prefix(mc);
+        compositor_argv.extend(argv.iter().cloned());
+        match compositor.launch(&compositor_argv, &shell) {
             Ok(()) => {
                 debug_log!("launch: started through {}", compositor.program());
                 return Ok(());
@@ -4222,6 +4254,7 @@ pub(crate) fn spawn_launcher_command(
     }
     let mut command = Command::new(&argv[0]);
     command.args(&argv[1..]);
+    command.envs(mc.env.iter().flatten());
     spawn_and_reap(command).context(if mc.script.is_some() {
         "cannot launch script"
     } else {
@@ -4627,6 +4660,80 @@ mod tests {
         assert_eq!(
             format_print_only_command(&config, "bash").unwrap(),
             "env -- bash -c 'echo hello'"
+        );
+    }
+
+    #[test]
+    fn test_print_only_sets_env_before_the_program() {
+        let env = Some([("A".into(), "1".into()), ("B".into(), "x y".into())].into());
+        let binary = RaffiConfig {
+            env: env.clone(),
+            ..binary_config(Some("firefox"), Some(vec!["-P", "work"]))
+        };
+        assert_eq!(
+            format_print_only_command(&binary, "bash").unwrap(),
+            "env -- A=1 'B=x y' firefox -P work"
+        );
+        let script = RaffiConfig {
+            env,
+            ..script_config("echo \"$A\"", None)
+        };
+        assert_eq!(
+            format_print_only_command(&script, "sh").unwrap(),
+            "env -- A=1 'B=x y' sh -c 'echo \"$A\"'"
+        );
+    }
+
+    #[test]
+    fn test_launcher_env_reaches_the_program() {
+        let dir = temp_test_dir("launcher-env");
+        let out = dir.join("out");
+        let config = RaffiConfig {
+            env: Some(
+                [
+                    ("RAFFI_TEST_VALUE".into(), "hello world".into()),
+                    ("RAFFI_TEST_OUT".into(), out.display().to_string()),
+                ]
+                .into(),
+            ),
+            ..script_config(
+                "printf %s \"$RAFFI_TEST_VALUE\" > \"$RAFFI_TEST_OUT.tmp\" && mv \"$RAFFI_TEST_OUT.tmp\" \"$RAFFI_TEST_OUT\"",
+                None,
+            )
+        };
+        spawn_launcher_command(&config, "sh", None).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !out.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(fs::read_to_string(&out).unwrap(), "hello world");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_read_config_launcher_env() {
+        let yaml = r#"
+version: 1
+launchers:
+  expanded:
+    script: "true"
+    env:
+      DIRS: "~/bin:${HOME}"
+  bad_name:
+    script: "true"
+    env:
+      "A=B": "1"
+  with_alias:
+    alias: "mp linus/linux"
+    env:
+      A: "1"
+"#;
+        let parsed = read_config_from_reader(Cursor::new(yaml), &Args::default()).unwrap();
+        assert_eq!(parsed.entries.len(), 1);
+        let home = std::env::var("HOME").unwrap_or_default();
+        assert_eq!(
+            parsed.entries[0].env.as_ref().unwrap()["DIRS"],
+            format!("{home}/bin:{home}")
         );
     }
 
@@ -5076,6 +5183,7 @@ mod tests {
             ])),
             raise: None,
             window_class: None,
+            env: None,
         };
         let args = Args {
             help: false,
