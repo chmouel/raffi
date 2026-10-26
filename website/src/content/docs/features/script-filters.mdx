@@ -83,10 +83,10 @@ changing the configuration starts from a clean entry.
 
 | Key        | Action                                                    |
 |------------|-----------------------------------------------------------|
-| Enter      | Run `action` on the selected item (copy by default)       |
+| Enter      | Open an item's children, or run `action` on a leaf item   |
 | Ctrl+Enter | Run `secondary_action`, or `action` when it is not set    |
 | Up / Down  | Move through the results                                  |
-| Escape     | Close Raffi                                               |
+| Escape     | Return to the parent list, or close Raffi at the top level|
 
 Actions use the item's `arg`, or its title when it has no `arg`. An action is
 one of:
@@ -95,6 +95,12 @@ one of:
 - `insert`, to close Raffi and type the value into the focused app with
   `wtype` or `ydotool`
 - any other text, run with `sh -c` after replacing `{value}` with the value
+
+An item with `children` opens those items when you press Enter or click it.
+Type to filter the current child list by title, subtitle or `arg`; Raffi does
+not rerun the script while filtering inside it. Press Escape to return to the
+parent list with its query and selection restored. Children can themselves have
+children.
 
 The value is also exported as `$RAFFI_VALUE`, and so are the item's
 [`variables`](#item-fields), so a script can pass structured data to its
@@ -476,6 +482,27 @@ A fuller output:
 }
 ```
 
+Add a `children` list to make an item open a nested list instead of running an
+action. Each child uses the same item fields, including `children` for deeper
+levels:
+
+```json
+{
+  "items": [
+    {
+      "title": "Alice",
+      "children": [
+        { "title": "Email", "arg": "alice@example.com" },
+        { "title": "Phone", "arg": "+1 555 0100" }
+      ]
+    }
+  ]
+}
+```
+
+Press Enter on Alice to browse her contact methods. Enter on a child without
+`children` runs the configured action; Escape goes back one level.
+
 Raffi lists the items in the order the script prints them. Filtering and
 sorting are the script's job.
 
@@ -484,6 +511,11 @@ sorting are the script's job.
 **`title`** `string` (required)
 
 Main text of the row. [ANSI colours](#colours) are supported.
+
+**`children`** `list of items`
+
+Optional nested items. Enter or clicking the parent opens this list; the parent
+does not run an action. Child items use the same fields as top-level items.
 
 **`subtitle`** `string`
 

@@ -342,6 +342,7 @@ mod tests {
         };
         let config = super::view_config(&config, Some(&result.views[0]));
         let item = super::ScriptFilterItem {
+            children: None,
             title: "Agent".into(),
             valid: true,
             subtitle: None,
@@ -627,6 +628,7 @@ mod tests {
             warm_interval_seconds: None,
         };
         let item = super::ScriptFilterItem {
+            children: None,
             title: "\u{1b}[32mAgent\u{1b}[0m".into(),
             valid: true,
             subtitle: None,

@@ -358,6 +358,7 @@ fn test_preview_script_filter_reads_virtual_file_with_zero_reported_size() {
     let mut app = test_app(AddonsConfig::default());
     app.script_filter.results = Some(ScriptFilterResult {
         items: vec![ScriptFilterItem {
+            children: None,
             title: "CPU info".into(),
             valid: true,
             subtitle: None,
@@ -2886,6 +2887,7 @@ fn test_preview_script_filter_precedence() {
     app.script_filter.results = Some(ScriptFilterResult {
         items: vec![
             ScriptFilterItem {
+                children: None,
                 title: "Item 1".into(),
                 valid: true,
                 subtitle: Some("Fallback subtitle".into()),
@@ -2903,6 +2905,7 @@ fn test_preview_script_filter_precedence() {
                 }),
             },
             ScriptFilterItem {
+                children: None,
                 title: "Item 2".into(),
                 valid: true,
                 subtitle: Some("Fallback subtitle".into()),
@@ -2953,6 +2956,7 @@ fn test_preview_script_filter_decodes_file_url_paths() {
     let file_url = format!("file://{escaped_path}");
     let localhost_file_url = format!("file://localhost{escaped_path}");
     let make_item = |quicklookurl| ScriptFilterItem {
+        children: None,
         title: "File".into(),
         valid: true,
         subtitle: None,
@@ -3018,6 +3022,7 @@ fn dynamic_preview_app(items: Vec<ScriptFilterItem>) -> LauncherApp {
 
 fn plain_item(title: &str) -> ScriptFilterItem {
     ScriptFilterItem {
+        children: None,
         title: title.into(),
         valid: true,
         subtitle: None,
@@ -3033,10 +3038,137 @@ fn plain_item(title: &str) -> ScriptFilterItem {
     }
 }
 
+fn navigation_app() -> LauncherApp {
+    let mut alpha = plain_item("Alpha");
+    alpha.children = Some(vec![plain_item("Email"), plain_item("Phone")]);
+    let mut contact = plain_item("Alice");
+    contact.children = Some(vec![alpha, plain_item("Beta")]);
+    let mut app = dynamic_preview_app(vec![plain_item("Other"), contact]);
+    app.search_query = "ag Alice".into();
+    app.query_class = classify_query(&app.search_query, &app.addons);
+    app.script_filter.query = "Alice".into();
+    app
+}
+
+#[test]
+fn test_script_filter_navigation_restores_selection_and_visible_query() {
+    let mut app = navigation_app();
+    let generation = app.script_filter.generation;
+    let _ = app.handle_script_filter_selected(1);
+    assert_eq!(app.selected_index, app.keyword_rows());
+    assert_eq!(app.search_query, "ag ");
+    assert!(app.script_filter.query.is_empty());
+    assert_eq!(app.query_class, classify_query("ag ", &app.addons));
+    assert_ne!(app.script_filter.generation, generation);
+    let _ = app.update(Message::SearchChanged("ag Alpha".into()));
+    assert_eq!(app.script_filter.results.as_ref().unwrap().items.len(), 1);
+    let _ = app.update(Message::Cancel);
+    assert_eq!(app.selected_index, app.keyword_rows() + 1);
+    assert_eq!(app.search_query, "ag Alice");
+    assert_eq!(app.script_filter.query, "Alice");
+    assert!(app.script_filter.navigation.is_empty());
+}
+
+#[test]
+fn test_script_filter_nested_back_preserves_unfiltered_siblings() {
+    let mut app = navigation_app();
+    let _ = app.handle_script_filter_selected(1);
+    let _ = app.update(Message::SearchChanged("ag Alpha".into()));
+    let _ = app.handle_script_filter_selected(0);
+    assert_eq!(
+        app.script_filter.results.as_ref().unwrap().items[0].title,
+        "Email"
+    );
+    let _ = app.update(Message::Cancel);
+    assert_eq!(app.search_query, "ag Alpha");
+    let _ = app.update(Message::SearchChanged("ag ".into()));
+    let titles: Vec<_> = app
+        .script_filter
+        .results
+        .as_ref()
+        .unwrap()
+        .items
+        .iter()
+        .map(|item| item.title.as_str())
+        .collect();
+    assert_eq!(titles, ["Alpha", "Beta"]);
+}
+
+#[test]
+fn test_script_filter_navigation_drops_old_previews_on_filter_and_back() {
+    let mut app = navigation_app();
+    let _ = app.handle_script_filter_selected(1);
+    app.script_filter.previews.insert(0, Default::default());
+    let generation = app.script_filter.preview_generation;
+    let task = app.update(Message::SearchChanged("ag Beta".into()));
+    assert!(app.script_filter.previews.is_empty());
+    assert_ne!(app.script_filter.preview_generation, generation);
+    assert_eq!(app.dynamic_preview_target(), Some(0));
+    assert!(task.units() > 0);
+    app.script_filter.previews.insert(0, Default::default());
+    let generation = app.script_filter.preview_generation;
+    let task = app.update(Message::Cancel);
+    assert!(app.script_filter.previews.is_empty());
+    assert_ne!(app.script_filter.preview_generation, generation);
+    assert_eq!(app.dynamic_preview_target(), Some(1));
+    assert!(task.units() > 0);
+}
+
+#[test]
+fn test_script_filter_navigation_leaves_on_config_switch() {
+    let mut app = navigation_app();
+    app.addons.script_filters.push(ScriptFilterConfig {
+        name: "Second".into(),
+        keyword: "second".into(),
+        command: "true".into(),
+        action: Some("copy".into()),
+        ..Default::default()
+    });
+    let _ = app.handle_script_filter_selected(1);
+    let _ = app.update(Message::SearchChanged("second bug".into()));
+    assert!(app.script_filter.navigation.is_empty());
+    assert!(app.script_filter.navigation_items.is_empty());
+    assert_eq!(app.script_filter.config_index, Some(1));
+    assert_eq!(app.script_filter.action.as_deref(), Some("copy"));
+    assert!(app.script_filter.loading);
+}
+
+#[test]
+fn test_script_filter_navigation_leaves_on_view_switch() {
+    let mut app = navigation_app();
+    app.script_filter.views = serde_json::from_str(r#"[{"id":"all"},{"id":"mine"}]"#).unwrap();
+    app.script_filter.default_view = Some("all".into());
+    let _ = app.handle_script_filter_selected(1);
+    let _ = app.update(Message::SearchChanged("ag Alpha".into()));
+    let _ = app.update(Message::CycleView(false));
+    assert!(app.script_filter.navigation.is_empty());
+    assert_eq!(app.script_filter.view.as_deref(), Some("mine"));
+    assert_eq!(app.search_query, "ag Alice");
+    assert_eq!(app.script_filter.query, "Alice");
+    assert!(app.script_filter.loading);
+}
+
+#[test]
+fn test_script_filter_navigation_refreshes_root() {
+    let mut app = navigation_app();
+    let _ = app.handle_script_filter_selected(1);
+    let _ = app.update(Message::SearchChanged("ag Alpha".into()));
+    let mut tasks = Vec::new();
+    app.handle_script_filter_query(0, "Alpha".into(), true, &mut tasks);
+    assert!(app.script_filter.navigation.is_empty());
+    assert!(app.script_filter.navigation_items.is_empty());
+    assert_eq!(app.search_query, "ag Alice");
+    assert_eq!(app.script_filter.query, "Alice");
+    assert!(app.script_filter.loading);
+    assert!(app.script_filter.preview_force_refresh);
+    assert!(!tasks.is_empty());
+}
+
 #[test]
 fn test_script_filter_invalid_headings_do_not_activate_or_record() {
     let mut heading = plain_item("Working");
     heading.valid = false;
+    heading.children = Some(vec![plain_item("Must stay hidden")]);
     let mut app = dynamic_preview_app(vec![heading]);
     app.main_view.names = vec![Some("script_filters.Agents".into())];
     app.search_query = "ag working".into();
@@ -8512,6 +8644,7 @@ fn test_main_view_script_filter_waits_for_min_length_and_drops_stale_runs() {
     let mut app = main_view_app(&["script_filters.Issues"], Vec::new(), addons);
     let result = |title: &str| ScriptFilterResult {
         items: vec![ScriptFilterItem {
+            children: None,
             title: title.into(),
             valid: true,
             subtitle: None,
@@ -8588,6 +8721,7 @@ fn test_main_view_late_rows_keep_the_selection() {
     let run = *generation;
     let items = (0..2)
         .map(|index| ScriptFilterItem {
+            children: None,
             title: format!("mail issue {index}"),
             valid: true,
             subtitle: None,
@@ -8690,6 +8824,7 @@ fn issue_items(count: usize) -> ScriptFilterResult {
     ScriptFilterResult {
         items: (0..count)
             .map(|index| ScriptFilterItem {
+                children: None,
                 title: format!("issue {index}"),
                 valid: true,
                 subtitle: None,
@@ -10696,6 +10831,7 @@ fn test_main_view_keep_open_preserves_query_and_selection() {
         run,
         Some(Ok(ScriptFilterResult {
             items: vec![ScriptFilterItem {
+                children: None,
                 title: "mail bug".into(),
                 valid: true,
                 subtitle: None,

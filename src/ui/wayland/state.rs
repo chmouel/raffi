@@ -62,6 +62,8 @@ impl CurrencyState {
 #[derive(Debug, Clone, Default)]
 pub(super) struct ScriptFilterState {
     pub results: Option<ScriptFilterResult>,
+    pub navigation: Vec<ScriptFilterNavigation>,
+    pub navigation_items: Vec<super::types::ScriptFilterItem>,
     /// The visible rows came from a snapshot and may be kept if a refresh fails.
     pub results_are_cached: bool,
     pub loading: bool,
@@ -102,9 +104,20 @@ pub(super) struct ScriptFilterState {
     pub default_view: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct ScriptFilterNavigation {
+    pub items: Vec<super::types::ScriptFilterItem>,
+    pub unfiltered_items: Vec<super::types::ScriptFilterItem>,
+    pub query: String,
+    pub search_query: String,
+    pub selection: usize,
+}
+
 impl ScriptFilterState {
     pub fn clear(&mut self) {
         self.results = None;
+        self.navigation.clear();
+        self.navigation_items.clear();
         self.results_are_cached = false;
         self.loading = false;
         self.loading_name = None;

@@ -1540,6 +1540,26 @@ impl LauncherApp {
                 if self.view.help_active {
                     return self.close_help();
                 }
+                if !self.script_filter.navigation.is_empty() {
+                    let navigation = self.script_filter.navigation.pop().unwrap();
+                    if let Some(result) = self.script_filter.results.as_mut() {
+                        result.items.clone_from(&navigation.items);
+                    }
+                    self.script_filter.navigation_items = navigation.unfiltered_items;
+                    self.script_filter.query = navigation.query;
+                    self.search_query = navigation.search_query;
+                    self.query_class = classify_query(&self.search_query, &self.addons);
+                    self.script_filter.generation = self.script_filter.generation.wrapping_add(1);
+                    self.script_filter.previews.clear();
+                    self.selected_index = self.keyword_rows() + navigation.selection;
+                    self.file_browser.cached_preview = None;
+                    self.refresh_file_preview_cache();
+                    return Task::batch([
+                        focus(self.view.search_input_id.clone()),
+                        self.snap_to_selection(),
+                        self.request_script_filter_preview(),
+                    ]);
+                }
                 // Escape stops an unlock, a slow fetch or a sync and returns
                 // to the list, or leaves the mode if it never loaded.
                 let unlocking = self.vault.unlocking;
@@ -2468,6 +2488,49 @@ impl LauncherApp {
         force_refresh: bool,
         tasks: &mut Vec<Task<Message>>,
     ) {
+        let mut query = query;
+        if self.script_filter.config_index != Some(config_index) || force_refresh {
+            if force_refresh && self.script_filter.config_index == Some(config_index) {
+                if let Some(root) = self.script_filter.navigation.first() {
+                    query.clone_from(&root.query);
+                    self.search_query.clone_from(&root.search_query);
+                    self.query_class = classify_query(&self.search_query, &self.addons);
+                }
+            }
+            self.script_filter.navigation.clear();
+            self.script_filter.navigation_items.clear();
+        }
+        if !self.script_filter.navigation.is_empty() {
+            self.script_filter.query = query.clone();
+            let needle = query.to_lowercase();
+            if let Some(result) = self.script_filter.results.as_mut() {
+                result.items = self
+                    .script_filter
+                    .navigation_items
+                    .iter()
+                    .filter(|item| {
+                        needle.is_empty()
+                            || item.title.to_lowercase().contains(&needle)
+                            || item
+                                .subtitle
+                                .as_deref()
+                                .is_some_and(|s| s.to_lowercase().contains(&needle))
+                            || item
+                                .arg
+                                .as_deref()
+                                .is_some_and(|s| s.to_lowercase().contains(&needle))
+                    })
+                    .cloned()
+                    .collect();
+            }
+            self.script_filter.loading = false;
+            self.script_filter.previews.clear();
+            self.selected_index = self.keyword_rows();
+            self.file_browser.cached_preview = None;
+            self.refresh_file_preview_cache();
+            tasks.push(self.request_script_filter_preview());
+            return;
+        }
         let Some(config) = self.addons.script_filters.get(config_index) else {
             return;
         };
@@ -4466,6 +4529,51 @@ impl LauncherApp {
     }
 
     pub(super) fn handle_script_filter_selected(&mut self, index: usize) -> Task<Message> {
+        if let Some(item) = self
+            .script_filter
+            .results
+            .as_ref()
+            .and_then(|result| result.items.get(index))
+            .cloned()
+        {
+            if !item.valid {
+                return Task::none();
+            }
+            if let Some(children) = item.children {
+                self.script_filter
+                    .navigation
+                    .push(super::state::ScriptFilterNavigation {
+                        items: self.script_filter.results.as_ref().unwrap().items.clone(),
+                        unfiltered_items: self.script_filter.navigation_items.clone(),
+                        query: self.script_filter.query.clone(),
+                        search_query: self.search_query.clone(),
+                        selection: index,
+                    });
+                if let Some(result) = self.script_filter.results.as_mut() {
+                    result.items = children.clone();
+                }
+                self.script_filter.navigation_items = children;
+                self.script_filter.query.clear();
+                if let Some(config) = self
+                    .script_filter
+                    .config_index
+                    .and_then(|index| self.addons.script_filters.get(index))
+                {
+                    self.search_query = format!("{} ", config.keyword);
+                    self.query_class = classify_query(&self.search_query, &self.addons);
+                }
+                self.script_filter.generation = self.script_filter.generation.wrapping_add(1);
+                self.script_filter.previews.clear();
+                self.selected_index = self.keyword_rows();
+                self.file_browser.cached_preview = None;
+                self.refresh_file_preview_cache();
+                return Task::batch([
+                    focus(self.view.search_input_id.clone()),
+                    self.snap_to_selection(),
+                    self.request_script_filter_preview(),
+                ]);
+            }
+        }
         let mut pick = None;
         let mut addon_close = None;
         let mut force_close = false;
@@ -4909,6 +5017,11 @@ impl LauncherApp {
             _ => {}
         }
         if self.script_filter.config_index.is_some() && self.script_filter.cycle_view(backwards) {
+            if let Some(root) = self.script_filter.navigation.first() {
+                self.search_query.clone_from(&root.search_query);
+            }
+            self.script_filter.navigation.clear();
+            self.script_filter.navigation_items.clear();
             return self.handle_search_changed(self.search_query.clone());
         }
         if self.main_view.active && !self.main_view.stops.is_empty() {

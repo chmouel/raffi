@@ -312,6 +312,9 @@ impl ScriptFilterPreview {
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct ScriptFilterItem {
     pub title: String,
+    /// Optional child list opened when this item is selected.
+    #[serde(default)]
+    pub children: Option<Vec<ScriptFilterItem>>,
     #[serde(default = "crate::default_true")]
     pub valid: bool,
     pub subtitle: Option<String>,
