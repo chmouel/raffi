@@ -70,9 +70,9 @@ Disable icon loading globally.
 ```
 
 
-**`general.show_preview`** `boolean` (default: `false` for apps and entries)
+**`general.show_preview`** `boolean` (default: unset)
 
-Show the right-hand preview pane for apps and custom entries. Addon results always preview. Toggle at runtime with `Ctrl+P`.
+Unset previews addon results only; `true` also previews apps and custom entries; `false` hides the pane everywhere except entries that set their own `show_preview: true`. Toggle at runtime with `Ctrl+P`.
 
   ```yaml
   general:

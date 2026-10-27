@@ -93,7 +93,7 @@ impl UI for WaylandUI {
 }
 
 fn configure_preview_visibility(view: &mut state::ViewState, show_preview: Option<bool>) {
-    view.show_preview = true;
+    view.show_preview = show_preview != Some(false);
     view.show_launcher_preview = show_preview == Some(true);
 }
 

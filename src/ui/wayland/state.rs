@@ -576,6 +576,9 @@ pub(super) struct ViewState {
     pub help_active: bool,
     pub show_preview: bool,
     pub show_launcher_preview: bool,
+    /// Set when Ctrl+P hid the pane, so entries with `show_preview: true`
+    /// stop overriding a hidden pane too.
+    pub preview_hidden_by_user: bool,
     pub preview_style: PreviewStyle,
     /// Live window size, updated on resize events, used to size image previews.
     pub window_size: iced::Size,
@@ -614,6 +617,7 @@ impl ViewState {
             help_active: false,
             show_preview: true,
             show_launcher_preview: false,
+            preview_hidden_by_user: false,
             default_script_shell: "bash".to_string(),
             launch_via: None,
             raise_running: false,

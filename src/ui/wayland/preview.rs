@@ -836,6 +836,19 @@ impl LauncherApp {
         None
     }
 
+    /// Preview of a selected entry that sets `show_preview: true`, shown even
+    /// when the pane is hidden by config, until Ctrl+P hides it.
+    fn forced_launcher_preview(&self) -> Option<PreviewData> {
+        if self.view.preview_hidden_by_user {
+            return None;
+        }
+        let MainRowRef::Launcher(config_idx) = self.selected_main_row()? else {
+            return None;
+        };
+        let config = self.configs.get(config_idx)?;
+        (config.show_preview == Some(true)).then(|| self.build_launcher_preview(config_idx, config))
+    }
+
     /// Resolve the preview data for the currently selected item across all modes.
     pub(super) fn resolve_selected_preview(&self) -> Option<PreviewData> {
         self.selected_preview_data(false)
@@ -843,7 +856,7 @@ impl LauncherApp {
 
     pub(super) fn selected_preview_data(&self, actions: bool) -> Option<PreviewData> {
         if !actions && !self.view.show_preview {
-            return None;
+            return self.forced_launcher_preview();
         }
 
         if self.view.help_active {

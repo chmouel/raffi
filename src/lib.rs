@@ -1879,9 +1879,10 @@ pub struct GeneralConfig {
     #[serde(default)]
     pub terminal_classes: Vec<String>,
     /// Show the Alfred-style right-hand preview pane.
-    /// By default, previews are shown automatically for addons (snippets, file browser,
-    /// script filters, etc.) and hidden for standard launcher entries unless `show_preview: true`
-    /// is set in `general` or on the launcher entry. Can also be toggled at runtime with Ctrl+P.
+    /// Unset shows previews for addons (snippets, file browser, script filters, etc.)
+    /// but not for standard launcher entries unless the entry sets `show_preview: true`.
+    /// `true` previews launcher entries too; `false` hides the pane everywhere except
+    /// entries with their own `show_preview: true`. Can also be toggled at runtime with Ctrl+P.
     #[serde(default)]
     pub show_preview: Option<bool>,
     /// Show a tip about a keyword in the empty search box, such as

@@ -1164,7 +1164,7 @@
           "$ref": "#/$defs/Renderer"
         },
         "show_preview": {
-          "description": "Show the Alfred-style right-hand preview pane.\nBy default, previews are shown automatically for addons (snippets, file browser,\nscript filters, etc.) and hidden for standard launcher entries unless `show_preview: true`\nis set in `general` or on the launcher entry. Can also be toggled at runtime with Ctrl+P.",
+          "description": "Show the Alfred-style right-hand preview pane.\nUnset shows previews for addons (snippets, file browser, script filters, etc.)\nbut not for standard launcher entries unless the entry sets `show_preview: true`.\n`true` previews launcher entries too; `false` hides the pane everywhere except\nentries with their own `show_preview: true`. Can also be toggled at runtime with Ctrl+P.",
           "type": [
             "boolean",
             "null"

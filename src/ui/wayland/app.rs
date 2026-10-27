@@ -1702,16 +1702,16 @@ impl LauncherApp {
             Message::TogglePreview => {
                 // If a standard launcher is selected and launcher previews are currently hidden,
                 // pressing Ctrl+P turns launcher preview on rather than disabling addon previews.
-                if self.view.show_preview
-                    && !self.view.show_launcher_preview
-                    && self.resolve_selected_preview().is_none()
-                {
+                let visible = self.resolve_selected_preview().is_some();
+                if self.view.show_preview && !self.view.show_launcher_preview && !visible {
                     self.view.show_launcher_preview = true;
+                } else if self.view.show_preview || visible {
+                    self.view.show_preview = false;
+                    self.view.preview_hidden_by_user = true;
                 } else {
-                    self.view.show_preview = !self.view.show_preview;
-                    if self.view.show_preview {
-                        self.view.show_launcher_preview = true;
-                    }
+                    self.view.show_preview = true;
+                    self.view.show_launcher_preview = true;
+                    self.view.preview_hidden_by_user = false;
                 }
                 self.refresh_file_preview_cache();
                 self.request_script_filter_preview()
@@ -3733,7 +3733,7 @@ impl LauncherApp {
     /// Scroll the preview pane by `delta` pixels (negative scrolls up).
     /// A no-op when the pane is hidden; `scroll_by` clamps at the pane bounds.
     fn scroll_preview(&self, delta: f32) -> Task<Message> {
-        if !self.view.show_preview {
+        if self.resolve_selected_preview().is_none() {
             return Task::none();
         }
         scroll_by(

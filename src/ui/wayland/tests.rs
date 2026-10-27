@@ -2528,7 +2528,7 @@ fn test_help_closes_on_toggle_and_cancel() {
 #[test]
 fn test_preview_scroll_messages_leave_state_unchanged() {
     let mut app = test_app(AddonsConfig::default());
-    super::configure_preview_visibility(&mut app.view, Some(false));
+    super::configure_preview_visibility(&mut app.view, None);
     app.inline_result = Some(super::support::calculator_inline_result(
         &super::types::CalculatorResult {
             expression: "1+1".into(),
@@ -2632,7 +2632,7 @@ fn test_launcher_preview_is_opt_in() {
         Vec::new(),
         false,
     );
-    super::configure_preview_visibility(&mut app.view, Some(false));
+    super::configure_preview_visibility(&mut app.view, None);
     assert!(app.view.show_preview);
     assert!(!app.view.show_launcher_preview);
 
@@ -2661,6 +2661,70 @@ fn test_launcher_preview_is_opt_in() {
     assert!(app.resolve_selected_preview().is_none());
     app.view.show_launcher_preview = true;
     assert!(app.resolve_selected_preview().is_some());
+}
+
+#[test]
+fn test_general_show_preview_false_hides_pane() {
+    let configs = vec![
+        RaffiConfig {
+            binary: Some("firefox".into()),
+            description: Some("Firefox".into()),
+            ..Default::default()
+        },
+        RaffiConfig {
+            binary: Some("kitty".into()),
+            description: Some("Kitty".into()),
+            show_preview: Some(true),
+            ..Default::default()
+        },
+    ];
+    let (mut app, _) = LauncherApp::new(
+        configs,
+        AddonsConfig::default(),
+        true,
+        Arc::new(Mutex::new(None)),
+        None,
+        ThemeColors::from_mode_with_overrides(&crate::ThemeMode::Dark, None),
+        10,
+        FontSizes::default_sizes(),
+        SortMode::Hybrid,
+        Vec::new(),
+        false,
+    );
+    super::configure_preview_visibility(&mut app.view, Some(false));
+    assert!(!app.view.show_preview);
+
+    // Plain launchers and addon results show nothing.
+    assert!(app.resolve_selected_preview().is_none());
+    app.inline_result = Some(super::support::calculator_inline_result(
+        &super::types::CalculatorResult {
+            expression: "1+1".into(),
+            result: 2.0,
+        },
+    ));
+    assert!(app.resolve_selected_preview().is_none());
+    app.inline_result = None;
+
+    // An entry with its own `show_preview: true` still previews.
+    app.selected_index = 1;
+    assert_eq!(
+        app.resolve_selected_preview().map(|p| p.title),
+        Some("Kitty".to_string())
+    );
+
+    // Ctrl+P hides that forced preview too.
+    let _ = app.update(Message::TogglePreview);
+    assert!(app.resolve_selected_preview().is_none());
+
+    // Ctrl+P again turns every preview on.
+    let _ = app.update(Message::TogglePreview);
+    assert!(app.view.show_preview);
+    assert!(app.view.show_launcher_preview);
+    app.selected_index = 0;
+    assert_eq!(
+        app.resolve_selected_preview().map(|p| p.title),
+        Some("Firefox".to_string())
+    );
 }
 
 #[test]
