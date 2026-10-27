@@ -27,6 +27,7 @@ mod empty_states;
 mod favicons;
 mod file_preview;
 mod help;
+mod hot_files;
 mod hyprland;
 mod kill;
 mod main_view;
@@ -366,4 +367,5 @@ pub(crate) fn clear_wayland_caches() {
     clear_slack_cache();
     self::cache::notify_clear();
     self::cache::clear_snapshots();
+    self::hot_files::clear();
 }

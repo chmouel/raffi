@@ -218,6 +218,8 @@ Current cache artifacts:
   stale-while-revalidate snapshots of Script Filter output
 - `browser-history/init.json`: parsed browser history plus SQLite file
   fingerprints
+- `hot-files.json`: files and byte ranges the native UI touched while
+  starting, read back by the cache service to keep them in the page cache
 
 These snapshots are versioned JSON or binary files written atomically with
 private permissions (`0700` directories, `0600` files). `raffi --refresh-cache`
@@ -234,6 +236,15 @@ view) or `get_script_filter` with `wait: true` (Ctrl+Shift+F5 sends
 `refresh_all`), and the UI reloads the
 view from the snapshot once the service replies. See
 `src/ui/wayland/cache.rs` and `misc/systemd/raffi-cache.service`.
+
+A cold launch is dominated by disk reads: the binary, the Vulkan and Mesa
+libraries and the system font scan iced runs before laying out text. Once
+the window exists, the native UI records the pages it touched in its mapped
+files (`/proc/self/maps` plus the present bit of `/proc/self/pagemap`) and
+the small startup files (config, cache directory, desktop entries, launcher
+icons) in `hot-files.json`. The cache service re-reads those ranges and
+replays the font scan every three minutes, so the kernel keeps them cached
+between launches. See `src/ui/wayland/hot_files.rs`.
 
 On startup, `run()` writes `raffi-schema.json` and `launchers-schema.json` next
 to the user config when either file is missing or outdated.

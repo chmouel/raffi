@@ -4904,10 +4904,15 @@ impl LauncherApp {
         handles: Option<super::dnd::RawWaylandHandles>,
     ) -> Task<Message> {
         super::release_renderer_override();
-        crate::debug_log!(
-            "startup: window created at {}ms",
-            crate::debug::elapsed_ms()
-        );
+        crate::debug::mark("window created");
+        let config_path = self.onboarding.config_path.clone();
+        let icons: Vec<std::path::PathBuf> = self
+            .launcher_icon_paths
+            .iter()
+            .flatten()
+            .map(std::path::PathBuf::from)
+            .collect();
+        std::thread::spawn(move || super::hot_files::record(config_path, icons));
         let Some(handles) = handles else {
             crate::debug_log!("dnd: no Wayland window, drag-and-drop disabled");
             return Task::none();

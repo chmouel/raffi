@@ -3399,7 +3399,7 @@ fn xdg_data_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-fn desktop_entry_dirs() -> Vec<PathBuf> {
+pub(crate) fn desktop_entry_dirs() -> Vec<PathBuf> {
     xdg_data_dirs()
         .into_iter()
         .map(|dir| dir.join("applications"))

@@ -241,7 +241,7 @@ pub(crate) fn addons_digest(addons: &AddonsConfig) -> String {
     stable_hash(&format!("{script_filters}:{browser_history}:{slack}"))
 }
 
-fn cache_root() -> Result<PathBuf> {
+pub(super) fn cache_root() -> Result<PathBuf> {
     let mut path = crate::ui::get_mru_cache_path()?;
     path.pop();
     Ok(path)
@@ -777,6 +777,7 @@ pub(crate) fn run(config: ParsedConfig) -> Result<()> {
     let _ = fs::set_permissions(&socket, fs::Permissions::from_mode(0o600));
     let state = Arc::new(DaemonState::new(config.addons));
     eprintln!("raffi: cache service listening on {}", socket.display());
+    super::hot_files::keep_warm();
     warm_loop(state.clone());
     serve(listener, state)
 }

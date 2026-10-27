@@ -263,7 +263,7 @@ Set the default shell interpreter for script entries.
 
 Refresh every local cache.
 
-  Raffi caches icon locations from system directories to speed up subsequent launches. Use this flag to force regeneration of the cache, for example after installing new icon themes. It also removes the private script-filter and browser-history snapshots and the Slack cache, and tells a running cache service to drop its state.
+  Raffi caches icon locations from system directories to speed up subsequent launches. Use this flag to force regeneration of the cache, for example after installing new icon themes. It also removes the private script-filter and browser-history snapshots, the Slack cache and the startup file list, and tells a running cache service to drop its state.
 
   ```bash
   raffi -r
@@ -287,6 +287,14 @@ behind your back: run it from a terminal or a user service such as
   Without the service, Raffi still reads and writes the same private
   snapshots directly, so cached rows still show immediately; only the
   periodic warming while Raffi is closed is lost.
+
+  The service also keeps Raffi's own startup files in memory. Each time the
+  window opens, Raffi notes the files it needed to start (the binary, the
+  graphics libraries, fonts, config and caches) in
+  `~/.cache/raffi/hot-files.json`. Every few minutes the service reads them
+  back, so the kernel does not evict them, and a launch after a long idle
+  stays as fast as a warm one. When the files are already cached, a pass
+  costs a few tens of milliseconds.
 
   When Raffi opens and finds the service running, the footer shows
   `server`. On a Slack view, browser history or a Script Filter with
