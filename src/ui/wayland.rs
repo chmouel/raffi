@@ -164,6 +164,192 @@ fn prewarm_fonts() {
     });
 }
 
+/// One launcher window: its inputs, the per-window state captured before it
+/// opens, and the slots its exit paths fill.
+struct Launch {
+    configs: Vec<RaffiConfig>,
+    addons: AddonsConfig,
+    settings: UISettings,
+    translucent: bool,
+    theme_colors: ThemeColors,
+    preview_style: theme::PreviewStyle,
+    hyprland: Option<Result<hyprland::Hyprland, String>>,
+    selected_item: SharedSelection,
+    deferred_action: Arc<Mutex<Option<actions::DeferredAction>>>,
+}
+
+impl Launch {
+    /// Capture what depends on the moment Raffi opens: the clipboard
+    /// manager running and, on Hyprland, the focused window.
+    fn prepare(
+        configs: &[RaffiConfig],
+        addons: &AddonsConfig,
+        settings: &UISettings,
+        translucent: bool,
+    ) -> Self {
+        crate::debug_log!(
+            "wayland: starting UI: {}x{} theme={:?} sort_mode={:?} no_icons={} max_history={} renderer={:?}",
+            settings.window_width,
+            settings.window_height,
+            settings.theme,
+            settings.sort_mode,
+            settings.no_icons,
+            settings.max_history,
+            settings.renderer
+        );
+        let theme_colors =
+            ThemeColors::from_mode_with_overrides(&settings.theme, settings.theme_colors.as_ref())
+                .with_opacity(if translucent { settings.opacity } else { 1.0 });
+        let mut addons = addons.clone();
+        clipboard_history::resolve_clipboard_addon(
+            &mut addons.clipboard,
+            clipboard_history::running_cmdlines,
+        );
+        let mut hyprland = hyprland::default_to_hypr_paste(
+            &mut addons.text_snippets,
+            hyprland::in_session(),
+            || hyprland::Hyprland::capture(&settings.terminal_classes),
+        );
+        if hyprland.is_none() && addons.clipboard.uses_hypr_paste() && hyprland::in_session() {
+            hyprland = Some(hyprland::Hyprland::capture(&settings.terminal_classes));
+        }
+        let preview_style = theme::PreviewStyle::resolve(
+            &theme_colors,
+            &settings.preview,
+            settings.font_family.as_deref(),
+            settings.font_sizes.item,
+        );
+        Self {
+            configs: configs.to_vec(),
+            addons,
+            settings: settings.clone(),
+            translucent,
+            theme_colors,
+            preview_style,
+            hyprland,
+            selected_item: Arc::new(Mutex::new(None)),
+            deferred_action: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    fn boot(&self, resident: bool) -> (LauncherApp, Task<types::Message>) {
+        let settings = &self.settings;
+        let (mut app, task) = LauncherApp::new(
+            self.configs.clone(),
+            self.addons.clone(),
+            settings.no_icons,
+            self.selected_item.clone(),
+            settings.initial_query.clone(),
+            self.theme_colors,
+            settings.max_history,
+            settings.font_sizes,
+            settings.sort_mode.clone(),
+            settings.fallbacks.clone(),
+            settings.vim_mode,
+        );
+        if settings.select_1 && !app.search_query.is_empty() {
+            app.select_1_query = Some(app.search_query.clone());
+        }
+        app.initialize_onboarding(
+            settings.config_path.clone(),
+            settings.existing_configuration,
+        );
+        app.text_snippets.clipboard_history = settings.clipboard_history;
+        app.close_on_action = settings.close_on_action;
+        app.print_only = settings.print_only;
+        app.resident = resident;
+        configure_preview_visibility(&mut app.view, settings.show_preview);
+        app.view.preview_style = self.preview_style.clone();
+        app.view.window_size = iced::Size::new(settings.window_width, settings.window_height);
+        app.view.default_script_shell = settings.default_script_shell.clone();
+        app.view.launch_via = settings.launch_via;
+        app.view.raise_running = settings.raise_running;
+        app.view.raise_via = crate::compositor::Compositor::current();
+        app.file_browser.preview_command = file_preview::FilePreviewCommand::resolve(
+            app.addons.file_browser.preview_command.as_deref(),
+            app.program_exists,
+        );
+        app.hyprland = self.hyprland.clone();
+        app.deferred_action = self.deferred_action.clone();
+        app.main_view.chips = settings.main_view_chips;
+        let preload = app.configure_main_view(settings.main_view.as_ref());
+        if settings.show_tips {
+            app.show_search_tip();
+        }
+        let server = Task::perform(browser_data::off_thread(cache::probe), |info| {
+            types::Message::CacheServerStatus(info.flatten())
+        });
+        crate::debug::mark("app booted");
+        (app, Task::batch([task, preload, server]))
+    }
+
+    fn iced_theme(&self) -> iced::Theme {
+        if self.settings.theme.is_light() {
+            iced::Theme::Light
+        } else {
+            iced::Theme::Dark
+        }
+    }
+
+    /// iced clears the window with the theme's opaque background; clear it
+    /// transparent so the rounded frame and `opacity` show what is behind.
+    fn style(&self, theme: &iced::Theme) -> iced::theme::Style {
+        let palette = theme.palette();
+        iced::theme::Style {
+            background_color: if self.translucent {
+                iced::Color::TRANSPARENT
+            } else {
+                palette.background
+            },
+            text_color: palette.text,
+        }
+    }
+
+    fn window_settings(&self) -> window::Settings {
+        let settings = &self.settings;
+        window::Settings {
+            size: iced::Size::new(settings.window_width, settings.window_height),
+            position: window::Position::Centered,
+            decorations: false,
+            transparent: true,
+            blur: settings.blur,
+            visible: true,
+            level: window::Level::AlwaysOnTop,
+            #[cfg(target_os = "linux")]
+            platform_specific: window::settings::PlatformSpecific {
+                application_id: settings
+                    .app_name
+                    .as_deref()
+                    .unwrap_or("com.chmouel.raffi")
+                    .to_string(),
+                ..Default::default()
+            },
+            #[cfg(not(target_os = "linux"))]
+            platform_specific: Default::default(),
+            ..Default::default()
+        }
+    }
+
+    /// Once the window is gone: run the action queued for after close, then
+    /// return the launcher entry picked, empty when none was.
+    fn finish(&self) -> Result<String> {
+        actions::run_deferred(&self.deferred_action).map_err(|error| anyhow::anyhow!(error))?;
+        Ok(self
+            .selected_item
+            .lock()
+            .ok()
+            .and_then(|selected| selected.clone())
+            .unwrap_or_default())
+    }
+}
+
+fn default_font(family: &str) -> iced::Font {
+    iced::Font {
+        family: iced::font::Family::Name(Box::leak(family.to_string().into_boxed_str())),
+        ..iced::Font::default()
+    }
+}
+
 /// Run the Wayland UI with the provided configurations and return the selected item.
 fn run_wayland_ui(
     configs: &[RaffiConfig],
@@ -172,171 +358,22 @@ fn run_wayland_ui(
 ) -> Result<String> {
     let translucent = select_renderer(settings.renderer);
     prewarm_fonts();
-    crate::debug_log!(
-        "wayland: starting UI: {}x{} theme={:?} sort_mode={:?} no_icons={} max_history={} renderer={:?}",
-        settings.window_width,
-        settings.window_height,
-        settings.theme,
-        settings.sort_mode,
-        settings.no_icons,
-        settings.max_history,
-        settings.renderer
-    );
-    let theme_colors =
-        ThemeColors::from_mode_with_overrides(&settings.theme, settings.theme_colors.as_ref())
-            .with_opacity(if translucent { settings.opacity } else { 1.0 });
-    let iced_theme = if settings.theme.is_light() {
-        iced::Theme::Light
-    } else {
-        iced::Theme::Dark
-    };
-    let selected_item: SharedSelection = Arc::new(Mutex::new(None));
-    let selected_item_clone = selected_item.clone();
-    let mut addons = addons.clone();
-    clipboard_history::resolve_clipboard_addon(
-        &mut addons.clipboard,
-        clipboard_history::running_cmdlines,
-    );
-    let mut hyprland =
-        hyprland::default_to_hypr_paste(&mut addons.text_snippets, hyprland::in_session(), || {
-            hyprland::Hyprland::capture(&settings.terminal_classes)
-        });
-    if hyprland.is_none() && addons.clipboard.uses_hypr_paste() && hyprland::in_session() {
-        hyprland = Some(hyprland::Hyprland::capture(&settings.terminal_classes));
-    }
-    let deferred_action = Arc::new(Mutex::new(None::<actions::DeferredAction>));
-    let deferred_action_for_new = deferred_action.clone();
-
-    let configs_owned = configs.to_vec();
-    let addons_owned = addons.clone();
-
-    let configs_for_new = configs_owned.clone();
-    let addons_for_new = addons_owned.clone();
-    let selected_item_for_new = selected_item_clone.clone();
-    let initial_query_owned = settings.initial_query.clone();
-    let config_path = settings.config_path.clone();
-    let existing_configuration = settings.existing_configuration;
-    let no_icons = settings.no_icons;
-    let max_history = settings.max_history;
-    let font_sizes = settings.font_sizes;
-    let window_width = settings.window_width;
-    let window_height = settings.window_height;
-    let sort_mode = settings.sort_mode.clone();
-    let fallbacks = settings.fallbacks.clone();
-    let main_view = settings.main_view.clone();
-    let main_view_chips = settings.main_view_chips;
-    let clipboard_history = settings.clipboard_history;
-    let show_preview = settings.show_preview;
-    let show_tips = settings.show_tips;
-    let vim_mode = settings.vim_mode;
-    let close_on_action = settings.close_on_action;
-    let print_only = settings.print_only;
-    let select_1 = settings.select_1;
-    let preview_style = theme::PreviewStyle::resolve(
-        &theme_colors,
-        &settings.preview,
-        settings.font_family.as_deref(),
-        settings.font_sizes.item,
-    );
-    let default_script_shell = settings.default_script_shell.clone();
-    let launch_via = settings.launch_via;
-    let raise_running = settings.raise_running;
-
-    let window_settings = window::Settings {
-        size: iced::Size::new(window_width, window_height),
-        position: window::Position::Centered,
-        decorations: false,
-        transparent: true,
-        blur: settings.blur,
-        visible: true,
-        level: window::Level::AlwaysOnTop,
-        #[cfg(target_os = "linux")]
-        platform_specific: window::settings::PlatformSpecific {
-            application_id: settings
-                .app_name
-                .as_deref()
-                .unwrap_or("com.chmouel.raffi")
-                .to_string(),
-            ..Default::default()
-        },
-        #[cfg(not(target_os = "linux"))]
-        platform_specific: Default::default(),
-        ..Default::default()
-    };
+    let launch = Arc::new(Launch::prepare(configs, addons, settings, translucent));
+    let window_settings = launch.window_settings();
+    let (boot, theme, style) = (launch.clone(), launch.clone(), launch.clone());
 
     let mut app = iced::application(
-        move || {
-            let (mut app, task) = LauncherApp::new(
-                configs_for_new.clone(),
-                addons_for_new.clone(),
-                no_icons,
-                selected_item_for_new.clone(),
-                initial_query_owned.clone(),
-                theme_colors,
-                max_history,
-                font_sizes,
-                sort_mode.clone(),
-                fallbacks.clone(),
-                vim_mode,
-            );
-            if select_1 && !app.search_query.is_empty() {
-                app.select_1_query = Some(app.search_query.clone());
-            }
-            app.initialize_onboarding(config_path.clone(), existing_configuration);
-            app.text_snippets.clipboard_history = clipboard_history;
-            app.close_on_action = close_on_action;
-            app.print_only = print_only;
-            configure_preview_visibility(&mut app.view, show_preview);
-            app.view.preview_style = preview_style.clone();
-            app.view.window_size = iced::Size::new(window_width, window_height);
-            app.view.default_script_shell = default_script_shell.clone();
-            app.view.launch_via = launch_via;
-            app.view.raise_running = raise_running;
-            app.view.raise_via = crate::compositor::Compositor::current();
-            app.file_browser.preview_command = file_preview::FilePreviewCommand::resolve(
-                app.addons.file_browser.preview_command.as_deref(),
-                app.program_exists,
-            );
-            app.hyprland = hyprland.clone();
-            app.deferred_action = deferred_action_for_new.clone();
-            app.main_view.chips = main_view_chips;
-            let preload = app.configure_main_view(main_view.as_ref());
-            if show_tips {
-                app.show_search_tip();
-            }
-            let server = Task::perform(browser_data::off_thread(cache::probe), |info| {
-                types::Message::CacheServerStatus(info.flatten())
-            });
-            crate::debug::mark("app booted");
-            (app, Task::batch([task, preload, server]))
-        },
+        move || boot.boot(false),
         LauncherApp::update,
         LauncherApp::view,
     )
     .subscription(LauncherApp::subscription)
-    .theme(move |_state: &LauncherApp| iced_theme.clone())
-    // iced clears the window with the theme's opaque background; clear it
-    // transparent so the rounded frame and `opacity` show what is behind.
-    .style(move |_state: &LauncherApp, theme: &iced::Theme| {
-        let palette = theme.palette();
-        iced::theme::Style {
-            background_color: if translucent {
-                iced::Color::TRANSPARENT
-            } else {
-                palette.background
-            },
-            text_color: palette.text,
-        }
-    })
+    .theme(move |_state: &LauncherApp| theme.iced_theme())
+    .style(move |_state: &LauncherApp, iced_theme: &iced::Theme| style.style(iced_theme))
     .window(window_settings);
 
     if let Some(ref family) = settings.font_family {
-        let family_owned = family.clone();
-        let family_static: &'static str = Box::leak(family_owned.into_boxed_str());
-        app = app.default_font(iced::Font {
-            family: iced::font::Family::Name(family_static),
-            ..iced::Font::default()
-        });
+        app = app.default_font(default_font(family));
     }
 
     let result = app.run();
@@ -346,15 +383,7 @@ fn run_wayland_ui(
         return Err(anyhow::anyhow!("Failed to run UI: {:?}", error));
     }
 
-    actions::run_deferred(&deferred_action).map_err(|error| anyhow::anyhow!(error))?;
-
-    if let Ok(selected) = selected_item.lock() {
-        if let Some(item) = selected.clone() {
-            return Ok(item);
-        }
-    }
-
-    Ok(String::new())
+    launch.finish()
 }
 
 /// Run the optional background cache service.

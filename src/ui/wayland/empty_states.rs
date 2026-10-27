@@ -174,6 +174,6 @@ impl LauncherApp {
                 format!("https://chmouel.github.io/raffi/features/{page}/"),
             ]));
         }
-        iced::exit()
+        self.exit()
     }
 }

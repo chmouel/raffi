@@ -326,7 +326,7 @@ impl LauncherApp {
         match outcome {
             Ok(()) => {
                 if is_hypr_paste || self.should_close(self.addons.clipboard.close_on_action) {
-                    iced::exit()
+                    self.exit()
                 } else {
                     Task::none()
                 }

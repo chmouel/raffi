@@ -836,4 +836,6 @@ pub(super) struct LauncherApp {
     pub help_saved_query: Option<String>,
     pub close_on_action: Option<bool>,
     pub print_only: bool,
+    /// Owned by `raffi --server`: closing ends the window, not the process.
+    pub resident: bool,
 }

@@ -1212,6 +1212,7 @@ impl LauncherApp {
                 drag: None,
                 close_on_action: None,
                 print_only: false,
+                resident: false,
             },
             {
                 let mut task = if vim_mode {
@@ -1231,10 +1232,19 @@ impl LauncherApp {
         addon_close.or(self.close_on_action).unwrap_or(true)
     }
 
+    /// Close Raffi: end the process, or only the window when resident.
+    pub(super) fn exit(&self) -> Task<Message> {
+        if self.resident {
+            iced::window::oldest().and_then(iced::window::close)
+        } else {
+            iced::exit()
+        }
+    }
+
     pub(super) fn finish_or_keep_open(&mut self, addon_close: Option<bool>) -> Task<Message> {
         self.save_query_to_history();
         if self.should_close(addon_close) {
-            iced::exit()
+            self.exit()
         } else {
             Task::none()
         }
@@ -1578,7 +1588,7 @@ impl LauncherApp {
                     }
                     return Task::none();
                 }
-                iced::exit()
+                self.exit()
             }
             Message::PromptChanged(value) => {
                 let busy = self.vault.busy();
@@ -3219,12 +3229,12 @@ impl LauncherApp {
                 if let Ok(mut slot) = self.deferred_action.lock() {
                     *slot = Some(super::actions::DeferredAction::Secret(job));
                 }
-                iced::exit()
+                self.exit()
             }
             Outcome::Done if matches!(op.kind, OpKind::Copy(_)) => Task::none(),
             Outcome::Done if op.kind == OpKind::Lock => {
                 if self.should_close(addon_close) {
-                    iced::exit()
+                    self.exit()
                 } else {
                     Task::none()
                 }
@@ -3401,7 +3411,7 @@ impl LauncherApp {
         if let Ok(mut selected) = self.selected_item.lock() {
             *selected = Some(description);
         }
-        iced::exit()
+        self.exit()
     }
 
     /// Focus the launcher's open window found on Enter, or start it when
@@ -3438,7 +3448,7 @@ impl LauncherApp {
         if let Ok(mut slot) = self.deferred_action.lock() {
             *slot = Some(focus);
         }
-        iced::exit()
+        self.exit()
     }
 
     /// Reload the window switcher after the compositor reported a change,
@@ -4103,7 +4113,7 @@ impl LauncherApp {
             return self.update(Message::FallbackSelected(fallback_index));
         }
 
-        iced::exit()
+        self.exit()
     }
 
     fn handle_inline_selected(&mut self, index: usize) -> Task<Message> {
@@ -4616,7 +4626,7 @@ impl LauncherApp {
         }
         if force_close {
             self.save_query_to_history();
-            iced::exit()
+            self.exit()
         } else {
             self.finish_or_keep_open(addon_close)
         }
@@ -4732,7 +4742,7 @@ impl LauncherApp {
         }
         if force_close {
             self.save_query_to_history();
-            iced::exit()
+            self.exit()
         } else {
             self.finish_or_keep_open(addon_close)
         }
@@ -4773,7 +4783,7 @@ impl LauncherApp {
             Ok(()) => {
                 if pending.action == "insert" {
                     self.save_query_to_history();
-                    iced::exit()
+                    self.exit()
                 } else {
                     let addon_close = self
                         .text_snippets
@@ -4849,7 +4859,7 @@ impl LauncherApp {
         match outcome {
             Ok(()) => {
                 self.save_query_to_history();
-                iced::exit()
+                self.exit()
             }
             Err(error) => {
                 crate::debug_log!("hypr_paste preparation failed: {error}");
@@ -4969,7 +4979,7 @@ impl LauncherApp {
 
         if force_close {
             self.save_query_to_history();
-            iced::exit()
+            self.exit()
         } else {
             self.finish_or_keep_open(self.addons.file_browser.close_on_action)
         }
@@ -5363,7 +5373,7 @@ impl LauncherApp {
         }
         if force_close {
             self.save_query_to_history();
-            iced::exit()
+            self.exit()
         } else {
             self.finish_or_keep_open(self.addons.emoji.close_on_action)
         }
@@ -5432,7 +5442,7 @@ impl LauncherApp {
             *slot = Some(action);
         }
         self.save_query_to_history();
-        iced::exit()
+        self.exit()
     }
 
     /// Ctrl+D on a command list row: run its close action, such as closing
@@ -5856,7 +5866,7 @@ impl LauncherApp {
                     }
                     if act == "insert" {
                         self.save_query_to_history();
-                        return iced::exit();
+                        return self.exit();
                     }
                     return self.finish_or_keep_open(fallback.close_on_action);
                 }
@@ -5882,7 +5892,7 @@ impl LauncherApp {
                         *slot = Some(action);
                     }
                     self.save_query_to_history();
-                    return iced::exit();
+                    return self.exit();
                 }
             }
         }
