@@ -491,12 +491,7 @@ fn item_for_merged(
     let entry = latest.entry;
     let title = title(&merged.occurrences);
     let profiles = profiles(&merged.occurrences);
-    let host = if entry.host.is_empty() {
-        entry.url.as_str()
-    } else {
-        entry.host.as_str()
-    };
-    let mut subtitle = format!("{host} · {}", source.label);
+    let mut subtitle = format!("{} · {}", entry.url, source.label);
     if profiles.len() > 1 {
         subtitle.push_str(&format!(" + {} more", profiles.len() - 1));
     }
@@ -562,12 +557,7 @@ fn item_for_source(
     options: RowOptions,
     now: DateTime<Local>,
 ) -> CommandItem {
-    let host = if entry.host.is_empty() {
-        entry.url.as_str()
-    } else {
-        entry.host.as_str()
-    };
-    let mut subtitle = format!("{host} · {}", source.label);
+    let mut subtitle = format!("{} · {}", entry.url, source.label);
     if totals.typed > 0 {
         subtitle.push_str(" · typed");
     }
@@ -1756,6 +1746,44 @@ mod tests {
             .iter()
             .any(|(key, value)| key == "Profiles" && value == "Brave, Firefox"));
         assert!(raffi.badge.is_some());
+        assert_eq!(
+            raffi.subtitle,
+            "https://github.com/chmouel/raffi?utm_source=news · Brave + 1 more · typed"
+        );
+    }
+
+    #[test]
+    fn test_history_subtitles_distinguish_pages_with_the_same_title() {
+        let mut library = fixture_group_library("Firefox");
+        let urls = [
+            "https://chatgpt.com/codex/settings/usage",
+            "https://chatgpt.com/codex/settings/usage?period=weekly#limits",
+        ];
+        library.sources[0].entries = urls
+            .iter()
+            .map(|url| {
+                Entry::new(
+                    canonical_url(url).unwrap(),
+                    (*url).to_string(),
+                    "Settings".to_string(),
+                    1_700_000_000,
+                    1,
+                    0,
+                )
+            })
+            .collect();
+        for view in [View::Recent, View::ByBrowser] {
+            let rows = rows(&library, view, &Filters::default(), options());
+            assert_eq!(rows.items.len(), urls.len());
+            for url in urls {
+                let item = rows
+                    .items
+                    .iter()
+                    .find(|item| item.subtitle == format!("{url} · Firefox"))
+                    .unwrap();
+                assert_eq!(item.title, "Settings");
+            }
+        }
     }
 
     #[test]

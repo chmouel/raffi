@@ -11,15 +11,16 @@ Type `hist ` (with the trailing space) to search the pages you visited in
 your browsers. Raffi reads the history databases directly, so there is no
 extension to install and the browser does not need to be running.
 
-<Image src={browserHistoryScreenshot} alt="Recent browser history rows with their site, profile and relative visit time" width={800} />
+<Image src={browserHistoryScreenshot} alt="Recent browser history rows with their URL, profile and relative visit time" width={800} />
 
 Words after the keyword match titles, addresses, browser names and profile
 names. Matching is literal and case-insensitive: every word must appear as a
 substring, and pages where a word starts with it rank first. At the same prefix
 quality, matches in the address rank before matches in the title. Results
 refresh one second after you stop typing; pressing Enter applies the pending
-search immediately. Each row shows the profile it came from; when a browser
-has several, its pages are grouped by profile.
+search immediately. Each row shows the page URL beneath its title, so pages
+with the same title can be told apart. It also shows the profile it came from;
+when a browser has several, its pages are grouped by profile.
 
 | Key            | Action                                      |
 |----------------|---------------------------------------------|

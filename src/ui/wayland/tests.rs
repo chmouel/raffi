@@ -11903,6 +11903,10 @@ fn test_browser_history_stale_debounce_after_leaving_is_ignored() {
 fn test_browser_history_filters_and_opens_pages() {
     let mut app = browser_history_app("hist site:github.com");
     assert_eq!(command_list_titles(&app), ["Raffi"]);
+    assert_eq!(
+        app.command_list.items[app.command_list.filtered[0]].subtitle,
+        "https://github.com/chmouel/raffi · Firefox · typed"
+    );
     let _ = app.update(Message::CommandListSelected(0));
     assert!(matches!(
         deferred_action(&app),

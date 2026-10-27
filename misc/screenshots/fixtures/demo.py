@@ -189,6 +189,7 @@ def _firefox_history(conn):
     rows = [
         ("https://news.ycombinator.com/", "Hacker News", 120, 12, now - 30 * 60),
         ("https://raffi.example.com/guide", "Raffi guide", 42, 3, now - 2 * 60 * 60),
+        ("https://raffi.example.com/guide/configuration", "Raffi guide", 18, 0, now - 150 * 60),
         ("https://github.com/chmouel/raffi", "Raffi on GitHub", 15, 2, now - 3 * 60 * 60),
         ("https://doc.rust-lang.org/std/", "Rust standard library", 8, 1, now - 26 * 60 * 60),
         ("https://en.wikipedia.org/wiki/Rust_(programming_language)", "Rust (programming language)", 9, 0, now - 2 * 86400),
