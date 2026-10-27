@@ -1,14 +1,16 @@
-//! Small raster copies of launcher icons. iced decodes an image in full to lay
+//! Small raster copies of icons. iced decodes an image in full to lay
 //! it out and scales it down on every draw, so a 1024px icon shown at 40px
 //! costs milliseconds on each launch, and its SVG renderer scans every system
 //! font before drawing the first SVG. Thumbnails are written in the background
 //! and used from the next launch on.
 
-use std::cell::OnceCell;
+use std::cell::{OnceCell, RefCell};
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use resvg::usvg::fontdb;
@@ -27,19 +29,61 @@ pub(super) fn substitute(paths: &mut [Option<String>]) {
     let Some(dir) = thumbnail_dir() else {
         return;
     };
-    let missing = substitute_in(&dir, paths);
-    if missing.is_empty() {
-        return;
+    for (source, thumbnail) in substitute_in(&dir, paths) {
+        queue(source, thumbnail);
     }
-    std::thread::spawn(move || {
-        remove_stale_partials(&dir);
-        let fonts = OnceCell::new();
-        for (source, thumbnail) in missing {
-            if let Err(error) = write_thumbnail(&source, &thumbnail, &fonts) {
-                crate::debug_log!("icons: no thumbnail for {}: {error}", source.display());
-            }
+}
+
+thread_local! {
+    static SVG_THUMBNAILS: RefCell<HashMap<PathBuf, Option<PathBuf>>> =
+        RefCell::new(HashMap::new());
+}
+
+/// The thumbnail to draw instead of an SVG icon resolved by the view, or
+/// `None` until one is written, in which case it is queued. Looked up once
+/// per icon and process, since the view runs on every update.
+pub(super) fn for_svg(source: &Path) -> Option<PathBuf> {
+    SVG_THUMBNAILS.with_borrow_mut(|thumbnails| {
+        if let Some(thumbnail) = thumbnails.get(source) {
+            return thumbnail.clone();
         }
+        let thumbnail = thumbnail_dir()
+            .and_then(|dir| thumbnail_path(&dir, source))
+            .and_then(|thumbnail| {
+                if thumbnail.exists() {
+                    return Some(thumbnail);
+                }
+                queue(source.to_path_buf(), thumbnail);
+                None
+            });
+        thumbnails.insert(source.to_path_buf(), thumbnail.clone());
+        thumbnail
+    })
+}
+
+/// Write `thumbnail` on the one background thread that writes them all, so
+/// system fonts are loaded at most once per process.
+fn queue(source: PathBuf, thumbnail: PathBuf) {
+    static WORKER: OnceLock<Sender<(PathBuf, PathBuf)>> = OnceLock::new();
+    let worker = WORKER.get_or_init(|| {
+        let (sender, receiver) = std::sync::mpsc::channel::<(PathBuf, PathBuf)>();
+        std::thread::spawn(move || {
+            if let Some(dir) = thumbnail_dir() {
+                remove_stale_partials(&dir);
+            }
+            let fonts = OnceCell::new();
+            for (source, thumbnail) in receiver {
+                if thumbnail.exists() {
+                    continue;
+                }
+                if let Err(error) = write_thumbnail(&source, &thumbnail, &fonts) {
+                    crate::debug_log!("icons: no thumbnail for {}: {error}", source.display());
+                }
+            }
+        });
+        sender
     });
+    let _ = worker.send((source, thumbnail));
 }
 
 fn thumbnail_dir() -> Option<PathBuf> {

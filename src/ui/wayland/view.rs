@@ -589,7 +589,8 @@ fn faded_icon_element<'a>(path: &Path, size: f32, opacity: f32) -> Option<Elemen
         .map(|ext| ext.eq_ignore_ascii_case("svg"))
         .unwrap_or(false);
 
-    Some(if is_svg {
+    let thumbnail = is_svg.then(|| super::thumbnails::for_svg(path)).flatten();
+    Some(if is_svg && thumbnail.is_none() {
         svg(iced::widget::svg::Handle::from_path(path))
             .width(Length::Fixed(size))
             .height(Length::Fixed(size))
@@ -597,7 +598,7 @@ fn faded_icon_element<'a>(path: &Path, size: f32, opacity: f32) -> Option<Elemen
             .opacity(opacity)
             .into()
     } else {
-        image(PathBuf::from(path))
+        image(thumbnail.unwrap_or_else(|| path.to_path_buf()))
             .width(Length::Fixed(size))
             .height(Length::Fixed(size))
             .content_fit(iced::ContentFit::Contain)
@@ -2343,27 +2344,7 @@ impl LauncherApp {
                 let icon_path = self.script_filter_icon(item, sf_result);
 
                 if let Some(icon_path_str) = icon_path {
-                    let icon_path = PathBuf::from(&icon_path_str);
-                    if icon_path.exists() {
-                        let is_svg = icon_path
-                            .extension()
-                            .and_then(|ext| ext.to_str())
-                            .map(|ext| ext.eq_ignore_ascii_case("svg"))
-                            .unwrap_or(false);
-
-                        let icon_content: Element<Message> = if is_svg {
-                            svg(iced::widget::svg::Handle::from_path(&icon_path))
-                                .width(Length::Fixed(40.0))
-                                .height(Length::Fixed(40.0))
-                                .content_fit(iced::ContentFit::Contain)
-                                .into()
-                        } else {
-                            image(icon_path)
-                                .width(Length::Fixed(40.0))
-                                .height(Length::Fixed(40.0))
-                                .content_fit(iced::ContentFit::Contain)
-                                .into()
-                        };
+                    if let Some(icon_content) = icon_element(Path::new(&icon_path_str), 40.0) {
                         item_row = item_row.push(icon_content);
                     }
                 }
@@ -2778,27 +2759,7 @@ impl LauncherApp {
                         mimetype_icon_name(&entry.full_path)
                     };
                     if let Some(icon_path_str) = self.icon_map.get(icon_name) {
-                        let icon_path = PathBuf::from(icon_path_str);
-                        if icon_path.exists() {
-                            let is_svg = icon_path
-                                .extension()
-                                .and_then(|ext| ext.to_str())
-                                .map(|ext| ext.eq_ignore_ascii_case("svg"))
-                                .unwrap_or(false);
-
-                            let icon_content: Element<Message> = if is_svg {
-                                svg(iced::widget::svg::Handle::from_path(&icon_path))
-                                    .width(Length::Fixed(40.0))
-                                    .height(Length::Fixed(40.0))
-                                    .content_fit(iced::ContentFit::Contain)
-                                    .into()
-                            } else {
-                                image(icon_path)
-                                    .width(Length::Fixed(40.0))
-                                    .height(Length::Fixed(40.0))
-                                    .content_fit(iced::ContentFit::Contain)
-                                    .into()
-                            };
+                        if let Some(icon_content) = icon_element(Path::new(icon_path_str), 40.0) {
                             item_row = item_row.push(icon_content);
                         }
                     }
@@ -2848,27 +2809,7 @@ impl LauncherApp {
 
             if let Some(icon_name) = &ws.icon {
                 if let Some(icon_path_str) = self.icon_map.get(icon_name) {
-                    let icon_path = PathBuf::from(icon_path_str);
-                    if icon_path.exists() {
-                        let is_svg = icon_path
-                            .extension()
-                            .and_then(|ext| ext.to_str())
-                            .map(|ext| ext.eq_ignore_ascii_case("svg"))
-                            .unwrap_or(false);
-
-                        let icon_content: Element<Message> = if is_svg {
-                            svg(iced::widget::svg::Handle::from_path(&icon_path))
-                                .width(Length::Fixed(40.0))
-                                .height(Length::Fixed(40.0))
-                                .content_fit(iced::ContentFit::Contain)
-                                .into()
-                        } else {
-                            image(icon_path)
-                                .width(Length::Fixed(40.0))
-                                .height(Length::Fixed(40.0))
-                                .content_fit(iced::ContentFit::Contain)
-                                .into()
-                        };
+                    if let Some(icon_content) = icon_element(Path::new(icon_path_str), 40.0) {
                         ws_row = ws_row.push(icon_content);
                     }
                 }
@@ -3150,27 +3091,7 @@ impl LauncherApp {
 
                 let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
                 if let Some(icon_path_str) = self.launcher_icon_paths[config_idx].clone() {
-                    let icon_path = PathBuf::from(&icon_path_str);
-                    if icon_path.exists() {
-                        let is_svg = icon_path
-                            .extension()
-                            .and_then(|ext| ext.to_str())
-                            .map(|ext| ext.eq_ignore_ascii_case("svg"))
-                            .unwrap_or(false);
-
-                        let icon_content: Element<Message> = if is_svg {
-                            svg(iced::widget::svg::Handle::from_path(&icon_path))
-                                .width(Length::Fixed(40.0))
-                                .height(Length::Fixed(40.0))
-                                .content_fit(iced::ContentFit::Contain)
-                                .into()
-                        } else {
-                            image(icon_path)
-                                .width(Length::Fixed(40.0))
-                                .height(Length::Fixed(40.0))
-                                .content_fit(iced::ContentFit::Contain)
-                                .into()
-                        };
+                    if let Some(icon_content) = icon_element(Path::new(&icon_path_str), 40.0) {
                         item_row = item_row.push(icon_content);
                     }
                 }
@@ -3197,27 +3118,7 @@ impl LauncherApp {
 
                 if let Some(icon_name) = &fallback.icon {
                     if let Some(icon_path_str) = self.icon_map.get(icon_name) {
-                        let icon_path = PathBuf::from(icon_path_str);
-                        if icon_path.exists() {
-                            let is_svg = icon_path
-                                .extension()
-                                .and_then(|ext| ext.to_str())
-                                .map(|ext| ext.eq_ignore_ascii_case("svg"))
-                                .unwrap_or(false);
-
-                            let icon_content: Element<Message> = if is_svg {
-                                svg(iced::widget::svg::Handle::from_path(&icon_path))
-                                    .width(Length::Fixed(40.0))
-                                    .height(Length::Fixed(40.0))
-                                    .content_fit(iced::ContentFit::Contain)
-                                    .into()
-                            } else {
-                                image(icon_path)
-                                    .width(Length::Fixed(40.0))
-                                    .height(Length::Fixed(40.0))
-                                    .content_fit(iced::ContentFit::Contain)
-                                    .into()
-                            };
+                        if let Some(icon_content) = icon_element(Path::new(icon_path_str), 40.0) {
                             item_row = item_row.push(icon_content);
                         }
                     }
