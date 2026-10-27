@@ -233,6 +233,23 @@ impl ScoredMatch {
     pub const fn sort_key(self) -> (MatchQuality, std::cmp::Reverse<u32>) {
         (self.quality, std::cmp::Reverse(self.score))
     }
+
+    /// Like `sort_key`, with rows used before ranked first among matches
+    /// of the same quality.
+    pub const fn used_sort_key(
+        self,
+        used: bool,
+    ) -> (
+        MatchQuality,
+        std::cmp::Reverse<bool>,
+        std::cmp::Reverse<u32>,
+    ) {
+        (
+            self.quality,
+            std::cmp::Reverse(used),
+            std::cmp::Reverse(self.score),
+        )
+    }
 }
 
 #[derive(Debug, Clone)]

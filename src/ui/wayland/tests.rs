@@ -9292,6 +9292,180 @@ fn test_main_view_ranks_individual_rows_across_sources() {
     assert_eq!(app.selected_main_row(), Some(MainRowRef::Launcher(1)));
 }
 
+fn used_launcher_entry() -> super::support::MruEntry {
+    super::support::MruEntry {
+        count: 1,
+        last_used: 1,
+    }
+}
+
+#[test]
+fn test_main_view_ranks_used_rows_first_within_a_match_quality() {
+    use super::main_view::MainRowRef;
+    let launchers = ["Mailbox", "Work mail"]
+        .into_iter()
+        .map(|title| RaffiConfig {
+            description: Some(title.into()),
+            binary: Some("client".into()),
+            ..Default::default()
+        })
+        .collect();
+    let mut app = main_view_app(
+        &["browser_tabs", "launchers"],
+        launchers,
+        AddonsConfig::default(),
+    );
+    app.mru_map
+        .insert("Work mail".into(), used_launcher_entry());
+    load_main_view_tabs(&mut app);
+    let _ = app.update(Message::SearchChanged("mail".into()));
+    // The unused tab titled exactly "Mail" still comes first.
+    assert_eq!(
+        app.main_view.ordered_rows[..3],
+        [
+            MainRowRef::Source { source: 0, row: 0 },
+            MainRowRef::Launcher(1),
+            MainRowRef::Launcher(0),
+        ]
+    );
+}
+
+#[test]
+fn test_main_view_ranks_recently_picked_rows_first() {
+    use crate::browser_host::{Browser, Listing, Tab};
+    let tab = |id, title: &str, url: &str| Tab {
+        id,
+        title: title.into(),
+        url: url.into(),
+        ..Tab::default()
+    };
+    let items = super::browser_tabs::tab_items(
+        &[(
+            std::path::PathBuf::from("/run/raffi/browsers/10.sock"),
+            Listing {
+                browser: Browser {
+                    id: "firefox".into(),
+                    name: "Firefox".into(),
+                    pid: Some(9),
+                },
+                tabs: (1..=5)
+                    .map(|id| tab(id, &format!("Workday {id}"), "https://workday.example.com/"))
+                    .chain(std::iter::once(tab(
+                        6,
+                        "ChatGPT Work",
+                        "https://chatgpt.example.com/",
+                    )))
+                    .collect(),
+            },
+        )],
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+    let picked = items
+        .iter()
+        .find(|item| item.title == "ChatGPT Work")
+        .unwrap()
+        .identity
+        .clone();
+    let mut app = main_view_app(&["browser_tabs"], Vec::new(), AddonsConfig::default());
+    let super::main_view::Source::List(list) = &app.main_view.sources[0] else {
+        panic!("command list source");
+    };
+    let generation = list.generation;
+    let _ = app.update(Message::MainViewLoaded(0, generation, Ok(items)));
+    let _ = app.update(Message::SearchChanged("work".into()));
+    assert_eq!(
+        main_view_titles(&app),
+        [
+            "Workday 1",
+            "Workday 2",
+            "Workday 3",
+            "Workday 4",
+            "Workday 5"
+        ]
+    );
+
+    app.main_view.recent = vec![recent_pick("browser_tabs", &picked)];
+    let _ = app.update(Message::SearchChanged("wor".into()));
+    let _ = app.update(Message::SearchChanged("work".into()));
+    assert_eq!(
+        main_view_titles(&app),
+        [
+            "ChatGPT Work",
+            "Workday 1",
+            "Workday 2",
+            "Workday 3",
+            "Workday 4"
+        ]
+    );
+    assert_eq!(app.main_view.more_count(0), 1);
+}
+
+#[test]
+fn test_main_view_ranks_used_snippets_before_capping() {
+    for recent in [false, true] {
+        let mut addons = AddonsConfig::default();
+        addons
+            .text_snippets
+            .push(snippet_source("Notes", "nt", Vec::new()));
+        let mut app = main_view_app(&["text_snippets.Notes"], Vec::new(), addons);
+        let snippets = (1..=5)
+            .map(|id| snippet(&format!("Workday {id}"), "note"))
+            .chain(std::iter::once(snippet("ChatGPT Work", "note")))
+            .collect();
+        let _ = app.update(Message::MainViewSnippetsLoaded(0, Ok(snippets)));
+        let _ = app.update(Message::SearchChanged("work".into()));
+        assert_eq!(
+            main_view_titles(&app),
+            [
+                "Workday 1",
+                "Workday 2",
+                "Workday 3",
+                "Workday 4",
+                "Workday 5"
+            ]
+        );
+
+        if recent {
+            app.main_view.recent = vec![recent_pick("text_snippets.Notes", "ChatGPT Work")];
+        } else {
+            app.text_snippets
+                .mru_map
+                .insert("nt:ChatGPT Work".into(), used_launcher_entry());
+        }
+        let _ = app.update(Message::SearchChanged("wor".into()));
+        let _ = app.update(Message::SearchChanged("work".into()));
+        assert_eq!(
+            main_view_titles(&app),
+            [
+                "ChatGPT Work",
+                "Workday 1",
+                "Workday 2",
+                "Workday 3",
+                "Workday 4"
+            ]
+        );
+        assert_eq!(app.main_view.more_count(0), 1);
+    }
+}
+
+#[test]
+fn test_launcher_list_ranks_used_launchers_first() {
+    let mut app = test_app(AddonsConfig::default());
+    app.configs = ["Workday", "ChatGPT Work"]
+        .into_iter()
+        .map(|title| RaffiConfig {
+            description: Some(title.into()),
+            binary: Some("browser".into()),
+            ..Default::default()
+        })
+        .collect();
+    app.mru_map
+        .insert("ChatGPT Work".into(), used_launcher_entry());
+    let _ = app.update(Message::SearchChanged("work".into()));
+    assert_eq!(app.filtered_configs, vec![1, 0]);
+}
+
 #[test]
 fn test_main_view_script_filter_follows_local_rows() {
     use super::main_view::MainRowRef;

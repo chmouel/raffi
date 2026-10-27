@@ -5657,12 +5657,21 @@ impl LauncherApp {
         } else if query.is_empty() {
             self.filtered_configs = (0..self.configs.len()).collect();
         } else {
-            let scored = super::support::score_configs_with_documents(
+            let mut scored = super::support::score_configs_with_documents(
                 &self.configs,
                 Some(&self.launcher_documents),
                 query,
                 log_query,
             );
+            scored.sort_by_key(|&(index, score)| {
+                let config = &self.configs[index];
+                let key = config
+                    .description
+                    .as_deref()
+                    .or(config.binary.as_deref())
+                    .unwrap_or_default();
+                score.used_sort_key(self.mru_map.contains_key(key))
+            });
             for &(index, score) in &scored {
                 self.filtered_config_scores[index] = Some(score);
             }

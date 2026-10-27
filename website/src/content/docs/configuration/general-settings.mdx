@@ -181,7 +181,7 @@ Maximum number of search query history entries.
 
 **`sort_mode`** `string` (default: `hybrid`)
 
-Controls how apps and entries, [text snippets](../../features/text-snippets/#snippet-keywords-and-search), [password store](../../features/password-store/) entries and [Bitwarden](../../features/bitwarden/) logins are ordered by past use. With no search query they are listed in this order; while typing, relevance comes first and past use breaks ties within a source. Valid options:
+Controls how apps and entries, [text snippets](../../features/text-snippets/#snippet-keywords-and-search), [password store](../../features/password-store/) entries and [Bitwarden](../../features/bitwarden/) logins are ordered by past use. With no search query they are listed in this order; while typing, relevance comes first, then what you have used before ranks above what you have not, and past use breaks the remaining ties within a source. Valid options:
   - `frequency` - Sort by launch count (most frequently used first)
   - `recency` - Sort by last-used time (most recently used first)
   - `hybrid` - Combined score: 40% frequency + 60% recency (default)

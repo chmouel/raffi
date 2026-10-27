@@ -711,6 +711,37 @@ impl MainViewState {
     pub fn source_order(&self, source: usize) -> usize {
         source + usize::from(source >= self.launchers_at)
     }
+
+    /// Whether a recent pick of `source` was made on the row `key`, or on
+    /// the page `url` of a tab.
+    fn picked(&self, source: usize, key: &str, url: Option<&str>) -> bool {
+        let Some(name) = self.names.get(source).and_then(Option::as_deref) else {
+            return false;
+        };
+        let windows = matches!(
+            self.sources.get(source),
+            Some(Source::List(list)) if list.addon == Some(CommandListAddon::Windows)
+        );
+        self.recent.iter().any(|pick| {
+            pick.source == name
+                && (!windows || pick.session == self.window_session)
+                && (pick.key == key || url.is_some_and(|url| pick.url.as_deref() == Some(url)))
+        })
+    }
+
+    /// Whether a list row was used, in its addon's own mode or as a pick.
+    fn list_row_used(&self, source: usize, list: &CommandListState, row: usize) -> bool {
+        list.item(row).is_some_and(|item| {
+            list.usage
+                .get(&item.identity)
+                .is_some_and(|&usage| usage > 0)
+                || self.picked(
+                    source,
+                    &item.identity,
+                    super::browser_tabs::tab_target(item).map(|tab| tab.url.as_str()),
+                )
+        })
+    }
 }
 
 /// The item `pick` was made on and not yet listed: the same identity, or
@@ -1576,6 +1607,7 @@ impl LauncherApp {
                     ranked.push((
                         row,
                         score,
+                        self.mru_map.contains_key(description),
                         self.main_view.launchers_at,
                         usage,
                         self.launcher_ordinals[config],
@@ -1589,35 +1621,18 @@ impl LauncherApp {
             let snippet_usage = matches!(&self.main_view.sources[source], Source::Snippets { .. })
                 .then(|| self.main_view_snippet_usage(source));
             let count = self.main_view.source_rows(source);
-            let mut source_rows: Vec<_> = match &self.main_view.sources[source] {
-                Source::List(list)
-                    if typed
-                        && count > 0
-                        && list.addon == Some(CommandListAddon::BrowserHistory) =>
-                {
-                    let mut rows: Vec<_> = (0..list.filtered.len()).collect();
-                    rows.sort_by_key(|&row| {
-                        (
-                            list.filtered_scores[row].map(|score| score.sort_key()),
-                            std::cmp::Reverse(
-                                list.item(row)
-                                    .and_then(|item| list.usage.get(&item.identity))
-                                    .copied()
-                                    .unwrap_or(0),
-                            ),
-                            list.filtered[row],
-                        )
-                    });
-                    rows
-                }
-                _ => (0..count).collect(),
+            let candidate_count = if typed {
+                self.main_view.source_match_count(source)
+            } else {
+                count
             };
-            source_rows.truncate(count);
-            for row in source_rows {
+            let mut source_rows = Vec::with_capacity(candidate_count);
+            for row in 0..candidate_count {
                 let reference = MainRowRef::Source { source, row };
-                let (score, usage, ordinal) = match &self.main_view.sources[source] {
+                let (score, used, usage, ordinal) = match &self.main_view.sources[source] {
                     Source::List(list) => (
                         list.filtered_scores.get(row).copied().flatten(),
+                        self.main_view.list_row_used(source, list, row),
                         list.item(row)
                             .and_then(|item| list.usage.get(&item.identity))
                             .copied()
@@ -1625,25 +1640,48 @@ impl LauncherApp {
                         list.filtered.get(row).copied().unwrap_or(row),
                     ),
                     Source::Snippets {
+                        items,
                         filtered,
                         filtered_scores,
                         ..
-                    } => (
-                        filtered_scores.get(row).copied().flatten(),
-                        snippet_usage
+                    } => {
+                        let index = filtered.get(row).copied().unwrap_or(row);
+                        let usage = snippet_usage
                             .as_ref()
-                            .and_then(|usage| usage.get(*filtered.get(row).unwrap_or(&row)))
+                            .and_then(|usage| usage.get(index))
                             .copied()
-                            .unwrap_or(0),
-                        filtered.get(row).copied().unwrap_or(row),
-                    ),
-                    Source::ScriptFilter { .. } => (None, 0, row),
+                            .unwrap_or(0);
+                        let picked = items.get(index).is_some_and(|snippet| {
+                            self.main_view.picked(source, &snippet.name, None)
+                        });
+                        (
+                            filtered_scores.get(row).copied().flatten(),
+                            usage > 0 || picked,
+                            usage,
+                            index,
+                        )
+                    }
+                    Source::ScriptFilter { .. } => (None, false, 0, row),
                 };
+                source_rows.push((reference, score, used, usage, ordinal));
+            }
+            if typed {
+                source_rows.sort_by_key(|(_, score, used, usage, ordinal)| {
+                    (
+                        score.map(|score| score.used_sort_key(*used)),
+                        std::cmp::Reverse(*usage),
+                        *ordinal,
+                    )
+                });
+            }
+            source_rows.truncate(count);
+            for (reference, score, used, usage, ordinal) in source_rows {
                 if typed {
                     if let Some(score) = score {
                         ranked.push((
                             reference,
                             score,
+                            used,
                             self.main_view.source_order(source),
                             usage,
                             ordinal,
@@ -1657,9 +1695,9 @@ impl LauncherApp {
             }
         }
         if typed {
-            ranked.sort_by_key(|(_, score, source, usage, ordinal)| {
+            ranked.sort_by_key(|(_, score, used, source, usage, ordinal)| {
                 (
-                    score.sort_key(),
+                    score.used_sort_key(*used),
                     *source,
                     std::cmp::Reverse(*usage),
                     *ordinal,

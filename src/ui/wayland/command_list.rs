@@ -844,7 +844,12 @@ pub(super) fn filter_items_with_documents_into(
         })
     };
     ranked.sort_by_key(|&(_, rank, score, used, _)| {
-        (rank, std::cmp::Reverse(score), std::cmp::Reverse(used))
+        (
+            rank,
+            std::cmp::Reverse(used > 0),
+            std::cmp::Reverse(score),
+            std::cmp::Reverse(used),
+        )
     });
     out.extend(ranked.iter().map(|&(index, _, _, _, _)| index));
     if let Some(scores) = out_scores {
