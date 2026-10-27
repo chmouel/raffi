@@ -4372,11 +4372,7 @@ pub fn run(args: Args) -> Result<()> {
         ui::clear_wayland_caches();
     }
 
-    let default_config_path = format!(
-        "{}/.config/raffi/raffi.yaml",
-        std::env::var("HOME").unwrap_or_default()
-    );
-    let configfile = args.configfile.as_deref().unwrap_or(&default_config_path);
+    let configfile = &default_config_path(&args);
     debug_log!("config: using file {configfile}");
     let config_exists = Path::new(configfile).exists();
     let launchers_path = launchers_file_for(configfile);
@@ -4418,8 +4414,44 @@ pub fn run(args: Args) -> Result<()> {
         eprintln!("Warning: could not write schema files next to config: {e:#}");
     }
 
-    let mut parsed_config = if config_exists {
-        read_config(configfile, &args).context("Failed to read config")?
+    #[cfg(feature = "wayland")]
+    if args.cache_daemon {
+        return ui::run_cache_daemon(load_config(&args, configfile)?);
+    }
+
+    let session = load_session(&args, configfile)?;
+    if session.config.entries.is_empty() {
+        eprintln!("{}", no_valid_config_message(configfile));
+        std::process::exit(1);
+    }
+
+    let ui = ui::get_ui(session.ui_type.clone());
+    let chosen = ui
+        .show(
+            &session.config.entries,
+            &session.config.addons,
+            &session.settings,
+        )
+        .context("Failed to show UI")?;
+    launch_chosen(&session, &args, &chosen)
+}
+
+fn default_config_path(args: &Args) -> String {
+    args.configfile.clone().unwrap_or_else(|| {
+        format!(
+            "{}/.config/raffi/raffi.yaml",
+            std::env::var("HOME").unwrap_or_default()
+        )
+    })
+}
+
+/// Read `configfile`, or the launchers file next to it, with the command-line
+/// overrides from `args` applied.
+fn load_config(args: &Args, configfile: &str) -> Result<ParsedConfig> {
+    let config_exists = Path::new(configfile).exists();
+    let launchers_path = launchers_file_for(configfile);
+    let parsed_config = if config_exists {
+        read_config(configfile, args).context("Failed to read config")?
     } else if launchers_path.exists() {
         let mut root = serde_yaml::Mapping::new();
         root.insert(Value::String("version".to_string()), Value::from(1u64));
@@ -4428,32 +4460,38 @@ pub fn run(args: Args) -> Result<()> {
             Value::Mapping(read_launchers_file(&launchers_path)?),
         );
         let mut raw = Value::Mapping(root);
-        apply_cli_overrides(&mut raw, &args)?;
+        apply_cli_overrides(&mut raw, args)?;
         let config: Config = serde_yaml::from_value(raw).context("cannot parse config")?;
-        process_config(config, &args)?
+        process_config(config, args)?
     } else {
         let mut raw = Value::Mapping(serde_yaml::Mapping::new());
-        apply_cli_overrides(&mut raw, &args)?;
+        apply_cli_overrides(&mut raw, args)?;
         let config: Config = serde_yaml::from_value(raw).context("cannot parse config")?;
-        process_config(config, &args)?
+        process_config(config, args)?
     };
     debug_log!("config: loaded {} entries", parsed_config.entries.len());
     debug::mark("config parsed");
+    Ok(parsed_config)
+}
 
-    #[cfg(feature = "wayland")]
-    if args.cache_daemon {
-        return ui::run_cache_daemon(parsed_config);
-    }
+/// What one launcher window needs: the config with detected applications
+/// merged in, and the UI settings resolved from it and the command line.
+pub(crate) struct Session {
+    pub(crate) config: ParsedConfig,
+    pub(crate) ui_type: UIType,
+    pub(crate) settings: ui::UISettings,
+    default_script_shell: String,
+}
+
+/// Load the config and the installed applications, and resolve the UI
+/// settings. `config.entries` is empty when there is nothing to launch.
+pub(crate) fn load_session(args: &Args, configfile: &str) -> Result<Session> {
+    let mut parsed_config = load_config(args, configfile)?;
 
     if parsed_config.entries.is_empty() {
         let scan = DesktopScan::from_addons(&parsed_config.addons);
         let detected_entries = detect_desktop_entries(&scan, &DefaultBinaryChecker);
-        if detected_entries.is_empty() {
-            eprintln!("{}", no_valid_config_message(configfile));
-            std::process::exit(1);
-        }
-
-        if !parsed_config.addons.apps.enabled {
+        if !detected_entries.is_empty() && !parsed_config.addons.apps.enabled {
             eprintln!(
                 "No valid launchers found in {configfile}; using {} auto-detected desktop applications.",
                 detected_entries.len()
@@ -4534,19 +4572,21 @@ pub fn run(args: Args) -> Result<()> {
     }
 
     let (window_width, window_height) = resolve_window_dimensions(general);
-    let opacity = resolve_opacity(&args, general);
+    let opacity = resolve_opacity(args, general);
 
     // Build UI settings
     let ui_settings = ui::UISettings {
         #[cfg(feature = "wayland")]
         config_path: Some(PathBuf::from(configfile)),
         #[cfg(feature = "wayland")]
-        existing_configuration: [Path::new(configfile), &launchers_path].iter().any(|path| {
-            path.symlink_metadata().map_or_else(
-                |error| error.kind() != std::io::ErrorKind::NotFound,
-                |_| true,
-            )
-        }),
+        existing_configuration: [Path::new(configfile), &launchers_file_for(configfile)]
+            .iter()
+            .any(|path| {
+                path.symlink_metadata().map_or_else(
+                    |error| error.kind() != std::io::ErrorKind::NotFound,
+                    |_| true,
+                )
+            }),
         no_icons,
         initial_query: args.initial_query.clone(),
         select_1: args.select_1,
@@ -4569,7 +4609,7 @@ pub fn run(args: Args) -> Result<()> {
         terminal_classes: general.terminal_classes.clone(),
         show_preview: general.show_preview,
         show_tips: general.show_tips.unwrap_or(true),
-        vim_mode: resolve_vim_mode(&args, general),
+        vim_mode: resolve_vim_mode(args, general),
         close_on_action: general.close_on_action,
         print_only: args.print_only,
         preview: general.preview.clone(),
@@ -4587,26 +4627,32 @@ pub fn run(args: Args) -> Result<()> {
         ui_settings.sort_mode
     );
 
-    // Get the appropriate UI implementation
     if fuzzel_drops_aliases {
         eprintln!("Warning: launchers with alias are hidden with ui_type: fuzzel.");
         parsed_config.entries.retain(|entry| entry.alias.is_none());
     }
-    let ui = ui::get_ui(ui_type);
-    let chosen = ui
-        .show(&parsed_config.entries, &parsed_config.addons, &ui_settings)
-        .context("Failed to show UI")?;
+    Ok(Session {
+        config: parsed_config,
+        ui_type,
+        settings: ui_settings,
+        default_script_shell,
+    })
+}
 
+/// Run the entry the UI returned, if any.
+fn launch_chosen(session: &Session, args: &Args, chosen: &str) -> Result<()> {
     let chosen_name = chosen.trim();
     debug_log!("ui: chosen={chosen_name:?}");
     if chosen_name.is_empty() {
-        std::process::exit(0);
+        return Ok(());
     }
-    let mc = find_chosen_entry(&parsed_config.entries, chosen_name)
+    let mc = find_chosen_entry(&session.config.entries, chosen_name)
         .context("No matching configuration found")?;
 
     let interpreter = if mc.script.is_some() {
-        mc.binary.as_deref().unwrap_or(&default_script_shell)
+        mc.binary
+            .as_deref()
+            .unwrap_or(&session.default_script_shell)
     } else {
         // Not used for binary commands
         ""
@@ -4617,7 +4663,7 @@ pub fn run(args: Args) -> Result<()> {
         mc.script.is_some(),
         mc.args
     );
-    execute_chosen_command(mc, &args, interpreter, ui_settings.launch_via)
+    execute_chosen_command(mc, args, interpreter, session.settings.launch_via)
         .context("Failed to execute command")?;
 
     Ok(())
