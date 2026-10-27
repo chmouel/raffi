@@ -1065,6 +1065,7 @@ impl LauncherApp {
         } else {
             read_desktop_icon_map()
         };
+        crate::debug::mark("icon maps loaded");
 
         let mru_map = load_mru_map(get_mru_cache_path().ok().as_deref());
 
@@ -1105,6 +1106,7 @@ impl LauncherApp {
             super::thumbnails::substitute(&mut paths);
             paths
         };
+        crate::debug::mark("launcher icons resolved");
 
         let initial_query = initial_query.unwrap_or_default();
         let search_input_id = super::state::TextInputId::unique();

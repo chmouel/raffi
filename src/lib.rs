@@ -4438,6 +4438,7 @@ pub fn run(args: Args) -> Result<()> {
         process_config(config, &args)?
     };
     debug_log!("config: loaded {} entries", parsed_config.entries.len());
+    debug::mark("config parsed");
 
     #[cfg(feature = "wayland")]
     if args.cache_daemon {
@@ -4465,6 +4466,7 @@ pub fn run(args: Args) -> Result<()> {
         debug_log!("config: {} installed applications", apps.len());
         merge_apps(&mut parsed_config.entries, apps);
     }
+    debug::mark("apps scanned");
 
     // Merge general config: CLI flags override config values
     let general = &parsed_config.general;

@@ -25,6 +25,13 @@ pub fn elapsed_ms() -> u128 {
     START.get().map_or(0, |start| start.elapsed().as_millis())
 }
 
+/// Log a startup milestone with the time since the debug log was opened.
+pub fn mark(stage: &str) {
+    if is_enabled() {
+        write_debug(&format!("startup: {stage} at {}ms", elapsed_ms()));
+    }
+}
+
 pub fn write_debug(msg: &str) {
     if let Some(mutex) = DEBUG_FILE.get() {
         if let Ok(mut f) = mutex.lock() {

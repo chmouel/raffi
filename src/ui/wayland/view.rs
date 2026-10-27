@@ -2168,6 +2168,8 @@ impl LauncherApp {
     }
 
     pub(super) fn view(&self) -> Element<'_, Message> {
+        static FIRST_VIEW: std::sync::Once = std::sync::Once::new();
+        FIRST_VIEW.call_once(|| crate::debug::mark("first view"));
         if self.onboarding.setup.is_some() {
             return self.render_onboarding_setup();
         }

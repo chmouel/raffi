@@ -306,6 +306,7 @@ fn run_wayland_ui(
             let server = Task::perform(browser_data::off_thread(cache::probe), |info| {
                 types::Message::CacheServerStatus(info.flatten())
             });
+            crate::debug::mark("app booted");
             (app, Task::batch([task, preload, server]))
         },
         LauncherApp::update,
