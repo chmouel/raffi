@@ -18,6 +18,24 @@ struct FrankfurterResponse {
     rates: HashMap<String, f64>,
 }
 
+/// Used when Frankfurter cannot be reached: the Bank of England's daily rates,
+/// served without a key by allratestoday.com. Each row is `1 base = value quote`.
+const FALLBACK_URL: &str = "https://allratestoday.com/api/open/central-bank/boe";
+
+#[derive(Debug, Deserialize)]
+struct BankTable {
+    rates: Vec<BankQuote>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BankQuote {
+    base: String,
+    quote: String,
+    #[serde(rename = "type")]
+    kind: String,
+    value: f64,
+}
+
 const SUPPORTED_CURRENCIES: &[&str] = &[
     "EUR", "USD", "GBP", "JPY", "CAD", "AUD", "CHF", "CNY", "HKD", "NZD", "SEK", "KRW", "SGD",
     "NOK", "MXN", "INR", "RUB", "ZAR", "TRY", "BRL", "TWD", "DKK", "PLN", "THB", "IDR", "HUF",
@@ -169,6 +187,83 @@ pub(super) fn try_parse_multi_currency_conversion(
     None
 }
 
+/// Rates for one unit of `from` in each of `to`, from Frankfurter or, when
+/// that fails, the Bank of England table. Currencies missing from the source
+/// are simply absent from the map.
+fn fetch_rates(from: &str, to: &[String]) -> Result<HashMap<String, f64>, String> {
+    let config = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(10)))
+        .build();
+    let agent: ureq::Agent = config.into();
+
+    let frankfurter_error = match fetch_frankfurter_rates(&agent, from, to) {
+        Ok(rates) => return Ok(rates),
+        Err(error) => error,
+    };
+    crate::debug_log!("currency: frankfurter failed ({frankfurter_error}), trying fallback");
+    match fetch_bank_table(&agent) {
+        Ok(per_pound) => Ok(to
+            .iter()
+            .filter_map(|to_currency| {
+                cross_rate(&per_pound, from, to_currency).map(|rate| (to_currency.clone(), rate))
+            })
+            .collect()),
+        Err(fallback_error) => Err(format!("{frankfurter_error}; {fallback_error}")),
+    }
+}
+
+fn fetch_frankfurter_rates(
+    agent: &ureq::Agent,
+    from: &str,
+    to: &[String],
+) -> Result<HashMap<String, f64>, String> {
+    let url = format!(
+        "https://api.frankfurter.dev/v1/latest?base={}&symbols={}",
+        from,
+        to.join(",")
+    );
+    let response: FrankfurterResponse = agent
+        .get(&url)
+        .call()
+        .map_err(|error| format!("Network error: {}", error))?
+        .body_mut()
+        .read_json()
+        .map_err(|error| format!("Parse error: {}", error))?;
+    Ok(response.rates)
+}
+
+/// Units of each currency per pound sterling, whichever way the bank quotes
+/// the pair. Only reference rates count.
+fn fetch_bank_table(agent: &ureq::Agent) -> Result<HashMap<String, f64>, String> {
+    let table: BankTable = agent
+        .get(FALLBACK_URL)
+        .call()
+        .map_err(|error| format!("Fallback network error: {}", error))?
+        .body_mut()
+        .read_json()
+        .map_err(|error| format!("Fallback parse error: {}", error))?;
+    Ok(per_home_units(&table, "GBP"))
+}
+
+fn per_home_units(table: &BankTable, home: &str) -> HashMap<String, f64> {
+    let mut units = HashMap::from([(home.to_string(), 1.0)]);
+    for quote in &table.rates {
+        if quote.kind != "reference" || quote.value <= 0.0 {
+            continue;
+        }
+        if quote.base == home && quote.quote != home {
+            units.insert(quote.quote.clone(), quote.value);
+        } else if quote.quote == home && quote.base != home {
+            units.insert(quote.base.clone(), 1.0 / quote.value);
+        }
+    }
+    units
+}
+
+fn cross_rate(units: &HashMap<String, f64>, from: &str, to: &str) -> Option<f64> {
+    Some(units.get(to)? / units.get(from)?)
+}
+
 pub(super) fn fetch_exchange_rate(request: CurrencyConversionRequest) -> Task<Message> {
     let request_for_result = request.clone();
     Task::perform(
@@ -184,26 +279,12 @@ fn fetch_rate_blocking(request: &CurrencyConversionRequest) -> Result<CurrencyRe
         request.from_currency,
         request.to_currency
     );
-    let url = format!(
-        "https://api.frankfurter.dev/v1/latest?base={}&symbols={}",
-        request.from_currency, request.to_currency
-    );
+    let rates = fetch_rates(
+        &request.from_currency,
+        std::slice::from_ref(&request.to_currency),
+    )?;
 
-    let config = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(10)))
-        .build();
-    let agent: ureq::Agent = config.into();
-
-    let response: FrankfurterResponse = agent
-        .get(&url)
-        .call()
-        .map_err(|error| format!("Network error: {}", error))?
-        .body_mut()
-        .read_json()
-        .map_err(|error| format!("Parse error: {}", error))?;
-
-    let rate = response
-        .rates
+    let rate = rates
         .get(&request.to_currency)
         .copied()
         .ok_or_else(|| "Rate not found".to_string())?;
@@ -233,37 +314,17 @@ fn fetch_multi_rates_blocking(
         request.from_currency,
         request.to_currencies
     );
-    let symbols = request.to_currencies.join(",");
-    let url = format!(
-        "https://api.frankfurter.dev/v1/latest?base={}&symbols={}",
-        request.from_currency, symbols
-    );
-
-    let config = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(10)))
-        .build();
-    let agent: ureq::Agent = config.into();
-
-    let response: FrankfurterResponse = agent
-        .get(&url)
-        .call()
-        .map_err(|error| format!("Network error: {}", error))?
-        .body_mut()
-        .read_json()
-        .map_err(|error| format!("Parse error: {}", error))?;
+    let rates = fetch_rates(&request.from_currency, &request.to_currencies)?;
 
     let conversions: Vec<CurrencyConversion> = request
         .to_currencies
         .iter()
         .filter_map(|to_currency| {
-            response
-                .rates
-                .get(to_currency)
-                .map(|&rate| CurrencyConversion {
-                    to_currency: to_currency.clone(),
-                    converted_amount: request.amount * rate,
-                    rate,
-                })
+            rates.get(to_currency).map(|&rate| CurrencyConversion {
+                to_currency: to_currency.clone(),
+                converted_amount: request.amount * rate,
+                rate,
+            })
         })
         .collect();
 
@@ -281,8 +342,32 @@ fn fetch_multi_rates_blocking(
 #[cfg(test)]
 mod tests {
     use super::{
-        is_currency_help_query, try_parse_currency_conversion, try_parse_multi_currency_conversion,
+        cross_rate, is_currency_help_query, per_home_units, try_parse_currency_conversion,
+        try_parse_multi_currency_conversion, BankQuote, BankTable,
     };
+
+    #[test]
+    fn test_bank_table_cross_rates() {
+        let quote = |base: &str, quote: &str, kind: &str, value: f64| BankQuote {
+            base: base.to_string(),
+            quote: quote.to_string(),
+            kind: kind.to_string(),
+            value,
+        };
+        let table = BankTable {
+            rates: vec![
+                quote("GBP", "USD", "reference", 1.25),
+                quote("EUR", "GBP", "reference", 0.8),
+                quote("GBP", "JPY", "buy", 190.0),
+                quote("GBP", "CHF", "reference", 0.0),
+            ],
+        };
+        let units = per_home_units(&table, "GBP");
+        assert_eq!(units.len(), 3);
+        assert!((cross_rate(&units, "EUR", "USD").unwrap() - 1.0).abs() < 1e-9);
+        assert!((cross_rate(&units, "USD", "GBP").unwrap() - 0.8).abs() < 1e-9);
+        assert!(cross_rate(&units, "GBP", "JPY").is_none());
+    }
 
     #[test]
     fn test_is_currency_help_query() {
