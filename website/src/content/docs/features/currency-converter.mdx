@@ -7,7 +7,7 @@ import { Aside, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import currencyScreenshot from '../../../assets/screenshots/currency-converter.png';
 
-Raffi includes a currency converter with real-time exchange rates from the Frankfurter API.
+Raffi includes a currency converter with real-time exchange rates from the Frankfurter API, with the Bank of England's rates as a fallback.
 
 ## Overview
 
@@ -179,6 +179,8 @@ Raffi uses the [Frankfurter API](https://www.frankfurter.app/) for exchange rate
 - No API key required
 - Updated daily with European Central Bank rates
 - Rates are cached for 1 hour locally
+
+When Frankfurter cannot be reached, Raffi falls back to the Bank of England's daily rates, served without an API key by [AllRatesToday](https://allratestoday.com). The Bank of England table covers about 20 currencies, so a few pairs may be unavailable until Frankfurter is back.
 
 ### Cache Behavior
 
