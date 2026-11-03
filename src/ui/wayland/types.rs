@@ -448,6 +448,10 @@ pub(crate) enum Message {
     WelcomeSelected(usize),
     BackTabComplete,
     ClearFilter,
+    /// Ctrl+U: empty the search field, or the prompt or action menu it shows.
+    ClearQuery,
+    /// Ctrl+W: delete the word before the end of the field's text.
+    DeleteWord,
     RetryLoad,
     OpenAddonSetup,
     ActionSelected(usize),
