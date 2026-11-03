@@ -55,6 +55,7 @@ impl CurrencyState {
     pub fn clear_multi(&mut self) {
         self.multi_result = None;
         self.multi_loading = false;
+        self.error = None;
         self.pending_multi_request = None;
     }
 }

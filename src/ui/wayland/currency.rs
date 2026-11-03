@@ -10,6 +10,7 @@ use super::state::{
     CurrencyConversion, CurrencyConversionRequest, CurrencyResult, Message, MultiCurrencyRequest,
     MultiCurrencyResult,
 };
+use crate::{CurrencyAddonConfig, CurrencyRateProvider};
 
 const DEFAULT_CURRENCIES: &[&str] = &["USD", "EUR", "GBP"];
 
@@ -18,9 +19,10 @@ struct FrankfurterResponse {
     rates: HashMap<String, f64>,
 }
 
-/// Used when Frankfurter cannot be reached: the Bank of England's daily rates,
-/// served without a key by allratestoday.com. Each row is `1 base = value quote`.
-const FALLBACK_URL: &str = "https://allratestoday.com/api/open/central-bank/boe";
+/// The Bank of England's daily rates, served without a key by
+/// allratestoday.com. Each row is `1 base = value quote`. Only contacted when
+/// listed in `addons.currency.sources`.
+const BANK_OF_ENGLAND_URL: &str = "https://allratestoday.com/api/open/central-bank/boe";
 
 #[derive(Debug, Deserialize)]
 struct BankTable {
@@ -187,64 +189,178 @@ pub(super) fn try_parse_multi_currency_conversion(
     None
 }
 
-/// Rates for one unit of `from` in each of `to`, from Frankfurter or, when
-/// that fails, the Bank of England table. Currencies missing from the source
-/// are simply absent from the map.
-fn fetch_rates(from: &str, to: &[String]) -> Result<HashMap<String, f64>, String> {
-    let config = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(10)))
-        .build();
-    let agent: ureq::Agent = config.into();
+/// How long the first source may take. Later sources get [`BACKUP_TIMEOUT`]
+/// so a bad connection does not add a full wait per source.
+const PRIMARY_TIMEOUT: Duration = Duration::from_secs(10);
+const BACKUP_TIMEOUT: Duration = Duration::from_secs(4);
 
-    let frankfurter_error = match fetch_frankfurter_rates(&agent, from, to) {
-        Ok(rates) => return Ok(rates),
-        Err(error) => error,
-    };
-    crate::debug_log!("currency: frankfurter failed ({frankfurter_error}), trying fallback");
-    match fetch_bank_table(&agent) {
-        Ok(per_pound) => Ok(to
+const FRANKFURTER_URL: &str = "https://api.frankfurter.dev/v1/latest";
+
+/// One configured exchange rate source, ready to be fetched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RateSource {
+    provider: CurrencyRateProvider,
+    url: String,
+}
+
+impl RateSource {
+    /// The sources in the order the user wants them tried. Without a
+    /// `sources` setting only Frankfurter is contacted.
+    pub(super) fn from_config(config: &CurrencyAddonConfig) -> Vec<RateSource> {
+        let configured = config.sources.as_deref().unwrap_or_default();
+        if configured.is_empty() {
+            return vec![RateSource::new(CurrencyRateProvider::Frankfurter, None)];
+        }
+        configured
             .iter()
-            .filter_map(|to_currency| {
-                cross_rate(&per_pound, from, to_currency).map(|rate| (to_currency.clone(), rate))
+            .map(|source| RateSource::new(source.provider(), source.url()))
+            .collect()
+    }
+
+    fn new(provider: CurrencyRateProvider, url: Option<&str>) -> Self {
+        let url = url
+            .unwrap_or(match provider {
+                CurrencyRateProvider::Frankfurter => FRANKFURTER_URL,
+                CurrencyRateProvider::BankOfEngland => BANK_OF_ENGLAND_URL,
             })
-            .collect()),
-        Err(fallback_error) => Err(format!("{frankfurter_error}; {fallback_error}")),
+            .to_string();
+        Self { provider, url }
+    }
+
+    fn name(&self) -> &'static str {
+        match self.provider {
+            CurrencyRateProvider::Frankfurter => "Frankfurter",
+            CurrencyRateProvider::BankOfEngland => "Bank of England",
+        }
+    }
+
+    /// Rates for one unit of `from` in each of `to`, as far as this source
+    /// has them. Nothing here decides whether the answer is good enough;
+    /// see [`usable_rates`].
+    fn fetch(
+        &self,
+        agent: &ureq::Agent,
+        from: &str,
+        to: &[String],
+    ) -> Result<HashMap<String, f64>, String> {
+        match self.provider {
+            CurrencyRateProvider::Frankfurter => {
+                let url = format!("{}?base={}&symbols={}", self.url, from, to.join(","));
+                let response: FrankfurterResponse = read_json(agent, &url)?;
+                Ok(response.rates)
+            }
+            CurrencyRateProvider::BankOfEngland => {
+                let table: BankTable = read_json(agent, &self.url)?;
+                Ok(bank_table_rates(&table, "GBP", from, to))
+            }
+        }
     }
 }
 
-fn fetch_frankfurter_rates(
-    agent: &ureq::Agent,
+fn read_json<T: serde::de::DeserializeOwned>(agent: &ureq::Agent, url: &str) -> Result<T, String> {
+    agent
+        .get(url)
+        .call()
+        .map_err(|error| format!("network error: {error}"))?
+        .body_mut()
+        .read_json()
+        .map_err(|error| format!("parse error: {error}"))
+}
+
+/// Rates for one unit of `from` in each of `to`, from the first source that
+/// answers with at least one of them. The error names every source that was
+/// tried and why it did not deliver, first source first.
+fn fetch_rates(
+    sources: &[RateSource],
     from: &str,
     to: &[String],
 ) -> Result<HashMap<String, f64>, String> {
-    let url = format!(
-        "https://api.frankfurter.dev/v1/latest?base={}&symbols={}",
-        from,
-        to.join(",")
-    );
-    let response: FrankfurterResponse = agent
-        .get(&url)
-        .call()
-        .map_err(|error| format!("Network error: {}", error))?
-        .body_mut()
-        .read_json()
-        .map_err(|error| format!("Parse error: {}", error))?;
-    Ok(response.rates)
+    fetch_rates_with(sources, to, |source, timeout| {
+        let config = ureq::Agent::config_builder()
+            .timeout_global(Some(timeout))
+            .build();
+        let agent: ureq::Agent = config.into();
+        source.fetch(&agent, from, to)
+    })
 }
 
-/// Units of each currency per pound sterling, whichever way the bank quotes
+fn fetch_rates_with<F>(
+    sources: &[RateSource],
+    to: &[String],
+    mut fetch: F,
+) -> Result<HashMap<String, f64>, String>
+where
+    F: FnMut(&RateSource, Duration) -> Result<HashMap<String, f64>, String>,
+{
+    if sources.is_empty() {
+        return Err("No exchange rate source is configured".to_string());
+    }
+    let mut failures = Vec::new();
+    for (index, source) in sources.iter().enumerate() {
+        let timeout = if index == 0 {
+            PRIMARY_TIMEOUT
+        } else {
+            BACKUP_TIMEOUT
+        };
+        match fetch(source, timeout).and_then(|rates| usable_rates(rates, to)) {
+            Ok(rates) => {
+                if !failures.is_empty() {
+                    crate::debug_log!(
+                        "currency: {} answered after {}",
+                        source.name(),
+                        failures.join("; ")
+                    );
+                }
+                return Ok(rates);
+            }
+            Err(error) => {
+                crate::debug_log!("currency: {} failed: {error}", source.name());
+                failures.push(format!("{}: {error}", source.name()));
+            }
+        }
+    }
+    Err(format!(
+        "Could not get an exchange rate ({})",
+        failures.join("; ")
+    ))
+}
+
+/// The requested rates that are actually usable. An answer with none of them
+/// is a failure, so the next source gets a turn instead of an empty result
+/// being shown as success.
+fn usable_rates(
+    rates: HashMap<String, f64>,
+    to: &[String],
+) -> Result<HashMap<String, f64>, String> {
+    let rates: HashMap<String, f64> = rates
+        .into_iter()
+        .filter(|(currency, rate)| to.contains(currency) && rate.is_finite() && *rate > 0.0)
+        .collect();
+    if rates.is_empty() {
+        return Err(format!("no rate for {}", to.join(", ")));
+    }
+    Ok(rates)
+}
+
+/// Rates for one unit of `from` in each of `to` that the bank's table can
+/// provide. A currency the bank does not quote, as `from` or as a target,
+/// yields no pairs rather than a guess.
+fn bank_table_rates(
+    table: &BankTable,
+    home: &str,
+    from: &str,
+    to: &[String],
+) -> HashMap<String, f64> {
+    let units = per_home_units(table, home);
+    to.iter()
+        .filter_map(|to_currency| {
+            cross_rate(&units, from, to_currency).map(|rate| (to_currency.clone(), rate))
+        })
+        .collect()
+}
+
+/// Units of each currency per unit of `home`, whichever way the bank quotes
 /// the pair. Only reference rates count.
-fn fetch_bank_table(agent: &ureq::Agent) -> Result<HashMap<String, f64>, String> {
-    let table: BankTable = agent
-        .get(FALLBACK_URL)
-        .call()
-        .map_err(|error| format!("Fallback network error: {}", error))?
-        .body_mut()
-        .read_json()
-        .map_err(|error| format!("Fallback parse error: {}", error))?;
-    Ok(per_home_units(&table, "GBP"))
-}
-
 fn per_home_units(table: &BankTable, home: &str) -> HashMap<String, f64> {
     let mut units = HashMap::from([(home.to_string(), 1.0)]);
     for quote in &table.rates {
@@ -264,15 +380,21 @@ fn cross_rate(units: &HashMap<String, f64>, from: &str, to: &str) -> Option<f64>
     Some(units.get(to)? / units.get(from)?)
 }
 
-pub(super) fn fetch_exchange_rate(request: CurrencyConversionRequest) -> Task<Message> {
+pub(super) fn fetch_exchange_rate(
+    request: CurrencyConversionRequest,
+    sources: Vec<RateSource>,
+) -> Task<Message> {
     let request_for_result = request.clone();
     Task::perform(
-        async move { fetch_rate_blocking(&request) },
+        async move { fetch_rate_blocking(&request, &sources) },
         move |result| Message::CurrencyConversionResult(request_for_result, result),
     )
 }
 
-fn fetch_rate_blocking(request: &CurrencyConversionRequest) -> Result<CurrencyResult, String> {
+fn fetch_rate_blocking(
+    request: &CurrencyConversionRequest,
+    sources: &[RateSource],
+) -> Result<CurrencyResult, String> {
     crate::debug_log!(
         "currency: fetch rate {} {} -> {}",
         request.amount,
@@ -280,14 +402,19 @@ fn fetch_rate_blocking(request: &CurrencyConversionRequest) -> Result<CurrencyRe
         request.to_currency
     );
     let rates = fetch_rates(
+        sources,
         &request.from_currency,
         std::slice::from_ref(&request.to_currency),
     )?;
 
-    let rate = rates
-        .get(&request.to_currency)
-        .copied()
-        .ok_or_else(|| "Rate not found".to_string())?;
+    // `fetch_rates` only succeeds with at least one requested rate, and only
+    // one was requested.
+    let rate = rates.get(&request.to_currency).copied().ok_or_else(|| {
+        format!(
+            "Could not get an exchange rate ({} to {} missing from the answer)",
+            request.from_currency, request.to_currency
+        )
+    })?;
 
     crate::debug_log!("currency: rate={rate} converted={}", request.amount * rate);
     Ok(CurrencyResult {
@@ -297,16 +424,20 @@ fn fetch_rate_blocking(request: &CurrencyConversionRequest) -> Result<CurrencyRe
     })
 }
 
-pub(super) fn fetch_multi_exchange_rates(request: MultiCurrencyRequest) -> Task<Message> {
+pub(super) fn fetch_multi_exchange_rates(
+    request: MultiCurrencyRequest,
+    sources: Vec<RateSource>,
+) -> Task<Message> {
     let request_for_result = request.clone();
     Task::perform(
-        async move { fetch_multi_rates_blocking(&request) },
+        async move { fetch_multi_rates_blocking(&request, &sources) },
         move |result| Message::MultiCurrencyConversionResult(request_for_result, result),
     )
 }
 
 fn fetch_multi_rates_blocking(
     request: &MultiCurrencyRequest,
+    sources: &[RateSource],
 ) -> Result<MultiCurrencyResult, String> {
     crate::debug_log!(
         "currency: fetch multi rates {} {} -> {:?}",
@@ -314,7 +445,7 @@ fn fetch_multi_rates_blocking(
         request.from_currency,
         request.to_currencies
     );
-    let rates = fetch_rates(&request.from_currency, &request.to_currencies)?;
+    let rates = fetch_rates(sources, &request.from_currency, &request.to_currencies)?;
 
     let conversions: Vec<CurrencyConversion> = request
         .to_currencies
@@ -329,7 +460,11 @@ fn fetch_multi_rates_blocking(
         .collect();
 
     if conversions.is_empty() {
-        return Err("No rates found".to_string());
+        return Err(format!(
+            "Could not get an exchange rate ({} to {} missing from the answer)",
+            request.from_currency,
+            request.to_currencies.join(", ")
+        ));
     }
 
     Ok(MultiCurrencyResult {
@@ -341,32 +476,206 @@ fn fetch_multi_rates_blocking(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        cross_rate, is_currency_help_query, per_home_units, try_parse_currency_conversion,
-        try_parse_multi_currency_conversion, BankQuote, BankTable,
-    };
+    use std::collections::HashMap;
+    use std::time::Duration;
 
-    #[test]
-    fn test_bank_table_cross_rates() {
-        let quote = |base: &str, quote: &str, kind: &str, value: f64| BankQuote {
+    use super::{
+        bank_table_rates, cross_rate, fetch_rates_with, is_currency_help_query, per_home_units,
+        try_parse_currency_conversion, try_parse_multi_currency_conversion, usable_rates,
+        BankQuote, BankTable, RateSource, BACKUP_TIMEOUT, BANK_OF_ENGLAND_URL, FRANKFURTER_URL,
+        PRIMARY_TIMEOUT,
+    };
+    use crate::{CurrencyAddonConfig, CurrencyRateProvider, CurrencyRateSource};
+
+    fn quote(base: &str, quote: &str, kind: &str, value: f64) -> BankQuote {
+        BankQuote {
             base: base.to_string(),
             quote: quote.to_string(),
             kind: kind.to_string(),
             value,
-        };
-        let table = BankTable {
+        }
+    }
+
+    fn bank_table() -> BankTable {
+        BankTable {
             rates: vec![
                 quote("GBP", "USD", "reference", 1.25),
                 quote("EUR", "GBP", "reference", 0.8),
                 quote("GBP", "JPY", "buy", 190.0),
                 quote("GBP", "CHF", "reference", 0.0),
             ],
-        };
-        let units = per_home_units(&table, "GBP");
+        }
+    }
+
+    fn targets(codes: &[&str]) -> Vec<String> {
+        codes.iter().map(|code| code.to_string()).collect()
+    }
+
+    fn rates(pairs: &[(&str, f64)]) -> HashMap<String, f64> {
+        pairs
+            .iter()
+            .map(|(code, rate)| (code.to_string(), *rate))
+            .collect()
+    }
+
+    #[test]
+    fn test_bank_table_cross_rates() {
+        let units = per_home_units(&bank_table(), "GBP");
         assert_eq!(units.len(), 3);
         assert!((cross_rate(&units, "EUR", "USD").unwrap() - 1.0).abs() < 1e-9);
         assert!((cross_rate(&units, "USD", "GBP").unwrap() - 0.8).abs() < 1e-9);
         assert!(cross_rate(&units, "GBP", "JPY").is_none());
+    }
+
+    #[test]
+    fn test_bank_table_rates_drops_pairs_the_bank_does_not_quote() {
+        let table = bank_table();
+        // Target not in the table: that pair is dropped, the others stay.
+        let found = bank_table_rates(&table, "GBP", "EUR", &targets(&["USD", "JPY", "GBP"]));
+        assert_eq!(found.len(), 2);
+        assert!(found.contains_key("USD"));
+        assert!(found.contains_key("GBP"));
+        assert!(!found.contains_key("JPY"));
+        // Source not in the table: no pair can be computed, none is kept.
+        let found = bank_table_rates(&table, "GBP", "INR", &targets(&["USD", "EUR", "GBP"]));
+        assert!(found.is_empty());
+    }
+
+    #[test]
+    fn test_bank_table_without_reference_rows_is_not_a_success() {
+        let table = BankTable {
+            rates: vec![
+                quote("GBP", "USD", "buy", 1.25),
+                quote("GBP", "EUR", "sell", 1.17),
+            ],
+        };
+        let found = bank_table_rates(&table, "GBP", "USD", &targets(&["EUR", "GBP"]));
+        assert!(found.is_empty());
+        let outcome = usable_rates(found, &targets(&["EUR", "GBP"]));
+        assert_eq!(outcome, Err("no rate for EUR, GBP".to_string()));
+    }
+
+    #[test]
+    fn test_usable_rates_keeps_only_requested_positive_rates() {
+        let answer = rates(&[("EUR", 0.9), ("JPY", 0.0), ("CHF", f64::NAN), ("SEK", 10.0)]);
+        let usable = usable_rates(answer, &targets(&["EUR", "JPY", "CHF"])).unwrap();
+        assert_eq!(usable, rates(&[("EUR", 0.9)]));
+        assert!(usable_rates(HashMap::new(), &targets(&["EUR"])).is_err());
+    }
+
+    #[test]
+    fn test_sources_default_to_frankfurter_only() {
+        let config = CurrencyAddonConfig::default();
+        let sources = RateSource::from_config(&config);
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].provider, CurrencyRateProvider::Frankfurter);
+        assert_eq!(sources[0].url, FRANKFURTER_URL);
+
+        let config = CurrencyAddonConfig {
+            sources: Some(Vec::new()),
+            ..CurrencyAddonConfig::default()
+        };
+        assert_eq!(RateSource::from_config(&config), sources);
+    }
+
+    #[test]
+    fn test_sources_follow_config_order_and_url() {
+        let config = CurrencyAddonConfig {
+            sources: Some(vec![
+                CurrencyRateSource::Provider(CurrencyRateProvider::BankOfEngland),
+                CurrencyRateSource::Custom {
+                    provider: CurrencyRateProvider::Frankfurter,
+                    url: "https://rates.example.org/latest".to_string(),
+                },
+            ]),
+            ..CurrencyAddonConfig::default()
+        };
+        let sources = RateSource::from_config(&config);
+        assert_eq!(sources.len(), 2);
+        assert_eq!(sources[0].provider, CurrencyRateProvider::BankOfEngland);
+        assert_eq!(sources[0].url, BANK_OF_ENGLAND_URL);
+        assert_eq!(sources[1].provider, CurrencyRateProvider::Frankfurter);
+        assert_eq!(sources[1].url, "https://rates.example.org/latest");
+    }
+
+    fn two_sources() -> Vec<RateSource> {
+        vec![
+            RateSource::new(CurrencyRateProvider::Frankfurter, None),
+            RateSource::new(CurrencyRateProvider::BankOfEngland, None),
+        ]
+    }
+
+    #[test]
+    fn test_fetch_rates_uses_first_source_when_it_answers() {
+        let mut calls = Vec::new();
+        let result = fetch_rates_with(&two_sources(), &targets(&["EUR"]), |source, timeout| {
+            calls.push((source.provider, timeout));
+            Ok(rates(&[("EUR", 0.9)]))
+        });
+        assert_eq!(result, Ok(rates(&[("EUR", 0.9)])));
+        assert_eq!(
+            calls,
+            vec![(CurrencyRateProvider::Frankfurter, PRIMARY_TIMEOUT)]
+        );
+    }
+
+    #[test]
+    fn test_fetch_rates_backup_gets_shorter_timeout() {
+        let mut timeouts = Vec::new();
+        let result = fetch_rates_with(&two_sources(), &targets(&["EUR"]), |source, timeout| {
+            timeouts.push(timeout);
+            match source.provider {
+                CurrencyRateProvider::Frankfurter => Err("network error: timed out".to_string()),
+                CurrencyRateProvider::BankOfEngland => Ok(rates(&[("EUR", 0.9)])),
+            }
+        });
+        assert_eq!(result, Ok(rates(&[("EUR", 0.9)])));
+        assert_eq!(timeouts, vec![PRIMARY_TIMEOUT, BACKUP_TIMEOUT]);
+        assert!(BACKUP_TIMEOUT < PRIMARY_TIMEOUT);
+        assert!(PRIMARY_TIMEOUT + BACKUP_TIMEOUT <= Duration::from_secs(15));
+    }
+
+    #[test]
+    fn test_fetch_rates_empty_answer_moves_on_to_next_source() {
+        let result = fetch_rates_with(&two_sources(), &targets(&["EUR"]), |source, _| match source
+            .provider
+        {
+            CurrencyRateProvider::Frankfurter => Ok(HashMap::new()),
+            CurrencyRateProvider::BankOfEngland => Ok(rates(&[("EUR", 0.9)])),
+        });
+        assert_eq!(result, Ok(rates(&[("EUR", 0.9)])));
+    }
+
+    #[test]
+    fn test_fetch_rates_reports_every_failure_first_source_first() {
+        let result =
+            fetch_rates_with(
+                &two_sources(),
+                &targets(&["EUR", "INR"]),
+                |source, _| match source.provider {
+                    CurrencyRateProvider::Frankfurter => {
+                        Err("network error: connection refused".to_string())
+                    }
+                    CurrencyRateProvider::BankOfEngland => Ok(HashMap::new()),
+                },
+            );
+        assert_eq!(
+            result,
+            Err(
+                "Could not get an exchange rate (Frankfurter: network error: connection refused; \
+                 Bank of England: no rate for EUR, INR)"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_fetch_rates_without_sources_is_an_error() {
+        let result = fetch_rates_with(&[], &targets(&["EUR"]), |_, _| Ok(rates(&[("EUR", 0.9)])));
+        assert_eq!(
+            result,
+            Err("No exchange rate source is configured".to_string())
+        );
     }
 
     #[test]

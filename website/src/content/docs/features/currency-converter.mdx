@@ -7,7 +7,7 @@ import { Aside, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import currencyScreenshot from '../../../assets/screenshots/currency-converter.png';
 
-Raffi includes a currency converter with real-time exchange rates from the Frankfurter API, with the Bank of England's rates as a fallback.
+Raffi includes a currency converter with real-time exchange rates from the Frankfurter API. A second source, the Bank of England's daily rates, can be enabled as a backup.
 
 ## Overview
 
@@ -109,6 +109,23 @@ addons:
 ```
 
 
+**`addons.currency.sources`** `array` (default: `[frankfurter]`)
+
+Where exchange rates come from, in the order the sources are tried. Raffi
+contacts the next source only when the previous one could not be reached or
+returned none of the requested rates. With the default, only Frankfurter is
+ever contacted. See [Exchange Rate Sources](#exchange-rate-sources) for the
+available sources and how to point one at your own mirror.
+
+```yaml raffi.yaml
+addons:
+  currency:
+    sources:
+      - frankfurter
+      - bank_of_england
+```
+
+
 ### Custom Trigger
 
 <Tabs>
@@ -171,16 +188,60 @@ addons:
 Without a `currencies` list, an amount alone is converted into USD, EUR and GBP. Typing a target, as in `$10 to chf`, works for any supported currency either way.
 </Aside>
 
-## Exchange Rate API
+## Exchange Rate Sources
 
-Raffi uses the [Frankfurter API](https://www.frankfurter.app/) for exchange rates:
+By default Raffi uses the [Frankfurter API](https://www.frankfurter.app/) and nothing else:
 
 - Free and open-source
 - No API key required
 - Updated daily with European Central Bank rates
 - Rates are cached for 1 hour locally
 
-When Frankfurter cannot be reached, Raffi falls back to the Bank of England's daily rates, served without an API key by [AllRatesToday](https://allratestoday.com). The Bank of England table covers about 20 currencies, so a few pairs may be unavailable until Frankfurter is back.
+`addons.currency.sources` chooses the sources and their order. The first
+entry is the preferred one; each later entry is contacted only when every
+source before it failed or had none of the requested rates. Available sources:
+
+| Source | Contacts | Rates |
+|--------|----------|-------|
+| `frankfurter` | `api.frankfurter.dev` | European Central Bank, about 30 currencies |
+| `bank_of_england` | `allratestoday.com` | Bank of England daily rates, about 20 currencies |
+
+To keep Frankfurter but fall back to the Bank of England when it is down:
+
+```yaml raffi.yaml
+addons:
+  currency:
+    sources:
+      - frankfurter
+      - bank_of_england
+```
+
+<Aside type="note">
+Each source listed is a separate website that may be contacted, and it sees the
+currency codes you convert between. `bank_of_england` is never used unless you
+list it. If you want a single source, list only that one, or leave `sources`
+unset for Frankfurter alone.
+</Aside>
+
+A source can also be fetched from another address, such as a mirror or a
+proxy on your own network that serves the same response format:
+
+```yaml raffi.yaml
+addons:
+  currency:
+    sources:
+      - provider: frankfurter
+        url: https://rates.example.org/v1/latest
+      - provider: bank_of_england
+        url: https://rates.example.org/boe.json
+```
+
+The first source gets up to 10 seconds to answer; each later source gets
+4 seconds, so a backup never doubles the wait. When no source can provide a
+single requested rate, the result row shows an error naming each source and
+why it failed, in the order they were tried. A currency pair that a source
+does not quote simply moves on to the next source; the pairs it does quote are
+still shown.
 
 ### Cache Behavior
 
@@ -280,7 +341,8 @@ $10000 to jpy    # Currency exchange
     1. Check internet connection
     2. Verify currency codes are correct (3-letter ISO codes)
     3. Ensure `enabled: true` in config
-    4. Check that Frankfurter API is accessible
+    4. Read the error row: it names each source in `addons.currency.sources` and why it failed
+    5. Check that the Frankfurter API (or the sources you configured) is accessible
   </details>
 
   <details>

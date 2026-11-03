@@ -2962,6 +2962,28 @@ impl LauncherApp {
             }
         }
 
+        if let Some(error) = &self.currency.error {
+            if !self.currency.loading && !self.currency.multi_loading {
+                let error_row = Row::new()
+                    .spacing(16)
+                    .align_y(iced::Alignment::Center)
+                    .push(text(error.as_str()).size(fs.item).color(t.text_muted));
+                items_column = items_column.push(
+                    button(error_row)
+                        .padding(fs.item_padding)
+                        .width(Length::Fill)
+                        .style(move |_theme, _status| button::Style {
+                            text_color: t.text_muted,
+                            border: iced::Border {
+                                radius: 8.0.into(),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        }),
+                );
+            }
+        }
+
         if let Some(inline) = &self.inline_result {
             for (idx, inline_row) in inline.rows.iter().enumerate() {
                 let is_selected = self.selected_index == special_item_idx;
