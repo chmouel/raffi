@@ -413,6 +413,19 @@ pub(super) fn fido_restart(old: &str, new: &str) -> Option<String> {
     }
 }
 
+/// Text left after Ctrl+W: the whitespace-delimited word before the end is
+/// dropped, along with whitespace typed after it.
+pub(super) fn delete_last_word(text: &str) -> String {
+    let trimmed = text.trim_end();
+    let end = trimmed
+        .char_indices()
+        .rev()
+        .find(|(_, character)| character.is_whitespace())
+        .map(|(index, character)| index + character.len_utf8())
+        .unwrap_or(0);
+    trimmed[..end].to_string()
+}
+
 /// Theme icon names for the keywords; rows show no icon when the theme lacks
 /// them.
 pub(super) const CLIPBOARD_ICON: &str = "copyq";
@@ -1527,6 +1540,17 @@ impl LauncherApp {
             Message::WelcomeSelected(index) => self.activate_welcome(index),
             Message::BackTabComplete => self.handle_tab_complete(),
             Message::ClearFilter => self.clear_filter(),
+            // The password managers keep Ctrl+U for copying a username, except
+            // while a prompt or the action menu holds the field.
+            Message::ClearQuery
+                if self.vault_addon().is_some()
+                    && !self.text_prompt_active()
+                    && self.action_menu.is_none() =>
+            {
+                self.handle_vault_shortcut(EntryAction::Copy(Field::Username))
+            }
+            Message::ClearQuery => self.replace_field_text(|_| String::new()),
+            Message::DeleteWord => self.replace_field_text(delete_last_word),
             Message::RetryLoad => {
                 let task = self.handle_refresh();
                 task.chain(focus(self.view.search_input_id.clone()))
@@ -6051,6 +6075,37 @@ impl LauncherApp {
         crate::debug_log!("keyword suggestion: completing to {new_query:?}");
         let input_id = self.view.search_input_id.clone();
         self.update(Message::SearchChanged(new_query))
+            .chain(move_cursor_to_end(input_id))
+    }
+
+    /// The text shown in the shared search field: an action menu, a bookmark
+    /// search prompt, or the query itself.
+    fn field_text(&self) -> &str {
+        if let Some(menu) = &self.action_menu {
+            return menu.query.as_str();
+        }
+        if let Some(prompt) = self
+            .bookmarks
+            .prompt
+            .as_ref()
+            .filter(|_| !self.view.help_active)
+        {
+            return prompt.term.as_str();
+        }
+        self.search_query.as_str()
+    }
+
+    /// Rewrite the text of whatever owns the search field, keeping the cursor
+    /// at the end. The password prompt keeps its own masked buffer.
+    fn replace_field_text(&mut self, edit: impl FnOnce(&str) -> String) -> Task<Message> {
+        let input_id = self.view.search_input_id.clone();
+        let busy = self.vault.busy();
+        if let Some(prompt) = self.vault.prompt.as_mut().filter(|_| !busy) {
+            prompt.buffer = crate::secret::Secret::new(edit(prompt.buffer.expose()));
+            return move_cursor_to_end(input_id);
+        }
+        let text = edit(self.field_text());
+        self.update(Message::SearchChanged(text))
             .chain(move_cursor_to_end(input_id))
     }
 

@@ -446,6 +446,16 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             "Refresh view",
             "Reloads the current list, search, or directory",
         ),
+        shortcut(
+            "Ctrl+U",
+            "Clear search field",
+            "Empties the field; in the password managers it copies the username",
+        ),
+        shortcut(
+            "Ctrl+W",
+            "Delete last word",
+            "Removes the word before the end of the field",
+        ),
     ];
     let server_cached = addons.slack.enabled
         || addons.browser_history.enabled

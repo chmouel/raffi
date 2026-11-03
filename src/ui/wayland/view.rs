@@ -3462,9 +3462,12 @@ impl LauncherApp {
                 key: keyboard::Key::Character(ref c),
                 modifiers,
                 ..
-            }) if c.as_str() == "u" && modifiers.control() => Some(Message::VaultShortcut(
-                super::vault::EntryAction::Copy(super::vault::Field::Username),
-            )),
+            }) if c.as_str() == "u" && modifiers.control() => Some(Message::ClearQuery),
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Character(ref c),
+                modifiers,
+                ..
+            }) if c.as_str() == "w" && modifiers.control() => Some(Message::DeleteWord),
             Event::Keyboard(ref key_event)
                 if matches!(key_event, keyboard::Event::KeyPressed { .. }) =>
             {

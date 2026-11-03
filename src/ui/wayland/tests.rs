@@ -2229,6 +2229,8 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "Ctrl+K",
             "Ctrl+P",
             "Ctrl+R",
+            "Ctrl+U",
+            "Ctrl+W",
             "F5",
             "Ctrl+Shift+F5",
             "Ctrl+H",
@@ -2316,6 +2318,8 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
             "Ctrl+K",
             "Ctrl+P",
             "Ctrl+R",
+            "Ctrl+U",
+            "Ctrl+W",
             "Alt+P/N",
             "Tab",
             "Ctrl+/",
@@ -2337,6 +2341,8 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
             "Ctrl+K",
             "Ctrl+P",
             "Ctrl+R",
+            "Ctrl+U",
+            "Ctrl+W",
             "Ctrl+/",
             "Ctrl+Enter",
             "Ctrl+Alt+V"
@@ -2380,7 +2386,7 @@ fn test_help_entries_skip_disabled_addons() {
     assert!(entries
         .iter()
         .all(|entry| entry.section == HelpSection::KeyboardShortcuts || entry.action.is_some()));
-    assert_eq!(entries.len(), 13);
+    assert_eq!(entries.len(), 15);
 }
 
 #[test]
@@ -13085,4 +13091,120 @@ fn onboarding_config_preview_is_explicit_and_preserves_the_active_file() {
     assert!(app.welcome_visible());
     assert_eq!(app.search_query, "");
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_delete_last_word_drops_one_word_and_the_space_before_it() {
+    assert_eq!(super::app::delete_last_word("browser tabs"), "browser ");
+    assert_eq!(super::app::delete_last_word("browser tabs "), "browser ");
+    assert_eq!(super::app::delete_last_word("browser"), "");
+    assert_eq!(super::app::delete_last_word(""), "");
+    assert_eq!(super::app::delete_last_word("sys   "), "");
+    assert_eq!(
+        super::app::delete_last_word("math\t1 + 2"),
+        "math\t1 + ",
+        "a tab separates words like a space"
+    );
+    assert_eq!(
+        super::app::delete_last_word("a\u{3000}b"),
+        "a\u{3000}",
+        "a multi-byte space is kept whole"
+    );
+}
+
+#[test]
+fn test_clear_query_and_delete_word_edit_the_search_field() {
+    let mut app = test_app(AddonsConfig::default());
+    let _ = app.update(Message::SearchChanged("browser tabs fire".into()));
+    assert!(app.update(Message::DeleteWord).units() > 0);
+    assert_eq!(app.search_query, "browser tabs ");
+    let _ = app.update(Message::ClearQuery);
+    assert_eq!(app.search_query, "");
+    assert_eq!(app.selected_index, 0);
+    assert!(app.update(Message::ClearQuery).units() > 0);
+}
+
+#[test]
+fn test_clear_query_clears_a_bookmark_search_prompt() {
+    let mut app = bookmarks_app("bm nixsearch");
+    let _ = app.update(Message::SearchChanged("bm nixsearch nix shell".into()));
+    assert_eq!(app.bookmarks.prompt.as_ref().unwrap().term, "nix shell");
+    let _ = app.update(Message::DeleteWord);
+    assert_eq!(app.bookmarks.prompt.as_ref().unwrap().term, "nix ");
+    let _ = app.update(Message::ClearQuery);
+    assert_eq!(app.bookmarks.prompt.as_ref().unwrap().term, "");
+    // Ctrl+U with nothing left to clear leaves the prompt like Escape does.
+    let _ = app.update(Message::ClearQuery);
+    assert!(app.bookmarks.prompt.is_none());
+}
+
+#[test]
+fn test_clear_query_keeps_copying_the_vault_username() {
+    let mut app = test_app(AddonsConfig::default());
+    let _ = app.update(Message::SearchChanged("pass ".into()));
+    let items = vec![super::pass::command_item(
+        "pass:entry:web/github",
+        "github",
+        "",
+        "dialog-password",
+    )];
+    let generation = app.vault.generation;
+    let _ = app.update(Message::VaultDone(
+        generation,
+        vault_report(super::vault::Outcome::Loaded(items)),
+    ));
+    select_identity(&mut app, "pass:entry:web/github");
+    let _ = app.update(Message::ClearQuery);
+    assert_eq!(
+        app.search_query, "pass ",
+        "Ctrl+U stays the username shortcut in the password managers"
+    );
+    assert_eq!(
+        app.vault.running.as_ref().map(|op| op.kind.clone()),
+        Some(super::vault::OpKind::Entry(
+            super::vault::EntryAction::Copy(super::vault::Field::Username),
+            "web/github".into()
+        ))
+    );
+}
+
+#[test]
+fn test_clear_query_clears_the_vault_action_menu_instead_of_copying() {
+    let mut app = test_app(AddonsConfig::default());
+    let _ = app.update(Message::SearchChanged("pass ".into()));
+    let items = vec![super::pass::command_item(
+        "pass:entry:web/github",
+        "github",
+        "",
+        "dialog-password",
+    )];
+    let generation = app.vault.generation;
+    let _ = app.update(Message::VaultDone(
+        generation,
+        vault_report(super::vault::Outcome::Loaded(items)),
+    ));
+    select_identity(&mut app, "pass:entry:web/github");
+    let _ = app.update(Message::OpenActions);
+    let _ = app.update(Message::SearchChanged("copy".into()));
+    let _ = app.update(Message::ClearQuery);
+    assert_eq!(app.action_menu.as_ref().unwrap().query, "");
+    assert!(
+        app.vault.running.is_none(),
+        "the menu owns the field, so no vault operation starts"
+    );
+    assert_eq!(app.search_query, "pass ");
+}
+
+#[test]
+fn test_clear_query_and_delete_word_edit_the_action_menu_filter() {
+    let mut app = test_app(AddonsConfig::default());
+    open_system(&mut app, "sys ");
+    let _ = app.update(Message::OpenActions);
+    let _ = app.update(Message::SearchChanged("power off".into()));
+    assert_eq!(app.search_query, "sys ", "the list query is untouched");
+    let _ = app.update(Message::DeleteWord);
+    assert_eq!(app.action_menu.as_ref().unwrap().query, "power ");
+    let _ = app.update(Message::ClearQuery);
+    assert_eq!(app.action_menu.as_ref().unwrap().query, "");
+    assert_eq!(app.search_query, "sys ");
 }
