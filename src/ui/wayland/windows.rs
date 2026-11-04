@@ -535,11 +535,60 @@ impl Default for HyprFullscreen {
     }
 }
 
+/// A Hyprland workspace reference. Hyprland 0.57+ omits `id` for named and
+/// special workspaces, identifying them by `address` instead.
 #[derive(Debug, Deserialize)]
 struct Workspace {
-    id: i64,
+    #[serde(default)]
+    id: Option<i64>,
+    #[serde(default)]
+    address: String,
     #[serde(default)]
     name: String,
+}
+
+impl Workspace {
+    fn numbered_id(&self) -> Option<i64> {
+        self.id.filter(|&id| id > 0)
+    }
+
+    fn key(&self) -> &str {
+        if !self.address.is_empty() {
+            &self.address
+        } else {
+            &self.name
+        }
+    }
+
+    fn is_special(&self) -> bool {
+        self.key().starts_with("special:")
+    }
+
+    fn display_name(&self) -> String {
+        if !self.name.is_empty() {
+            self.name.clone()
+        } else if !self.address.is_empty() {
+            self.address.clone()
+        } else {
+            self.id.unwrap_or_default().to_string()
+        }
+    }
+
+    fn same_as(&self, other: &Self) -> bool {
+        match (self.numbered_id(), other.numbered_id()) {
+            (Some(a), Some(b)) => a == b,
+            (Some(_), None) | (None, Some(_)) => false,
+            (None, None) => {
+                let a = self.key();
+                let b = other.key();
+                if !a.is_empty() || !b.is_empty() {
+                    a == b
+                } else {
+                    self.id.is_some() && self.id == other.id
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -574,7 +623,7 @@ pub(super) fn hyprland_items(
             // A special workspace shown over the regular one is where the
             // user is looking.
             match &monitor.special_workspace {
-                Some(special) if !special.name.is_empty() => move_target(special),
+                Some(special) if !special.key().is_empty() => move_target(special),
                 _ => move_target(&monitor.active_workspace),
             }
         });
@@ -606,9 +655,8 @@ pub(super) fn hyprland_items(
 
 #[derive(Debug, Deserialize)]
 struct HyprWorkspace {
-    id: i64,
-    #[serde(default)]
-    name: String,
+    #[serde(flatten)]
+    workspace: Workspace,
     #[serde(default)]
     monitor: String,
 }
@@ -636,25 +684,28 @@ pub(super) fn hyprland_workspace_items(
     });
     clients.sort_by_key(|client| (client.focus_history_id < 0, client.focus_history_id));
     workspaces.sort_by(|a, b| {
-        let key = |workspace: &HyprWorkspace| {
+        let key = |entry: &HyprWorkspace| {
+            let ws = &entry.workspace;
             (
-                workspace.name.starts_with("special:"),
-                workspace.id < 0,
-                workspace.id,
+                ws.is_special(),
+                ws.numbered_id().is_none(),
+                ws.numbered_id().unwrap_or(0),
             )
         };
-        key(a).cmp(&key(b)).then_with(|| a.name.cmp(&b.name))
+        key(a)
+            .cmp(&key(b))
+            .then_with(|| a.workspace.key().cmp(b.workspace.key()))
     });
-    let state = |workspace: &HyprWorkspace| {
+    let state = |workspace: &Workspace| {
         monitors.iter().find_map(|monitor| {
             let special = monitor
                 .special_workspace
                 .as_ref()
-                .filter(|special| !special.name.is_empty());
-            let on_top = special.map_or(monitor.active_workspace.id, |special| special.id);
-            if workspace.id == on_top && monitor.focused {
+                .filter(|special| !special.key().is_empty());
+            let on_top = special.unwrap_or(&monitor.active_workspace);
+            if workspace.same_as(on_top) && monitor.focused {
                 Some("Current")
-            } else if workspace.id == on_top || workspace.id == monitor.active_workspace.id {
+            } else if workspace.same_as(on_top) || workspace.same_as(&monitor.active_workspace) {
                 Some("Visible")
             } else {
                 None
@@ -664,12 +715,10 @@ pub(super) fn hyprland_workspace_items(
     let recent = clients.first();
     Ok(workspaces
         .iter()
-        .map(|workspace| {
-            let selector = move_target(&Workspace {
-                id: workspace.id,
-                name: workspace.name.clone(),
-            });
-            let switch = match workspace.name.strip_prefix("special:") {
+        .map(|entry| {
+            let workspace = &entry.workspace;
+            let selector = move_target(workspace);
+            let switch = match workspace.key().strip_prefix("special:") {
                 Some(name) => Some((
                     DeferredAction::Hypr(HyprAction::ToggleSpecial {
                         name: name.to_string(),
@@ -684,7 +733,7 @@ pub(super) fn hyprland_workspace_items(
                 }),
             };
             let move_here = recent
-                .filter(|client| client.workspace.id != workspace.id)
+                .filter(|client| !client.workspace.same_as(workspace))
                 .zip(selector)
                 .map(|(client, selector)| {
                     (
@@ -696,16 +745,12 @@ pub(super) fn hyprland_workspace_items(
                     )
                 });
             workspace_item(WorkspaceRow {
-                name: if workspace.name.is_empty() {
-                    workspace.id.to_string()
-                } else {
-                    workspace.name.clone()
-                },
-                output: Some(workspace.monitor.as_str())
+                name: workspace.display_name(),
+                output: Some(entry.monitor.as_str())
                     .filter(|output| monitors.len() > 1 && !output.is_empty()),
                 windows: clients
                     .iter()
-                    .filter(|client| client.workspace.id == workspace.id)
+                    .filter(|client| client.workspace.same_as(workspace))
                     .map(|client| (client.title.as_str(), client.class.as_str()))
                     .collect(),
                 state: state(workspace),
@@ -717,28 +762,24 @@ pub(super) fn hyprland_workspace_items(
 }
 
 /// The workspace selector for moving a window to the active workspace. Named
-/// workspaces have negative ids, which Hyprland would read as relative moves,
-/// and the legacy dispatch cannot take names with commas.
+/// workspaces have negative or omitted ids, which Hyprland would not resolve
+/// as numbers, and the legacy dispatch cannot take names with commas.
 fn move_target(active: &Workspace) -> Option<String> {
-    if active.id > 0 {
-        Some(active.id.to_string())
-    } else if active.name.contains(',') {
+    if let Some(id) = active.numbered_id() {
+        return Some(id.to_string());
+    }
+    let key = active.key();
+    if key.is_empty() || key.contains(',') {
         None
-    } else if active.name.starts_with("special:") {
-        Some(active.name.clone())
-    } else if !active.name.is_empty() {
-        Some(format!("name:{}", active.name))
+    } else if key.starts_with("special:") {
+        Some(key.to_string())
     } else {
-        None
+        Some(format!("name:{key}"))
     }
 }
 
 fn hyprland_window(client: Client, target: Option<&str>, output: Option<&str>) -> CommandItem {
-    let mut workspace = if client.workspace.name.is_empty() {
-        client.workspace.id.to_string()
-    } else {
-        client.workspace.name.clone()
-    };
+    let mut workspace = client.workspace.display_name();
     if let Some(output) = output.filter(|output| !output.is_empty()) {
         workspace = format!("{workspace} ({output})");
     }
@@ -1772,6 +1813,82 @@ mod tests {
             ]
         );
         assert!(items.iter().all(|item| item.secondary.is_none()));
+    }
+
+    #[test]
+    fn test_hyprland_0_57_workspaces_without_ids() {
+        let monitors = r#"[
+            {"id": 0, "name": "DP-1", "focused": false,
+             "activeWorkspace": {"address": "web", "type": "normal", "name": "web"},
+             "specialWorkspace": {"address": "", "type": "", "name": ""}},
+            {"id": 1, "name": "DP-2", "focused": true,
+             "activeWorkspace": {"address": "2", "id": 2, "type": "normal", "name": "code"},
+             "specialWorkspace": {"address": "", "type": "", "name": ""}}
+        ]"#;
+        let clients = r#"[
+            {"address": "0x1", "mapped": true, "hidden": false,
+             "workspace": {"address": "web", "type": "normal", "name": "web"},
+             "monitor": 0, "class": "firefox", "title": "Mozilla Firefox",
+             "initialClass": "firefox", "pid": 100, "focusHistoryID": 1},
+            {"address": "0x2", "mapped": true, "hidden": false,
+             "workspace": {"address": "special:magic", "type": "special", "name": "special:magic"},
+             "monitor": 1, "class": "kitty", "title": "scratch",
+             "initialClass": "kitty", "pid": 101, "focusHistoryID": 0}
+        ]"#;
+        let window_items = hyprland_items(clients.as_bytes(), monitors.as_bytes(), 4242).unwrap();
+        assert_eq!(window_items.len(), 2);
+        assert_eq!(
+            window_items[0].subtitle,
+            "kitty on workspace special:magic (DP-2)"
+        );
+        assert_eq!(window_items[1].subtitle, "firefox on workspace web (DP-1)");
+        assert!(matches!(
+            &window_items[1].secondary.as_ref().unwrap().action,
+            DeferredAction::Hypr(HyprAction::MoveHere { address, workspace })
+                if address == "0x1" && workspace == "2"
+        ));
+
+        let workspaces = r#"[
+            {"address": "special:magic", "type": "special", "name": "special:magic", "monitor": "DP-2"},
+            {"address": "web", "type": "normal", "name": "web", "monitor": "DP-1"},
+            {"address": "2", "id": 2, "type": "normal", "name": "code", "monitor": "DP-2"}
+        ]"#;
+        let ws_items = hyprland_workspace_items(
+            workspaces.as_bytes(),
+            monitors.as_bytes(),
+            clients.as_bytes(),
+            4242,
+        )
+        .unwrap();
+        assert_eq!(
+            workspace_rows(&ws_items),
+            vec![
+                ("Workspace code", "on DP-2 · No windows", Some("Current")),
+                (
+                    "Workspace web",
+                    "on DP-1 · 1 window · Mozilla Firefox",
+                    Some("Visible")
+                ),
+                (
+                    "Workspace special:magic",
+                    "on DP-2 · 1 window · scratch",
+                    None
+                ),
+            ]
+        );
+        assert!(matches!(
+            &ws_items[0].primary.as_ref().unwrap().action,
+            DeferredAction::Hypr(HyprAction::Workspace { workspace }) if workspace == "2"
+        ));
+        assert!(matches!(
+            &ws_items[1].primary.as_ref().unwrap().action,
+            DeferredAction::Hypr(HyprAction::Workspace { workspace }) if workspace == "name:web"
+        ));
+        assert!(matches!(
+            &ws_items[2].primary.as_ref().unwrap().action,
+            DeferredAction::Hypr(HyprAction::ToggleSpecial { name }) if name == "magic"
+        ));
+        assert!(ws_items[2].secondary.is_none());
     }
 
     // Captured from a nested niri 26.04, plus a Raffi window (pid 4242).
