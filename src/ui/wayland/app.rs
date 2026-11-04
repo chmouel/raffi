@@ -2369,6 +2369,7 @@ impl LauncherApp {
                         request: request.clone(),
                         converted_amount: request.amount * cached.rate,
                         rate: cached.rate,
+                        origin: cached.origin,
                     });
                     self.currency.loading = false;
                     self.currency.error = None;
@@ -2405,6 +2406,7 @@ impl LauncherApp {
                             to_currency: to_currency.clone(),
                             converted_amount: request.amount * cached.rate,
                             rate: cached.rate,
+                            origin: cached.origin,
                         });
                     } else {
                         all_cached = false;
@@ -4258,9 +4260,10 @@ impl LauncherApp {
                     "{}_{}",
                     currency_result.request.from_currency, currency_result.request.to_currency
                 );
-                self.currency
-                    .cache
-                    .insert(cache_key, CachedRate::new(currency_result.rate));
+                self.currency.cache.insert(
+                    cache_key,
+                    CachedRate::new(currency_result.rate, currency_result.origin),
+                );
                 self.currency.result = Some(currency_result);
                 self.currency.error = None;
             }
@@ -4297,9 +4300,10 @@ impl LauncherApp {
                 for conversion in &multi_result.conversions {
                     let cache_key =
                         format!("{}_{}", multi_result.from_currency, conversion.to_currency);
-                    self.currency
-                        .cache
-                        .insert(cache_key, CachedRate::new(conversion.rate));
+                    self.currency.cache.insert(
+                        cache_key,
+                        CachedRate::new(conversion.rate, conversion.origin),
+                    );
                 }
                 self.currency.multi_result = Some(multi_result);
                 self.currency.error = None;

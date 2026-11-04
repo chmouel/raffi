@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use super::state::{
     CurrencyConversion, CurrencyConversionRequest, CurrencyResult, Message, MultiCurrencyRequest,
-    MultiCurrencyResult,
+    MultiCurrencyResult, RateOrigin,
 };
 use crate::{CurrencyAddonConfig, CurrencyRateProvider};
 
@@ -205,16 +205,17 @@ pub(super) struct RateSource {
 
 impl RateSource {
     /// The sources in the order the user wants them tried. Without a
-    /// `sources` setting only Frankfurter is contacted.
+    /// `sources` setting only Frankfurter is contacted. An explicit empty
+    /// list stays empty: it means "contact nothing", and conversions report
+    /// that instead of quietly using a default.
     pub(super) fn from_config(config: &CurrencyAddonConfig) -> Vec<RateSource> {
-        let configured = config.sources.as_deref().unwrap_or_default();
-        if configured.is_empty() {
-            return vec![RateSource::new(CurrencyRateProvider::Frankfurter, None)];
+        match config.sources.as_deref() {
+            None => vec![RateSource::new(CurrencyRateProvider::Frankfurter, None)],
+            Some(configured) => configured
+                .iter()
+                .map(|source| RateSource::new(source.provider(), source.url()))
+                .collect(),
         }
-        configured
-            .iter()
-            .map(|source| RateSource::new(source.provider(), source.url()))
-            .collect()
     }
 
     fn new(provider: CurrencyRateProvider, url: Option<&str>) -> Self {
@@ -274,7 +275,7 @@ fn fetch_rates(
     sources: &[RateSource],
     from: &str,
     to: &[String],
-) -> Result<HashMap<String, f64>, String> {
+) -> Result<(HashMap<String, f64>, RateOrigin), String> {
     fetch_rates_with(sources, to, |source, timeout| {
         let config = ureq::Agent::config_builder()
             .timeout_global(Some(timeout))
@@ -288,12 +289,12 @@ fn fetch_rates_with<F>(
     sources: &[RateSource],
     to: &[String],
     mut fetch: F,
-) -> Result<HashMap<String, f64>, String>
+) -> Result<(HashMap<String, f64>, RateOrigin), String>
 where
     F: FnMut(&RateSource, Duration) -> Result<HashMap<String, f64>, String>,
 {
     if sources.is_empty() {
-        return Err("No exchange rate source is configured".to_string());
+        return Err("No exchange rate source: addons.currency.sources is empty".to_string());
     }
     let mut failures = Vec::new();
     for (index, source) in sources.iter().enumerate() {
@@ -311,7 +312,11 @@ where
                         failures.join("; ")
                     );
                 }
-                return Ok(rates);
+                let origin = RateOrigin {
+                    source: source.name(),
+                    backup: index > 0,
+                };
+                return Ok((rates, origin));
             }
             Err(error) => {
                 crate::debug_log!("currency: {} failed: {error}", source.name());
@@ -401,7 +406,7 @@ fn fetch_rate_blocking(
         request.from_currency,
         request.to_currency
     );
-    let rates = fetch_rates(
+    let (rates, origin) = fetch_rates(
         sources,
         &request.from_currency,
         std::slice::from_ref(&request.to_currency),
@@ -409,18 +414,14 @@ fn fetch_rate_blocking(
 
     // `fetch_rates` only succeeds with at least one requested rate, and only
     // one was requested.
-    let rate = rates.get(&request.to_currency).copied().ok_or_else(|| {
-        format!(
-            "Could not get an exchange rate ({} to {} missing from the answer)",
-            request.from_currency, request.to_currency
-        )
-    })?;
+    let rate = rates[&request.to_currency];
 
     crate::debug_log!("currency: rate={rate} converted={}", request.amount * rate);
     Ok(CurrencyResult {
         request: request.clone(),
         converted_amount: request.amount * rate,
         rate,
+        origin,
     })
 }
 
@@ -445,7 +446,7 @@ fn fetch_multi_rates_blocking(
         request.from_currency,
         request.to_currencies
     );
-    let rates = fetch_rates(sources, &request.from_currency, &request.to_currencies)?;
+    let (rates, origin) = fetch_rates(sources, &request.from_currency, &request.to_currencies)?;
 
     let conversions: Vec<CurrencyConversion> = request
         .to_currencies
@@ -455,17 +456,10 @@ fn fetch_multi_rates_blocking(
                 to_currency: to_currency.clone(),
                 converted_amount: request.amount * rate,
                 rate,
+                origin,
             })
         })
         .collect();
-
-    if conversions.is_empty() {
-        return Err(format!(
-            "Could not get an exchange rate ({} to {} missing from the answer)",
-            request.from_currency,
-            request.to_currencies.join(", ")
-        ));
-    }
 
     Ok(MultiCurrencyResult {
         amount: request.amount,
@@ -485,6 +479,7 @@ mod tests {
         BankQuote, BankTable, RateSource, BACKUP_TIMEOUT, BANK_OF_ENGLAND_URL, FRANKFURTER_URL,
         PRIMARY_TIMEOUT,
     };
+    use crate::ui::wayland::state::RateOrigin;
     use crate::{CurrencyAddonConfig, CurrencyRateProvider, CurrencyRateSource};
 
     fn quote(base: &str, quote: &str, kind: &str, value: f64) -> BankQuote {
@@ -570,12 +565,27 @@ mod tests {
         assert_eq!(sources.len(), 1);
         assert_eq!(sources[0].provider, CurrencyRateProvider::Frankfurter);
         assert_eq!(sources[0].url, FRANKFURTER_URL);
+    }
 
+    #[test]
+    fn test_explicit_empty_sources_contact_nothing() {
         let config = CurrencyAddonConfig {
             sources: Some(Vec::new()),
             ..CurrencyAddonConfig::default()
         };
-        assert_eq!(RateSource::from_config(&config), sources);
+        let sources = RateSource::from_config(&config);
+        assert!(sources.is_empty());
+
+        let mut called = false;
+        let result = fetch_rates_with(&sources, &targets(&["EUR"]), |_, _| {
+            called = true;
+            Ok(rates(&[("EUR", 0.9)]))
+        });
+        assert!(!called);
+        assert_eq!(
+            result,
+            Err("No exchange rate source: addons.currency.sources is empty".to_string())
+        );
     }
 
     #[test]
@@ -612,7 +622,16 @@ mod tests {
             calls.push((source.provider, timeout));
             Ok(rates(&[("EUR", 0.9)]))
         });
-        assert_eq!(result, Ok(rates(&[("EUR", 0.9)])));
+        assert_eq!(
+            result,
+            Ok((
+                rates(&[("EUR", 0.9)]),
+                RateOrigin {
+                    source: "Frankfurter",
+                    backup: false
+                }
+            ))
+        );
         assert_eq!(
             calls,
             vec![(CurrencyRateProvider::Frankfurter, PRIMARY_TIMEOUT)]
@@ -629,7 +648,16 @@ mod tests {
                 CurrencyRateProvider::BankOfEngland => Ok(rates(&[("EUR", 0.9)])),
             }
         });
-        assert_eq!(result, Ok(rates(&[("EUR", 0.9)])));
+        assert_eq!(
+            result,
+            Ok((
+                rates(&[("EUR", 0.9)]),
+                RateOrigin {
+                    source: "Bank of England",
+                    backup: true
+                }
+            ))
+        );
         assert_eq!(timeouts, vec![PRIMARY_TIMEOUT, BACKUP_TIMEOUT]);
         assert!(BACKUP_TIMEOUT < PRIMARY_TIMEOUT);
         assert!(PRIMARY_TIMEOUT + BACKUP_TIMEOUT <= Duration::from_secs(15));
@@ -643,7 +671,7 @@ mod tests {
             CurrencyRateProvider::Frankfurter => Ok(HashMap::new()),
             CurrencyRateProvider::BankOfEngland => Ok(rates(&[("EUR", 0.9)])),
         });
-        assert_eq!(result, Ok(rates(&[("EUR", 0.9)])));
+        assert_eq!(result.map(|(rates, _)| rates), Ok(rates(&[("EUR", 0.9)])));
     }
 
     #[test]
@@ -666,15 +694,6 @@ mod tests {
                  Bank of England: no rate for EUR, INR)"
                     .to_string()
             )
-        );
-    }
-
-    #[test]
-    fn test_fetch_rates_without_sources_is_an_error() {
-        let result = fetch_rates_with(&[], &targets(&["EUR"]), |_, _| Ok(rates(&[("EUR", 0.9)])));
-        assert_eq!(
-            result,
-            Err("No exchange rate source is configured".to_string())
         );
     }
 

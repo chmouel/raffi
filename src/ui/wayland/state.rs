@@ -11,7 +11,7 @@ use super::theme::{PreviewStyle, ThemeColors};
 pub(crate) use super::types::{
     CachedRate, CalculatorResult, ClipboardData, CurrencyConversion, CurrencyConversionRequest,
     CurrencyResult, DynamicPreview, EmojiEntry, FileBrowserEntry, Message, MultiCurrencyRequest,
-    MultiCurrencyResult, ScriptFilterResult, ScriptFilterView, WebSearchActiveState,
+    MultiCurrencyResult, RateOrigin, ScriptFilterResult, ScriptFilterView, WebSearchActiveState,
 };
 use crate::{AddonsConfig, TextSnippet};
 

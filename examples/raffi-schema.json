@@ -785,7 +785,7 @@
           "default": true
         },
         "sources": {
-          "description": "Exchange rate sources in the order they are tried; the next one is\ncontacted only when the previous one fails or has none of the\nrequested rates. Default: `[frankfurter]`, so no other site is\ncontacted unless listed here.",
+          "description": "Exchange rate sources in the order they are tried; the next one is\ncontacted only when the previous one fails or has none of the\nrequested rates. Default: `[frankfurter]`, so no other site is\ncontacted unless listed here. An empty list contacts nothing, and\nconversions report an error.",
           "type": [
             "array",
             "null"
@@ -838,6 +838,7 @@
               "type": "string"
             }
           },
+          "additionalProperties": false,
           "required": [
             "provider",
             "url"

@@ -125,8 +125,9 @@ pub enum CurrencyRateProvider {
 
 /// One entry of `addons.currency.sources`: a provider name, or a provider
 /// together with the URL to fetch it from
-#[derive(Deserialize, JsonSchema, Debug, Clone, PartialEq, Eq)]
+#[derive(JsonSchema, Debug, Clone, PartialEq, Eq)]
 #[serde(untagged)]
+#[schemars(deny_unknown_fields)]
 pub enum CurrencyRateSource {
     /// The provider at its usual address, e.g. `frankfurter`
     Provider(CurrencyRateProvider),
@@ -138,6 +139,49 @@ pub enum CurrencyRateSource {
         /// `symbols` query parameters are appended
         url: String,
     },
+}
+
+// Written by hand because an untagged derive turns any mistake in a
+// hand-edited list into "data did not match any variant", and drops unknown
+// keys of a `{provider, url}` entry.
+impl<'de> Deserialize<'de> for CurrencyRateSource {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::{self, value::MapAccessDeserializer, IntoDeserializer};
+
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct CustomSource {
+            provider: CurrencyRateProvider,
+            url: String,
+        }
+
+        struct SourceVisitor;
+
+        impl<'de> de::Visitor<'de> for SourceVisitor {
+            type Value = CurrencyRateSource;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a provider name, or a map with `provider` and `url`")
+            }
+
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                CurrencyRateProvider::deserialize(value.into_deserializer())
+                    .map(CurrencyRateSource::Provider)
+                    .map_err(|error: E| E::custom(format!("addons.currency.sources: {error}")))
+            }
+
+            fn visit_map<A: de::MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+                CustomSource::deserialize(MapAccessDeserializer::new(map))
+                    .map(|source| CurrencyRateSource::Custom {
+                        provider: source.provider,
+                        url: source.url,
+                    })
+                    .map_err(|error| de::Error::custom(format!("addons.currency.sources: {error}")))
+            }
+        }
+
+        deserializer.deserialize_any(SourceVisitor)
+    }
 }
 
 impl CurrencyRateSource {
@@ -174,7 +218,8 @@ pub struct CurrencyAddonConfig {
     /// Exchange rate sources in the order they are tried; the next one is
     /// contacted only when the previous one fails or has none of the
     /// requested rates. Default: `[frankfurter]`, so no other site is
-    /// contacted unless listed here.
+    /// contacted unless listed here. An empty list contacts nothing, and
+    /// conversions report an error.
     #[serde(default)]
     pub sources: Option<Vec<CurrencyRateSource>>,
 }
@@ -5266,6 +5311,35 @@ launchers:
                 },
             ])
         );
+    }
+
+    #[test]
+    fn test_currency_source_typo_names_the_setting_and_the_value() {
+        let error = serde_yaml::from_str::<Vec<CurrencyRateSource>>("- bank-of-england")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("addons.currency.sources"), "{error}");
+        assert!(error.contains("bank-of-england"), "{error}");
+    }
+
+    #[test]
+    fn test_currency_source_rejects_unknown_keys_in_custom_entry() {
+        let yaml = "- provider: frankfurter\n  url: https://rates.example.org\n  ulr: typo";
+        let error = serde_yaml::from_str::<Vec<CurrencyRateSource>>(yaml)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("addons.currency.sources"), "{error}");
+        assert!(error.contains("ulr"), "{error}");
+    }
+
+    #[test]
+    fn test_currency_source_typo_survives_the_value_round_trip() {
+        // read_config goes through serde_yaml::Value, not straight from text.
+        let value: Value = serde_yaml::from_str("[frankfurter, bank_of_englnd]").unwrap();
+        let error = serde_yaml::from_value::<Vec<CurrencyRateSource>>(value)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("bank_of_englnd"), "{error}");
     }
 
     struct MockEnvProvider {

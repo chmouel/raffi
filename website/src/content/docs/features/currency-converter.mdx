@@ -195,7 +195,7 @@ By default Raffi uses the [Frankfurter API](https://www.frankfurter.app/) and no
 - Free and open-source
 - No API key required
 - Updated daily with European Central Bank rates
-- Rates are cached for 1 hour locally
+- Rates are cached for 1 hour locally (5 minutes when a backup source answered)
 
 `addons.currency.sources` chooses the sources and their order. The first
 entry is the preferred one; each later entry is contacted only when every
@@ -220,7 +220,8 @@ addons:
 Each source listed is a separate website that may be contacted, and it sees the
 currency codes you convert between. `bank_of_england` is never used unless you
 list it. If you want a single source, list only that one, or leave `sources`
-unset for Frankfurter alone.
+unset for Frankfurter alone. An empty list (`sources: []`) contacts nothing, and
+conversions show an error.
 </Aside>
 
 A source can also be fetched from another address, such as a mirror or a

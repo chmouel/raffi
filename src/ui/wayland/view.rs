@@ -2972,14 +2972,7 @@ impl LauncherApp {
                     button(error_row)
                         .padding(fs.item_padding)
                         .width(Length::Fill)
-                        .style(move |_theme, _status| button::Style {
-                            text_color: t.text_muted,
-                            border: iced::Border {
-                                radius: 8.0.into(),
-                                ..Default::default()
-                            },
-                            ..Default::default()
-                        }),
+                        .style(item_button_style(t, false, t.text_muted)),
                 );
             }
         }

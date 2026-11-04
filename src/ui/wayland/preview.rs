@@ -1936,6 +1936,7 @@ impl LauncherApp {
                         req.to_currency, inverse_rate, req.from_currency
                     ),
                 ),
+                ("Source".to_string(), currency.origin.source.to_string()),
                 (
                     "Enter".to_string(),
                     format!("Copy {:.2} to clipboard", currency.converted_amount),
@@ -1997,6 +1998,7 @@ impl LauncherApp {
                         selected.to_currency, inverse_rate, multi.from_currency
                     ),
                 ),
+                ("Source".to_string(), selected.origin.source.to_string()),
                 (
                     "Enter".to_string(),
                     format!("Copy {:.2} to clipboard", selected.converted_amount),
