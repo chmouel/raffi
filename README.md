@@ -73,7 +73,7 @@ Some lists have more than one view, and `Ctrl+Tab` always switches between them,
 
 Most addons start with a keyword followed by a space. Others answer as soon as your search looks like something they understand.
 
-Answers as you type:
+### Direct Answers:
 
 - [Calculator](https://chmouel.github.io/raffi/features/calculator/): type a sum like `2*(3+4)`
 - [Currency converter](https://chmouel.github.io/raffi/features/currency-converter/): `$10 to eur`
@@ -82,7 +82,7 @@ Answers as you type:
 - [World clock](https://chmouel.github.io/raffi/features/world-clock/): `time tokyo`, `15:00 paris to nyc`
 - [Developer tools](https://chmouel.github.io/raffi/features/developer-tools/): `dev ` to encode, decode or hash text, plus UUID and password generators
 
-Search and pick:
+### Pick items
 
 - [File browser](https://chmouel.github.io/raffi/features/file-browser/): start with `/` or `~/`, with previews of PDFs, images, videos and source code
 - Emoji and Nerd Font icons: `emoji `
@@ -90,7 +90,7 @@ Search and pick:
 - [Text snippets](https://chmouel.github.io/raffi/features/text-snippets/), [web searches](https://chmouel.github.io/raffi/features/web-search/) and [script filters](https://chmouel.github.io/raffi/features/script-filters/), each under a keyword you choose
 - [Installed apps](https://chmouel.github.io/raffi/features/installed-apps/), with their actions such as opening a private window
 
-Control your desktop:
+### Desktop control:
 
 - [System commands](https://chmouel.github.io/raffi/features/system-commands/) to lock, suspend, log out or shut down: `sys `
 - [Window switcher](https://chmouel.github.io/raffi/features/window-switcher/) for Hyprland, niri and sway: `win `
@@ -103,14 +103,20 @@ Control your desktop:
 - [Stop a process](https://chmouel.github.io/raffi/features/kill-process/): `kill `
 - [Run a command in a terminal](https://chmouel.github.io/raffi/features/terminal/): `> htop`
 
-Passwords, copied or typed for you:
+### Passwords access:
 
 - [pass](https://chmouel.github.io/raffi/features/password-store/): `pass `
 - [Bitwarden](https://chmouel.github.io/raffi/features/bitwarden/) through rbw: `bw `
 
+### Chat:
+
 [Slack](https://chmouel.github.io/raffi/features/slack/) is off until you set it up. Then `slack ` opens conversations, searches messages, lists what you haven't read and sets your status.
 
+### Look
+
 You can change how Raffi looks with the built-in [themes](https://chmouel.github.io/raffi/features/themes/) or your own colors.
+
+### Legacy Fuzzel support
 
 If you already use [Fuzzel](https://codeberg.org/dnkl/fuzzel), Raffi can show your apps and entries there instead. See the [Fuzzel page](https://chmouel.github.io/raffi/integration/fuzzel/) for what that gives up.
 
