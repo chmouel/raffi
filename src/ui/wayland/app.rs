@@ -17,7 +17,7 @@ use super::color::{color_inline_result, try_parse_color};
 use super::command_list::{CommandListAddon, Selection};
 use super::currency::{
     fetch_exchange_rate, fetch_multi_exchange_rates, is_currency_help_query,
-    try_parse_currency_conversion, try_parse_multi_currency_conversion,
+    try_parse_currency_conversion, try_parse_multi_currency_conversion, RateSource,
 };
 use super::devtools::{
     compute_hash_rows, generator_inline_result, transform_rows, try_parse_generator, DevRow,
@@ -2369,6 +2369,7 @@ impl LauncherApp {
                         request: request.clone(),
                         converted_amount: request.amount * cached.rate,
                         rate: cached.rate,
+                        origin: cached.origin,
                     });
                     self.currency.loading = false;
                     self.currency.error = None;
@@ -2381,7 +2382,8 @@ impl LauncherApp {
             self.currency.result = None;
             self.currency.error = None;
             self.currency.pending_request = Some(request.clone());
-            tasks.push(fetch_exchange_rate(request));
+            let sources = RateSource::from_config(&self.addons.currency);
+            tasks.push(fetch_exchange_rate(request, sources));
             return Some(Task::batch(std::mem::take(tasks)));
         }
 
@@ -2404,6 +2406,7 @@ impl LauncherApp {
                             to_currency: to_currency.clone(),
                             converted_amount: request.amount * cached.rate,
                             rate: cached.rate,
+                            origin: cached.origin,
                         });
                     } else {
                         all_cached = false;
@@ -2428,8 +2431,10 @@ impl LauncherApp {
 
             self.currency.multi_loading = true;
             self.currency.multi_result = None;
+            self.currency.error = None;
             self.currency.pending_multi_request = Some(request.clone());
-            tasks.push(fetch_multi_exchange_rates(request));
+            let sources = RateSource::from_config(&self.addons.currency);
+            tasks.push(fetch_multi_exchange_rates(request, sources));
             return Some(Task::batch(std::mem::take(tasks)));
         }
 
@@ -4255,9 +4260,10 @@ impl LauncherApp {
                     "{}_{}",
                     currency_result.request.from_currency, currency_result.request.to_currency
                 );
-                self.currency
-                    .cache
-                    .insert(cache_key, CachedRate::new(currency_result.rate));
+                self.currency.cache.insert(
+                    cache_key,
+                    CachedRate::new(currency_result.rate, currency_result.origin),
+                );
                 self.currency.result = Some(currency_result);
                 self.currency.error = None;
             }
@@ -4294,14 +4300,17 @@ impl LauncherApp {
                 for conversion in &multi_result.conversions {
                     let cache_key =
                         format!("{}_{}", multi_result.from_currency, conversion.to_currency);
-                    self.currency
-                        .cache
-                        .insert(cache_key, CachedRate::new(conversion.rate));
+                    self.currency.cache.insert(
+                        cache_key,
+                        CachedRate::new(conversion.rate, conversion.origin),
+                    );
                 }
                 self.currency.multi_result = Some(multi_result);
+                self.currency.error = None;
             }
-            Err(_) => {
+            Err(error) => {
                 self.currency.multi_result = None;
+                self.currency.error = Some(error);
             }
         }
         self.currency.pending_multi_request = None;

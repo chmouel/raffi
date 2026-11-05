@@ -784,6 +784,16 @@
           "type": "boolean",
           "default": true
         },
+        "sources": {
+          "description": "Exchange rate sources in the order they are tried; the next one is\ncontacted only when the previous one fails or has none of the\nrequested rates. Default: `[frankfurter]`, so no other site is\ncontacted unless listed here. An empty list contacts nothing, and\nconversions report an error.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/CurrencyRateSource"
+          }
+        },
         "trigger": {
           "type": [
             "string",
@@ -793,6 +803,48 @@
         }
       },
       "additionalProperties": false
+    },
+    "CurrencyRateProvider": {
+      "description": "A service the currency converter can fetch exchange rates from",
+      "oneOf": [
+        {
+          "description": "Frankfurter (api.frankfurter.dev): European Central Bank reference rates",
+          "type": "string",
+          "const": "frankfurter"
+        },
+        {
+          "description": "The Bank of England's daily rates, as published by allratestoday.com",
+          "type": "string",
+          "const": "bank_of_england"
+        }
+      ]
+    },
+    "CurrencyRateSource": {
+      "description": "One entry of `addons.currency.sources`: a provider name, or a provider\ntogether with the URL to fetch it from",
+      "anyOf": [
+        {
+          "description": "The provider at its usual address, e.g. `frankfurter`",
+          "$ref": "#/$defs/CurrencyRateProvider"
+        },
+        {
+          "description": "The provider's response format served from another address, such as\na mirror or a proxy",
+          "type": "object",
+          "properties": {
+            "provider": {
+              "$ref": "#/$defs/CurrencyRateProvider"
+            },
+            "url": {
+              "description": "Full URL of the endpoint; for `frankfurter` the `base` and\n`symbols` query parameters are appended",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "url"
+          ]
+        }
+      ]
     },
     "DevtoolsAddonConfig": {
       "description": "Configuration for the developer tools addon: the `dev` transform list\nand the inline `uuid` and `pw` generators",

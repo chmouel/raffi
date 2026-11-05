@@ -55,6 +55,7 @@ pub(crate) struct CurrencyResult {
     pub request: CurrencyConversionRequest,
     pub converted_amount: f64,
     pub rate: f64,
+    pub origin: RateOrigin,
 }
 
 /// Multi-currency conversion request (simple syntax without to/in).
@@ -79,6 +80,7 @@ pub(crate) struct CurrencyConversion {
     pub to_currency: String,
     pub converted_amount: f64,
     pub rate: f64,
+    pub origin: RateOrigin,
 }
 
 /// Alfred Script Filter JSON icon.
@@ -403,25 +405,47 @@ pub(crate) struct WebSearchActiveState {
     pub icon: Option<String>,
 }
 
+/// Which configured exchange rate source produced a rate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RateOrigin {
+    pub source: &'static str,
+    /// True when an earlier source in the list failed to answer.
+    pub backup: bool,
+}
+
 /// Cached exchange rate with timestamp for TTL.
 #[derive(Debug, Clone)]
 pub(crate) struct CachedRate {
     pub rate: f64,
+    pub origin: RateOrigin,
     pub timestamp: Instant,
 }
 
 impl CachedRate {
     const TTL: Duration = Duration::from_secs(3600);
+    /// A backup's answer is kept briefly, so the preferred source gets asked
+    /// again soon after it recovers without paying its timeout on every query
+    /// while it is down.
+    const BACKUP_TTL: Duration = Duration::from_secs(300);
 
-    pub(crate) fn new(rate: f64) -> Self {
+    pub(crate) fn new(rate: f64, origin: RateOrigin) -> Self {
         Self {
             rate,
+            origin,
             timestamp: Instant::now(),
         }
     }
 
+    fn ttl(&self) -> Duration {
+        if self.origin.backup {
+            Self::BACKUP_TTL
+        } else {
+            Self::TTL
+        }
+    }
+
     pub(crate) fn is_valid(&self) -> bool {
-        self.timestamp.elapsed() < Self::TTL
+        self.timestamp.elapsed() < self.ttl()
     }
 }
 
@@ -712,5 +736,29 @@ impl ClipboardData {
             self.current = other.current;
         }
         self.history.extend(other.history);
+    }
+}
+
+#[cfg(test)]
+mod cached_rate_tests {
+    use super::*;
+
+    fn cached(backup: bool, age: Duration) -> CachedRate {
+        CachedRate {
+            rate: 0.9,
+            origin: RateOrigin {
+                source: "Test",
+                backup,
+            },
+            timestamp: Instant::now() - age,
+        }
+    }
+
+    #[test]
+    fn test_backup_rate_expires_before_primary_rate() {
+        let age = CachedRate::BACKUP_TTL + Duration::from_secs(1);
+        assert!(cached(false, age).is_valid());
+        assert!(!cached(true, age).is_valid());
+        assert!(cached(true, Duration::from_secs(1)).is_valid());
     }
 }

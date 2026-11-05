@@ -11,7 +11,7 @@ use super::theme::{PreviewStyle, ThemeColors};
 pub(crate) use super::types::{
     CachedRate, CalculatorResult, ClipboardData, CurrencyConversion, CurrencyConversionRequest,
     CurrencyResult, DynamicPreview, EmojiEntry, FileBrowserEntry, Message, MultiCurrencyRequest,
-    MultiCurrencyResult, ScriptFilterResult, ScriptFilterView, WebSearchActiveState,
+    MultiCurrencyResult, RateOrigin, ScriptFilterResult, ScriptFilterView, WebSearchActiveState,
 };
 use crate::{AddonsConfig, TextSnippet};
 
@@ -55,6 +55,7 @@ impl CurrencyState {
     pub fn clear_multi(&mut self) {
         self.multi_result = None;
         self.multi_loading = false;
+        self.error = None;
         self.pending_multi_request = None;
     }
 }

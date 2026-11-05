@@ -3733,6 +3733,10 @@ fn test_preview_emoji_calculator_currency_and_web_search() {
         },
         converted_amount: 92.5,
         rate: 0.925,
+        origin: super::types::RateOrigin {
+            source: "Frankfurter",
+            backup: false,
+        },
     });
     let curr_preview = app
         .resolve_selected_preview()
@@ -4594,6 +4598,10 @@ fn test_currency_copy_failure_keeps_launcher_open() {
         },
         converted_amount: 9.254,
         rate: 0.9254,
+        origin: super::types::RateOrigin {
+            source: "Frankfurter",
+            backup: false,
+        },
     });
     assert_currency_copy_failure_and_retry(&mut app);
 }
@@ -4609,11 +4617,19 @@ fn test_multi_currency_copy_failure_keeps_launcher_open() {
                 to_currency: "EUR".into(),
                 converted_amount: 9.25,
                 rate: 0.925,
+                origin: super::types::RateOrigin {
+                    source: "Frankfurter",
+                    backup: false,
+                },
             },
             super::types::CurrencyConversion {
                 to_currency: "GBP".into(),
                 converted_amount: 7.891,
                 rate: 0.7891,
+                origin: super::types::RateOrigin {
+                    source: "Frankfurter",
+                    backup: false,
+                },
             },
         ],
     });
