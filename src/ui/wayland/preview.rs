@@ -380,8 +380,12 @@ pub(crate) enum PreviewBody {
     /// Image at the pane width and its own height, up to half the pane
     /// (for a browser tab's page image).
     Thumbnail { path: String },
-    /// Scaled image decoded from memory (for clipboard history images).
-    ImageData { handle: iced::widget::image::Handle },
+    /// Scaled image decoded from memory, with an optional muted summary line
+    /// centred under it (for clipboard history images).
+    ImageData {
+        handle: iced::widget::image::Handle,
+        footer: Option<String>,
+    },
     /// Giant centered glyph/emoji hero display.
     HeroGlyph { glyph: String },
     /// Large centered value display (for Calculator and Currency Converter).
@@ -1512,6 +1516,7 @@ impl LauncherApp {
                     PreparedPreviewBody::ImageData(handle) => {
                         data.bodies.push(PreviewBody::ImageData {
                             handle: handle.clone(),
+                            footer: None,
                         });
                     }
                     // Only the first file is shown: it is the one kept in the
@@ -1801,8 +1806,12 @@ impl LauncherApp {
     fn build_clipboard_preview(&self, item: &ClipItem) -> PreviewData {
         let mut bodies = Vec::new();
         let mut metadata = vec![("Type".to_string(), item.kind.label().to_string())];
-        if let Some(time) = item.copied {
-            metadata.push(("Copied".to_string(), super::clipboard::full_copy_time(time)));
+        let now = Local::now().naive_local();
+        let copied = item
+            .copied
+            .map(|time| super::clipboard::human_copy_time(time, now));
+        if let Some(time) = &copied {
+            metadata.push(("Copied".to_string(), time.clone()));
         }
         match self.clipboard.preview(&item.id) {
             None => bodies.push(PreviewBody::Prose {
@@ -1818,13 +1827,15 @@ impl LauncherApp {
             Some(Ok(preview)) => {
                 match &preview.image {
                     Some(Ok(image)) => {
+                        let dimensions = format!("{} × {} px", image.width, image.height);
                         bodies.push(PreviewBody::ImageData {
                             handle: image.handle.clone(),
+                            footer: Some(match &copied {
+                                Some(time) => format!("{dimensions} · copied {time}"),
+                                None => dimensions.clone(),
+                            }),
                         });
-                        metadata.push((
-                            "Dimensions".to_string(),
-                            format!("{} × {} px", image.width, image.height),
-                        ));
+                        metadata.push(("Dimensions".to_string(), dimensions));
                     }
                     Some(Err(error)) => bodies.push(PreviewBody::Prose {
                         heading: Some("Image".to_string()),
@@ -1849,12 +1860,17 @@ impl LauncherApp {
                         truncated: false,
                     });
                 } else if !preview.text.is_empty() {
+                    let mut footer = text_summary(
+                        &preview.text,
+                        preview.text_truncated.then_some(item.text_len),
+                    );
+                    if let Some(time) = &copied {
+                        footer.push_str(" · copied ");
+                        footer.push_str(time);
+                    }
                     bodies.push(PreviewBody::Plain {
                         content: preview.text.clone(),
-                        footer: Some(text_summary(
-                            &preview.text,
-                            preview.text_truncated.then_some(item.text_len),
-                        )),
+                        footer: Some(footer),
                     });
                 }
                 let formats = preview

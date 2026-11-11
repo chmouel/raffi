@@ -1734,8 +1734,31 @@ impl LauncherApp {
                         col = col.push(el);
                     }
                 }
-                Some(PreviewBody::ImageData { handle }) => {
+                Some(PreviewBody::ImageData {
+                    handle,
+                    footer: None,
+                }) => {
                     col = col.push(memory_image(handle.clone(), viewport_height));
+                }
+                // The summary line stays in the first view, under the image.
+                Some(PreviewBody::ImageData {
+                    handle,
+                    footer: Some(footer),
+                }) => {
+                    col = col.push(memory_image(
+                        handle.clone(),
+                        (viewport_height - ps.small * 1.5 - 14.0).max(0.0),
+                    ));
+                    col = col.push(
+                        container(
+                            text(footer.clone())
+                                .size(ps.small)
+                                .color(ps.text_muted)
+                                .font(ps.font),
+                        )
+                        .width(Length::Fill)
+                        .align_x(iced::Alignment::Center),
+                    );
                 }
                 _ => {}
             }
@@ -1836,7 +1859,7 @@ impl LauncherApp {
                         col = col.push(el);
                     }
                 }
-                PreviewBody::ImageData { handle } => {
+                PreviewBody::ImageData { handle, .. } => {
                     col = col.push(memory_image(handle, viewport_height));
                 }
                 PreviewBody::Thumbnail { path } => {

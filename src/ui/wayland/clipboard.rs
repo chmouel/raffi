@@ -110,8 +110,18 @@ pub(crate) fn short_copy_time(time: NaiveDateTime, now: NaiveDateTime) -> String
     }
 }
 
-pub(crate) fn full_copy_time(time: NaiveDateTime) -> String {
-    time.format(COPY_TIME_FORMAT).to_string()
+/// Spoken copy time for the preview: "today at 14:32", "yesterday at
+/// 09:10", "Monday at 18:05" in the past week, then the weekday and date,
+/// with the year only when it is not the current one.
+pub(crate) fn human_copy_time(time: NaiveDateTime, now: NaiveDateTime) -> String {
+    let days = (now.date() - time.date()).num_days();
+    match days {
+        0 => time.format("today at %H:%M").to_string(),
+        1 => time.format("yesterday at %H:%M").to_string(),
+        2..=6 => time.format("%A at %H:%M").to_string(),
+        _ if time.year() == now.year() => time.format("%A, %B %-d at %H:%M").to_string(),
+        _ => time.format("%A, %B %-d, %Y at %H:%M").to_string(),
+    }
 }
 
 impl ClipItem {
@@ -147,17 +157,6 @@ impl ClipItem {
 
     /// Type and size details for the result row.
     pub(crate) fn subtitle(&self) -> String {
-        let details = self.details();
-        match self.copied {
-            Some(time) => {
-                let now = chrono::Local::now().naive_local();
-                format!("{details} · {}", short_copy_time(time, now))
-            }
-            None => details,
-        }
-    }
-
-    fn details(&self) -> String {
         let label = self.kind.label();
         match self.kind {
             ItemKind::Text | ItemKind::Html => match self.text_len {
@@ -699,8 +698,15 @@ mod tests {
         assert_eq!(page.items[1].kind, ItemKind::Image);
         assert_eq!(page.items[0].copied, None);
         let copied = page.items[1].copied.unwrap();
-        assert_eq!(full_copy_time(copied), "2026-10-16 14:32:05");
-        assert!(page.items[1].subtitle().starts_with("Image · "));
+        assert_eq!(
+            copied.format(COPY_TIME_FORMAT).to_string(),
+            "2026-10-16 14:32:05"
+        );
+        assert_eq!(
+            page.items[1].subtitle(),
+            "Image",
+            "rows leave the copy time out"
+        );
         let odd = br#"{"tab":"t","total":1,"head":"h","next":1,"stable":true,"items":[{"r":0,"id":"a","f":[],"k":"text","n":0,"p":"","t":0,"c":"soon"}]}"#;
         assert_eq!(parse_page(odd).unwrap().items[0].copied, None);
 
@@ -725,6 +731,25 @@ mod tests {
             short_copy_time(at("2025-12-31 10:00:00"), now),
             "2025-12-31"
         );
+    }
+
+    #[test]
+    fn test_human_copy_time() {
+        let at = |s: &str| NaiveDateTime::parse_from_str(s, COPY_TIME_FORMAT).unwrap();
+        let now = at("2026-10-16 19:00:00");
+        let cases = [
+            ("2026-10-16 08:05:00", "today at 08:05"),
+            ("2026-10-15 23:59:00", "yesterday at 23:59"),
+            ("2026-10-12 10:00:00", "Monday at 10:00"),
+            ("2026-03-02 10:00:00", "Monday, March 2 at 10:00"),
+            (
+                "2025-12-31 10:00:00",
+                "Wednesday, December 31, 2025 at 10:00",
+            ),
+        ];
+        for (time, expected) in cases {
+            assert_eq!(human_copy_time(at(time), now), expected);
+        }
     }
 
     #[test]

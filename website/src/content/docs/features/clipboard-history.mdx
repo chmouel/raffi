@@ -68,9 +68,11 @@ tell from a single line. Runs of spaces collapse to one.
 
 ## Copy times
 
-Each row shows when the item was copied: the time for today, the weekday for
-the past week, and the date for anything older. The preview pane shows the
-full date and time.
+The preview pane shows when an item was copied, in the summary line under
+text and images and in the details of other items: "today at 14:32",
+"yesterday at 09:10", the weekday for the past week ("Monday at 18:05"), and
+the weekday and date for anything older ("Monday, March 2 at 10:00"). Rows
+leave it out to stay compact.
 
 CopyQ does not record copy times by default. Add the "Show Copy Time" command
 from the [CopyQ command examples](https://copyq.readthedocs.io/en/latest/command-examples.html#show-copy-time)
@@ -93,12 +95,14 @@ images carry no text to match.
 
 Press **Ctrl+P** to toggle the preview pane. For text, it works like Alfred's
 clipboard viewer: the bare text fills the pane, with no title, box or
-metadata, and a muted `3 words; 33 chars` line centred underneath. For
+metadata, and a muted `3 words; 33 chars · copied Monday at 10:00` line
+centred underneath (the copy time appears when CopyQ stored one). For
 everything else it shows:
 
 - text, cut to the first 8 KiB or 100 lines (a cut item reports its full
   character count only)
-- images, scaled to fit, with their pixel size
+- images, scaled to fit, with a muted `1920 × 1080 px · copied ...` line
+  centred underneath
 - file lists, with missing files marked
 - the formats the item holds and their sizes
 

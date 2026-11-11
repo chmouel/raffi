@@ -4211,14 +4211,13 @@ fn test_clipboard_errors_show_as_status_row() {
 fn test_clipboard_previews_are_bound_to_session_and_item() {
     let mut app = test_app(clipboard_addons());
     let generation = open_clipboard(&mut app, "clip ");
+    let mut copied = clip(1, "b", "b");
+    let copy_time = chrono::Local::now().naive_local() - chrono::Duration::days(3);
+    copied.copied = Some(copy_time);
+    let weekday = copy_time.format("%A at %H:%M").to_string();
     let _ = app.update(Message::ClipboardPage(
         generation,
-        Ok(clip_page(
-            "a",
-            2,
-            2,
-            vec![clip(0, "a", "a"), clip(1, "b", "b")],
-        )),
+        Ok(clip_page("a", 2, 2, vec![clip(0, "a", "a"), copied])),
     ));
     assert_eq!(app.clipboard.preview_inflight.as_deref(), Some("a"));
     let preview = app.resolve_selected_preview().unwrap();
@@ -4260,7 +4259,8 @@ fn test_clipboard_previews_are_bound_to_session_and_item() {
         preview.bodies.first(),
         Some(PreviewBody::Plain { content, footer })
             if content == "beta\nsecond line"
-                && footer.as_deref() == Some("3 words; 16 chars")
+                && footer.as_deref()
+                    == Some(format!("3 words; 16 chars · copied {weekday}").as_str())
     ));
 
     let mut image = clip_text_preview("");
@@ -4275,7 +4275,8 @@ fn test_clipboard_previews_are_bound_to_session_and_item() {
     let preview = app.resolve_selected_preview().unwrap();
     assert!(matches!(
         preview.bodies.first(),
-        Some(PreviewBody::ImageData { .. })
+        Some(PreviewBody::ImageData { footer, .. })
+            if footer.as_deref() == Some(format!("2 × 1 px · copied {weekday}").as_str())
     ));
 
     for index in 0..20 {
