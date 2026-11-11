@@ -615,20 +615,35 @@ fn image_title(formats: &[String]) -> String {
     format!("Image ({})", format.to_uppercase())
 }
 
-/// Collapse whitespace and keep at most `max_chars` characters.
+/// Nerd Font return arrow standing in for a line break in a row title.
+const LINE_BREAK_MARK: char = '\u{f0311}';
+
+/// Collapse whitespace and keep at most `max_chars` characters, marking line
+/// breaks with `LINE_BREAK_MARK` so multi-line entries stay recognisable.
 /// Text without spaces uses a tighter limit so it fits in a list row.
 pub(crate) fn one_line(text: &str, max_chars: usize) -> String {
     let mut line = String::new();
-    for (index, word) in text.split_whitespace().enumerate() {
-        if index > 0 {
-            line.push(' ');
+    for source in text.split(['\n', '\r']) {
+        let mut words = source.split_whitespace();
+        let Some(first) = words.next() else {
+            continue;
+        };
+        if !line.is_empty() {
+            line.push(LINE_BREAK_MARK);
         }
-        line.push_str(word);
+        line.push_str(first);
+        for word in words {
+            line.push(' ');
+            line.push_str(word);
+            if line.chars().count() > max_chars {
+                break;
+            }
+        }
         if line.chars().count() > max_chars {
             break;
         }
     }
-    let effective_max = if line.contains(' ') {
+    let effective_max = if line.contains([' ', LINE_BREAK_MARK]) {
         max_chars
     } else {
         max_chars / 2
@@ -817,7 +832,11 @@ mod tests {
     fn test_titles() {
         assert_eq!(
             item(0, "a", ItemKind::Text, "  first\n\tsecond  ").title(),
-            "first second"
+            "first\u{f0311}second"
+        );
+        assert_eq!(
+            item(0, "a", ItemKind::Text, "one\r\ntwo\rthree").title(),
+            "one\u{f0311}two\u{f0311}three"
         );
         assert_eq!(item(0, "a", ItemKind::Text, " \n").title(), "Blank text");
         let files = item(
