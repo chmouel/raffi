@@ -1660,6 +1660,10 @@ impl LauncherApp {
                 .wrapping(iced::widget::text::Wrapping::WordOrGlyph)
         };
 
+        if let Some(PreviewBody::Plain { .. }) = data.bodies.first() {
+            return self.render_plain_preview(data, ps);
+        }
+
         let mut col = Column::new().spacing(14).width(Length::Fill);
 
         // Image previews fill the whole pane: the image is rendered first at the
@@ -1695,12 +1699,14 @@ impl LauncherApp {
         }
 
         let mut title_col = Column::new().spacing(2).width(Length::Fill);
-        title_col = title_col.push(
-            text(data.title)
-                .size(ps.title)
-                .color(ps.text_main)
-                .font(ps.font),
-        );
+        if !data.title.is_empty() {
+            title_col = title_col.push(
+                text(data.title)
+                    .size(ps.title)
+                    .color(ps.text_main)
+                    .font(ps.font),
+            );
+        }
         if let Some(sub) = data.subtitle {
             title_col = title_col.push(text(sub).size(ps.small).color(ps.text_muted).font(ps.font));
         }
@@ -1787,6 +1793,8 @@ impl LauncherApp {
                     }
                     col = col.push(section);
                 }
+                // Only rendered as the sole body, by `render_plain_preview`.
+                PreviewBody::Plain { .. } => {}
                 PreviewBody::AnsiText {
                     heading: h,
                     content,
@@ -1963,6 +1971,69 @@ impl LauncherApp {
 
         let pane_bg = ps.bg;
         container(scroll)
+            .padding(iced::Padding {
+                top: 8.0,
+                right: PREVIEW_PANE_RIGHT_PADDING,
+                bottom: 8.0,
+                left: PREVIEW_PANE_LEFT_PADDING,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |_theme| container::Style {
+                background: Some(iced::Background::Color(pane_bg)),
+                border: iced::Border {
+                    radius: 10.0.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
+    /// Bare text with a centred summary line, no title, badge, box or metadata.
+    fn render_plain_preview(&self, data: PreviewData, ps: PreviewStyle) -> Element<'_, Message> {
+        let t = self.view.theme;
+        let Some(PreviewBody::Plain { content, footer }) = data.bodies.into_iter().next() else {
+            return Space::new().into();
+        };
+        let body = scrollable(
+            container(
+                text(content)
+                    .size(ps.text)
+                    .color(ps.text_main)
+                    .font(ps.font)
+                    .wrapping(iced::widget::text::Wrapping::WordOrGlyph)
+                    .width(Length::Fill),
+            )
+            .padding(iced::Padding {
+                top: 0.0,
+                right: PREVIEW_CONTENT_RIGHT_PADDING,
+                bottom: 0.0,
+                left: 0.0,
+            }),
+        )
+        .id(self.view.preview_scrollable_id.clone())
+        .direction(slim_scrollbar())
+        .style(scrollable_style(t))
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+        let mut col = Column::new().spacing(8).width(Length::Fill).push(body);
+        if let Some(footer) = footer {
+            col = col.push(
+                container(
+                    text(footer)
+                        .size(ps.small)
+                        .color(ps.text_muted)
+                        .font(ps.font),
+                )
+                .width(Length::Fill)
+                .align_x(iced::Alignment::Center),
+            );
+        }
+
+        let pane_bg = ps.bg;
+        container(col)
             .padding(iced::Padding {
                 top: 8.0,
                 right: PREVIEW_PANE_RIGHT_PADDING,

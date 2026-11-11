@@ -4252,9 +4252,15 @@ fn test_clipboard_previews_are_bound_to_session_and_item() {
         Ok(clip_text_preview("beta\nsecond line")),
     ));
     let preview = app.resolve_selected_preview().unwrap();
+    assert!(
+        preview.title.is_empty(),
+        "the pane opens on the text, without a title"
+    );
     assert!(matches!(
         preview.bodies.first(),
-        Some(PreviewBody::Prose { content, .. }) if content == "beta\nsecond line"
+        Some(PreviewBody::Plain { content, footer })
+            if content == "beta\nsecond line"
+                && footer.as_deref() == Some("3 words; 16 chars")
     ));
 
     let mut image = clip_text_preview("");

@@ -91,9 +91,13 @@ images carry no text to match.
 
 ## Previews
 
-Press **Ctrl+P** to toggle the preview pane. It shows:
+Press **Ctrl+P** to toggle the preview pane. For text, it works like Alfred's
+clipboard viewer: the bare text fills the pane, with no title, box or
+metadata, and a muted `3 words; 33 chars` line centred underneath. For
+everything else it shows:
 
-- multiline text, cut to the first 8 KiB or 100 lines
+- text, cut to the first 8 KiB or 100 lines (a cut item reports its full
+  character count only)
 - images, scaled to fit, with their pixel size
 - file lists, with missing files marked
 - the formats the item holds and their sizes

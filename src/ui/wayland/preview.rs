@@ -6,7 +6,7 @@ use std::path::Path;
 use chrono::{DateTime, Local};
 
 use super::browser::read_directory;
-use super::clipboard::{ClipItem, ItemKind};
+use super::clipboard::ClipItem;
 use super::command_list::{CommandItem, CommandListState};
 use super::devtools::DevRow;
 use super::file_preview::FilePreviewOutput;
@@ -359,6 +359,12 @@ pub(crate) enum PreviewBody {
         content: String,
         truncated: bool,
     },
+    /// The text alone, with no header, box or metadata, and a muted summary
+    /// line under it (clipboard text, in the style of Alfred's clipboard viewer).
+    Plain {
+        content: String,
+        footer: Option<String>,
+    },
     /// ANSI-styled multiline text block (for Script Filter output), with an optional heading.
     AnsiText {
         heading: Option<String>,
@@ -388,6 +394,29 @@ pub(crate) enum PreviewBody {
         entries: Vec<(String, bool)>,
         total_count: usize,
     },
+}
+
+/// "3 words; 33 chars" for a text preview. A cut preview only knows the
+/// full length, so it reports that alone.
+fn text_summary(text: &str, full_len: Option<usize>) -> String {
+    match full_len {
+        Some(chars) => format!("{chars} chars"),
+        None => format!(
+            "{} {}; {} {}",
+            text.split_whitespace().count(),
+            if text.split_whitespace().count() == 1 {
+                "word"
+            } else {
+                "words"
+            },
+            text.chars().count(),
+            if text.chars().count() == 1 {
+                "char"
+            } else {
+                "chars"
+            },
+        ),
+    }
 }
 
 /// Complete structured model for the right-hand preview pane.
@@ -1820,15 +1849,12 @@ impl LauncherApp {
                         truncated: false,
                     });
                 } else if !preview.text.is_empty() {
-                    let heading = if preview.kind == ItemKind::Html {
-                        "Plain text"
-                    } else {
-                        "Text"
-                    };
-                    bodies.push(PreviewBody::Prose {
-                        heading: Some(heading.to_string()),
+                    bodies.push(PreviewBody::Plain {
                         content: preview.text.clone(),
-                        truncated: preview.text_truncated,
+                        footer: Some(text_summary(
+                            &preview.text,
+                            preview.text_truncated.then_some(item.text_len),
+                        )),
                     });
                 }
                 let formats = preview
@@ -1858,8 +1884,9 @@ impl LauncherApp {
         metadata.push(("Ctrl+D".to_string(), "Delete this entry".to_string()));
         metadata.push(("Ctrl+R".to_string(), "Refresh the list".to_string()));
 
+        // The row already shows the item: the pane opens straight on its text.
         PreviewData {
-            title: item.title(),
+            title: String::new(),
             subtitle: None,
             badge: Some("Clipboard".to_string()),
             icon: None,
