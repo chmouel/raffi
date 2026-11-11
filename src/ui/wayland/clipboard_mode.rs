@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use iced::Task;
 
-use super::clipboard::{CopyQ, Page};
+use super::clipboard::{ClipItem, CopyQ, Page};
 use super::state::{LauncherApp, Message};
 use crate::ClipboardAction;
 
@@ -12,6 +12,14 @@ const MAX_SCAN_RESTARTS: u32 = 3;
 const PREVIEW_CACHE_SIZE: usize = 8;
 
 impl LauncherApp {
+    /// Theme icon for the app a clipboard item was copied from, trying its
+    /// ID as stored and lowercased, as window classes are often capitalised.
+    pub(super) fn clipboard_source_icon(&self, item: &ClipItem) -> Option<String> {
+        let app = item.source.as_deref()?;
+        self.resolve_icon_name(app)
+            .or_else(|| self.resolve_icon_name(&app.to_lowercase()))
+    }
+
     /// Enter or update the clipboard browser for `query`.
     pub(super) fn handle_clipboard_query(&mut self, query: String, tasks: &mut Vec<Task<Message>>) {
         let state = &mut self.clipboard;

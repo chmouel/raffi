@@ -44,7 +44,7 @@ for (var row = start; row < end; row++) {
   if (isText && text.trim().length < minChars) continue;
   var tier = tierOf(text);
   if (tier < 0) continue;
-  items.push({ r: row, id: fingerprint(item), f: keys, k: kind, n: text.length, p: text.substring(0, previewChars), t: tier, c: copyTimeOf(item) });
+  items.push({ r: row, id: fingerprint(item), f: keys, k: kind, n: text.length, p: text.substring(0, previewChars), t: tier, c: copyTimeOf(item), s: sourceAppOf(item) });
 }
 var stable = count() == total && (total ? fingerprint(getItem(0)) : "") == head;
 emit({ tab: tabName, total: total, head: head, next: end, stable: stable, items: items });

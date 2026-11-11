@@ -86,6 +86,17 @@ pub(crate) struct ClipItem {
     /// Local copy time, when CopyQ stored one.
     #[serde(rename = "c", default, deserialize_with = "copy_time")]
     pub copied: Option<NaiveDateTime>,
+    /// App ID or window class of the app focused when the item was copied,
+    /// when CopyQ stored one.
+    #[serde(rename = "s", default, deserialize_with = "source_app")]
+    pub source: Option<String>,
+}
+
+fn source_app<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    let raw = String::deserialize(deserializer)?;
+    Ok(Some(raw.trim().to_string()).filter(|app| !app.is_empty()))
 }
 
 fn copy_time<'de, D: serde::Deserializer<'de>>(
@@ -668,6 +679,7 @@ mod tests {
             excerpt: excerpt.into(),
             tier: 0,
             copied: None,
+            source: None,
         }
     }
 
@@ -689,7 +701,7 @@ mod tests {
     fn test_parse_page() {
         let output = br#"{"tab":"&clipboard","total":3,"head":"h","next":3,"stable":true,"items":[
             {"r":0,"id":"a","f":["text/plain"],"k":"text","n":12,"p":"h\u00e9llo\nworld","t":1},
-            {"r":2,"id":"b","f":["image/png"],"k":"image","n":0,"p":"","t":0,"c":"2026-10-16 14:32:05"}]}"#;
+            {"r":2,"id":"b","f":["image/png"],"k":"image","n":0,"p":"","t":0,"c":"2026-10-16 14:32:05","s":" Firefox "}]}"#;
         let page = parse_page(output).unwrap();
         assert_eq!(page.tab, "&clipboard");
         assert_eq!(page.items.len(), 2);
@@ -697,6 +709,8 @@ mod tests {
         assert_eq!(page.items[0].tier, 1);
         assert_eq!(page.items[1].kind, ItemKind::Image);
         assert_eq!(page.items[0].copied, None);
+        assert_eq!(page.items[0].source, None);
+        assert_eq!(page.items[1].source.as_deref(), Some("Firefox"));
         let copied = page.items[1].copied.unwrap();
         assert_eq!(
             copied.format(COPY_TIME_FORMAT).to_string(),

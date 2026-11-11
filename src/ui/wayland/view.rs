@@ -2641,10 +2641,14 @@ impl LauncherApp {
                 let text_col = Column::new()
                     .push(text(item.title()).size(fs.item).color(t.text_main))
                     .push(text(item.subtitle()).size(fs.subtitle).color(t.text_muted));
-                let item_row = Row::new()
-                    .spacing(16)
-                    .align_y(iced::Alignment::Center)
-                    .push(text_col.width(Length::Fill));
+                let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
+                if let Some(icon) = self
+                    .clipboard_source_icon(item)
+                    .and_then(|path| icon_element(Path::new(&path), 40.0))
+                {
+                    item_row = item_row.push(icon);
+                }
+                let item_row = item_row.push(text_col.width(Length::Fill));
                 items_column = items_column.push(
                     self.selectable(
                         button(item_row)

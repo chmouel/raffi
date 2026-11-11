@@ -3962,6 +3962,7 @@ fn clip(row: usize, id: &str, text: &str) -> super::clipboard::ClipItem {
         excerpt: text.into(),
         tier: 0,
         copied: None,
+        source: None,
     }
 }
 
@@ -4205,6 +4206,23 @@ fn test_clipboard_errors_show_as_status_row() {
         preview.subtitle.as_deref(),
         Some("Loading clipboard history...")
     );
+}
+
+#[test]
+fn test_clipboard_rows_use_the_source_app_icon() {
+    let mut app = test_app(clipboard_addons());
+    app.icon_map
+        .insert("firefox".into(), "/icons/firefox.svg".into());
+    let mut item = clip(0, "a", "a");
+    assert_eq!(app.clipboard_source_icon(&item), None);
+    item.source = Some("Firefox".into());
+    assert_eq!(
+        app.clipboard_source_icon(&item).as_deref(),
+        Some("/icons/firefox.svg"),
+        "a capitalised window class falls back to the lowercase icon name"
+    );
+    item.source = Some("unknown-app".into());
+    assert_eq!(app.clipboard_source_icon(&item), None);
 }
 
 #[test]

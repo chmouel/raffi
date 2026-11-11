@@ -40,6 +40,12 @@ function copyTimeOf(item) {
   for (var i = parts.length - 1; i >= 0; i--) if (COPY_TIME.test(parts[i].trim())) return parts[i].trim();
   return "";
 }
+// App that had focus when the item was copied, stored by the "Store Source
+// App" command from the clipboard history docs.
+function sourceAppOf(item) {
+  var app = item["application/x-copyq-user-source-app"];
+  return app === undefined ? "" : str(app).trim();
+}
 function useTab(name) {
   if (!name) {
     name = str(config("clipboard_tab")).split(NL).join("");

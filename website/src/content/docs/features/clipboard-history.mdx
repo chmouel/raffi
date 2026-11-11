@@ -80,6 +80,59 @@ or from [copyq-commands](https://github.com/hluk/copyq-commands/blob/master/comm
 (in CopyQ, press F6 and paste it). Raffi reads the time from either version.
 Items copied before you add the command show no time.
 
+## Source app icons
+
+Each row can show the icon of the app you copied from. CopyQ does not record
+the source app on Wayland, so add this command to CopyQ (press F6 in CopyQ and
+paste it). It works on Hyprland and sway: whenever the clipboard changes, it
+asks the compositor which window has focus and stores that app's ID with the
+item.
+
+```ini
+[Command]
+Name=Store Source App
+Automatic=true
+Icon=
+Command="
+    copyq:
+    const mime = 'application/x-copyq-user-source-app';
+
+    function hyprland() {
+        const result = execute('hyprctl', 'activewindow', '-j');
+        if (!result || result.exit_code !== 0) { return ''; }
+        const window = JSON.parse(str(result.stdout) || '{}');
+        return window.class || window.initialClass || '';
+    }
+
+    function sway() {
+        const result = execute('swaymsg', '-t', 'get_tree');
+        if (!result || result.exit_code !== 0) { return ''; }
+        const stack = [JSON.parse(str(result.stdout))];
+        while (stack.length) {
+            const node = stack.pop();
+            if (node.focused) {
+                return node.app_id || (node.window_properties || {}).class || '';
+            }
+            stack.push(...(node.nodes || []), ...(node.floating_nodes || []));
+        }
+        return '';
+    }
+
+    let app = '';
+    try {
+        if (str(env('HYPRLAND_INSTANCE_SIGNATURE'))) { app = hyprland(); }
+        else if (str(env('SWAYSOCK'))) { app = sway(); }
+    } catch (e) {}
+    if (app) { setData(mime, app); }"
+```
+
+Raffi looks the ID up in your icon theme, as given and then lowercased, and
+leaves the icon out when the theme has none. The command records the window
+that had focus, which is the app you copied from when you press Ctrl+C. A copy
+made in the background, such as by `wl-copy`, a password manager or clipboard
+sync, gets whatever app was in front at the time. Items copied before you add
+the command show no icon.
+
 ## Images and URLs
 
 Press **Ctrl+Tab** to go from all items to images only, then to URLs only,
