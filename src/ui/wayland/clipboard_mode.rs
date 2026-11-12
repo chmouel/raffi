@@ -50,9 +50,10 @@ impl LauncherApp {
         let query = state.query.clone();
         let kind = state.view.kind();
         let min_chars = self.addons.clipboard.min_chars();
+        let exclude = self.addons.clipboard.exclude_regexes();
         let history = History::new(self.addons.clipboard.backend);
         Task::perform(
-            async move { history.list_page("", 0, &query, kind, min_chars) },
+            async move { history.list_page("", 0, &query, kind, min_chars, &exclude?) },
             move |result| Message::ClipboardPage(generation, result),
         )
     }
@@ -106,6 +107,7 @@ impl LauncherApp {
             state.total = page.total;
             state.items.clear();
         }
+        let advanced = page.next > state.scanned;
         state.scanned = page.next;
         state.items.extend(page.items);
         state.items.sort_by_key(|item| (item.tier, item.row));
@@ -116,19 +118,23 @@ impl LauncherApp {
         self.restore_clipboard_selection(follow.as_deref());
 
         let state = &mut self.clipboard;
-        if page.next < state.total {
+        if page.next < state.total && advanced {
             let generation = state.generation;
             let tab = state.tab.clone();
             let query = state.query.clone();
             let kind = state.view.kind();
             let min_chars = self.addons.clipboard.min_chars();
+            let exclude = self.addons.clipboard.exclude_regexes();
             let history = History::new(self.addons.clipboard.backend);
             let start = page.next;
             Task::perform(
-                async move { history.list_page(&tab, start, &query, kind, min_chars) },
+                async move { history.list_page(&tab, start, &query, kind, min_chars, &exclude?) },
                 move |result| Message::ClipboardPage(generation, result),
             )
         } else {
+            if page.next < state.total {
+                state.error = Some("Clipboard history listing stopped advancing".into());
+            }
             state.loading = false;
             Task::none()
         }

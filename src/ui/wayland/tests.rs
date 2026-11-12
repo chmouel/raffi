@@ -3963,6 +3963,7 @@ fn clip(row: usize, id: &str, text: &str) -> super::clipboard::ClipItem {
         tier: 0,
         copied: None,
         source: None,
+        oversized: false,
     }
 }
 
@@ -4110,6 +4111,28 @@ fn test_clipboard_scan_pages_merge_and_ignore_stale_generations() {
     let _ = app.update(Message::SearchChanged("fire".into()));
     assert!(!app.clipboard.active);
     assert!(app.clipboard.items.is_empty());
+}
+
+#[test]
+fn test_clipboard_scan_stops_when_page_does_not_advance() {
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip ");
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page("h", 3, 1, vec![clip(0, "a", "alpha")])),
+    ));
+    assert!(app.clipboard.loading);
+
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page("h", 3, 1, Vec::new())),
+    ));
+    assert!(
+        !app.clipboard.loading,
+        "a stuck cursor is not requested again"
+    );
+    assert!(app.clipboard.error.is_some());
+    assert_eq!(app.clipboard.items.len(), 1);
 }
 
 #[test]

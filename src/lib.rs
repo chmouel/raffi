@@ -751,6 +751,12 @@ pub struct ClipboardAddonConfig {
     /// Close Raffi after copying a clipboard entry (default: `general.close_on_action`, else true).
     #[serde(default)]
     pub close_on_action: Option<bool>,
+    /// Rust regular expressions. An entry whose complete text matches any of
+    /// them is not recorded by Raffi and is hidden from the browser (default:
+    /// none). Matching is case-sensitive unless a flag such as `(?i)` is used.
+    /// Existing entries are hidden, not deleted, and CopyQ keeps recording.
+    #[serde(default)]
+    pub exclude_patterns: Vec<String>,
 }
 
 fn default_clipboard_action() -> ClipboardAction {
@@ -772,6 +778,19 @@ impl ClipboardAddonConfig {
 
     pub fn min_chars(&self) -> usize {
         self.min_chars.unwrap_or(3)
+    }
+
+    /// Compile `exclude_patterns`, naming the key and index of an invalid one.
+    #[cfg(feature = "wayland")]
+    pub fn exclude_regexes(&self) -> Result<Vec<regex::Regex>, String> {
+        self.exclude_patterns
+            .iter()
+            .enumerate()
+            .map(|(index, pattern)| {
+                regex::Regex::new(pattern)
+                    .map_err(|error| format!("addons.clipboard.exclude_patterns[{index}]: {error}"))
+            })
+            .collect()
     }
 
     pub fn max_items(&self) -> usize {
@@ -809,6 +828,7 @@ impl Default for ClipboardAddonConfig {
             action: default_clipboard_action(),
             secondary_action: default_clipboard_secondary_action(),
             close_on_action: None,
+            exclude_patterns: Vec::new(),
         }
     }
 }
@@ -2824,10 +2844,27 @@ pub fn check_config(filename: &str) -> Result<Vec<ConfigProblem>> {
         } else {
             serde_yaml::from_str::<Config>(&contents)
         };
-        if let Err(e) = result {
-            let mut problem = ConfigProblem::new("/", e.to_string());
-            problem.line = e.location().map(|l| l.line());
-            problems.push(problem);
+        match result {
+            Err(e) => {
+                let mut problem = ConfigProblem::new("/", e.to_string());
+                problem.line = e.location().map(|l| l.line());
+                problems.push(problem);
+            }
+            #[cfg(feature = "wayland")]
+            Ok(config) => {
+                for (index, pattern) in config.addons.clipboard.exclude_patterns.iter().enumerate()
+                {
+                    if let Err(error) = regex::Regex::new(pattern) {
+                        problems.push(ConfigProblem::new(
+                            &format!("/addons/clipboard/exclude_patterns/{index}"),
+                            error.to_string(),
+                        ));
+                    }
+                }
+                locate_config_problems(&mut problems, &contents, v0);
+            }
+            #[cfg(not(feature = "wayland"))]
+            Ok(_) => {}
         }
     }
     Ok(problems)
@@ -3326,6 +3363,11 @@ fn process_config(config: Config, args: &Args) -> Result<ParsedConfig> {
     }
 
     let mut addons = config.addons;
+    #[cfg(feature = "wayland")]
+    addons
+        .clipboard
+        .exclude_regexes()
+        .map_err(anyhow::Error::msg)?;
     let fb = &mut addons.file_browser;
     fb.action = fb.action.as_ref().map(|s| expand_config_value(s));
     fb.secondary_action = fb.secondary_action.as_ref().map(|s| expand_config_value(s));
@@ -6678,6 +6720,31 @@ shell:
         assert!(parse("addons:\n  clipboard:\n    backend: cliphist\n").is_err());
     }
 
+    #[cfg(feature = "wayland")]
+    #[test]
+    fn test_clipboard_exclude_patterns() {
+        assert!(ClipboardAddonConfig::default()
+            .exclude_regexes()
+            .unwrap()
+            .is_empty());
+
+        let valid = ClipboardAddonConfig {
+            exclude_patterns: vec!["^secret:".into(), "(?i)password\\s*=".into()],
+            ..Default::default()
+        };
+        assert_eq!(valid.exclude_regexes().unwrap().len(), 2);
+
+        let invalid = ClipboardAddonConfig {
+            exclude_patterns: vec!["^ok".into(), "(unclosed".into()],
+            ..Default::default()
+        };
+        let error = invalid.exclude_regexes().unwrap_err();
+        assert!(
+            error.starts_with("addons.clipboard.exclude_patterns[1]: "),
+            "{error}"
+        );
+    }
+
     #[test]
     fn test_devtools_addon_config_parsing() {
         let defaults = AddonsConfig::default().devtools;
@@ -7768,6 +7835,23 @@ launchers:
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(fs::read_to_string(&path).unwrap(), contents);
         assert!(!dir.join("raffi.yaml.bak").exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    #[cfg(all(feature = "config-validation", feature = "wayland"))]
+    fn test_check_config_reports_invalid_exclude_pattern() {
+        let dir = temp_test_dir("check-config-exclude");
+        let path = dir.join("raffi.yaml");
+        let contents =
+            "version: 1\naddons:\n  clipboard:\n    exclude_patterns:\n      - ok\n      - '('\n";
+        fs::write(&path, contents).unwrap();
+
+        let problems = check_config(path.to_str().unwrap()).unwrap();
+
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert_eq!(problems[0].path, "/addons/clipboard/exclude_patterns/1");
+        assert_eq!(problems[0].line, Some(6));
         let _ = fs::remove_dir_all(dir);
     }
 

@@ -341,8 +341,21 @@ fn now_secs() -> i64 {
         .map_or(0, |duration| duration.as_secs() as i64)
 }
 
+/// A text format among the `failed` reads, when exclusions are active. Its
+/// text might match them, and the formats that were read might not show it,
+/// so the capture must not be recorded.
+fn unchecked_text_format<'a>(failed: &'a [String], exclude: &[regex::Regex]) -> Option<&'a str> {
+    if exclude.is_empty() {
+        return None;
+    }
+    failed
+        .iter()
+        .find(|mime| !mime.starts_with("image/"))
+        .map(String::as_str)
+}
+
 /// Read and store each job in turn.
-fn record(jobs: mpsc::Receiver<Job>, limits: Limits) {
+fn record(jobs: mpsc::Receiver<Job>, limits: Limits, exclude: Vec<regex::Regex>) {
     let mut store = match Store::open_default() {
         Ok(store) => store,
         Err(error) => {
@@ -353,6 +366,7 @@ fn record(jobs: mpsc::Receiver<Job>, limits: Limits) {
     for job in jobs {
         let deadline = Instant::now() + READ_TIMEOUT;
         let mut formats = Vec::new();
+        let mut failed = Vec::new();
         // Sources usually answer requests in order, so read them in order.
         // A format that fails is left out; the others are still kept.
         for (mime, fd) in job.reads {
@@ -363,15 +377,24 @@ fn record(jobs: mpsc::Receiver<Job>, limits: Limits) {
             };
             match read_pipe(fd, cap, deadline) {
                 Ok(data) => formats.push((mime, data)),
-                Err(error) => eprintln!("raffi: clipboard {mime} not recorded: {error}"),
+                Err(error) => {
+                    eprintln!("raffi: clipboard {mime} not recorded: {error}");
+                    failed.push(mime);
+                }
             }
+        }
+        if let Some(mime) = unchecked_text_format(&failed, &exclude) {
+            eprintln!(
+                "raffi: clipboard entry not recorded: its {mime} could not be read to check exclude_patterns"
+            );
+            continue;
         }
         let capture = Capture {
             formats,
             copied_at: job.copied_at,
             source: job.source.recv_timeout(APP_TIMEOUT * 2).ok().flatten(),
         };
-        match store.insert(capture, &limits) {
+        match store.insert_filtered(capture, &limits, &exclude) {
             Ok(hash) => {
                 let commands = COMMANDS.lock().unwrap_or_else(|error| error.into_inner());
                 if let Some(commands) = commands.as_ref() {
@@ -381,7 +404,7 @@ fn record(jobs: mpsc::Receiver<Job>, limits: Limits) {
                     });
                 }
             }
-            Err(Skipped::Empty) => {}
+            Err(Skipped::Empty | Skipped::Excluded) => {}
             Err(error) => eprintln!("raffi: clipboard entry not recorded: {error}"),
         }
     }
@@ -696,11 +719,11 @@ data_control!(
 
 /// Start recording the clipboard in the background, reconnecting when the
 /// connection to the compositor is lost.
-pub(crate) fn start(limits: Limits) {
+pub(crate) fn start(limits: Limits, exclude: Vec<regex::Regex>) {
     let (jobs, queue) = mpsc::sync_channel::<Job>(MAX_PENDING_JOBS);
     std::thread::Builder::new()
         .name("raffi-clipboard-record".into())
-        .spawn(move || record(queue, limits))
+        .spawn(move || record(queue, limits, exclude))
         .ok();
     std::thread::Builder::new()
         .name("raffi-clipboard".into())
@@ -825,6 +848,19 @@ mod tests {
         assert_eq!(plan_reads(&mimes(&["text/plain", OWN_MIME])), None);
         assert_eq!(plan_reads(&mimes(&["application/x-something"])), None);
         assert_eq!(plan_reads(&[]), None);
+    }
+
+    #[test]
+    fn test_unchecked_text_format_only_matters_with_exclusions() {
+        let exclude = [regex::Regex::new("^secret:").unwrap()];
+        let failed = mimes(&["image/png", "text/plain"]);
+        assert_eq!(unchecked_text_format(&failed, &exclude), Some("text/plain"));
+        assert_eq!(unchecked_text_format(&failed, &[]), None);
+        assert_eq!(
+            unchecked_text_format(&mimes(&["image/png"]), &exclude),
+            None
+        );
+        assert_eq!(unchecked_text_format(&[], &exclude), None);
     }
 
     #[test]

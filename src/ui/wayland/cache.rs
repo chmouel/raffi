@@ -247,11 +247,12 @@ pub(crate) fn addons_digest(addons: &AddonsConfig) -> String {
     let slack = config_digest(&addons.slack);
     let clipboard = &addons.clipboard;
     let clipboard = format!(
-        "{:?}:{}:{}:{}",
+        "{:?}:{}:{}:{}:{}",
         clipboard.backend,
         clipboard.max_items(),
         clipboard.max_size_bytes(),
-        clipboard.max_image_size_bytes()
+        clipboard.max_image_size_bytes(),
+        config_digest(&clipboard.exclude_patterns)
     );
     stable_hash(&format!(
         "{script_filters}:{browser_history}:{slack}:{clipboard}"
@@ -820,7 +821,11 @@ pub(crate) fn run(config: ParsedConfig) -> Result<()> {
     super::hot_files::keep_warm();
     let clipboard = &state.addons.clipboard;
     if clipboard.backend == crate::ClipboardBackend::Raffi && clipboard.enabled != Some(false) {
-        super::clipboard_watch::start(super::clipboard_store::Limits::from_config(clipboard));
+        let exclude = clipboard.exclude_regexes().map_err(anyhow::Error::msg)?;
+        super::clipboard_watch::start(
+            super::clipboard_store::Limits::from_config(clipboard),
+            exclude,
+        );
     }
     warm_loop(state.clone());
     serve(listener, state)
@@ -1051,6 +1056,20 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn test_addons_digest_changes_with_clipboard_exclude_patterns() {
+        let mut addons = AddonsConfig::default();
+        let before = addons_digest(&addons);
+        addons.clipboard.exclude_patterns = vec!["^secret:".into()];
+        let after = addons_digest(&addons);
+        assert_ne!(before, after);
+        addons
+            .clipboard
+            .exclude_patterns
+            .push("(?i)password".into());
+        assert_ne!(after, addons_digest(&addons));
     }
 
     #[test]

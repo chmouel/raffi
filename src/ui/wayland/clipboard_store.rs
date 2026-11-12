@@ -70,6 +70,7 @@ pub(crate) struct Capture {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Skipped {
     Empty,
+    Excluded,
     TooLarge(String),
     Failed(String),
 }
@@ -78,6 +79,7 @@ impl std::fmt::Display for Skipped {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Empty => f.write_str("nothing to record"),
+            Self::Excluded => f.write_str("matches addons.clipboard.exclude_patterns"),
             Self::TooLarge(reason) => write!(f, "too large: {reason}"),
             Self::Failed(error) => f.write_str(error),
         }
@@ -159,7 +161,19 @@ impl Store {
 
     /// Record `capture`, or move the identical entry to the top. Returns the
     /// entry's id.
+    #[cfg(test)]
     pub(crate) fn insert(&mut self, capture: Capture, limits: &Limits) -> Result<String, Skipped> {
+        self.insert_filtered(capture, limits, &[])
+    }
+
+    /// Like `insert`, but rejects the capture when its normalized searchable
+    /// text matches one of `exclude`. Nothing is written in that case.
+    pub(crate) fn insert_filtered(
+        &mut self,
+        capture: Capture,
+        limits: &Limits,
+        exclude: &[regex::Regex],
+    ) -> Result<String, Skipped> {
         let mut formats = capture.formats;
         formats.retain(|(_, data)| !data.is_empty());
         if formats.is_empty() {
@@ -185,6 +199,9 @@ impl Store {
         let mimes: Vec<&str> = formats.iter().map(|(mime, _)| mime.as_str()).collect();
         let kind = kind_of(&mimes);
         let text = text_of(&formats);
+        if is_excluded(&text, exclude) {
+            return Err(Skipped::Excluded);
+        }
         let size: usize = formats.iter().map(|(_, data)| data.len()).sum();
         let source = capture
             .source
@@ -288,6 +305,7 @@ impl Store {
         query: &str,
         only_kind: &str,
         min_chars: usize,
+        exclude: &[regex::Regex],
     ) -> Result<Page, String> {
         let terms: Vec<String> = query
             .to_lowercase()
@@ -315,8 +333,9 @@ impl Store {
             "url" => "kind IN ('text', 'html') AND is_url = 1",
             _ => "1",
         };
-        // Without a query only the start of each text is needed.
-        let text = if terms.is_empty() {
+        // Without a query only the start of each text is needed, unless
+        // exclusions must see the complete text.
+        let text = if terms.is_empty() && exclude.is_empty() {
             format!("substr(text, 1, {EXCERPT_CHARS})")
         } else {
             "text".to_string()
@@ -345,6 +364,9 @@ impl Store {
         for (row, entry) in rows.enumerate() {
             let (hash, kind, formats, text, text_len, copied_at, source) =
                 entry.map_err(db_error)?;
+            if is_excluded(&text, exclude) {
+                continue;
+            }
             let Some(tier) = tier_of(&text, &terms, &phrase) else {
                 continue;
             };
@@ -358,6 +380,7 @@ impl Store {
                 tier,
                 copied: local_time(copied_at),
                 source,
+                oversized: false,
             });
         }
         let total = total.max(0) as usize;
@@ -558,9 +581,15 @@ static STYLE: LazyLock<regex::Regex> = LazyLock::new(|| {
 static TAG: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"<[^>]*>").expect("valid regex"));
 
+/// Whether `text` matches any exclusion pattern. Entries without text are
+/// never excluded.
+pub(crate) fn is_excluded(text: &str, patterns: &[regex::Regex]) -> bool {
+    !text.is_empty() && patterns.iter().any(|pattern| pattern.is_match(text))
+}
+
 /// Searchable text: plain text, else the file list, else the HTML with its
 /// tags removed.
-fn text_of(formats: &[(String, Vec<u8>)]) -> String {
+pub(crate) fn text_of(formats: &[(String, Vec<u8>)]) -> String {
     let format = |name: &str| {
         formats
             .iter()
@@ -715,13 +744,13 @@ mod tests {
         let first = store.insert(text("first entry", 100), &LIMITS).unwrap();
         store.insert(text("second entry", 200), &LIMITS).unwrap();
         assert_eq!(
-            titles(&store.list("", "", 0).unwrap()),
+            titles(&store.list("", "", 0, &[]).unwrap()),
             ["second entry", "first entry"]
         );
 
         let again = store.insert(text("first entry", 300), &LIMITS).unwrap();
         assert_eq!(again, first);
-        let page = store.list("", "", 0).unwrap();
+        let page = store.list("", "", 0, &[]).unwrap();
         assert_eq!(titles(&page), ["first entry", "second entry"]);
         assert_eq!(page.total, 2);
         assert_eq!(page.head, first);
@@ -730,7 +759,7 @@ mod tests {
 
         store.bump(&page.items[1].id).unwrap();
         assert_eq!(
-            titles(&store.list("", "", 0).unwrap()),
+            titles(&store.list("", "", 0, &[]).unwrap()),
             ["second entry", "first entry"]
         );
         let _ = fs::remove_dir_all(dir);
@@ -752,7 +781,7 @@ mod tests {
         }
         // Three fit by count, but only two fit in 25 bytes.
         assert_eq!(
-            titles(&store.list("", "", 0).unwrap()),
+            titles(&store.list("", "", 0, &[]).unwrap()),
             ["dddddddddd", "cccccccccc"]
         );
 
@@ -761,7 +790,7 @@ mod tests {
             ..limits
         };
         store.insert(text("eeeeeeeeee", 9), &tiny).unwrap();
-        assert_eq!(titles(&store.list("", "", 0).unwrap()), ["eeeeeeeeee"]);
+        assert_eq!(titles(&store.list("", "", 0, &[]).unwrap()), ["eeeeeeeeee"]);
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -787,7 +816,7 @@ mod tests {
             source: None,
         };
         assert_eq!(store.insert(empty, &limits), Err(Skipped::Empty));
-        assert_eq!(store.list("", "", 0).unwrap().total, 0);
+        assert_eq!(store.list("", "", 0, &[]).unwrap().total, 0);
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -817,7 +846,7 @@ mod tests {
         };
         store.insert(image, &LIMITS).unwrap();
 
-        let page = store.list("Hello  World", "", 0).unwrap();
+        let page = store.list("Hello  World", "", 0, &[]).unwrap();
         let ranked: Vec<(String, u8)> = page
             .items
             .iter()
@@ -832,18 +861,79 @@ mod tests {
             ]
         );
 
-        let images = store.list("", "image", 0).unwrap();
+        let images = store.list("", "image", 0, &[]).unwrap();
         assert_eq!(images.items.len(), 1);
         assert_eq!(images.items[0].kind, ItemKind::Image);
         assert_eq!(images.items[0].title(), "Image (PNG)");
 
-        let urls = store.list("", "url", 0).unwrap();
+        let urls = store.list("", "url", 0, &[]).unwrap();
         assert_eq!(titles(&urls), ["https://example.com/page"]);
 
-        let all = store.list("", "", 3).unwrap();
+        let all = store.list("", "", 3, &[]).unwrap();
         assert!(!titles(&all).contains(&"ok".to_string()));
         assert_eq!(all.items.len(), 6);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_insert_filtered_checks_text_after_normalization() {
+        let (mut store, dir) = temp_store("normalized-exclude");
+        let patterns = [regex::Regex::new("(?i)password").unwrap()];
+        let capture = Capture {
+            formats: vec![
+                ("text/plain".into(), Vec::new()),
+                ("text/html".into(), b"<p>Password = x</p>".to_vec()),
+            ],
+            copied_at: 1,
+            source: None,
+        };
+
+        assert_eq!(
+            store.insert_filtered(capture, &LIMITS, &patterns),
+            Err(Skipped::Excluded)
+        );
+        assert!(store.list("", "", 0, &[]).unwrap().items.is_empty());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_list_hides_entries_matching_exclusions() {
+        let (mut store, dir) = temp_store("exclude");
+        store.insert(text("secret: hunter2", 1), &LIMITS).unwrap();
+        store
+            .insert(text("line one\nPASSWORD=abc", 2), &LIMITS)
+            .unwrap();
+        store
+            .insert(
+                Capture {
+                    formats: vec![("text/html".into(), b"<p>Password = x</p>".to_vec())],
+                    copied_at: 3,
+                    source: None,
+                },
+                &LIMITS,
+            )
+            .unwrap();
+        let long = format!("{}needle", "a".repeat(EXCERPT_CHARS + 50));
+        store.insert(text(&long, 4), &LIMITS).unwrap();
+        store.insert(text("keep this entry", 5), &LIMITS).unwrap();
+
+        let exclude = [
+            regex::Regex::new("^secret:").unwrap(),
+            regex::Regex::new("(?i)password\\s*=").unwrap(),
+            regex::Regex::new("needle").unwrap(),
+        ];
+        let page = store.list("", "", 0, &exclude).unwrap();
+        assert_eq!(titles(&page), ["keep this entry"]);
+        assert_eq!(page.total, 5);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_is_excluded_ignores_empty_text() {
+        let patterns = [regex::Regex::new("").unwrap()];
+        assert!(!is_excluded("", &patterns));
+        assert!(is_excluded("anything", &patterns));
+        assert!(!is_excluded("anything", &[]));
     }
 
     #[test]

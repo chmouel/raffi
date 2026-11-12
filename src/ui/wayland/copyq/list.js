@@ -5,6 +5,15 @@ var phrase = terms.join(" ");
 var previewChars = parseInt(str(arguments[5]));
 var onlyKind = str(arguments[6]);
 var minChars = parseInt(str(arguments[7])) || 0;
+// A positive byte budget emits each kept item's complete text as its excerpt,
+// so Rust can match exclusion patterns against it, and ends the page before
+// its items' output would exceed the budget. An item too large on its own is
+// sent with a plain excerpt and flagged, for Rust to fetch its text alone.
+var fullTextBudget = parseInt(str(arguments[8])) || 0;
+var used = 0, overflow = false;
+// Upper bound of the bytes `emit` prints for `value`: UTF-8 takes at most
+// three bytes per UTF-16 unit of its JSON.
+function outputBytes(value) { return 3 * JSON.stringify(value).length + 1; }
 // A whole text that is one URL: any scheme followed by "://", or one of the
 // schemes written without it, then no whitespace, control character or
 // angle bracket. Built without backslashes, see prelude.js.
@@ -44,7 +53,20 @@ for (var row = start; row < end; row++) {
   if (isText && text.trim().length < minChars) continue;
   var tier = tierOf(text);
   if (tier < 0) continue;
-  items.push({ r: row, id: fingerprint(item), f: keys, k: kind, n: text.length, p: text.substring(0, previewChars), t: tier, c: copyTimeOf(item), s: sourceAppOf(item) });
+  var entry = { r: row, id: fingerprint(item), f: keys, k: kind, n: text.length, p: fullTextBudget ? text : text.substring(0, previewChars), t: tier, c: copyTimeOf(item), s: sourceAppOf(item) };
+  if (fullTextBudget) {
+    var cost = outputBytes(entry);
+    if (cost > fullTextBudget) {
+      entry.p = text.substring(0, previewChars);
+      entry.x = true;
+      cost = outputBytes(entry);
+    }
+    // Too large even for an empty page: skip it, so the scan still advances.
+    if (cost > fullTextBudget) continue;
+    if (used + cost > fullTextBudget) { overflow = true; break; }
+    used += cost;
+  }
+  items.push(entry);
 }
 var stable = count() == total && (total ? fingerprint(getItem(0)) : "") == head;
-emit({ tab: tabName, total: total, head: head, next: end, stable: stable, items: items });
+emit({ tab: tabName, total: total, head: head, next: overflow ? row : end, stable: stable, items: items });

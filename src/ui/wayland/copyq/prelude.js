@@ -18,15 +18,15 @@ function kindOf(keys) {
   return "other";
 }
 var STYLE = new RegExp("<(style|script)[^>]*>[^<]*</(style|script)>", "gi");
+function formatText(item, mime) { return item[mime] === undefined ? "" : str(item[mime]); }
+// Plain text, else the file list, else the HTML with its tags removed. Empty
+// formats are skipped, as the raffi backend drops them before reading text.
 function textOf(item) {
-  if (item["text/plain"] !== undefined) return str(item["text/plain"]);
-  if (item["text/uri-list"] !== undefined) return str(item["text/uri-list"]);
-  if (item["text/html"] !== undefined) {
-    return str(item["text/html"]).replace(STYLE, " ").replace(/<[^>]*>/g, " ")
-      .replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"').replace(/&amp;/g, "&");
-  }
-  return "";
+  var text = formatText(item, "text/plain") || formatText(item, "text/uri-list");
+  if (text) return text;
+  return formatText(item, "text/html").replace(STYLE, " ").replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&amp;/g, "&");
 }
 // Copy time stored by CopyQ's "Show Copy Time" command, either as its own
 // format or, in newer versions of the command, as a tag.
@@ -41,10 +41,10 @@ function copyTimeOf(item) {
   return "";
 }
 // App that had focus when the item was copied, stored by the "Store Source
-// App" command from the clipboard history docs.
+// App" command from the clipboard history docs. Only a label, so bounded.
 function sourceAppOf(item) {
   var app = item["application/x-copyq-user-source-app"];
-  return app === undefined ? "" : str(app).trim();
+  return app === undefined ? "" : str(app).trim().substring(0, 256);
 }
 function useTab(name) {
   if (!name) {

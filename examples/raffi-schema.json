@@ -658,6 +658,14 @@
           ],
           "default": null
         },
+        "exclude_patterns": {
+          "description": "Rust regular expressions. An entry whose complete text matches any of\nthem is not recorded by Raffi and is hidden from the browser (default:\nnone). Matching is case-sensitive unless a flag such as `(?i)` is used.\nExisting entries are hidden, not deleted, and CopyQ keeps recording.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
         "max_image_size_mb": {
           "description": "`raffi` backend: images larger than this many MB are not recorded\n(default: 50).",
           "type": [

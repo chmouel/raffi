@@ -14,6 +14,7 @@ use chrono::{Datelike, NaiveDateTime};
 use serde::Deserialize;
 
 use super::actions::run_bounded;
+use super::clipboard_store::is_excluded;
 
 const PRELUDE: &str = include_str!("copyq/prelude.js");
 const LIST_SCRIPT: &str = include_str!("copyq/list.js");
@@ -27,6 +28,13 @@ pub(super) const PAGE_SIZE: usize = 400;
 pub(super) const EXCERPT_CHARS: usize = 300;
 const LIST_TIMEOUT: Duration = Duration::from_secs(5);
 const LIST_MAX_OUTPUT: usize = 4 * 1024 * 1024;
+/// Output allowed for a listing page's items when they carry their complete
+/// text for exclusion matching; the rest of `LIST_MAX_OUTPUT` covers the page
+/// fields around them.
+const LIST_FULL_TEXT_BUDGET: usize = LIST_MAX_OUTPUT - 64 * 1024;
+/// Longest text fetched for an entry too large to send in a listing page, in
+/// UTF-16 units and in bytes of output: the raffi backend's recording limit.
+const EXCLUDE_TEXT_CHARS: usize = super::clipboard_store::MAX_TEXT_BYTES;
 /// Text shown in the preview pane, matching the file preview limits.
 pub(super) const PREVIEW_TEXT_BYTES: usize = super::preview::MAX_FILE_PREVIEW_BYTES;
 const PREVIEW_TEXT_LINES: usize = super::preview::MAX_FILE_PREVIEW_LINES;
@@ -90,6 +98,10 @@ pub(crate) struct ClipItem {
     /// when CopyQ stored one.
     #[serde(rename = "s", default, deserialize_with = "source_app")]
     pub source: Option<String>,
+    /// Set when the listing asked for complete texts but this one was too
+    /// large, so `excerpt` holds only its start.
+    #[serde(rename = "x", default)]
+    pub oversized: bool,
 }
 
 fn source_app<'de, D: serde::Deserializer<'de>>(
@@ -302,14 +314,16 @@ impl History {
         query: &str,
         only_kind: &str,
         min_chars: usize,
+        exclude: &[regex::Regex],
     ) -> Result<Page, String> {
         match self {
-            Self::CopyQ(copyq) => copyq.list_page(tab, start, query, only_kind, min_chars),
+            Self::CopyQ(copyq) => copyq.list_page(tab, start, query, only_kind, min_chars, exclude),
             Self::Raffi => {
                 if !super::cache::listening() {
                     return Err(super::cache::CLIPBOARD_NOT_RUNNING.to_string());
                 }
-                super::clipboard_store::Store::open_default()?.list(query, only_kind, min_chars)
+                super::clipboard_store::Store::open_default()?
+                    .list(query, only_kind, min_chars, exclude)
             }
         }
     }
@@ -370,7 +384,8 @@ impl CopyQ {
     }
 
     /// Scan `PAGE_SIZE` rows from `start`, returning those matching `query`.
-    /// An empty `tab` selects CopyQ's configured clipboard tab.
+    /// An empty `tab` selects CopyQ's configured clipboard tab. Entries
+    /// matching `exclude` are dropped, which needs their complete text.
     pub(crate) fn list_page(
         &self,
         tab: &str,
@@ -378,8 +393,14 @@ impl CopyQ {
         query: &str,
         only_kind: &str,
         min_chars: usize,
+        exclude: &[regex::Regex],
     ) -> Result<Page, String> {
         let query = query.split_whitespace().collect::<Vec<_>>().join(" ");
+        let full_text_budget = if exclude.is_empty() {
+            0
+        } else {
+            LIST_FULL_TEXT_BUDGET
+        };
         let output = self.eval(
             LIST_SCRIPT,
             &[
@@ -390,11 +411,34 @@ impl CopyQ {
                 &EXCERPT_CHARS.to_string(),
                 only_kind,
                 &min_chars.to_string(),
+                &full_text_budget.to_string(),
             ],
             LIST_TIMEOUT,
             LIST_MAX_OUTPUT,
         )?;
-        parse_page(&output)
+        let mut page = parse_page(&output)?;
+        let tab = page.tab.clone();
+        hide_excluded(&mut page, exclude, |item| {
+            self.full_text(&item.reference(&tab))
+        });
+        Ok(page)
+    }
+
+    /// Complete text of `item`, through the preview script without its image.
+    fn full_text(&self, item: &ItemRef) -> Result<String, String> {
+        let output = self.eval(
+            PREVIEW_SCRIPT,
+            &[
+                &item.tab,
+                &item.id,
+                &item.row.to_string(),
+                &EXCLUDE_TEXT_CHARS.to_string(),
+                "-1",
+            ],
+            PREVIEW_TIMEOUT,
+            EXCLUDE_TEXT_CHARS + 64 * 1024,
+        )?;
+        parse_full_text(&output)
     }
 
     pub(crate) fn preview(&self, item: &ItemRef) -> Result<ClipPreview, String> {
@@ -477,6 +521,56 @@ fn parse_page(output: &[u8]) -> Result<Page, String> {
         return Err("CopyQ returned an inconsistent history listing".into());
     }
     Ok(page)
+}
+
+/// Drops excluded items. `next` is kept so pagination still advances past
+/// pages where every item is hidden. An oversized item is matched against the
+/// text `full_text` returns for it, and hidden when that fails, since it
+/// cannot be checked.
+fn hide_excluded(
+    page: &mut Page,
+    exclude: &[regex::Regex],
+    mut full_text: impl FnMut(&ClipItem) -> Result<String, String>,
+) {
+    if exclude.is_empty() {
+        return;
+    }
+    page.items.retain(|item| {
+        if !item.oversized {
+            return !is_excluded(&item.excerpt, exclude);
+        }
+        match full_text(item) {
+            Ok(text) => !is_excluded(&text, exclude),
+            Err(error) => {
+                eprintln!("raffi: clipboard entry hidden, its text could not be checked: {error}");
+                false
+            }
+        }
+    });
+    for item in &mut page.items {
+        item.excerpt = item.excerpt.chars().take(EXCERPT_CHARS).collect();
+    }
+}
+
+/// Text of a preview reply, which must hold the complete text.
+fn parse_full_text(output: &[u8]) -> Result<String, String> {
+    let header = output
+        .split(|&byte| byte == b'\n')
+        .next()
+        .unwrap_or_default();
+    let header: PreviewHeader = serde_json::from_slice(header)
+        .map_err(|_| "CopyQ returned an unexpected preview".to_string())?;
+    if !header.ok {
+        return Err(header
+            .error
+            .unwrap_or_else(|| "CopyQ could not read the item".into()));
+    }
+    if header.text.encode_utf16().count() != header.text_len {
+        return Err(format!(
+            "text is longer than {EXCLUDE_TEXT_CHARS} characters"
+        ));
+    }
+    Ok(header.text)
 }
 
 fn parse_preview(output: &[u8]) -> Result<ClipPreview, String> {
@@ -738,6 +832,7 @@ mod tests {
             tier: 0,
             copied: None,
             source: None,
+            oversized: false,
         }
     }
 
@@ -979,6 +1074,113 @@ mod tests {
         assert!(copyq_error("timed out after 5s".into()).starts_with("copyq: timed out"));
     }
 
+    #[test]
+    fn test_excluded_page_keeps_pagination_cursor() {
+        let exclude = [regex::Regex::new("^secret:").unwrap()];
+        let mut page = Page {
+            tab: "&clipboard".into(),
+            total: 800,
+            head: String::new(),
+            next: 400,
+            stable: true,
+            items: vec![
+                item(0, "a", ItemKind::Text, "secret: one"),
+                item(1, "b", ItemKind::Text, "secret: two"),
+            ],
+        };
+        hide_excluded(&mut page, &exclude, |_| panic!("no item is oversized"));
+        assert!(page.items.is_empty());
+        assert_eq!(page.next, 400);
+    }
+
+    #[test]
+    fn test_excluded_match_beyond_excerpt_is_hidden() {
+        let exclude = [regex::Regex::new("token").unwrap()];
+        let long = format!("{}token", "x".repeat(EXCERPT_CHARS + 10));
+        let mut page = Page {
+            tab: "&clipboard".into(),
+            total: 1,
+            head: String::new(),
+            next: 1,
+            stable: true,
+            items: vec![item(0, "a", ItemKind::Text, &long)],
+        };
+        hide_excluded(&mut page, &exclude, |_| panic!("no item is oversized"));
+        assert!(page.items.is_empty());
+    }
+
+    fn oversized(row: usize, id: &str, excerpt: &str) -> ClipItem {
+        ClipItem {
+            oversized: true,
+            ..item(row, id, ItemKind::Text, excerpt)
+        }
+    }
+
+    #[test]
+    fn test_oversized_item_is_matched_on_its_fetched_text() {
+        let exclude = [regex::Regex::new("token").unwrap()];
+        let mut page = Page {
+            tab: "&clipboard".into(),
+            total: 3,
+            head: String::new(),
+            next: 3,
+            stable: true,
+            items: vec![
+                oversized(0, "secret", "harmless start"),
+                oversized(1, "clean", "plain start"),
+                item(2, "small", ItemKind::Text, "small"),
+            ],
+        };
+        let mut fetched = Vec::new();
+        hide_excluded(&mut page, &exclude, |item| {
+            fetched.push(item.id.clone());
+            Ok(match item.id.as_str() {
+                "secret" => "harmless start ... token".to_string(),
+                _ => "plain start ... and more".to_string(),
+            })
+        });
+        assert_eq!(fetched, ["secret", "clean"]);
+        let ids: Vec<&str> = page.items.iter().map(|item| item.id.as_str()).collect();
+        assert_eq!(ids, ["clean", "small"]);
+        assert_eq!(page.items[0].excerpt, "plain start");
+    }
+
+    #[test]
+    fn test_oversized_item_is_hidden_when_its_text_cannot_be_read() {
+        let exclude = [regex::Regex::new("token").unwrap()];
+        let mut page = Page {
+            tab: "&clipboard".into(),
+            total: 1,
+            head: String::new(),
+            next: 1,
+            stable: true,
+            items: vec![oversized(0, "a", "harmless start")],
+        };
+        hide_excluded(&mut page, &exclude, |_| Err("timed out".into()));
+        assert!(page.items.is_empty());
+    }
+
+    #[test]
+    fn test_parse_page_reads_oversized_flag() {
+        let output = br#"{"tab":"&clipboard","total":2,"head":"h","next":2,"stable":true,"items":[
+            {"r":0,"id":"a","f":["text/plain"],"k":"text","n":9000000,"p":"start","t":0,"x":true},
+            {"r":1,"id":"b","f":["text/plain"],"k":"text","n":5,"p":"small","t":0}]}"#;
+        let page = parse_page(output).unwrap();
+        assert!(page.items[0].oversized);
+        assert!(!page.items[1].oversized);
+    }
+
+    #[test]
+    fn test_parse_full_text() {
+        let complete =
+            br#"{"ok":true,"k":"text","n":5,"text":"h\u00e9 \ud83d\ude00","image":"","sent":-1}"#;
+        assert_eq!(parse_full_text(complete).unwrap(), "hé 😀");
+        let cut = br#"{"ok":true,"k":"text","n":20000000,"text":"start","image":"","sent":-1}"#;
+        assert!(parse_full_text(cut).is_err());
+        let gone = br#"{"ok":false,"error":"item is no longer in the clipboard history"}"#;
+        assert!(parse_full_text(gone).unwrap_err().contains("no longer"));
+    }
+
     /// Runs against a disposable CopyQ session filled with synthetic items:
     /// `copyq -s raffitest` with text, HTML, image and URI-list entries, and
     /// a text entry holding only a URL.
@@ -986,7 +1188,7 @@ mod tests {
     #[ignore = "needs a running `copyq -s raffitest` session"]
     fn test_copyq_session_round_trip() {
         let copyq = CopyQ::with_session("raffitest");
-        let page = copyq.list_page("", 0, "", "", 0).unwrap();
+        let page = copyq.list_page("", 0, "", "", 0, &[]).unwrap();
         assert!(page.stable);
         let html = page
             .items
@@ -1002,13 +1204,13 @@ mod tests {
             assert!(preview.image.unwrap().is_ok());
         }
 
-        let long = copyq.list_page("", 0, "", "", 3).unwrap();
+        let long = copyq.list_page("", 0, "", "", 3, &[]).unwrap();
         assert!(long.items.iter().all(|item| {
             !matches!(item.kind, ItemKind::Text | ItemKind::Html)
                 || item.excerpt.trim().chars().count() >= 3
         }));
 
-        let images = copyq.list_page("", 0, "", "image", 0).unwrap();
+        let images = copyq.list_page("", 0, "", "image", 0, &[]).unwrap();
         assert!(images.items.iter().all(|item| item.kind == ItemKind::Image));
         assert_eq!(
             images.items.len(),
@@ -1018,7 +1220,7 @@ mod tests {
                 .count()
         );
 
-        let urls = copyq.list_page("", 0, "", "url", 0).unwrap();
+        let urls = copyq.list_page("", 0, "", "url", 0, &[]).unwrap();
         assert!(!urls.items.is_empty());
         assert!(urls.items.iter().all(|item| {
             matches!(item.kind, ItemKind::Text | ItemKind::Html)
@@ -1033,11 +1235,11 @@ mod tests {
         assert!(copyq.delete(&stale).unwrap_err().contains("no longer"));
 
         copyq.delete(&reference).unwrap();
-        let after = copyq.list_page("", 0, "", "", 0).unwrap();
+        let after = copyq.list_page("", 0, "", "", 0, &[]).unwrap();
         assert_eq!(after.total, page.total - 1);
         assert!(after.items.iter().all(|item| item.id != reference.id));
         assert!(copyq
-            .list_page("", 0, "zz-no-match-zz", "", 0)
+            .list_page("", 0, "zz-no-match-zz", "", 0, &[])
             .unwrap()
             .items
             .is_empty());

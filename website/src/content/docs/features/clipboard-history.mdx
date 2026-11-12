@@ -267,6 +267,23 @@ Hide text entries shorter than this many characters, not counting
 surrounding spaces and newlines. `0` lists everything. Images and files are
 always listed.
 
+**`addons.clipboard.exclude_patterns`** `string[]` (default: `[]`)
+
+Rust regular expressions. An entry whose text matches any of them is never
+recorded by the `raffi` backend and is hidden from the browser for both
+backends. The whole text is searched, not just the visible excerpt, so a match
+far down a long entry still excludes it. Matching is case-sensitive unless a
+flag such as `(?i)` is given. Invalid expressions stop raffi at startup with
+the key and index of the bad entry, and `raffi --check-config` reports them
+with the line of the pattern.
+
+Existing entries are hidden, not deleted. CopyQ keeps recording everything
+itself; raffi only controls what its browser shows. A CopyQ entry whose
+complete text cannot be checked, such as one over 16 MiB, is hidden while
+patterns are set, and the `raffi` backend skips a copy when one of its text
+formats cannot be read. After changing these patterns, restart
+`raffi --cache-daemon` so the recorder picks them up.
+
 **`addons.clipboard.backend`** `copyq | raffi` (default: `copyq`)
 
 Clipboard manager to read from: CopyQ, or the history the Raffi server
@@ -307,6 +324,9 @@ addons:
     enabled: true
     trigger: clip
     min_chars: 3
+    exclude_patterns:
+      - '^secret:'
+      - '(?i)password\s*='
     backend: copyq
     action: copy
     secondary_action: hypr_paste

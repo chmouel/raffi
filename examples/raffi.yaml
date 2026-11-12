@@ -363,6 +363,7 @@ addons:
   #   enabled: true
   #   trigger: clip
   #   min_chars: 3            # hide text entries shorter than this
+  #   exclude_patterns: []    # regexes; matches are hidden (both backends) and not recorded by the raffi backend
   #   backend: copyq          # or raffi
   #   max_items: 1000         # raffi backend: entries kept
   #   max_size_mb: 500        # raffi backend: total history size
