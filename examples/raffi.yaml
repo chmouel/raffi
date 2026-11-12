@@ -354,11 +354,13 @@ addons:
   # all its formats (text, HTML, images, file lists); Ctrl+Enter pastes it
   # into the previous window on Hyprland. Ctrl+R refreshes the list and
   # Ctrl+Tab cycles between all items, images only and URLs only.
-  # Ctrl+D deletes the selected entry from CopyQ.
+  # Ctrl+D deletes the selected entry from the history.
   # Previews show the copy time when CopyQ stores it (its "Show Copy Time"
   # command). action and secondary_action accept copy or hypr_paste.
   # backend: raffi records the history in `raffi --cache-daemon` instead of
-  # CopyQ, with copy times and source apps built in.
+  # CopyQ, with copy times and source apps built in. The default, auto, uses
+  # that history when the server records it, else CopyQ; the server records
+  # under auto unless CopyQ is already running when it starts.
   # clipboard:
   #   enabled: true
   #   trigger: clip
@@ -374,7 +376,7 @@ addons:
   #   # Keep copies a password manager marked with x-kde-passwordManagerHint
   #   # as temporary entries instead of skipping them (default false).
   #   temporary_password_manager: false
-  #   backend: copyq          # or raffi
+  #   backend: auto           # or copyq, raffi
   #   max_items: 1000         # raffi backend: entries kept
   #   max_size_mb: 500        # raffi backend: total history size
   #   max_image_size_mb: 50   # raffi backend: larger images are skipped

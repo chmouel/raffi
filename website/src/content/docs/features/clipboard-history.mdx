@@ -16,9 +16,23 @@ item.
 
 <Aside type="note">
 The clipboard browser turns itself on
-when its backend is running as Raffi starts (CopyQ, or `raffi --cache-daemon`
-for the Raffi backend), unless you set `enabled` yourself.
+when its backend is running as Raffi starts (CopyQ or `raffi --cache-daemon`),
+unless you set `enabled` yourself.
 </Aside>
+
+## Choosing a backend
+
+`backend` defaults to `auto`. The first time you open the clipboard browser,
+Raffi uses its own history when `raffi --cache-daemon` is recording it, and
+CopyQ otherwise. If neither is running, the browser says that no clipboard
+history service is running instead of listing anything; start one and press
+**Ctrl+R**.
+
+Under `auto`, `raffi --cache-daemon` records the clipboard unless CopyQ is
+already running when it starts, so the two never keep a history side by
+side. If CopyQ starts later, the server keeps recording and Raffi keeps
+using its own history until the server restarts. Set `backend: copyq` or
+`backend: raffi` to pick one for good.
 
 ## Setup
 
@@ -194,10 +208,11 @@ to copying.
 
 ## Raffi backend
 
-With `backend: raffi`, Raffi records the clipboard itself and CopyQ is not
-needed. Listing and previews read a local database, so the history opens
-faster than through CopyQ, and copy times, source app icons and password
-skipping work without extra commands. CopyQ stays the default.
+With `backend: raffi`, or under `auto` when CopyQ is not running, Raffi
+records the clipboard itself and CopyQ is not needed. Listing and previews
+read a local database, so the history opens faster than through CopyQ, and
+copy times, source app icons and password skipping work without extra
+commands.
 
 The recorder runs inside the Raffi server
 ([`raffi --cache-daemon`](../../reference/cli-options/#cache-management)),
@@ -380,10 +395,12 @@ not. Must be greater than zero.
 temporary entries instead of skipping them. They are never kept permanently,
 and `exclude_patterns` still wins.
 
-**`addons.clipboard.backend`** `copyq | raffi` (default: `copyq`)
+**`addons.clipboard.backend`** `auto | copyq | raffi` (default: `auto`)
 
-Clipboard manager to read from: CopyQ, or the history the Raffi server
-records (see [Raffi backend](#raffi-backend)).
+Clipboard manager to read from: CopyQ, the history the Raffi server records
+(see [Raffi backend](#raffi-backend)), or `auto` for whichever of the two
+runs, Raffi's own history first (see [Choosing a backend](#choosing-a-backend)).
+Restart `raffi --cache-daemon` after changing it.
 
 **`addons.clipboard.max_items`** `integer` (default: `1000`)
 
@@ -428,12 +445,16 @@ addons:
       - '(?i)\bOTP\b'
     temporary_timeout: 60
     temporary_password_manager: false
-    backend: copyq
+    backend: auto
     action: copy
     secondary_action: hypr_paste
 ```
 
 ## Troubleshooting
+
+"No clipboard history service is running" means `backend: auto` found
+neither a `raffi --cache-daemon` recording the clipboard nor CopyQ. Start one
+of them, then press **Ctrl+R**.
 
 "CopyQ is not running" means the `copyq` command could not reach the CopyQ
 server. Start CopyQ, then press **Ctrl+R**.

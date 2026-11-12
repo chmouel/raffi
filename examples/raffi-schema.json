@@ -748,6 +748,11 @@
       "description": "Clipboard manager that stores the history browsed by the clipboard addon",
       "oneOf": [
         {
+          "description": "Raffi's own history when `raffi --cache-daemon` records it, else\nCopyQ when it runs. The cache service records unless CopyQ is\nrunning when it starts.",
+          "type": "string",
+          "const": "auto"
+        },
+        {
           "description": "CopyQ, through its command line scripting API",
           "type": "string",
           "const": "copyq"

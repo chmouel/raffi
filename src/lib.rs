@@ -695,8 +695,12 @@ pub struct TextSnippetSourceConfig {
 #[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ClipboardBackend {
-    /// CopyQ, through its command line scripting API
+    /// Raffi's own history when `raffi --cache-daemon` records it, else
+    /// CopyQ when it runs. The cache service records unless CopyQ is
+    /// running when it starts.
     #[default]
+    Auto,
+    /// CopyQ, through its command line scripting API
     Copyq,
     /// Raffi's own history, recorded by `raffi --cache-daemon`
     Raffi,
@@ -6773,7 +6777,17 @@ launchers:
         assert_eq!(defaults.enabled, None);
         assert_eq!(defaults.trigger(), "clip");
         assert_eq!(defaults.min_chars(), 3);
-        assert_eq!(defaults.backend, ClipboardBackend::Copyq);
+        assert_eq!(defaults.backend, ClipboardBackend::Auto);
+        for (name, backend) in [
+            ("auto", ClipboardBackend::Auto),
+            ("copyq", ClipboardBackend::Copyq),
+            ("raffi", ClipboardBackend::Raffi),
+        ] {
+            assert_eq!(
+                serde_yaml::from_str::<ClipboardBackend>(name).unwrap(),
+                backend
+            );
+        }
         assert_eq!(defaults.action, ClipboardAction::Copy);
         assert_eq!(defaults.secondary_action, ClipboardAction::HyprPaste);
         assert!(!defaults.uses_hypr_paste());

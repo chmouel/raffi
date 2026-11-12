@@ -299,6 +299,10 @@ struct SelectReply {
     error: Option<String>,
 }
 
+/// Shown when `backend: auto` finds no clipboard manager running.
+pub(crate) const NO_BACKEND: &str = "No clipboard history service is running: start \
+     `raffi --cache-daemon` or CopyQ, or set addons.clipboard.backend";
+
 /// The clipboard manager holding the history, from `addons.clipboard.backend`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum History {
@@ -306,6 +310,42 @@ pub(crate) enum History {
     /// History recorded by `raffi --cache-daemon`: read from its database,
     /// put back on the clipboard through the service.
     Raffi,
+    /// Whichever of the two runs, looked up on first use.
+    Auto,
+}
+
+/// The backend `auto` stands for: Raffi's own history when the cache service
+/// records it, else CopyQ when it runs.
+fn pick_backend(
+    raffi_recording: impl FnOnce() -> bool,
+    copyq_running: impl FnOnce() -> bool,
+) -> Result<History, String> {
+    if raffi_recording() {
+        Ok(History::Raffi)
+    } else if copyq_running() {
+        Ok(History::CopyQ(CopyQ::default()))
+    } else {
+        Err(NO_BACKEND.to_string())
+    }
+}
+
+/// `pick_backend` against the running services, kept for the rest of the
+/// process once found so the ids listed by one backend are never sent to
+/// the other. Never looks outside the process in tests.
+fn detect_backend() -> Result<History, String> {
+    static FOUND: std::sync::Mutex<Option<History>> = std::sync::Mutex::new(None);
+    if cfg!(test) {
+        return Err(NO_BACKEND.to_string());
+    }
+    let mut found = FOUND.lock().unwrap_or_else(|error| error.into_inner());
+    if let Some(history) = found.as_ref() {
+        return Ok(history.clone());
+    }
+    let history = pick_backend(super::cache::clipboard_recording, || {
+        super::clipboard_history::copyq_running(super::clipboard_history::running_cmdlines)
+    })?;
+    *found = Some(history.clone());
+    Ok(history)
 }
 
 impl History {
@@ -313,6 +353,15 @@ impl History {
         match backend {
             crate::ClipboardBackend::Copyq => Self::CopyQ(CopyQ::default()),
             crate::ClipboardBackend::Raffi => Self::Raffi,
+            crate::ClipboardBackend::Auto => Self::Auto,
+        }
+    }
+
+    /// This history, with `Auto` replaced by the backend it stands for.
+    fn resolved(&self) -> Result<Self, String> {
+        match self {
+            Self::Auto => detect_backend(),
+            other => Ok(other.clone()),
         }
     }
 
@@ -332,7 +381,7 @@ impl History {
         if cancel() {
             return Err("clipboard listing replaced by a newer one".into());
         }
-        match self {
+        match self.resolved()? {
             Self::CopyQ(copyq) => copyq.list_page(tab, start, query, only_kind, min_chars, exclude),
             Self::Raffi => {
                 if !super::cache::listening() {
@@ -347,28 +396,32 @@ impl History {
                     Some(cancel),
                 )
             }
+            Self::Auto => Err(NO_BACKEND.to_string()),
         }
     }
 
     pub(crate) fn preview(&self, item: &ItemRef) -> Result<ClipPreview, String> {
-        match self {
+        match self.resolved()? {
             Self::CopyQ(copyq) => copyq.preview(item),
             Self::Raffi => super::clipboard_store::Store::open_default()?
                 .preview(&item.id, super::clipboard_store::now_secs()),
+            Self::Auto => Err(NO_BACKEND.to_string()),
         }
     }
 
     pub(crate) fn select(&self, item: &ItemRef) -> Result<(), String> {
-        match self {
+        match self.resolved()? {
             Self::CopyQ(copyq) => copyq.select(item),
             Self::Raffi => super::cache::clipboard_select(&item.id),
+            Self::Auto => Err(NO_BACKEND.to_string()),
         }
     }
 
     pub(crate) fn delete(&self, item: &ItemRef) -> Result<(), String> {
-        match self {
+        match self.resolved()? {
             Self::CopyQ(copyq) => copyq.delete(item),
             Self::Raffi => super::clipboard_store::Store::open_default()?.delete(&item.id),
+            Self::Auto => Err(NO_BACKEND.to_string()),
         }
     }
 }
@@ -1006,6 +1059,26 @@ mod tests {
         bytes.extend(height.to_be_bytes());
         bytes.extend([8, 6, 0, 0, 0]);
         bytes
+    }
+
+    #[test]
+    fn test_auto_picks_the_raffi_history_then_copyq() {
+        assert_eq!(pick_backend(|| true, || true), Ok(History::Raffi));
+        assert_eq!(
+            pick_backend(|| false, || true),
+            Ok(History::CopyQ(CopyQ::default()))
+        );
+        assert_eq!(
+            pick_backend(|| false, || false),
+            Err(NO_BACKEND.to_string())
+        );
+        let never: super::super::clipboard_store::Cancel = std::sync::Arc::new(|| false);
+        assert_eq!(
+            History::new(crate::ClipboardBackend::Auto)
+                .list_page("", 0, "", "", 0, &[], never)
+                .unwrap_err(),
+            NO_BACKEND
+        );
     }
 
     #[test]

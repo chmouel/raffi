@@ -17,7 +17,7 @@
 use std::io;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
 use std::process::Command as Process;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -933,6 +933,7 @@ data_control!(
 /// Start recording the clipboard in the background, reconnecting when the
 /// connection to the compositor is lost.
 pub(crate) fn start(limits: Limits, policy: Policy) {
+    RECORDING.store(true, Ordering::Relaxed);
     crate::debug_log!(
         "clipboard policy: {} exclusion(s), {} temporary pattern(s), {}s timeout, password manager {}",
         policy.exclude.len(),
@@ -997,6 +998,15 @@ pub(crate) fn start(limits: Limits, policy: Policy) {
     eprintln!("raffi: recording the clipboard history");
 }
 
+/// Set once this process records the clipboard, as reported to the UI by
+/// the cache service's status.
+static RECORDING: AtomicBool = AtomicBool::new(false);
+
+/// Whether this process records the clipboard history.
+pub(crate) fn recording() -> bool {
+    RECORDING.load(Ordering::Relaxed)
+}
+
 /// Put the history entry `hash` on the clipboard. Called by the socket
 /// server for the UI.
 pub(crate) fn select(hash: &str) -> Result<(), String> {
@@ -1006,7 +1016,7 @@ pub(crate) fn select(hash: &str) -> Result<(), String> {
         .clone()
         .ok_or_else(|| {
             "the Raffi server is not recording the clipboard; \
-             set addons.clipboard.backend to raffi and restart it"
+             set addons.clipboard.backend to raffi or auto and restart it"
                 .to_string()
         })?;
     let (reply, answer) = mpsc::channel();

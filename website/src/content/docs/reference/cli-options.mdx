@@ -276,7 +276,8 @@ Refresh every local cache.
 
 Run the optional background cache service in the foreground. It warms the
 script filters, Slack views and browser history you opted into, records the
-clipboard for the [`raffi` clipboard backend](../../features/clipboard-history/#raffi-backend),
+clipboard for the [`raffi` clipboard backend](../../features/clipboard-history/#raffi-backend)
+(under the default `auto` backend, only when CopyQ is not running as it starts),
 and serves requests over `$XDG_RUNTIME_DIR/raffi/cache.sock`. Raffi never starts it
 behind your back: run it from a terminal or a user service such as
 `misc/systemd/raffi-cache.service`.

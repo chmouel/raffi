@@ -37,8 +37,9 @@ pub(crate) const CLIPBOARD_NOT_RUNNING: &str =
     "Raffi clipboard service is not running: start `raffi --cache-daemon`";
 const WARM_TICK: Duration = Duration::from_secs(30);
 /// Protocol revision reported by `Status`; daemons from before it existed
-/// report 0 and ignore `wait`. Revision 2 adds `clipboard_select`.
-pub(crate) const PROTOCOL: u32 = 2;
+/// report 0 and ignore `wait`. Revision 2 adds `clipboard_select`, revision
+/// 3 the `clipboard` status flag.
+pub(crate) const PROTOCOL: u32 = 3;
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
 /// A snapshot file to write after a successful script run.
@@ -133,6 +134,9 @@ pub(crate) enum Response {
         sources: Vec<SourceStatus>,
         #[serde(default)]
         protocol: u32,
+        /// The service records the clipboard history.
+        #[serde(default)]
+        clipboard: bool,
     },
     ScriptFilter {
         payload: Option<String>,
@@ -557,6 +561,18 @@ pub(crate) fn clipboard_select(id: &str) -> Result<(), String> {
     }
 }
 
+/// Whether a running cache service records the clipboard history.
+/// Blocking: run it off the UI thread.
+pub(crate) fn clipboard_recording() -> bool {
+    matches!(
+        try_request(&Request::Status, PROBE_TIMEOUT),
+        Some(Response::Status {
+            clipboard: true,
+            ..
+        })
+    )
+}
+
 /// Whether a cache service listens on the socket.
 pub(crate) fn listening() -> bool {
     cache_socket_path().is_ok_and(|path| UnixStream::connect(path).is_ok())
@@ -608,6 +624,7 @@ pub(crate) fn handle_request(state: &Arc<DaemonState>, request: Request) -> Resp
             config_digest: state.config_digest.clone(),
             sources: state.source_status(),
             protocol: PROTOCOL,
+            clipboard: super::clipboard_watch::recording(),
         },
         Request::GetScriptFilter {
             key,
@@ -823,7 +840,12 @@ pub(crate) fn run(config: ParsedConfig) -> Result<()> {
     eprintln!("raffi: cache service listening on {}", socket.display());
     super::hot_files::keep_warm();
     let clipboard = &state.addons.clipboard;
-    if clipboard.backend == crate::ClipboardBackend::Raffi && clipboard.enabled != Some(false) {
+    if clipboard.enabled != Some(false)
+        && super::clipboard_history::daemon_records(
+            clipboard.backend,
+            super::clipboard_history::running_cmdlines,
+        )
+    {
         let policy =
             super::clipboard_policy::Policy::from_config(clipboard).map_err(anyhow::Error::msg)?;
         super::clipboard_store::start_sweeper();
