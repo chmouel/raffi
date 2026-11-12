@@ -3964,6 +3964,7 @@ fn clip(row: usize, id: &str, text: &str) -> super::clipboard::ClipItem {
         copied: None,
         source: None,
         oversized: false,
+        expires_at: None,
     }
 }
 
@@ -4205,6 +4206,237 @@ fn test_clipboard_selection_follows_item_across_refresh() {
         )),
     ));
     assert_eq!(app.selected_index, 2, "still on item b");
+}
+
+fn clip_expiring(row: usize, id: &str, text: &str, expires_at: i64) -> super::clipboard::ClipItem {
+    super::clipboard::ClipItem {
+        expires_at: Some(expires_at),
+        ..clip(row, id, text)
+    }
+}
+
+#[test]
+fn test_clipboard_drops_rows_at_their_deadline() {
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip ");
+    let now = super::clipboard_store::now_secs();
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page(
+            "h",
+            3,
+            3,
+            vec![
+                clip_expiring(0, "t", "code 1234", now + 60),
+                clip(1, "p", "permanent"),
+                clip(2, "q", "kept too"),
+            ],
+        )),
+    ));
+    assert_eq!(app.clipboard.items.len(), 3);
+
+    assert_eq!(
+        app.prune_expired_clipboard_items(now + 59),
+        0,
+        "a row stays until its deadline"
+    );
+    assert_eq!(app.clipboard.items.len(), 3);
+
+    assert_eq!(app.prune_expired_clipboard_items(now + 60), 1);
+    let ids: Vec<_> = app
+        .clipboard
+        .items
+        .iter()
+        .map(|item| item.id.as_str())
+        .collect();
+    assert_eq!(ids, vec!["p", "q"], "rows without a deadline stay");
+    assert_eq!(app.clipboard.total, 2);
+    assert_eq!(app.total_items(), 2);
+
+    // The tick keeps a live list as it is.
+    let _ = app.update(Message::ClipboardTick);
+    assert_eq!(app.clipboard.items.len(), 2);
+}
+
+#[test]
+fn test_clipboard_drops_the_preview_of_an_expired_row() {
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip ");
+    let now = super::clipboard_store::now_secs();
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page(
+            "h",
+            2,
+            2,
+            vec![
+                clip_expiring(0, "t", "code", now + 5),
+                clip(1, "p", "permanent"),
+            ],
+        )),
+    ));
+    let session = app.clipboard.session;
+    let _ = app.update(Message::ClipboardPreview(
+        session,
+        "t".into(),
+        Ok(clip_text_preview("code")),
+    ));
+    let _ = app.update(Message::ClipboardPreview(
+        session,
+        "p".into(),
+        Ok(clip_text_preview("permanent")),
+    ));
+    assert!(app.clipboard.preview("t").is_some());
+
+    assert_eq!(app.prune_expired_clipboard_items(now + 5), 1);
+    assert!(
+        app.clipboard.preview("t").is_none(),
+        "the cached preview goes with the row"
+    );
+    assert!(app.clipboard.preview("p").is_some());
+    assert!(app.clipboard.preview_inflight.is_none());
+
+    // A preview that arrives after its row went is dropped.
+    let _ = app.update(Message::ClipboardPreview(
+        session,
+        "t".into(),
+        Ok(clip_text_preview("late")),
+    ));
+    assert!(app.clipboard.preview("t").is_none());
+    assert_eq!(app.clipboard.previews.len(), 1);
+}
+
+#[test]
+fn test_clipboard_keeps_a_surviving_selection_by_id() {
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip ");
+    let now = super::clipboard_store::now_secs();
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page(
+            "h",
+            3,
+            3,
+            vec![
+                clip_expiring(0, "t", "code", now + 5),
+                clip(1, "b", "beta"),
+                clip(2, "c", "gamma"),
+            ],
+        )),
+    ));
+    let _ = app.update(Message::MoveDown);
+    let _ = app.update(Message::MoveDown);
+    assert_eq!(app.clipboard.items[app.selected_index].id, "c");
+
+    assert_eq!(app.prune_expired_clipboard_items(now + 5), 1);
+    assert_eq!(
+        app.clipboard.items[app.selected_index].id, "c",
+        "the selected row stays selected by id"
+    );
+}
+
+#[test]
+fn test_clipboard_selects_the_nearest_row_when_the_selected_one_expires() {
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip ");
+    let now = super::clipboard_store::now_secs();
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page(
+            "h",
+            3,
+            3,
+            vec![
+                clip(0, "a", "alpha"),
+                clip_expiring(1, "t", "code", now + 5),
+                clip(2, "c", "gamma"),
+            ],
+        )),
+    ));
+    let _ = app.update(Message::MoveDown);
+    assert_eq!(app.clipboard.items[app.selected_index].id, "t");
+
+    assert_eq!(app.prune_expired_clipboard_items(now + 5), 1);
+    assert_eq!(
+        app.clipboard.items[app.selected_index].id, "c",
+        "the row that slid into the selected index takes over"
+    );
+
+    // The last row going leaves the selection on the new last row.
+    let _ = app.update(Message::MoveDown);
+    app.clipboard.items[1].expires_at = Some(now + 5);
+    assert_eq!(app.prune_expired_clipboard_items(now + 5), 1);
+    assert_eq!(app.selected_index, 0);
+    assert_eq!(app.clipboard.items[app.selected_index].id, "a");
+}
+
+#[test]
+fn test_clipboard_lists_nothing_once_every_temporary_row_expired() {
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip ");
+    let now = super::clipboard_store::now_secs();
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page(
+            "h",
+            2,
+            2,
+            vec![
+                clip_expiring(0, "a", "code", now + 5),
+                clip_expiring(1, "b", "code too", now + 10),
+            ],
+        )),
+    ));
+    assert!(app.clipboard.preview_inflight.is_some());
+
+    assert_eq!(app.prune_expired_clipboard_items(now + 10), 2);
+    assert!(app.clipboard.items.is_empty());
+    assert_eq!(app.clipboard.total, 0);
+    assert_eq!(app.total_items(), 1, "the status row only");
+    assert_eq!(app.clipboard.status(), "Clipboard history is empty");
+    assert!(app.clipboard.preview_inflight.is_none());
+    assert!(app.clipboard.previews.is_empty());
+}
+
+#[test]
+fn test_clipboard_scan_does_not_list_already_expired_rows() {
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip ");
+    // A page read before the deadline reaches the list after it.
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page(
+            "h",
+            2,
+            2,
+            vec![clip_expiring(0, "gone", "code", 1), clip(1, "a", "alpha")],
+        )),
+    ));
+    let ids: Vec<_> = app
+        .clipboard
+        .items
+        .iter()
+        .map(|item| item.id.as_str())
+        .collect();
+    assert_eq!(ids, vec!["a"]);
+}
+
+#[test]
+fn test_clipboard_does_not_activate_an_expired_row() {
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip ");
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page("h", 1, 1, vec![clip(0, "t", "code")])),
+    ));
+    // The deadline passed between the listing and the key press, before the
+    // next tick could drop the row.
+    app.clipboard.items[0].expires_at = Some(1);
+
+    let _ = app.update(Message::Submit);
+    assert!(!app.clipboard.pending, "no action runs on an expired entry");
+    assert!(app.clipboard.items.is_empty());
+    assert_eq!(app.total_items(), 1, "the status row only");
 }
 
 #[test]

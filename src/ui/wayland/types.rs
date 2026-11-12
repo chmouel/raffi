@@ -689,6 +689,8 @@ pub(crate) enum Message {
         std::result::Result<Option<super::hyprland::Hyprland>, String>,
     ),
     ClipboardRefresh,
+    /// A one-second tick while the browser lists entries with a deadline.
+    ClipboardTick,
     /// The startup probe of the cache service answered, or not.
     CacheServerStatus(Option<super::cache::ServerInfo>),
     /// F5, or Ctrl+Shift+F5 to refresh every source: refresh through the

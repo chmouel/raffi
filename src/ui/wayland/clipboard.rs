@@ -102,6 +102,10 @@ pub(crate) struct ClipItem {
     /// large, so `excerpt` holds only its start.
     #[serde(rename = "x", default)]
     pub oversized: bool,
+    /// Unix time when a temporary entry leaves the history; None when the
+    /// entry stays. Only the raffi backend sets it.
+    #[serde(default)]
+    pub expires_at: Option<i64>,
 }
 
 fn source_app<'de, D: serde::Deserializer<'de>>(
@@ -204,6 +208,11 @@ impl ClipItem {
             files.pop();
         }
         (files, partial)
+    }
+
+    /// Whether the entry reached its deadline at `now` (unix seconds).
+    pub(crate) fn expired_at(&self, now: i64) -> bool {
+        self.expires_at.is_some_and(|deadline| deadline <= now)
     }
 
     pub(crate) fn reference(&self, tab: &str) -> ItemRef {
@@ -322,8 +331,13 @@ impl History {
                 if !super::cache::listening() {
                     return Err(super::cache::CLIPBOARD_NOT_RUNNING.to_string());
                 }
-                super::clipboard_store::Store::open_default()?
-                    .list(query, only_kind, min_chars, exclude)
+                super::clipboard_store::Store::open_default()?.list(
+                    query,
+                    only_kind,
+                    min_chars,
+                    exclude,
+                    super::clipboard_store::now_secs(),
+                )
             }
         }
     }
@@ -331,7 +345,8 @@ impl History {
     pub(crate) fn preview(&self, item: &ItemRef) -> Result<ClipPreview, String> {
         match self {
             Self::CopyQ(copyq) => copyq.preview(item),
-            Self::Raffi => super::clipboard_store::Store::open_default()?.preview(&item.id),
+            Self::Raffi => super::clipboard_store::Store::open_default()?
+                .preview(&item.id, super::clipboard_store::now_secs()),
         }
     }
 
@@ -833,6 +848,7 @@ mod tests {
             copied: None,
             source: None,
             oversized: false,
+            expires_at: None,
         }
     }
 

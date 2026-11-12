@@ -516,7 +516,7 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
         entries.push(shortcut(
             "Ctrl+D",
             "Delete clipboard entry",
-            "Clipboard history: remove the selected item from CopyQ",
+            "Clipboard history: remove the selected item from the history",
         ));
     }
     if addons.windows.enabled {

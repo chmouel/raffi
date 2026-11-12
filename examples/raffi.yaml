@@ -364,6 +364,16 @@ addons:
   #   trigger: clip
   #   min_chars: 3            # hide text entries shorter than this
   #   exclude_patterns: []    # regexes; matches are hidden (both backends) and not recorded by the raffi backend
+  #   # raffi backend: entries matching these regexes are recorded, then
+  #   # deleted from the history after temporary_timeout seconds (default 60).
+  #   # exclude_patterns still wins, and the system clipboard is untouched.
+  #   temporary_patterns:
+  #     - '(?i)^verification code:'
+  #     - '^OTP:'
+  #   temporary_timeout: 60
+  #   # Keep copies a password manager marked with x-kde-passwordManagerHint
+  #   # as temporary entries instead of skipping them (default false).
+  #   temporary_password_manager: false
   #   backend: copyq          # or raffi
   #   max_items: 1000         # raffi backend: entries kept
   #   max_size_mb: 500        # raffi backend: total history size

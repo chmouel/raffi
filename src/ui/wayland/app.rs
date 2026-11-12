@@ -1879,6 +1879,7 @@ impl LauncherApp {
                 self.handle_clipboard_action_done(session, result)
             }
             Message::ClipboardRefresh => self.handle_refresh(),
+            Message::ClipboardTick => self.handle_clipboard_tick(),
             Message::CacheServerStatus(info) => self.handle_cache_server_status(info),
             Message::ServerRefresh(all) => self.handle_server_refresh(all),
             Message::ServerRefreshDone(token, result) => {

@@ -1,5 +1,7 @@
 use std::collections::HashSet;
+use std::time::Duration;
 
+use iced::futures::channel::mpsc::{unbounded, UnboundedReceiver};
 use iced::Task;
 
 use super::clipboard::{ClipItem, History, Page};
@@ -10,6 +12,21 @@ use crate::ClipboardAction;
 const MAX_SCAN_RESTARTS: u32 = 3;
 /// Previews kept for quick back-and-forth navigation.
 const PREVIEW_CACHE_SIZE: usize = 8;
+/// How often the open browser drops entries whose deadline passed.
+const EXPIRY_TICK: Duration = Duration::from_secs(1);
+
+/// Report every [`EXPIRY_TICK`] while the subscription is kept, so the list
+/// can drop the entries that reached their deadline.
+pub(super) fn expiry_tick() -> UnboundedReceiver<()> {
+    let (sender, receiver) = unbounded();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(EXPIRY_TICK);
+        if sender.unbounded_send(()).is_err() {
+            break;
+        }
+    });
+    receiver
+}
 
 impl LauncherApp {
     /// Theme icon for the app a clipboard item was copied from, trying its
@@ -109,7 +126,10 @@ impl LauncherApp {
         }
         let advanced = page.next > state.scanned;
         state.scanned = page.next;
-        state.items.extend(page.items);
+        let now = super::clipboard_store::now_secs();
+        state
+            .items
+            .extend(page.items.into_iter().filter(|item| !item.expired_at(now)));
         state.items.sort_by_key(|item| (item.tier, item.row));
         let mut seen = HashSet::new();
         state.items.retain(|item| seen.insert(item.id.clone()));
@@ -138,6 +158,46 @@ impl LauncherApp {
             state.loading = false;
             Task::none()
         }
+    }
+
+    /// Drop the listed entries that reached their deadline at `now`, with
+    /// their cached previews, and keep a surviving selection by id. Returns
+    /// how many rows went.
+    pub(super) fn prune_expired_clipboard_items(&mut self, now: i64) -> usize {
+        if !self.clipboard.items.iter().any(|item| item.expired_at(now)) {
+            return 0;
+        }
+        let follow = self.selected_clipboard_id();
+        let before = self.clipboard.items.len();
+        {
+            let state = &mut self.clipboard;
+            state.items.retain(|item| !item.expired_at(now));
+            let listed = |id: &str| state.items.iter().any(|item| item.id == id);
+            state.previews.retain(|(id, _)| listed(id));
+            if state
+                .preview_inflight
+                .as_deref()
+                .is_some_and(|id| !listed(id))
+            {
+                state.preview_inflight = None;
+            }
+        }
+        let removed = before - self.clipboard.items.len();
+        self.clipboard.total = self.clipboard.total.saturating_sub(removed);
+        self.restore_clipboard_selection(follow.as_deref());
+        removed
+    }
+
+    /// Drop entries whose deadline passed while the browser stayed open.
+    pub(super) fn handle_clipboard_tick(&mut self) -> Task<Message> {
+        if !self.clipboard.active || self.view.help_active {
+            return Task::none();
+        }
+        let removed = self.prune_expired_clipboard_items(super::clipboard_store::now_secs());
+        if removed > 0 {
+            crate::debug_log!("clipboard: {removed} expired entries left the list");
+        }
+        Task::none()
     }
 
     /// Display index of the first clipboard row.
@@ -234,6 +294,9 @@ impl LauncherApp {
         };
         let state = &mut self.clipboard;
         let item = &state.items[index];
+        if item.expired_at(super::clipboard_store::now_secs()) {
+            return Task::none();
+        }
         if state.preview(&item.id).is_some() {
             return Task::none();
         }
@@ -260,6 +323,11 @@ impl LauncherApp {
         if state.preview_inflight.as_deref() == Some(id.as_str()) {
             state.preview_inflight = None;
         }
+        // A row that expired or was deleted while its preview ran is gone,
+        // so the result is dropped instead of cached.
+        if !state.items.iter().any(|item| item.id == id) {
+            return Task::none();
+        }
         state.previews.retain(|(cached, _)| *cached != id);
         if state.previews.len() >= PREVIEW_CACHE_SIZE {
             state.previews.drain(..1);
@@ -269,6 +337,18 @@ impl LauncherApp {
     }
 
     pub(super) fn handle_clipboard_selected(&mut self, index: usize) -> Task<Message> {
+        let now = super::clipboard_store::now_secs();
+        if self
+            .clipboard
+            .items
+            .get(index)
+            .is_some_and(|item| item.expired_at(now))
+        {
+            // The entry left the history; the row goes away instead of the
+            // action running on it.
+            self.prune_expired_clipboard_items(now);
+            return Task::none();
+        }
         let state = &self.clipboard;
         if state.pending {
             return Task::none();

@@ -19,18 +19,17 @@ use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
 use std::process::Command as Process;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use calloop::channel;
 use wayland_client::Connection;
 
-use super::clipboard_store::{Capture, Limits, Skipped, Store, MAX_TEXT_BYTES};
+use super::clipboard_policy::{Policy, PASSWORD_HINT};
+use super::clipboard_store::{now_secs, Capture, Limits, Skipped, Store, MAX_TEXT_BYTES};
 use crate::compositor::Compositor;
 
 /// Marks selections owned by Raffi so they are not recorded again.
 const OWN_MIME: &str = "application/x-raffi-clipboard";
-/// Set by password managers (KeePassXC, among others) on secrets.
-const PASSWORD_HINT: &str = "x-kde-passwordManagerHint";
 /// Text formats in order of preference; the first offered one is stored as
 /// `text/plain`.
 const TEXT_MIMES: [&str; 6] = [
@@ -70,17 +69,36 @@ enum Command {
         hash: String,
         reply: mpsc::Sender<Result<(), String>>,
     },
-    /// From the recorder: the selection `generation` was stored as `hash`.
-    Recorded { generation: u64, hash: String },
+    /// From the recorder: the selection `generation` was stored as `hash`, a
+    /// password-manager secret when `secret`.
+    Recorded {
+        generation: u64,
+        hash: String,
+        secret: bool,
+    },
 }
 
 static COMMANDS: Mutex<Option<channel::Sender<Command>>> = Mutex::new(None);
 
+/// What to read from an offer, and whether its source marked it as a
+/// password-manager secret.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Plan {
+    reads: Vec<(String, String)>,
+    password_marked: bool,
+}
+
 /// Formats to read from an offer, as (requested MIME type, stored MIME
-/// type), or `None` when the selection must not be recorded.
-fn plan_reads(offered: &[String]) -> Option<Vec<(String, String)>> {
+/// type), or `None` when the selection must not be recorded. `allow_password`
+/// is `temporary_password_manager`: without it, a marked secret is refused
+/// from its MIME list alone, so its contents are never read.
+fn plan_reads(offered: &[String], allow_password: bool) -> Option<Plan> {
     let has = |mime: &str| offered.iter().any(|offer| offer == mime);
-    if has(OWN_MIME) || has(PASSWORD_HINT) {
+    if has(OWN_MIME) {
+        return None;
+    }
+    let password_marked = has(PASSWORD_HINT);
+    if password_marked && !allow_password {
         return None;
     }
     let mut reads = Vec::new();
@@ -106,7 +124,17 @@ fn plan_reads(offered: &[String]) -> Option<Vec<(String, String)>> {
     {
         reads.push((image.clone(), image));
     }
-    (!reads.is_empty()).then_some(reads)
+    if reads.is_empty() {
+        return None;
+    }
+    if password_marked {
+        // Kept as a format, so selecting the entry offers the hint again.
+        reads.push((PASSWORD_HINT.to_string(), PASSWORD_HINT.to_string()));
+    }
+    Some(Plan {
+        reads,
+        password_marked,
+    })
 }
 
 /// MIME types to offer for an entry with the stored `formats`.
@@ -280,6 +308,8 @@ struct Job {
     generation: u64,
     reads: Vec<(String, OwnedFd)>,
     copied_at: i64,
+    /// The source marked the selection as a password-manager secret.
+    password_marked: bool,
     /// The app focused when the copy happened, looked up in the background.
     source: mpsc::Receiver<Option<String>>,
 }
@@ -291,19 +321,26 @@ struct Persist {
     /// Numbers selections, so late recordings of older ones are ignored.
     generation: u64,
     recorded: Option<(u64, String)>,
+    /// The recorded entry is a password-manager secret, which is never put
+    /// back: the clipboard stays cleared, as the password manager wanted.
+    secret: bool,
     /// The current selection was cleared before it was recorded.
     cleared: bool,
 }
 
 impl Persist {
-    /// A new selection arrived; `own` is the entry Raffi itself offers.
-    fn selection(&mut self, own: Option<String>) -> u64 {
+    /// A new selection arrived; `own` is the entry Raffi itself offers, and
+    /// whether that entry is a password-manager secret.
+    fn selection(&mut self, own: Option<(String, bool)>) -> u64 {
         // Shared across reconnections, so recordings queued before one never
         // match a selection after it.
         static GENERATION: AtomicU64 = AtomicU64::new(0);
         self.generation = GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
         self.cleared = false;
-        self.recorded = own.map(|hash| (self.generation, hash));
+        (self.recorded, self.secret) = match own {
+            Some((hash, secret)) => (Some((self.generation, hash)), secret),
+            None => (None, false),
+        };
         self.generation
     }
 
@@ -315,11 +352,12 @@ impl Persist {
 
     /// Selection `generation` was stored: the entry to restore when the
     /// selection was cleared in the meantime.
-    fn recorded(&mut self, generation: u64, hash: String) -> Option<String> {
+    fn recorded(&mut self, generation: u64, hash: String, secret: bool) -> Option<String> {
         if generation != self.generation {
             return None;
         }
         self.recorded = Some((generation, hash));
+        self.secret = secret;
         if self.cleared {
             self.current()
         } else {
@@ -328,6 +366,9 @@ impl Persist {
     }
 
     fn current(&self) -> Option<String> {
+        if self.secret {
+            return None;
+        }
         self.recorded
             .as_ref()
             .filter(|(generation, _)| *generation == self.generation)
@@ -335,27 +376,21 @@ impl Persist {
     }
 }
 
-fn now_secs() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_secs() as i64)
-}
-
-/// A text format among the `failed` reads, when exclusions are active. Its
-/// text might match them, and the formats that were read might not show it,
-/// so the capture must not be recorded.
-fn unchecked_text_format<'a>(failed: &'a [String], exclude: &[regex::Regex]) -> Option<&'a str> {
-    if exclude.is_empty() {
+/// A text format among the `failed` reads, when `policy` can skip or shorten
+/// a capture from its text. That text might have matched, and the formats
+/// that were read might not show it, so the capture must not be recorded.
+fn unchecked_text_format<'a>(failed: &'a [String], policy: &Policy) -> Option<&'a str> {
+    if policy.exclude.is_empty() && policy.temporary.is_empty() {
         return None;
     }
     failed
         .iter()
-        .find(|mime| !mime.starts_with("image/"))
+        .find(|mime| *mime != PASSWORD_HINT && !mime.starts_with("image/"))
         .map(String::as_str)
 }
 
 /// Read and store each job in turn.
-fn record(jobs: mpsc::Receiver<Job>, limits: Limits, exclude: Vec<regex::Regex>) {
+fn record(jobs: mpsc::Receiver<Job>, limits: Limits, policy: Policy) {
     let mut store = match Store::open_default() {
         Ok(store) => store,
         Err(error) => {
@@ -383,9 +418,9 @@ fn record(jobs: mpsc::Receiver<Job>, limits: Limits, exclude: Vec<regex::Regex>)
                 }
             }
         }
-        if let Some(mime) = unchecked_text_format(&failed, &exclude) {
+        if let Some(mime) = unchecked_text_format(&failed, &policy) {
             eprintln!(
-                "raffi: clipboard entry not recorded: its {mime} could not be read to check exclude_patterns"
+                "raffi: clipboard entry not recorded: its {mime} could not be read to check addons.clipboard patterns"
             );
             continue;
         }
@@ -393,18 +428,20 @@ fn record(jobs: mpsc::Receiver<Job>, limits: Limits, exclude: Vec<regex::Regex>)
             formats,
             copied_at: job.copied_at,
             source: job.source.recv_timeout(APP_TIMEOUT * 2).ok().flatten(),
+            password_marked: job.password_marked,
         };
-        match store.insert_filtered(capture, &limits, &exclude) {
+        match store.insert_filtered(capture, &limits, &policy, now_secs()) {
             Ok(hash) => {
                 let commands = COMMANDS.lock().unwrap_or_else(|error| error.into_inner());
                 if let Some(commands) = commands.as_ref() {
                     let _ = commands.send(Command::Recorded {
                         generation: job.generation,
                         hash,
+                        secret: job.password_marked,
                     });
                 }
             }
-            Err(Skipped::Empty | Skipped::Excluded) => {}
+            Err(Skipped::Empty | Skipped::Excluded | Skipped::Expired) => {}
             Err(error) => eprintln!("raffi: clipboard entry not recorded: {error}"),
         }
     }
@@ -417,6 +454,9 @@ type Formats = Vec<(String, Vec<u8>)>;
 struct Core {
     store: Store,
     jobs: mpsc::SyncSender<Job>,
+    /// `temporary_password_manager`: record the copies a password manager
+    /// marked instead of skipping them unread.
+    password_manager: bool,
     /// The entry Raffi currently owns the selection with, and its formats.
     served: Option<(String, Arc<Formats>)>,
     persist: Persist,
@@ -434,15 +474,20 @@ impl Core {
         let own = offered
             .iter()
             .any(|mime| mime == OWN_MIME)
-            .then(|| self.served.as_ref().map(|(hash, _)| hash.clone()))
+            .then(|| {
+                self.served.as_ref().map(|(hash, formats)| {
+                    let secret = formats.iter().any(|(mime, _)| mime == PASSWORD_HINT);
+                    (hash.clone(), secret)
+                })
+            })
             .flatten();
         let generation = self.persist.selection(own);
-        let Some(plan) = plan_reads(offered) else {
+        let Some(plan) = plan_reads(offered, self.password_manager) else {
             return Vec::new();
         };
         let mut reads = Vec::new();
         let mut writers = Vec::new();
-        for (request, stored) in plan {
+        for (request, stored) in plan.reads {
             let Ok((read, write)) = pipe() else {
                 return Vec::new();
             };
@@ -455,6 +500,7 @@ impl Core {
             generation,
             reads,
             copied_at: now_secs(),
+            password_marked: plan.password_marked,
             source,
         };
         if self.jobs.try_send(job).is_err() {
@@ -472,7 +518,7 @@ impl Core {
 
     /// Load the entry `hash` to serve it, returning the MIME types to offer.
     fn load(&mut self, hash: &str) -> Result<Vec<String>, String> {
-        let formats = self.store.formats(hash)?;
+        let formats = self.store.formats(hash, now_secs())?;
         let mimes = offered_mimes(&formats);
         self.served = Some((hash.to_string(), Arc::new(formats)));
         Ok(mimes)
@@ -595,8 +641,12 @@ macro_rules! data_control {
                             let result = self.select(&hash);
                             let _ = reply.send(result);
                         }
-                        Command::Recorded { generation, hash } => {
-                            if let Some(hash) = self.core.persist.recorded(generation, hash) {
+                        Command::Recorded {
+                            generation,
+                            hash,
+                            secret,
+                        } => {
+                            if let Some(hash) = self.core.persist.recorded(generation, hash, secret) {
                                 self.restore(&hash);
                             }
                         }
@@ -719,11 +769,19 @@ data_control!(
 
 /// Start recording the clipboard in the background, reconnecting when the
 /// connection to the compositor is lost.
-pub(crate) fn start(limits: Limits, exclude: Vec<regex::Regex>) {
+pub(crate) fn start(limits: Limits, policy: Policy) {
+    crate::debug_log!(
+        "clipboard policy: {} exclusion(s), {} temporary pattern(s), {}s timeout, password manager {}",
+        policy.exclude.len(),
+        policy.temporary.len(),
+        policy.temporary_timeout,
+        policy.temporary_password_manager
+    );
     let (jobs, queue) = mpsc::sync_channel::<Job>(MAX_PENDING_JOBS);
+    let password_manager = policy.temporary_password_manager;
     std::thread::Builder::new()
         .name("raffi-clipboard-record".into())
-        .spawn(move || record(queue, limits, exclude))
+        .spawn(move || record(queue, limits, policy))
         .ok();
     std::thread::Builder::new()
         .name("raffi-clipboard".into())
@@ -734,6 +792,7 @@ pub(crate) fn start(limits: Limits, exclude: Vec<regex::Regex>) {
                     Ok(Core {
                         store: Store::open_default()?,
                         jobs: jobs.clone(),
+                        password_manager,
                         served: None,
                         persist: Persist::default(),
                     })
@@ -803,17 +862,21 @@ mod tests {
 
     #[test]
     fn test_plan_reads_picks_kept_formats() {
-        let plan = plan_reads(&mimes(&[
-            "TEXT",
-            "text/plain",
-            "text/plain;charset=utf-8",
-            "text/html",
-            "text/_moz_htmlinfo",
-            "chromium/x-source-url",
-        ]))
+        let plan = plan_reads(
+            &mimes(&[
+                "TEXT",
+                "text/plain",
+                "text/plain;charset=utf-8",
+                "text/html",
+                "text/_moz_htmlinfo",
+                "chromium/x-source-url",
+            ]),
+            false,
+        )
         .unwrap();
+        assert!(!plan.password_marked);
         assert_eq!(
-            plan,
+            plan.reads,
             [
                 (
                     "text/plain;charset=utf-8".to_string(),
@@ -824,43 +887,101 @@ mod tests {
         );
 
         // A browser "Copy Image" offers one picture in many encodings.
-        let plan = plan_reads(&mimes(&[
-            "text/html",
-            "image/bmp",
-            "image/jpeg",
-            "image/png",
-            "image/svg+xml",
-        ]))
+        let plan = plan_reads(
+            &mimes(&[
+                "text/html",
+                "image/bmp",
+                "image/jpeg",
+                "image/png",
+                "image/svg+xml",
+            ]),
+            false,
+        )
         .unwrap();
-        let requested: Vec<&str> = plan.iter().map(|(mime, _)| mime.as_str()).collect();
+        let requested: Vec<&str> = plan.reads.iter().map(|(mime, _)| mime.as_str()).collect();
         assert_eq!(requested, ["text/html", "image/png", "image/svg+xml"]);
 
-        let plan = plan_reads(&mimes(&["image/x-portable-pixmap"])).unwrap();
-        assert_eq!(plan[0].1, "image/x-portable-pixmap");
+        let plan = plan_reads(&mimes(&["image/x-portable-pixmap"]), false).unwrap();
+        assert_eq!(plan.reads[0].1, "image/x-portable-pixmap");
     }
 
     #[test]
     fn test_plan_reads_skips_secrets_own_and_unknown_selections() {
+        // Without the password-manager opt-in its secrets are refused from
+        // the MIME list alone, so their contents are never read.
         assert_eq!(
-            plan_reads(&mimes(&["text/plain", "x-kde-passwordManagerHint"])),
+            plan_reads(&mimes(&["text/plain", PASSWORD_HINT]), false),
             None
         );
-        assert_eq!(plan_reads(&mimes(&["text/plain", OWN_MIME])), None);
-        assert_eq!(plan_reads(&mimes(&["application/x-something"])), None);
-        assert_eq!(plan_reads(&[]), None);
+        // Neither is a selection Raffi itself owns, whatever the opt-in.
+        assert_eq!(
+            plan_reads(&mimes(&["text/plain", OWN_MIME, PASSWORD_HINT]), true),
+            None
+        );
+        assert_eq!(plan_reads(&mimes(&["text/plain", OWN_MIME]), true), None);
+        assert_eq!(plan_reads(&mimes(&["application/x-something"]), true), None);
+        assert_eq!(plan_reads(&[], true), None);
     }
 
     #[test]
-    fn test_unchecked_text_format_only_matters_with_exclusions() {
-        let exclude = [regex::Regex::new("^secret:").unwrap()];
-        let failed = mimes(&["image/png", "text/plain"]);
-        assert_eq!(unchecked_text_format(&failed, &exclude), Some("text/plain"));
-        assert_eq!(unchecked_text_format(&failed, &[]), None);
+    fn test_plan_reads_carries_the_password_marker_when_opted_in() {
+        let plan = plan_reads(&mimes(&["text/plain", PASSWORD_HINT]), true).unwrap();
+        assert!(plan.password_marked);
+        // The marker is read too, so the entry keeps the source's payload and
+        // offers the hint again when it is selected.
         assert_eq!(
-            unchecked_text_format(&mimes(&["image/png"]), &exclude),
+            plan.reads,
+            [
+                ("text/plain".to_string(), "text/plain".to_string()),
+                (PASSWORD_HINT.to_string(), PASSWORD_HINT.to_string()),
+            ]
+        );
+
+        // A marker-only offer has no content to record.
+        assert_eq!(plan_reads(&mimes(&[PASSWORD_HINT]), true), None);
+
+        // The marker is not a substitute for the patterns: an unmarked offer
+        // is planned exactly as before.
+        let plain = plan_reads(&mimes(&["text/plain"]), true).unwrap();
+        assert!(!plain.password_marked);
+    }
+
+    /// Detection reads the offer's MIME list and nothing else: no `rbw`, no
+    /// vault tool and no unlock prompt is involved, so the recorder works on
+    /// a system with none of them installed.
+    #[test]
+    fn test_password_marked_offers_need_no_helper_binary() {
+        assert!(
+            plan_reads(&mimes(&["text/plain", PASSWORD_HINT]), true)
+                .unwrap()
+                .password_marked
+        );
+    }
+
+    #[test]
+    fn test_unchecked_text_format_only_matters_with_patterns() {
+        let policy = Policy {
+            exclude: vec![regex::Regex::new("^secret:").unwrap()],
+            ..Policy::default()
+        };
+        let failed = mimes(&["image/png", "text/plain"]);
+        assert_eq!(unchecked_text_format(&failed, &policy), Some("text/plain"));
+        assert_eq!(unchecked_text_format(&failed, &Policy::default()), None);
+        assert_eq!(unchecked_text_format(&mimes(&["image/png"]), &policy), None);
+        assert_eq!(unchecked_text_format(&[], &policy), None);
+        let temporary = Policy {
+            temporary: vec![regex::Regex::new("^OTP:").unwrap()],
+            ..Policy::default()
+        };
+        assert_eq!(
+            unchecked_text_format(&failed, &temporary),
+            Some("text/plain")
+        );
+        // The password-manager marker holds no text to match.
+        assert_eq!(
+            unchecked_text_format(&mimes(&[PASSWORD_HINT]), &policy),
             None
         );
-        assert_eq!(unchecked_text_format(&[], &exclude), None);
     }
 
     #[test]
@@ -895,32 +1016,57 @@ mod tests {
 
         // Recorded, then its app exits.
         let first = persist.selection(None);
-        assert_eq!(persist.recorded(first, "a".into()), None);
+        assert_eq!(persist.recorded(first, "a".into(), false), None);
         assert_eq!(persist.cleared(), Some("a".into()));
 
         // The app exits before its copy is recorded.
         let second = persist.selection(None);
         assert_eq!(persist.cleared(), None);
-        assert_eq!(persist.recorded(second, "b".into()), Some("b".into()));
+        assert_eq!(
+            persist.recorded(second, "b".into(), false),
+            Some("b".into())
+        );
 
         // A late recording of an older copy changes nothing.
         let third = persist.selection(None);
-        assert_eq!(persist.recorded(second, "b".into()), None);
+        assert_eq!(persist.recorded(second, "b".into(), false), None);
         // A skipped copy, such as a password, is never replaced by an
         // older entry when cleared.
         assert_eq!(persist.cleared(), None);
         let _ = third;
 
         // Raffi's own selection holds the entry it serves.
-        persist.selection(Some("c".into()));
+        persist.selection(Some(("c".into(), false)));
         assert_eq!(persist.cleared(), Some("c".into()));
 
         // After a reconnection, a recording queued before it never matches.
         let mut reconnected = Persist::default();
         let fresh = reconnected.selection(None);
         assert_ne!(fresh, third);
-        assert_eq!(reconnected.recorded(third, "old".into()), None);
+        assert_eq!(reconnected.recorded(third, "old".into(), false), None);
         assert_eq!(reconnected.cleared(), None);
+    }
+
+    #[test]
+    fn test_persist_does_not_restore_a_password_manager_secret() {
+        let mut persist = Persist::default();
+        // The password manager copied a secret and then cleared the
+        // selection: the clipboard stays empty.
+        let secret = persist.selection(None);
+        assert_eq!(persist.recorded(secret, "s".into(), true), None);
+        assert_eq!(persist.cleared(), None);
+
+        // A normal copy afterwards restores as before.
+        let normal = persist.selection(None);
+        assert_eq!(persist.recorded(normal, "s".into(), false), None);
+        assert_eq!(persist.cleared(), Some("s".into()));
+
+        // Raffi's own selection of a secret is not put back either, while the
+        // one of a normal entry is.
+        persist.selection(Some(("s".into(), true)));
+        assert_eq!(persist.cleared(), None);
+        persist.selection(Some(("n".into(), false)));
+        assert_eq!(persist.cleared(), Some("n".into()));
     }
 
     #[test]

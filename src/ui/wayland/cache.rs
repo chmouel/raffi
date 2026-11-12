@@ -247,12 +247,15 @@ pub(crate) fn addons_digest(addons: &AddonsConfig) -> String {
     let slack = config_digest(&addons.slack);
     let clipboard = &addons.clipboard;
     let clipboard = format!(
-        "{:?}:{}:{}:{}:{}",
+        "{:?}:{}:{}:{}:{}:{}:{}:{}",
         clipboard.backend,
         clipboard.max_items(),
         clipboard.max_size_bytes(),
         clipboard.max_image_size_bytes(),
-        config_digest(&clipboard.exclude_patterns)
+        config_digest(&clipboard.exclude_patterns),
+        config_digest(&clipboard.temporary_patterns),
+        clipboard.temporary_timeout(),
+        clipboard.temporary_password_manager(),
     );
     stable_hash(&format!(
         "{script_filters}:{browser_history}:{slack}:{clipboard}"
@@ -821,10 +824,12 @@ pub(crate) fn run(config: ParsedConfig) -> Result<()> {
     super::hot_files::keep_warm();
     let clipboard = &state.addons.clipboard;
     if clipboard.backend == crate::ClipboardBackend::Raffi && clipboard.enabled != Some(false) {
-        let exclude = clipboard.exclude_regexes().map_err(anyhow::Error::msg)?;
+        let policy =
+            super::clipboard_policy::Policy::from_config(clipboard).map_err(anyhow::Error::msg)?;
+        super::clipboard_store::start_sweeper();
         super::clipboard_watch::start(
             super::clipboard_store::Limits::from_config(clipboard),
-            exclude,
+            policy,
         );
     }
     warm_loop(state.clone());
@@ -1059,7 +1064,7 @@ mod tests {
     }
 
     #[test]
-    fn test_addons_digest_changes_with_clipboard_exclude_patterns() {
+    fn test_addons_digest_changes_with_clipboard_policy() {
         let mut addons = AddonsConfig::default();
         let before = addons_digest(&addons);
         addons.clipboard.exclude_patterns = vec!["^secret:".into()];
@@ -1070,6 +1075,19 @@ mod tests {
             .exclude_patterns
             .push("(?i)password".into());
         assert_ne!(after, addons_digest(&addons));
+
+        // The recorder applies the temporary settings at startup too, so a
+        // change to them makes a running service stale.
+        let mut tempo = AddonsConfig::default();
+        let plain = addons_digest(&tempo);
+        tempo.clipboard.temporary_patterns = vec!["^OTP:".into()];
+        let patterns = addons_digest(&tempo);
+        assert_ne!(plain, patterns);
+        tempo.clipboard.temporary_timeout = Some(30);
+        let timeout = addons_digest(&tempo);
+        assert_ne!(patterns, timeout);
+        tempo.clipboard.temporary_password_manager = true;
+        assert_ne!(timeout, addons_digest(&tempo));
     }
 
     #[test]

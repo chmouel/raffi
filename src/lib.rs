@@ -757,6 +757,20 @@ pub struct ClipboardAddonConfig {
     /// Existing entries are hidden, not deleted, and CopyQ keeps recording.
     #[serde(default)]
     pub exclude_patterns: Vec<String>,
+    /// Rust regular expressions. An entry whose complete text matches any of
+    /// them is recorded as a temporary entry of Raffi's history, kept for
+    /// `temporary_timeout` seconds (default: none). `exclude_patterns` wins
+    /// over these, and CopyQ keeps recording everything.
+    #[serde(default)]
+    pub temporary_patterns: Vec<String>,
+    /// Seconds a temporary entry stays in Raffi's history (default: 60).
+    #[serde(default)]
+    pub temporary_timeout: Option<u64>,
+    /// Record copies carrying `x-kde-passwordManagerHint` as temporary
+    /// entries even when no `temporary_patterns` matches, instead of skipping
+    /// them (default: false).
+    #[serde(default)]
+    pub temporary_password_manager: bool,
 }
 
 fn default_clipboard_action() -> ClipboardAction {
@@ -765,6 +779,26 @@ fn default_clipboard_action() -> ClipboardAction {
 
 fn default_clipboard_secondary_action() -> ClipboardAction {
     ClipboardAction::HyprPaste
+}
+
+pub(crate) const DEFAULT_TEMPORARY_TIMEOUT: u64 = 60;
+
+/// Why `value` cannot be used as `temporary_timeout`. The recorder stores
+/// absolute expiry times, so `now + value` must fit in an `i64`.
+#[cfg(feature = "wayland")]
+fn temporary_timeout_problem(value: u64) -> Option<String> {
+    if value == 0 {
+        return Some("must be greater than zero".to_string());
+    }
+    let Ok(seconds) = i64::try_from(value) else {
+        return Some(format!("{value} is too large to be a number of seconds"));
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs() as i64);
+    now.checked_add(seconds)
+        .is_none()
+        .then(|| format!("{seconds} seconds from now overflows the expiry time"))
 }
 
 impl ClipboardAddonConfig {
@@ -783,14 +817,56 @@ impl ClipboardAddonConfig {
     /// Compile `exclude_patterns`, naming the key and index of an invalid one.
     #[cfg(feature = "wayland")]
     pub fn exclude_regexes(&self) -> Result<Vec<regex::Regex>, String> {
-        self.exclude_patterns
-            .iter()
-            .enumerate()
-            .map(|(index, pattern)| {
-                regex::Regex::new(pattern)
-                    .map_err(|error| format!("addons.clipboard.exclude_patterns[{index}]: {error}"))
-            })
-            .collect()
+        compile_patterns(&self.exclude_patterns, "exclude_patterns")
+    }
+
+    /// Compile `temporary_patterns`, naming the key and index of an invalid one.
+    #[cfg(feature = "wayland")]
+    pub fn temporary_regexes(&self) -> Result<Vec<regex::Regex>, String> {
+        compile_patterns(&self.temporary_patterns, "temporary_patterns")
+    }
+
+    /// `temporary_timeout` in seconds, refusing values the recorder cannot
+    /// turn into an expiry time.
+    #[cfg(feature = "wayland")]
+    pub fn temporary_timeout_secs(&self) -> Result<i64, String> {
+        let seconds = self.temporary_timeout();
+        match temporary_timeout_problem(seconds) {
+            Some(problem) => Err(format!("addons.clipboard.temporary_timeout: {problem}")),
+            None => Ok(seconds as i64),
+        }
+    }
+
+    pub fn temporary_timeout(&self) -> u64 {
+        self.temporary_timeout.unwrap_or(DEFAULT_TEMPORARY_TIMEOUT)
+    }
+
+    pub fn temporary_password_manager(&self) -> bool {
+        self.temporary_password_manager
+    }
+
+    /// Every invalid clipboard setting as a YAML pointer and message, for
+    /// `--check-config`.
+    #[cfg(feature = "wayland")]
+    pub fn clipboard_problems(&self) -> Vec<(String, String)> {
+        let mut problems = Vec::new();
+        for (key, patterns) in [
+            ("exclude_patterns", &self.exclude_patterns),
+            ("temporary_patterns", &self.temporary_patterns),
+        ] {
+            for (index, pattern) in patterns.iter().enumerate() {
+                if let Err(error) = regex::Regex::new(pattern) {
+                    problems.push((
+                        format!("/addons/clipboard/{key}/{index}"),
+                        error.to_string(),
+                    ));
+                }
+            }
+        }
+        if let Some(problem) = temporary_timeout_problem(self.temporary_timeout()) {
+            problems.push(("/addons/clipboard/temporary_timeout".to_string(), problem));
+        }
+        problems
     }
 
     pub fn max_items(&self) -> usize {
@@ -829,8 +905,24 @@ impl Default for ClipboardAddonConfig {
             secondary_action: default_clipboard_secondary_action(),
             close_on_action: None,
             exclude_patterns: Vec::new(),
+            temporary_patterns: Vec::new(),
+            temporary_timeout: None,
+            temporary_password_manager: false,
         }
     }
+}
+
+/// Compile `patterns`, naming the config key and index of an invalid one.
+#[cfg(feature = "wayland")]
+fn compile_patterns(patterns: &[String], key: &str) -> Result<Vec<regex::Regex>, String> {
+    patterns
+        .iter()
+        .enumerate()
+        .map(|(index, pattern)| {
+            regex::Regex::new(pattern)
+                .map_err(|error| format!("addons.clipboard.{key}[{index}]: {error}"))
+        })
+        .collect()
 }
 
 /// A built-in entry of the system commands addon
@@ -2852,14 +2944,8 @@ pub fn check_config(filename: &str) -> Result<Vec<ConfigProblem>> {
             }
             #[cfg(feature = "wayland")]
             Ok(config) => {
-                for (index, pattern) in config.addons.clipboard.exclude_patterns.iter().enumerate()
-                {
-                    if let Err(error) = regex::Regex::new(pattern) {
-                        problems.push(ConfigProblem::new(
-                            &format!("/addons/clipboard/exclude_patterns/{index}"),
-                            error.to_string(),
-                        ));
-                    }
+                for (path, message) in config.addons.clipboard.clipboard_problems() {
+                    problems.push(ConfigProblem::new(&path, message));
                 }
                 locate_config_problems(&mut problems, &contents, v0);
             }
@@ -3364,10 +3450,20 @@ fn process_config(config: Config, args: &Args) -> Result<ParsedConfig> {
 
     let mut addons = config.addons;
     #[cfg(feature = "wayland")]
-    addons
-        .clipboard
-        .exclude_regexes()
-        .map_err(anyhow::Error::msg)?;
+    {
+        addons
+            .clipboard
+            .exclude_regexes()
+            .map_err(anyhow::Error::msg)?;
+        addons
+            .clipboard
+            .temporary_regexes()
+            .map_err(anyhow::Error::msg)?;
+        addons
+            .clipboard
+            .temporary_timeout_secs()
+            .map_err(anyhow::Error::msg)?;
+    }
     let fb = &mut addons.file_browser;
     fb.action = fb.action.as_ref().map(|s| expand_config_value(s));
     fb.secondary_action = fb.secondary_action.as_ref().map(|s| expand_config_value(s));
@@ -6746,6 +6842,63 @@ shell:
     }
 
     #[test]
+    fn test_clipboard_temporary_defaults() {
+        let config = AddonsConfig::default().clipboard;
+        assert!(config.temporary_patterns.is_empty());
+        assert_eq!(config.temporary_timeout(), 60);
+        assert_eq!(config.temporary_timeout, None);
+        assert!(!config.temporary_password_manager());
+    }
+
+    #[cfg(feature = "wayland")]
+    #[test]
+    fn test_clipboard_temporary_patterns_and_timeout() {
+        let config: ClipboardAddonConfig = serde_yaml::from_str(
+            "temporary_patterns: ['(?i)^verification code:', '^OTP:']\n\
+             temporary_timeout: 90\n\
+             temporary_password_manager: true\n",
+        )
+        .unwrap();
+        assert_eq!(config.temporary_regexes().unwrap().len(), 2);
+        assert_eq!(config.temporary_timeout_secs().unwrap(), 90);
+        assert!(config.temporary_password_manager());
+
+        let invalid = ClipboardAddonConfig {
+            temporary_patterns: vec!["^ok".into(), "(unclosed".into()],
+            ..Default::default()
+        };
+        let error = invalid.temporary_regexes().unwrap_err();
+        assert!(
+            error.starts_with("addons.clipboard.temporary_patterns[1]: "),
+            "{error}"
+        );
+
+        assert!(ClipboardAddonConfig {
+            temporary_timeout: Some(0),
+            ..Default::default()
+        }
+        .temporary_timeout_secs()
+        .is_err());
+        let error = ClipboardAddonConfig {
+            temporary_timeout: Some(u64::MAX),
+            ..Default::default()
+        }
+        .temporary_timeout_secs()
+        .unwrap_err();
+        assert!(
+            error.starts_with("addons.clipboard.temporary_timeout: "),
+            "{error}"
+        );
+        // A year fits the i64 expiry arithmetic.
+        assert!(ClipboardAddonConfig {
+            temporary_timeout: Some(60 * 60 * 24 * 365),
+            ..Default::default()
+        }
+        .temporary_timeout_secs()
+        .is_ok());
+    }
+
+    #[test]
     fn test_devtools_addon_config_parsing() {
         let defaults = AddonsConfig::default().devtools;
         assert!(defaults.enabled);
@@ -7835,6 +7988,31 @@ launchers:
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(fs::read_to_string(&path).unwrap(), contents);
         assert!(!dir.join("raffi.yaml.bak").exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    #[cfg(all(feature = "config-validation", feature = "wayland"))]
+    fn test_check_config_reports_invalid_temporary_policy() {
+        let dir = temp_test_dir("check-config-temporary");
+        let path = dir.join("raffi.yaml");
+        let contents = "version: 1\naddons:\n  clipboard:\n    temporary_patterns:\n      - '^OTP:'\n      - '('\n    temporary_timeout: 0\n";
+        fs::write(&path, contents).unwrap();
+
+        let problems = check_config(path.to_str().unwrap()).unwrap();
+
+        let found: Vec<(&str, Option<usize>)> = problems
+            .iter()
+            .map(|problem| (problem.path.as_str(), problem.line))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("/addons/clipboard/temporary_patterns/1", Some(6)),
+                ("/addons/clipboard/temporary_timeout", Some(7)),
+            ],
+            "{problems:?}"
+        );
         let _ = fs::remove_dir_all(dir);
     }
 

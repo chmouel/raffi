@@ -10,12 +10,17 @@
 //! it later gives applications what the original source offered. Entries are
 //! identified by a hash of all their formats: copying the same thing again
 //! moves the existing entry to the top instead of adding a duplicate.
+//!
+//! Entries captured as temporary keep an absolute deadline and leave the
+//! history, with their formats, once it passes. The deadline is written with
+//! the entry and never follows a configuration change; expiry only touches
+//! the history, not the selection on the clipboard.
 
 use std::fs;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chrono::{Local, NaiveDateTime, TimeZone};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -24,6 +29,7 @@ use super::clipboard::{
     bounded_text, decode_image, inspect_files, ClipItem, ClipPreview, ItemKind, Page,
     EXCERPT_CHARS, MAX_IMAGE_BYTES, PREVIEW_TEXT_BYTES,
 };
+use super::clipboard_policy::{Disposition, Policy, PASSWORD_HINT};
 
 /// Tab name reported in pages; the raffi history has a single list.
 pub(crate) const TAB: &str = "raffi";
@@ -33,7 +39,27 @@ pub(crate) const MAX_TEXT_BYTES: usize = 16 * 1024 * 1024;
 /// concurrent connections cannot hand out the same one.
 const NEXT_SEQ: &str = "(SELECT COALESCE(MAX(seq), 0) + 1 FROM items)";
 const BUSY_TIMEOUT: Duration = Duration::from_secs(2);
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
+/// How often the sweeper looks for entries that reached their deadline.
+const SWEEP_INTERVAL: Duration = Duration::from_secs(1);
+/// SQL predicate on `items`, with `now` bound as the first parameter: the
+/// entry is still in the history at that second.
+const ALIVE: &str = "(expires_at IS NULL OR expires_at > ?1)";
+/// SQL predicate on `items`, with `now` bound as the first parameter: the
+/// entry reached its deadline at that second.
+const EXPIRED: &str = "(expires_at IS NOT NULL AND expires_at <= ?1)";
+
+/// Stored for the password-manager marker when the source offers it with no
+/// data, so that the marker survives the empty-format filter and the entry
+/// is served with it again.
+const PASSWORD_MARKER: &[u8] = b"secret";
+
+/// Unix time, injected into every operation that depends on the clock.
+pub(crate) fn now_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs() as i64)
+}
 
 /// How much history the recorder keeps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +90,9 @@ pub(crate) struct Capture {
     pub copied_at: i64,
     /// App ID or window class of the app focused when it was copied.
     pub source: Option<String>,
+    /// The source marked the selection as a secret with
+    /// `x-kde-passwordManagerHint`.
+    pub password_marked: bool,
 }
 
 /// Why a capture was not recorded.
@@ -71,6 +100,8 @@ pub(crate) struct Capture {
 pub(crate) enum Skipped {
     Empty,
     Excluded,
+    /// The entry reached its deadline before it could be recorded.
+    Expired,
     TooLarge(String),
     Failed(String),
 }
@@ -79,7 +110,8 @@ impl std::fmt::Display for Skipped {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Empty => f.write_str("nothing to record"),
-            Self::Excluded => f.write_str("matches addons.clipboard.exclude_patterns"),
+            Self::Excluded => f.write_str("excluded by addons.clipboard"),
+            Self::Expired => f.write_str("already expired"),
             Self::TooLarge(reason) => write!(f, "too large: {reason}"),
             Self::Failed(error) => f.write_str(error),
         }
@@ -108,6 +140,96 @@ fn db_error(error: rusqlite::Error) -> String {
     format!("clipboard history: {error}")
 }
 
+/// Create the schema, or upgrade a database written by an older Raffi.
+/// Version 2 added `items.expires_at`; the rows recorded before it have no
+/// deadline and are kept as they are.
+fn migrate(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA foreign_keys = ON;
+         CREATE TABLE IF NOT EXISTS items (
+             id INTEGER PRIMARY KEY,
+             hash TEXT NOT NULL UNIQUE,
+             seq INTEGER NOT NULL,
+             kind TEXT NOT NULL,
+             formats TEXT NOT NULL,
+             text TEXT NOT NULL,
+             text_len INTEGER NOT NULL,
+             trim_len INTEGER NOT NULL,
+             is_url INTEGER NOT NULL,
+             copied_at INTEGER NOT NULL,
+             source TEXT,
+             size INTEGER NOT NULL,
+             expires_at INTEGER
+         );
+         CREATE TABLE IF NOT EXISTS formats (
+             item_id INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+             mime TEXT NOT NULL,
+             data BLOB NOT NULL,
+             PRIMARY KEY (item_id, mime)
+         );",
+    )
+    .map_err(db_error)?;
+    if !has_column(conn, "items", "expires_at")? {
+        conn.execute_batch("ALTER TABLE items ADD COLUMN expires_at INTEGER")
+            .map_err(db_error)?;
+    }
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS items_seq ON items (seq);
+         CREATE INDEX IF NOT EXISTS items_kind ON items (kind, seq);
+         CREATE INDEX IF NOT EXISTS items_expires_at ON items (expires_at)
+             WHERE expires_at IS NOT NULL;",
+    )
+    .map_err(db_error)?;
+    conn.pragma_update(None, "user_version", SCHEMA_VERSION)
+        .map_err(db_error)
+}
+
+fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
+    let count: i64 = conn
+        .query_row(
+            &format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?1"),
+            [column],
+            |row| row.get(0),
+        )
+        .map_err(db_error)?;
+    Ok(count > 0)
+}
+
+/// Remove the entries that reached their deadline at `now`, leaving the
+/// failures to the sweeper's next tick.
+fn sweep(store: &mut Store, now: i64) -> Result<usize, String> {
+    let removed = store.expire(now)?;
+    if removed > 0 {
+        crate::debug_log!("clipboard: removed {removed} expired entries");
+    }
+    Ok(removed)
+}
+
+/// Remove expired entries once at startup, then every second, on a thread of
+/// its own: cleanup must not wait for a copy or for the compositor.
+pub(crate) fn start_sweeper() {
+    std::thread::Builder::new()
+        .name("raffi-clipboard-sweep".into())
+        .spawn(|| {
+            let mut store: Option<Store> = None;
+            loop {
+                let result = match store.as_mut() {
+                    Some(store) => sweep(store, now_secs()).map(|_| ()),
+                    None => Store::open_default().map(|opened| store = Some(opened)),
+                };
+                if let Err(error) = result {
+                    eprintln!("raffi: clipboard history cleanup failed: {error}");
+                    // Reopening on the next tick retries a locked or damaged
+                    // database without stopping the sweeper.
+                    store = None;
+                }
+                std::thread::sleep(SWEEP_INTERVAL);
+            }
+        })
+        .ok();
+}
+
 impl Store {
     pub(crate) fn open_default() -> Result<Self, String> {
         Self::open(&default_path()?)
@@ -127,53 +249,34 @@ impl Store {
         // SQLite gives the WAL and shared memory files the same mode.
         let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
         conn.busy_timeout(BUSY_TIMEOUT).map_err(db_error)?;
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             PRAGMA foreign_keys = ON;
-             CREATE TABLE IF NOT EXISTS items (
-                 id INTEGER PRIMARY KEY,
-                 hash TEXT NOT NULL UNIQUE,
-                 seq INTEGER NOT NULL,
-                 kind TEXT NOT NULL,
-                 formats TEXT NOT NULL,
-                 text TEXT NOT NULL,
-                 text_len INTEGER NOT NULL,
-                 trim_len INTEGER NOT NULL,
-                 is_url INTEGER NOT NULL,
-                 copied_at INTEGER NOT NULL,
-                 source TEXT,
-                 size INTEGER NOT NULL
-             );
-             CREATE INDEX IF NOT EXISTS items_seq ON items (seq);
-             CREATE INDEX IF NOT EXISTS items_kind ON items (kind, seq);
-             CREATE TABLE IF NOT EXISTS formats (
-                 item_id INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
-                 mime TEXT NOT NULL,
-                 data BLOB NOT NULL,
-                 PRIMARY KEY (item_id, mime)
-             );",
-        )
-        .map_err(db_error)?;
-        conn.pragma_update(None, "user_version", SCHEMA_VERSION)
-            .map_err(db_error)?;
+        migrate(&conn)?;
         Ok(Self { conn })
     }
 
     /// Record `capture`, or move the identical entry to the top. Returns the
     /// entry's id.
     #[cfg(test)]
-    pub(crate) fn insert(&mut self, capture: Capture, limits: &Limits) -> Result<String, Skipped> {
-        self.insert_filtered(capture, limits, &[])
+    pub(crate) fn insert(
+        &mut self,
+        capture: Capture,
+        limits: &Limits,
+        now: i64,
+    ) -> Result<String, Skipped> {
+        self.insert_filtered(capture, limits, &Policy::default(), now)
     }
 
-    /// Like `insert`, but rejects the capture when its normalized searchable
-    /// text matches one of `exclude`. Nothing is written in that case.
+    /// Like `insert`, but drops the capture when `policy` skips it. A
+    /// temporary entry gets the deadline `capture.copied_at` plus the policy
+    /// timeout, so copying the same thing again moves it up with a new
+    /// deadline from the current policy.
     pub(crate) fn insert_filtered(
         &mut self,
         capture: Capture,
         limits: &Limits,
-        exclude: &[regex::Regex],
+        policy: &Policy,
+        now: i64,
     ) -> Result<String, Skipped> {
+        let password_marked = capture.password_marked;
         let mut formats = capture.formats;
         formats.retain(|(_, data)| !data.is_empty());
         if formats.is_empty() {
@@ -195,12 +298,48 @@ impl Store {
         formats.sort_by(|a, b| a.0.cmp(&b.0));
         formats.dedup_by(|a, b| a.0 == b.0);
 
-        let hash = fingerprint(&formats);
-        let mimes: Vec<&str> = formats.iter().map(|(mime, _)| mime.as_str()).collect();
+        // The marker follows the copy rather than its content: it is stored
+        // as a format so the entry is served with it again, and a source may
+        // offer it with no data at all.
+        let marker = password_marked.then(|| {
+            formats
+                .iter()
+                .find(|(mime, data)| mime == PASSWORD_HINT && !data.is_empty())
+                .map(|(_, data)| data.clone())
+                .unwrap_or_else(|| PASSWORD_MARKER.to_vec())
+        });
+        formats.retain(|(mime, _)| mime != PASSWORD_HINT);
+        if let Some(marker) = &marker {
+            formats.push((PASSWORD_HINT.to_string(), marker.clone()));
+            formats.sort_by(|a, b| a.0.cmp(&b.0));
+        }
+
+        // Identical content keeps one entry, whether or not it was copied
+        // with the marker: the marker is left out of the fingerprint so the
+        // latest copy decides the deadline and the marker of that entry.
+        let hash = fingerprint(
+            formats
+                .iter()
+                .filter(|(mime, _)| mime != PASSWORD_HINT)
+                .map(|(mime, data)| (mime.as_str(), data.as_slice())),
+        );
+        // The marker is not content: it is left out of the kind the entry is
+        // listed with, of its searchable text and of its formats.
+        let mimes: Vec<&str> = formats
+            .iter()
+            .filter(|(mime, _)| mime != PASSWORD_HINT)
+            .map(|(mime, _)| mime.as_str())
+            .collect();
         let kind = kind_of(&mimes);
         let text = text_of(&formats);
-        if is_excluded(&text, exclude) {
-            return Err(Skipped::Excluded);
+        let expires_at = deadline_for(
+            policy.disposition(&text, password_marked),
+            password_marked,
+            capture.copied_at,
+            policy.temporary_timeout,
+        )?;
+        if expires_at.is_some_and(|deadline| deadline <= now) {
+            return Err(Skipped::Expired);
         }
         let size: usize = formats.iter().map(|(_, data)| data.len()).sum();
         let source = capture
@@ -218,18 +357,45 @@ impl Store {
             let updated = tx
                 .execute(
                     &format!(
-                        "UPDATE items SET seq = {NEXT_SEQ}, copied_at = ?1,
-                             source = COALESCE(?2, source) WHERE hash = ?3"
+                        "UPDATE items SET seq = {NEXT_SEQ}, copied_at = ?1, expires_at = ?2,
+                             source = COALESCE(?3, source), formats = ?4, size = ?5
+                         WHERE hash = ?6"
                     ),
-                    params![capture.copied_at, source, hash],
+                    params![
+                        capture.copied_at,
+                        expires_at,
+                        source,
+                        mimes.join("\n"),
+                        size as i64,
+                        hash
+                    ],
                 )
                 .map_err(db_error)?;
+            if updated > 0 {
+                // The marker follows the latest copy: a marked copy makes the
+                // entry temporary and served with the hint, an unmarked one
+                // drops the hint again.
+                tx.execute(
+                    "DELETE FROM formats WHERE mime = ?1
+                         AND item_id = (SELECT id FROM items WHERE hash = ?2)",
+                    params![PASSWORD_HINT, hash],
+                )
+                .map_err(db_error)?;
+                if let Some(marker) = &marker {
+                    tx.execute(
+                        "INSERT INTO formats (item_id, mime, data)
+                             VALUES ((SELECT id FROM items WHERE hash = ?1), ?2, ?3)",
+                        params![hash, PASSWORD_HINT, marker],
+                    )
+                    .map_err(db_error)?;
+                }
+            }
             if updated == 0 {
                 tx.execute(
                     &format!(
                         "INSERT INTO items (hash, seq, kind, formats, text, text_len, trim_len,
-                             is_url, copied_at, source, size)
-                         VALUES (?1, {NEXT_SEQ}, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"
+                             is_url, copied_at, source, size, expires_at)
+                         VALUES (?1, {NEXT_SEQ}, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"
                     ),
                     params![
                         hash,
@@ -242,6 +408,7 @@ impl Store {
                         capture.copied_at,
                         source,
                         size as i64,
+                        expires_at,
                     ],
                 )
                 .map_err(db_error)?;
@@ -255,20 +422,25 @@ impl Store {
                 }
             }
             tx.commit().map_err(db_error)?;
-            self.prune(limits)
+            self.prune(limits, now)
         })();
         result.map_err(Skipped::Failed).map(|()| hash)
     }
 
     /// Drop the oldest entries beyond `max_items`, then until the history
-    /// fits in `max_size`. The newest entry is always kept.
-    fn prune(&self, limits: &Limits) -> Result<(), String> {
+    /// fits in `max_size`. The newest entry that is still alive is always
+    /// kept: expired entries are left to `expire` and count for nothing.
+    fn prune(&self, limits: &Limits, now: i64) -> Result<(), String> {
         let mut statement = self
             .conn
-            .prepare("SELECT id, size FROM items ORDER BY seq DESC")
+            .prepare(&format!(
+                "SELECT id, size FROM items WHERE {ALIVE} ORDER BY seq DESC"
+            ))
             .map_err(db_error)?;
         let rows = statement
-            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
+            .query_map([now], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+            })
             .map_err(db_error)?;
         let mut total = 0u64;
         let mut doomed = Vec::new();
@@ -298,14 +470,15 @@ impl Store {
         Ok(())
     }
 
-    /// Every matching entry, newest first, as one complete page. Matching
-    /// and ranking follow the CopyQ listing script.
+    /// Every matching entry that is alive at `now`, newest first, as one
+    /// complete page. Matching and ranking follow the CopyQ listing script.
     pub(crate) fn list(
         &self,
         query: &str,
         only_kind: &str,
         min_chars: usize,
         exclude: &[regex::Regex],
+        now: i64,
     ) -> Result<Page, String> {
         let terms: Vec<String> = query
             .to_lowercase()
@@ -315,13 +488,17 @@ impl Store {
         let phrase = terms.join(" ");
         let total: i64 = self
             .conn
-            .query_row("SELECT COUNT(*) FROM items", [], |row| row.get(0))
+            .query_row(
+                &format!("SELECT COUNT(*) FROM items WHERE {ALIVE}"),
+                [now],
+                |row| row.get(0),
+            )
             .map_err(db_error)?;
         let head: String = self
             .conn
             .query_row(
-                "SELECT hash FROM items ORDER BY seq DESC LIMIT 1",
-                [],
+                &format!("SELECT hash FROM items WHERE {ALIVE} ORDER BY seq DESC LIMIT 1"),
+                [now],
                 |row| row.get(0),
             )
             .optional()
@@ -341,13 +518,14 @@ impl Store {
             "text".to_string()
         };
         let sql = format!(
-            "SELECT hash, kind, formats, {text}, text_len, copied_at, source FROM items
-             WHERE {filter} AND NOT (kind IN ('text', 'html') AND trim_len < ?1)
+            "SELECT hash, kind, formats, {text}, text_len, copied_at, source, expires_at
+             FROM items
+             WHERE {ALIVE} AND {filter} AND NOT (kind IN ('text', 'html') AND trim_len < ?2)
              ORDER BY seq DESC"
         );
         let mut statement = self.conn.prepare(&sql).map_err(db_error)?;
         let rows = statement
-            .query_map([min_chars as i64], |row| {
+            .query_map(params![now, min_chars as i64], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -356,13 +534,14 @@ impl Store {
                     row.get::<_, i64>(4)?,
                     row.get::<_, i64>(5)?,
                     row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<i64>>(7)?,
                 ))
             })
             .map_err(db_error)?;
 
         let mut items = Vec::new();
         for (row, entry) in rows.enumerate() {
-            let (hash, kind, formats, text, text_len, copied_at, source) =
+            let (hash, kind, formats, text, text_len, copied_at, source, expires_at) =
                 entry.map_err(db_error)?;
             if is_excluded(&text, exclude) {
                 continue;
@@ -381,6 +560,7 @@ impl Store {
                 copied: local_time(copied_at),
                 source,
                 oversized: false,
+                expires_at,
             });
         }
         let total = total.max(0) as usize;
@@ -394,25 +574,28 @@ impl Store {
         })
     }
 
-    fn item_id(&self, hash: &str) -> Result<i64, String> {
+    /// The id of the entry `hash`, as long as it is alive at `now`.
+    fn item_id(&self, hash: &str, now: i64) -> Result<i64, String> {
         self.conn
-            .query_row("SELECT id FROM items WHERE hash = ?1", [hash], |row| {
-                row.get(0)
-            })
+            .query_row(
+                &format!("SELECT id FROM items WHERE hash = ?2 AND {ALIVE}"),
+                params![now, hash],
+                |row| row.get(0),
+            )
             .optional()
             .map_err(db_error)?
             .ok_or_else(|| "item is no longer in the clipboard history".to_string())
     }
 
-    pub(crate) fn preview(&self, hash: &str) -> Result<ClipPreview, String> {
+    pub(crate) fn preview(&self, hash: &str, now: i64) -> Result<ClipPreview, String> {
         let (id, kind, text, text_len): (i64, String, String, i64) = self
             .conn
             .query_row(
                 &format!(
                     "SELECT id, kind, substr(text, 1, {PREVIEW_TEXT_BYTES}), text_len
-                     FROM items WHERE hash = ?1"
+                     FROM items WHERE hash = ?2 AND {ALIVE}"
                 ),
-                [hash],
+                params![now, hash],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .optional()
@@ -421,10 +604,15 @@ impl Store {
         let kind = parse_kind(&kind);
         let mut statement = self
             .conn
-            .prepare("SELECT mime, length(data) FROM formats WHERE item_id = ?1 ORDER BY mime")
+            // The password-manager marker is not content, so the preview
+            // does not list it.
+            .prepare(
+                "SELECT mime, length(data) FROM formats WHERE item_id = ?1 AND mime != ?2
+                 ORDER BY mime",
+            )
             .map_err(db_error)?;
         let formats = statement
-            .query_map([id], |row| {
+            .query_map(params![id, PASSWORD_HINT], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, i64>(1)?.max(0) as usize,
@@ -473,9 +661,9 @@ impl Store {
     }
 
     /// Every stored format of the entry `hash`, to put it back on the
-    /// clipboard.
-    pub(crate) fn formats(&self, hash: &str) -> Result<Vec<(String, Vec<u8>)>, String> {
-        let id = self.item_id(hash)?;
+    /// clipboard, as long as it is alive at `now`.
+    pub(crate) fn formats(&self, hash: &str, now: i64) -> Result<Vec<(String, Vec<u8>)>, String> {
+        let id = self.item_id(hash, now)?;
         let mut statement = self
             .conn
             .prepare("SELECT mime, data FROM formats WHERE item_id = ?1 ORDER BY mime")
@@ -497,6 +685,35 @@ impl Store {
             return Err("item is no longer in the clipboard history".into());
         }
         Ok(())
+    }
+
+    /// Delete the entries that reached their deadline at `now`, with the
+    /// formats stored for them, and report how many entries went.
+    pub(crate) fn expire(&mut self, now: i64) -> Result<usize, String> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(db_error)?;
+        let doomed: Vec<i64> = {
+            let mut statement = tx
+                .prepare(&format!("SELECT id FROM items WHERE {EXPIRED}"))
+                .map_err(db_error)?;
+            let ids = statement
+                .query_map([now], |row| row.get(0))
+                .map_err(db_error)?
+                .collect::<Result<Vec<i64>, _>>()
+                .map_err(db_error)?;
+            ids
+        };
+        for id in &doomed {
+            tx.execute("DELETE FROM formats WHERE item_id = ?1", [id])
+                .map_err(db_error)?;
+        }
+        let removed = tx
+            .execute(&format!("DELETE FROM items WHERE {EXPIRED}"), [now])
+            .map_err(db_error)?;
+        tx.commit().map_err(db_error)?;
+        Ok(removed)
     }
 }
 
@@ -524,7 +741,7 @@ fn local_time(secs: i64) -> Option<NaiveDateTime> {
 
 /// 128-bit FNV-1a over every format, length-prefixed so that boundaries
 /// between formats cannot collide.
-fn fingerprint(formats: &[(String, Vec<u8>)]) -> String {
+fn fingerprint<'a>(formats: impl Iterator<Item = (&'a str, &'a [u8])>) -> String {
     let mut hash = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d_u128;
     let mut feed = |bytes: &[u8]| {
         for byte in bytes {
@@ -539,6 +756,25 @@ fn fingerprint(formats: &[(String, Vec<u8>)]) -> String {
         feed(data);
     }
     format!("{hash:032x}")
+}
+
+/// The deadline a capture gets, or `None` to keep it until it ages out of
+/// the history. A password-manager copy is never kept permanently, whatever
+/// the policy says: it is skipped instead.
+fn deadline_for(
+    disposition: Disposition,
+    password_marked: bool,
+    copied_at: i64,
+    timeout: i64,
+) -> Result<Option<i64>, Skipped> {
+    match disposition {
+        Disposition::Skip => Err(Skipped::Excluded),
+        Disposition::Temporary => Ok(Some(copied_at.saturating_add(timeout))),
+        Disposition::Normal if password_marked => Err(Skipped::Failed(
+            "password-manager copies are never recorded permanently".into(),
+        )),
+        Disposition::Normal => Ok(None),
+    }
 }
 
 fn kind_of(mimes: &[&str]) -> ItemKind {
@@ -584,7 +820,7 @@ static TAG: LazyLock<regex::Regex> =
 /// Whether `text` matches any exclusion pattern. Entries without text are
 /// never excluded.
 pub(crate) fn is_excluded(text: &str, patterns: &[regex::Regex]) -> bool {
-    !text.is_empty() && patterns.iter().any(|pattern| pattern.is_match(text))
+    super::clipboard_policy::matches_any(text, patterns)
 }
 
 /// Searchable text: plain text, else the file list, else the HTML with its
@@ -670,15 +906,23 @@ mod tests {
     use super::*;
     use std::time::SystemTime;
 
-    fn temp_store(name: &str) -> (Store, PathBuf) {
+    fn temp_dir(name: &str) -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("raffi-clipstore-{name}-{unique}"));
+        std::env::temp_dir().join(format!("raffi-clipstore-{name}-{unique}"))
+    }
+
+    fn temp_store(name: &str) -> (Store, PathBuf) {
+        let dir = temp_dir(name);
         let store = Store::open(&dir.join("clipboard.db")).unwrap();
         (store, dir)
     }
+
+    /// Clock injected into the operations that care about time; entries
+    /// recorded with `text` never expire.
+    const NOW: i64 = 10_000;
 
     const LIMITS: Limits = Limits {
         max_items: 100,
@@ -686,11 +930,45 @@ mod tests {
         max_image_size: 1 << 20,
     };
 
+    /// A policy recording everything as temporary for `timeout` seconds.
+    fn temporary_policy(timeout: i64) -> Policy {
+        Policy {
+            temporary: vec![regex::Regex::new("").unwrap()],
+            temporary_timeout: timeout,
+            ..Policy::default()
+        }
+    }
+
+    fn deadline(store: &Store, hash: &str) -> Option<i64> {
+        store
+            .conn
+            .query_row(
+                "SELECT expires_at FROM items WHERE hash = ?1",
+                [hash],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    /// (entries, stored formats) in the database, expired ones included.
+    fn rows(store: &Store) -> (i64, i64) {
+        let count = |table: &str| -> i64 {
+            store
+                .conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap()
+        };
+        (count("items"), count("formats"))
+    }
+
     fn text(value: &str, at: i64) -> Capture {
         Capture {
             formats: vec![("text/plain".into(), value.as_bytes().to_vec())],
             copied_at: at,
             source: Some("kitty".into()),
+            password_marked: false,
         }
     }
 
@@ -708,7 +986,9 @@ mod tests {
     #[test]
     fn test_concurrent_connections_never_share_a_position() {
         let (mut store, dir) = temp_store("concurrent");
-        let hash = store.insert(text("selected entry", 1), &LIMITS).unwrap();
+        let hash = store
+            .insert(text("selected entry", 1), &LIMITS, NOW)
+            .unwrap();
         let path = dir.join("clipboard.db");
         let selector = std::thread::spawn(move || {
             let other = Store::open(&path).unwrap();
@@ -718,7 +998,7 @@ mod tests {
         });
         for index in 0..200 {
             store
-                .insert(text(&format!("copy number {index}"), 2), &LIMITS)
+                .insert(text(&format!("copy number {index}"), 2), &LIMITS, NOW)
                 .unwrap();
         }
         selector.join().unwrap();
@@ -741,16 +1021,22 @@ mod tests {
     #[test]
     fn test_insert_lists_newest_first_and_dedups_recopies() {
         let (mut store, dir) = temp_store("dedup");
-        let first = store.insert(text("first entry", 100), &LIMITS).unwrap();
-        store.insert(text("second entry", 200), &LIMITS).unwrap();
+        let first = store
+            .insert(text("first entry", 100), &LIMITS, NOW)
+            .unwrap();
+        store
+            .insert(text("second entry", 200), &LIMITS, NOW)
+            .unwrap();
         assert_eq!(
-            titles(&store.list("", "", 0, &[]).unwrap()),
+            titles(&store.list("", "", 0, &[], NOW).unwrap()),
             ["second entry", "first entry"]
         );
 
-        let again = store.insert(text("first entry", 300), &LIMITS).unwrap();
+        let again = store
+            .insert(text("first entry", 300), &LIMITS, NOW)
+            .unwrap();
         assert_eq!(again, first);
-        let page = store.list("", "", 0, &[]).unwrap();
+        let page = store.list("", "", 0, &[], NOW).unwrap();
         assert_eq!(titles(&page), ["first entry", "second entry"]);
         assert_eq!(page.total, 2);
         assert_eq!(page.head, first);
@@ -759,7 +1045,7 @@ mod tests {
 
         store.bump(&page.items[1].id).unwrap();
         assert_eq!(
-            titles(&store.list("", "", 0, &[]).unwrap()),
+            titles(&store.list("", "", 0, &[], NOW).unwrap()),
             ["second entry", "first entry"]
         );
         let _ = fs::remove_dir_all(dir);
@@ -777,11 +1063,13 @@ mod tests {
             .into_iter()
             .enumerate()
         {
-            store.insert(text(value, index as i64), &limits).unwrap();
+            store
+                .insert(text(value, index as i64), &limits, NOW)
+                .unwrap();
         }
         // Three fit by count, but only two fit in 25 bytes.
         assert_eq!(
-            titles(&store.list("", "", 0, &[]).unwrap()),
+            titles(&store.list("", "", 0, &[], NOW).unwrap()),
             ["dddddddddd", "cccccccccc"]
         );
 
@@ -789,8 +1077,11 @@ mod tests {
             max_size: 1,
             ..limits
         };
-        store.insert(text("eeeeeeeeee", 9), &tiny).unwrap();
-        assert_eq!(titles(&store.list("", "", 0, &[]).unwrap()), ["eeeeeeeeee"]);
+        store.insert(text("eeeeeeeeee", 9), &tiny, NOW).unwrap();
+        assert_eq!(
+            titles(&store.list("", "", 0, &[], NOW).unwrap()),
+            ["eeeeeeeeee"]
+        );
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -805,18 +1096,20 @@ mod tests {
             formats: vec![("image/png".into(), png(4, 4))],
             copied_at: 1,
             source: None,
+            password_marked: false,
         };
         assert!(matches!(
-            store.insert(capture, &limits),
+            store.insert(capture, &limits, NOW),
             Err(Skipped::TooLarge(_))
         ));
         let empty = Capture {
             formats: vec![("text/plain".into(), Vec::new())],
             copied_at: 1,
             source: None,
+            password_marked: false,
         };
-        assert_eq!(store.insert(empty, &limits), Err(Skipped::Empty));
-        assert_eq!(store.list("", "", 0, &[]).unwrap().total, 0);
+        assert_eq!(store.insert(empty, &limits, NOW), Err(Skipped::Empty));
+        assert_eq!(store.list("", "", 0, &[], NOW).unwrap().total, 0);
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -834,7 +1127,9 @@ mod tests {
         .into_iter()
         .enumerate()
         {
-            store.insert(text(value, index as i64), &LIMITS).unwrap();
+            store
+                .insert(text(value, index as i64), &LIMITS, NOW)
+                .unwrap();
         }
         let image = Capture {
             formats: vec![
@@ -843,10 +1138,11 @@ mod tests {
             ],
             copied_at: 10,
             source: Some("firefox".into()),
+            password_marked: false,
         };
-        store.insert(image, &LIMITS).unwrap();
+        store.insert(image, &LIMITS, NOW).unwrap();
 
-        let page = store.list("Hello  World", "", 0, &[]).unwrap();
+        let page = store.list("Hello  World", "", 0, &[], NOW).unwrap();
         let ranked: Vec<(String, u8)> = page
             .items
             .iter()
@@ -861,47 +1157,559 @@ mod tests {
             ]
         );
 
-        let images = store.list("", "image", 0, &[]).unwrap();
+        let images = store.list("", "image", 0, &[], NOW).unwrap();
         assert_eq!(images.items.len(), 1);
         assert_eq!(images.items[0].kind, ItemKind::Image);
         assert_eq!(images.items[0].title(), "Image (PNG)");
 
-        let urls = store.list("", "url", 0, &[]).unwrap();
+        let urls = store.list("", "url", 0, &[], NOW).unwrap();
         assert_eq!(titles(&urls), ["https://example.com/page"]);
 
-        let all = store.list("", "", 3, &[]).unwrap();
+        let all = store.list("", "", 3, &[], NOW).unwrap();
         assert!(!titles(&all).contains(&"ok".to_string()));
         assert_eq!(all.items.len(), 6);
         let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
+    fn test_a_password_marked_capture_is_temporary_without_matching_a_pattern() {
+        let (mut store, dir) = temp_store("password-marked");
+        let policy = Policy {
+            temporary_password_manager: true,
+            ..Policy::default()
+        };
+        let capture = Capture {
+            password_marked: true,
+            ..text("hunter2", 1_000)
+        };
+        let hash = store
+            .insert_filtered(capture, &LIMITS, &policy, 1_000)
+            .unwrap();
+        // The default timeout applies, with no temporary pattern involved.
+        assert_eq!(deadline(&store, &hash), Some(1_060));
+        // Selecting it from the browser does not extend the deadline.
+        store.bump(&hash).unwrap();
+        assert_eq!(deadline(&store, &hash), Some(1_060));
+        assert_eq!(sweep(&mut store, 1_060).unwrap(), 1);
+        assert_eq!(rows(&store), (0, 0));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_a_password_marked_capture_keeps_the_marker_without_counting_as_content() {
+        let (mut store, dir) = temp_store("password-marker");
+        let policy = Policy {
+            temporary_password_manager: true,
+            ..Policy::default()
+        };
+
+        // The source offered the marker with its usual payload.
+        let hash = store
+            .insert_filtered(
+                Capture {
+                    formats: vec![
+                        ("text/plain".into(), b"hunter2".to_vec()),
+                        (PASSWORD_HINT.into(), b"secret".to_vec()),
+                    ],
+                    password_marked: true,
+                    ..text("hunter2", 1_000)
+                },
+                &LIMITS,
+                &policy,
+                1_000,
+            )
+            .unwrap();
+        // Served again with the hint, so paste targets still treat it as a
+        // secret, and the marker payload is the source's own.
+        assert_eq!(
+            store.formats(&hash, 1_000).unwrap(),
+            [
+                ("text/plain".to_string(), b"hunter2".to_vec()),
+                (PASSWORD_HINT.to_string(), b"secret".to_vec()),
+            ]
+        );
+        // ... but it is not text, a kind or a listed format.
+        let item = &store.list("", "", 0, &[], 1_000).unwrap().items[0];
+        assert_eq!(item.kind, ItemKind::Text);
+        assert_eq!(item.formats, ["text/plain"]);
+        assert_eq!(item.title(), "hunter2");
+        let preview = store.preview(&hash, 1_000).unwrap();
+        assert_eq!(preview.formats, [("text/plain".to_string(), 7)]);
+        assert_eq!(preview.text, "hunter2");
+
+        // A source that offers the marker with no data still leaves one that
+        // survives the empty-format filter.
+        let empty_marker = store
+            .insert_filtered(
+                Capture {
+                    formats: vec![
+                        ("text/plain".into(), b"hunter3".to_vec()),
+                        (PASSWORD_HINT.into(), Vec::new()),
+                    ],
+                    password_marked: true,
+                    ..text("hunter3", 1_010)
+                },
+                &LIMITS,
+                &policy,
+                1_010,
+            )
+            .unwrap();
+        let formats = store.formats(&empty_marker, 1_010).unwrap();
+        assert_eq!(formats[1].0, PASSWORD_HINT);
+        assert!(!formats[1].1.is_empty());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_the_latest_copy_decides_the_deadline_and_the_marker() {
+        let (mut store, dir) = temp_store("password-duplicate");
+        let policy = Policy {
+            temporary_password_manager: true,
+            ..Policy::default()
+        };
+        let hash = store.insert(text("hunter2", 1_000), &LIMITS, NOW).unwrap();
+        assert_eq!(deadline(&store, &hash), None);
+
+        // The same text copied again as a password-manager secret: one entry,
+        // now temporary and served with the hint.
+        let again = store
+            .insert_filtered(
+                Capture {
+                    password_marked: true,
+                    ..text("hunter2", 1_050)
+                },
+                &LIMITS,
+                &policy,
+                1_050,
+            )
+            .unwrap();
+        assert_eq!(again, hash);
+        assert_eq!(deadline(&store, &hash), Some(1_110));
+        assert!(store
+            .formats(&hash, 1_050)
+            .unwrap()
+            .iter()
+            .any(|(mime, data)| mime == PASSWORD_HINT && !data.is_empty()));
+        assert_eq!(store.list("", "", 0, &[], 1_050).unwrap().items.len(), 1);
+
+        // Copied once more without the marker: the entry is permanent and the
+        // hint is gone.
+        store
+            .insert_filtered(text("hunter2", 1_100), &LIMITS, &policy, 1_100)
+            .unwrap();
+        assert_eq!(deadline(&store, &hash), None);
+        assert_eq!(
+            store.formats(&hash, 1_100).unwrap(),
+            [("text/plain".to_string(), b"hunter2".to_vec())]
+        );
+        assert_eq!(sweep(&mut store, i64::MAX).unwrap(), 0);
+        assert_eq!(store.list("", "", 0, &[], i64::MAX).unwrap().items.len(), 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_a_password_marked_capture_is_never_kept_permanently() {
+        // The policy always makes a marked capture temporary; this guard is
+        // what keeps a misconfigured one out of the history for good.
+        assert_eq!(
+            deadline_for(Disposition::Normal, true, 1_000, 60),
+            Err(Skipped::Failed(
+                "password-manager copies are never recorded permanently".into()
+            ))
+        );
+        assert_eq!(
+            deadline_for(Disposition::Normal, false, 1_000, 60),
+            Ok(None)
+        );
+        assert_eq!(
+            deadline_for(Disposition::Temporary, true, 1_000, 60),
+            Ok(Some(1_060))
+        );
+        assert_eq!(
+            deadline_for(Disposition::Skip, true, 1_000, 60),
+            Err(Skipped::Excluded)
+        );
+    }
+
+    #[test]
+    fn test_exclusions_win_over_the_password_manager_opt_in() {
+        let (mut store, dir) = temp_store("password-excluded");
+        let policy = Policy {
+            exclude: vec![regex::Regex::new("(?i)^hunter").unwrap()],
+            temporary_password_manager: true,
+            ..Policy::default()
+        };
+        let capture = Capture {
+            password_marked: true,
+            ..text("hunter2", 1_000)
+        };
+        assert_eq!(
+            store.insert_filtered(capture, &LIMITS, &policy, 1_000),
+            Err(Skipped::Excluded)
+        );
+        assert_eq!(rows(&store), (0, 0));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn test_insert_filtered_checks_text_after_normalization() {
         let (mut store, dir) = temp_store("normalized-exclude");
-        let patterns = [regex::Regex::new("(?i)password").unwrap()];
+        let policies = [
+            Policy {
+                exclude: vec![regex::Regex::new("(?i)password").unwrap()],
+                ..Policy::default()
+            },
+            Policy {
+                temporary: vec![regex::Regex::new("(?i)password").unwrap()],
+                temporary_password_manager: true,
+                ..Policy::default()
+            },
+            Policy {
+                temporary_password_manager: true,
+                ..Policy::default()
+            },
+        ];
         let capture = Capture {
             formats: vec![
                 ("text/plain".into(), Vec::new()),
                 ("text/html".into(), b"<p>Password = x</p>".to_vec()),
             ],
-            copied_at: 1,
+            copied_at: NOW - 10,
             source: None,
+            password_marked: true,
         };
 
         assert_eq!(
-            store.insert_filtered(capture, &LIMITS, &patterns),
+            store.insert_filtered(capture.clone(), &LIMITS, &policies[0], NOW),
             Err(Skipped::Excluded)
         );
-        assert!(store.list("", "", 0, &[]).unwrap().items.is_empty());
+        assert!(store.list("", "", 0, &[], NOW).unwrap().items.is_empty());
+        // A temporary entry is still recorded, and so is a password-marked
+        // one once the password manager opt-in is set.
+        assert!(store
+            .insert_filtered(capture.clone(), &LIMITS, &policies[1], NOW)
+            .is_ok());
+        assert!(store
+            .insert_filtered(capture, &LIMITS, &policies[2], NOW)
+            .is_ok());
+        assert_eq!(store.list("", "", 0, &[], NOW).unwrap().items.len(), 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_temporary_entry_expires_at_its_deadline() {
+        let (mut store, dir) = temp_store("expiry-boundary");
+        let policy = temporary_policy(60);
+        let hash = store
+            .insert_filtered(text("code: 1234", 1_000), &LIMITS, &policy, 1_000)
+            .unwrap();
+        assert_eq!(deadline(&store, &hash), Some(1_060));
+
+        // A second before the deadline it is still listed, previewable and
+        // selectable, and the listing carries the deadline.
+        let listed = store.list("", "", 0, &[], 1_059).unwrap();
+        assert_eq!(titles(&listed), ["code: 1234"]);
+        assert_eq!(listed.items[0].expires_at, Some(1_060));
+        let permanent = store
+            .insert_filtered(text("plain", 1_000), &LIMITS, &Policy::default(), 1_000)
+            .unwrap();
+        let listed = store.list("", "", 0, &[], 1_059).unwrap();
+        let stays = listed
+            .items
+            .iter()
+            .find(|item| item.id == permanent)
+            .expect("the entry without a deadline");
+        assert_eq!(stays.expires_at, None);
+        store.delete(&permanent).unwrap();
+        assert!(store.preview(&hash, 1_059).is_ok());
+        assert!(store.formats(&hash, 1_059).is_ok());
+        assert_eq!(sweep(&mut store, 1_059).unwrap(), 0);
+
+        // At the deadline it is gone, before any cleanup has run.
+        let page = store.list("", "", 0, &[], 1_060).unwrap();
+        assert!(page.items.is_empty());
+        assert_eq!(page.total, 0);
+        let gone = "item is no longer in the clipboard history";
+        assert_eq!(store.preview(&hash, 1_060).unwrap_err(), gone);
+        assert_eq!(store.formats(&hash, 1_060).unwrap_err(), gone);
+
+        assert_eq!(rows(&store), (1, 1));
+        assert_eq!(sweep(&mut store, 1_060).unwrap(), 1);
+        assert_eq!(rows(&store), (0, 0));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_a_capture_that_already_expired_is_not_recorded() {
+        let (mut store, dir) = temp_store("expired-capture");
+        let policy = temporary_policy(60);
+        assert_eq!(
+            store.insert_filtered(text("code: 1234", 1_000), &LIMITS, &policy, 1_060),
+            Err(Skipped::Expired)
+        );
+        assert_eq!(
+            store.insert_filtered(text("code: 1234", 1_000), &LIMITS, &policy, 1_061),
+            Err(Skipped::Expired)
+        );
+        assert_eq!(rows(&store), (0, 0));
+        // A second earlier it still has a lifetime left.
+        assert!(store
+            .insert_filtered(text("code: 1234", 1_000), &LIMITS, &policy, 1_059)
+            .is_ok());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_duplicate_copies_reset_the_deadline() {
+        let (mut store, dir) = temp_store("expiry-duplicate");
+        let policy = temporary_policy(60);
+        let hash = store
+            .insert_filtered(text("code: 1234", 1_000), &LIMITS, &policy, 1_000)
+            .unwrap();
+        assert_eq!(deadline(&store, &hash), Some(1_060));
+
+        // Copied again as temporary: a deadline counted from the new copy.
+        let again = store
+            .insert_filtered(text("code: 1234", 1_050), &LIMITS, &policy, 1_050)
+            .unwrap();
+        assert_eq!(again, hash);
+        assert_eq!(deadline(&store, &hash), Some(1_110));
+        assert_eq!(store.list("", "", 0, &[], 1_100).unwrap().items.len(), 1);
+
+        // Copied again as a normal entry: no deadline any more.
+        store
+            .insert_filtered(
+                text("code: 1234", 1_110),
+                &LIMITS,
+                &Policy::default(),
+                1_110,
+            )
+            .unwrap();
+        assert_eq!(deadline(&store, &hash), None);
+        assert_eq!(sweep(&mut store, i64::MAX).unwrap(), 0);
+        assert_eq!(store.list("", "", 0, &[], i64::MAX).unwrap().items.len(), 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_selecting_an_entry_does_not_extend_its_deadline() {
+        let (mut store, dir) = temp_store("expiry-bump");
+        let policy = temporary_policy(60);
+        let hash = store
+            .insert_filtered(text("code: 1234", 1_000), &LIMITS, &policy, 1_000)
+            .unwrap();
+        store.bump(&hash).unwrap();
+        assert_eq!(deadline(&store, &hash), Some(1_060));
+        assert_eq!(store.list("", "", 0, &[], 1_059).unwrap().items.len(), 1);
+        assert_eq!(sweep(&mut store, 1_060).unwrap(), 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_a_new_configuration_leaves_existing_deadlines_alone() {
+        let (mut store, dir) = temp_store("expiry-config");
+        let hash = store
+            .insert_filtered(
+                text("code: 1234", 1_000),
+                &LIMITS,
+                &temporary_policy(60),
+                1_000,
+            )
+            .unwrap();
+        // A longer timeout only applies to what is recorded after it.
+        store
+            .insert_filtered(
+                text("code: 5678", 1_000),
+                &LIMITS,
+                &temporary_policy(600),
+                1_000,
+            )
+            .unwrap();
+        assert_eq!(deadline(&store, &hash), Some(1_060));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_cleanup_runs_without_new_captures() {
+        let (mut store, dir) = temp_store("expiry-sweep");
+        let policy = temporary_policy(30);
+        store
+            .insert_filtered(text("code: 1", 1_000), &LIMITS, &policy, 1_000)
+            .unwrap();
+        store
+            .insert_filtered(text("code: 2", 1_010), &LIMITS, &policy, 1_010)
+            .unwrap();
+        store
+            .insert(text("kept entry", 1_000), &LIMITS, 1_000)
+            .unwrap();
+
+        assert_eq!(sweep(&mut store, 1_029).unwrap(), 0);
+        // The sweeper keeps going between copies: only the due entry goes.
+        assert_eq!(sweep(&mut store, 1_030).unwrap(), 1);
+        assert_eq!(sweep(&mut store, 1_030).unwrap(), 0);
+        assert_eq!(
+            titles(&store.list("", "", 0, &[], 1_030).unwrap()),
+            ["kept entry", "code: 2"]
+        );
+        assert_eq!(sweep(&mut store, 1_040).unwrap(), 1);
+        assert_eq!(
+            titles(&store.list("", "", 0, &[], 1_040).unwrap()),
+            ["kept entry"]
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_expiring_the_newest_entry_takes_every_format() {
+        let (mut store, dir) = temp_store("expiry-formats");
+        let policy = temporary_policy(60);
+        let older = store
+            .insert(text("older entry", 1_000), &LIMITS, 1_000)
+            .unwrap();
+        let newest = store
+            .insert_filtered(
+                Capture {
+                    formats: vec![
+                        ("text/html".into(), b"<p>code 4242</p>".to_vec()),
+                        ("text/plain".into(), b"code 4242".to_vec()),
+                    ],
+                    copied_at: 1_000,
+                    source: None,
+                    password_marked: false,
+                },
+                &LIMITS,
+                &policy,
+                1_000,
+            )
+            .unwrap();
+        assert_eq!(rows(&store), (2, 3));
+
+        assert_eq!(sweep(&mut store, 1_060).unwrap(), 1);
+        assert_eq!(rows(&store), (1, 1));
+        assert!(store.formats(&newest, 1_060).is_err());
+        assert!(store.formats(&older, 1_060).is_ok());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_pruning_ignores_expired_entries() {
+        let (mut store, dir) = temp_store("expiry-prune");
+        let limits = Limits {
+            max_items: 2,
+            ..LIMITS
+        };
+        store
+            .insert(text("older entry", 1_000), &limits, 1_000)
+            .unwrap();
+        store
+            .insert_filtered(
+                text("code: 1234", 1_000),
+                &limits,
+                &temporary_policy(60),
+                1_000,
+            )
+            .unwrap();
+
+        // At 1_070 the temporary entry is expired: it neither counts for the
+        // history size nor takes the place of the newest live entry.
+        store
+            .insert(text("newer entry", 1_070), &limits, 1_070)
+            .unwrap();
+        assert_eq!(
+            titles(&store.list("", "", 0, &[], 1_070).unwrap()),
+            ["newer entry", "older entry"]
+        );
+        assert_eq!(rows(&store), (3, 3));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_a_version_1_database_is_upgraded_without_losing_history() {
+        let dir = temp_dir("upgrade");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("clipboard.db");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE items (
+                 id INTEGER PRIMARY KEY,
+                 hash TEXT NOT NULL UNIQUE,
+                 seq INTEGER NOT NULL,
+                 kind TEXT NOT NULL,
+                 formats TEXT NOT NULL,
+                 text TEXT NOT NULL,
+                 text_len INTEGER NOT NULL,
+                 trim_len INTEGER NOT NULL,
+                 is_url INTEGER NOT NULL,
+                 copied_at INTEGER NOT NULL,
+                 source TEXT,
+                 size INTEGER NOT NULL
+             );
+             CREATE INDEX items_seq ON items (seq);
+             CREATE INDEX items_kind ON items (kind, seq);
+             CREATE TABLE formats (
+                 item_id INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+                 mime TEXT NOT NULL,
+                 data BLOB NOT NULL,
+                 PRIMARY KEY (item_id, mime)
+             );
+             PRAGMA user_version = 1;
+             INSERT INTO items (hash, seq, kind, formats, text, text_len, trim_len, is_url,
+                     copied_at, source, size)
+             VALUES ('old', 1, 'text', 'text/plain', 'kept entry', 10, 10, 0, 900, 'kitty', 10);
+             INSERT INTO formats (item_id, mime, data) VALUES (1, 'text/plain', 'kept entry');",
+        )
+        .unwrap();
+        drop(conn);
+
+        let mut store = Store::open(&path).unwrap();
+        assert_eq!(
+            titles(&store.list("", "", 0, &[], NOW).unwrap()),
+            ["kept entry"]
+        );
+        assert_eq!(deadline(&store, "old"), None);
+        assert_eq!(sweep(&mut store, i64::MAX).unwrap(), 0);
+        let version: i64 = store
+            .conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        drop(store);
+
+        // Opening it again changes nothing.
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.list("", "", 0, &[], NOW).unwrap().items.len(), 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_the_deadline_survives_a_restart() {
+        let (mut store, dir) = temp_store("expiry-restart");
+        let hash = store
+            .insert_filtered(
+                text("code: 1234", 1_000),
+                &LIMITS,
+                &temporary_policy(60),
+                1_000,
+            )
+            .unwrap();
+        drop(store);
+
+        let mut store = Store::open(&dir.join("clipboard.db")).unwrap();
+        assert_eq!(deadline(&store, &hash), Some(1_060));
+        assert_eq!(store.list("", "", 0, &[], 1_059).unwrap().items.len(), 1);
+        assert_eq!(sweep(&mut store, 1_060).unwrap(), 1);
+        assert_eq!(rows(&store), (0, 0));
         let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
     fn test_list_hides_entries_matching_exclusions() {
         let (mut store, dir) = temp_store("exclude");
-        store.insert(text("secret: hunter2", 1), &LIMITS).unwrap();
         store
-            .insert(text("line one\nPASSWORD=abc", 2), &LIMITS)
+            .insert(text("secret: hunter2", 1), &LIMITS, NOW)
+            .unwrap();
+        store
+            .insert(text("line one\nPASSWORD=abc", 2), &LIMITS, NOW)
             .unwrap();
         store
             .insert(
@@ -909,20 +1717,24 @@ mod tests {
                     formats: vec![("text/html".into(), b"<p>Password = x</p>".to_vec())],
                     copied_at: 3,
                     source: None,
+                    password_marked: false,
                 },
                 &LIMITS,
+                NOW,
             )
             .unwrap();
         let long = format!("{}needle", "a".repeat(EXCERPT_CHARS + 50));
-        store.insert(text(&long, 4), &LIMITS).unwrap();
-        store.insert(text("keep this entry", 5), &LIMITS).unwrap();
+        store.insert(text(&long, 4), &LIMITS, NOW).unwrap();
+        store
+            .insert(text("keep this entry", 5), &LIMITS, NOW)
+            .unwrap();
 
         let exclude = [
             regex::Regex::new("^secret:").unwrap(),
             regex::Regex::new("(?i)password\\s*=").unwrap(),
             regex::Regex::new("needle").unwrap(),
         ];
-        let page = store.list("", "", 0, &exclude).unwrap();
+        let page = store.list("", "", 0, &exclude, NOW).unwrap();
         assert_eq!(titles(&page), ["keep this entry"]);
         assert_eq!(page.total, 5);
         let _ = fs::remove_dir_all(dir);
@@ -940,9 +1752,9 @@ mod tests {
     fn test_preview_text_image_and_files() {
         let (mut store, dir) = temp_store("preview");
         let text_id = store
-            .insert(text("line one\nline two", 1), &LIMITS)
+            .insert(text("line one\nline two", 1), &LIMITS, NOW)
             .unwrap();
-        let preview = store.preview(&text_id).unwrap();
+        let preview = store.preview(&text_id, NOW).unwrap();
         assert_eq!(preview.kind, ItemKind::Text);
         assert_eq!(preview.text, "line one\nline two");
         assert_eq!(preview.formats, [("text/plain".to_string(), 17)]);
@@ -958,11 +1770,13 @@ mod tests {
                     ],
                     copied_at: 2,
                     source: None,
+                    password_marked: false,
                 },
                 &LIMITS,
+                NOW,
             )
             .unwrap();
-        let preview = store.preview(&image_id).unwrap();
+        let preview = store.preview(&image_id, NOW).unwrap();
         assert_eq!(preview.kind, ItemKind::Image);
         let image = preview.image.unwrap().unwrap();
         assert_eq!(
@@ -970,7 +1784,7 @@ mod tests {
             ("image/png", 5, 3)
         );
         assert_eq!(
-            store.formats(&image_id).unwrap(),
+            store.formats(&image_id, NOW).unwrap(),
             [
                 ("image/png".to_string(), bytes),
                 ("image/svg+xml".to_string(), b"<svg/>".to_vec()),
@@ -986,17 +1800,19 @@ mod tests {
                     )],
                     copied_at: 3,
                     source: None,
+                    password_marked: false,
                 },
                 &LIMITS,
+                NOW,
             )
             .unwrap();
-        let preview = store.preview(&files_id).unwrap();
+        let preview = store.preview(&files_id, NOW).unwrap();
         assert_eq!(preview.kind, ItemKind::Files);
         assert_eq!(preview.files[0].name, "/definitely/missing file");
         assert_eq!(preview.files[0].missing, Some(true));
 
         store.delete(&text_id).unwrap();
-        assert!(store.preview(&text_id).is_err());
+        assert!(store.preview(&text_id, NOW).is_err());
         assert!(store.delete(&text_id).is_err());
         let _ = fs::remove_dir_all(dir);
     }

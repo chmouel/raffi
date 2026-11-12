@@ -710,6 +710,29 @@
           "description": "Action on Ctrl+Enter (default: `hypr_paste`).",
           "$ref": "#/$defs/ClipboardAction"
         },
+        "temporary_password_manager": {
+          "description": "Record copies carrying `x-kde-passwordManagerHint` as temporary\nentries even when no `temporary_patterns` matches, instead of skipping\nthem (default: false).",
+          "type": "boolean",
+          "default": false
+        },
+        "temporary_patterns": {
+          "description": "Rust regular expressions. An entry whose complete text matches any of\nthem is recorded as a temporary entry of Raffi's history, kept for\n`temporary_timeout` seconds (default: none). `exclude_patterns` wins\nover these, and CopyQ keeps recording everything.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "temporary_timeout": {
+          "description": "Seconds a temporary entry stays in Raffi's history (default: 60).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
         "trigger": {
           "description": "Keyword that opens the history (default: `clip`).",
           "type": [

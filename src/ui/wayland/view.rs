@@ -3604,13 +3604,28 @@ impl LauncherApp {
             == Some(super::command_list::CommandListAddon::Windows))
         .then(self.compositor)
         .flatten();
+        // Only temporary entries can leave the listed history on their own,
+        // so the tick runs only while one of them is on screen.
+        let expiry = if self.clipboard.active
+            && self
+                .clipboard
+                .items
+                .iter()
+                .any(|item| item.expires_at.is_some())
+        {
+            iced::Subscription::run_with(true, |_| super::clipboard_mode::expiry_tick())
+                .map(|()| Message::ClipboardTick)
+        } else {
+            iced::Subscription::none()
+        };
         match compositor {
             Some(compositor) => iced::Subscription::batch([
                 keys,
                 iced::Subscription::run_with(compositor, super::window_events::watch)
                     .map(|()| Message::WindowsChanged),
+                expiry,
             ]),
-            None => keys,
+            None => iced::Subscription::batch([keys, expiry]),
         }
     }
 }

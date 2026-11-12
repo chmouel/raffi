@@ -174,6 +174,7 @@ disk.
 |------------|----------------|-----------------------------------------------|
 | Enter      | `copy`         | Put the item back on the clipboard            |
 | Ctrl+Enter | `hypr_paste`   | Copy, then paste into the window you came from |
+| Ctrl+D     |                | Delete the item from the history (CopyQ or `clipboard.db`, with all its formats) |
 
 Change them with `action` and `secondary_action`. Both accept `copy` and
 `hypr_paste`.
@@ -229,7 +230,8 @@ For every copy it keeps:
 
 Copying the same content again moves it to the top. Copies marked
 `x-kde-passwordManagerHint`, as KeePassXC and other password managers do,
-are never recorded. The primary selection is ignored, and Raffi does not
+are never recorded unless you [opt in to temporary password entries](#password-managers).
+The primary selection is ignored, and Raffi does not
 import an existing CopyQ history.
 
 When you copy an entry from the list, the server puts it on the clipboard
@@ -242,6 +244,75 @@ The history lives in `~/.local/share/raffi/clipboard.db` (or under
 the backend or the limits. The shipped `misc/systemd/raffi-cache.service`
 grants write access to `~/.local/share/raffi` only, so update its
 `ExecStartPre` and `ReadWritePaths` lines if you move `$XDG_DATA_HOME`.
+
+## Temporary entries
+
+Some copies should not stay in the history: a one-time code, a password, a
+token. The `raffi` backend can keep them for a while and then forget them:
+
+```yaml
+addons:
+  clipboard:
+    backend: raffi
+    temporary_patterns:
+      - '(?i)^verification code:'
+      - '(?i)\bOTP\b'
+      - '^sk-[A-Za-z0-9]{20,}$'
+    temporary_timeout: 60          # seconds, default 60
+    temporary_password_manager: true
+```
+
+An entry matching any of `temporary_patterns` is recorded as usual — listed,
+searchable, previewable, copyable — and then leaves the history once
+`temporary_timeout` seconds have passed since it was copied. The browser drops
+such a row within a second of its deadline, and the server deletes the entry
+and the formats stored for it from the database.
+
+`temporary_patterns` take Rust regular expressions, in the same syntax as
+`exclude_patterns`. They are matched against the entry's complete searchable
+text: its plain text, or the text Raffi extracts from `text/html` when the copy
+carries no plain text, plus the file names of a copied file list. The whole
+text is searched, not just the visible excerpt, so a match far down a long
+entry still counts. Matching is case-sensitive unless a flag such as `(?i)` is
+given. `exclude_patterns` always wins: an excluded copy is never recorded,
+temporary or not.
+
+The deadline is measured from the moment of the copy. Copying the same content
+again from another app resets it, and selecting the entry in the browser does
+not extend it. The deadline is written with the entry, so changing
+`temporary_timeout` later leaves existing entries alone.
+
+Expiry only touches Raffi's history: the entry and the formats stored for it
+are deleted, and the system clipboard is left alone. An entry you re-published
+from the history stays on the clipboard after the entry itself is gone, and a
+copy another app made meanwhile is never disturbed.
+
+### Password managers
+
+Password managers mark the secrets they copy with the
+`x-kde-passwordManagerHint` MIME type. KeePassXC does, and so do the helpers of
+rbw, Bitwarden and most other tools. The `raffi` backend detects that marker on
+the clipboard itself: it never reads or unlocks your vault, and no
+password-manager tool is needed. Copy helpers such as `rbw` are optional.
+
+Marked copies are skipped by default. With `temporary_password_manager: true`
+they are recorded as temporary entries instead and kept for
+`temporary_timeout`. They are never kept permanently: no `temporary_patterns`
+match makes them permanent, and `exclude_patterns` still wins over the opt-in.
+
+A marked entry is never put back on the clipboard once the source app clears
+it. When you select one, the server re-advertises the marker together with the
+stored formats, so anything watching the clipboard still treats it as a
+secret.
+
+The CopyQ backend is unaffected by all three settings: CopyQ keeps its own
+history, and Raffi only hides the entries `exclude_patterns` matches in the
+browser.
+
+Restart `raffi --cache-daemon` after changing any of them, since the recorder
+reads them at startup. `raffi --check-config` reports an invalid regular
+expression, and a `temporary_timeout` of zero or too large to be a deadline,
+with the key and line of the setting.
 
 ## Privacy
 
@@ -283,6 +354,25 @@ complete text cannot be checked, such as one over 16 MiB, is hidden while
 patterns are set, and the `raffi` backend skips a copy when one of its text
 formats cannot be read. After changing these patterns, restart
 `raffi --cache-daemon` so the recorder picks them up.
+
+**`addons.clipboard.temporary_patterns`** `string[]` (default: `[]`)
+
+`raffi` backend: Rust regular expressions. A copy whose complete searchable
+text matches any of them is recorded as a temporary entry, kept for
+`temporary_timeout` seconds. `exclude_patterns` wins over these, and CopyQ is
+unaffected. See [Temporary entries](#temporary-entries).
+
+**`addons.clipboard.temporary_timeout`** `integer` (default: `60`)
+
+`raffi` backend: seconds a temporary entry stays in the history, counted from
+the copy. Copying the same content again resets it, selecting the entry does
+not. Must be greater than zero.
+
+**`addons.clipboard.temporary_password_manager`** `boolean` (default: `false`)
+
+`raffi` backend: record copies carrying `x-kde-passwordManagerHint` as
+temporary entries instead of skipping them. They are never kept permanently,
+and `exclude_patterns` still wins.
 
 **`addons.clipboard.backend`** `copyq | raffi` (default: `copyq`)
 
@@ -327,6 +417,11 @@ addons:
     exclude_patterns:
       - '^secret:'
       - '(?i)password\s*='
+    temporary_patterns:
+      - '(?i)^verification code:'
+      - '(?i)\bOTP\b'
+    temporary_timeout: 60
+    temporary_password_manager: false
     backend: copyq
     action: copy
     secondary_action: hypr_paste
