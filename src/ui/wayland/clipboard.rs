@@ -115,9 +115,7 @@ fn source_app<'de, D: serde::Deserializer<'de>>(
     Ok(Some(raw.trim().to_string()).filter(|app| !app.is_empty()))
 }
 
-fn copy_time<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<i64>, D::Error> {
+fn copy_time<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<i64>, D::Error> {
     let raw = String::deserialize(deserializer)?;
     Ok(NaiveDateTime::parse_from_str(&raw, COPY_TIME_FORMAT)
         .ok()

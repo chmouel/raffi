@@ -290,11 +290,15 @@ another application would, so it is there when you next open the browser, and
 the id of the entry is printed when the history kept it:
 
 ```bash
-raffi clipboard set git status --short
+raffi clipboard set "git status --short"
+raffi clipboard set --source pi "text an agent wrote"
 raffi clipboard set --mime image/png < shot.png
 some-tool | raffi clipboard set --temporary   # leaves the history after temporary_timeout
-raffi clipboard set --secret "$(pass show site)"   # skipped by other clipboard managers
+pass show site | raffi clipboard set --secret   # skipped by other clipboard managers
 ```
+
+A secret belongs on the input, never in the arguments: everything on a command
+line is in the process list and in the shell history.
 
 `--mime` says what the content is (`text/plain` when absent); text has to be
 UTF-8, and the recorder's limits apply to the size. Without `--mime`, the usual
@@ -303,13 +307,44 @@ offered alongside it, so every client can paste it. `--temporary` records a
 temporary entry whatever `temporary_patterns` says, and `--secret` adds the
 `x-kde-passwordManagerHint: secret` marker: other clipboard managers then skip
 the content, and Raffi records it only when `temporary_password_manager` is
-on, as a temporary entry. Content `exclude_patterns` hides is put on the
+on, as a temporary entry. `--source APP` records the app the content came
+from, which is the `source` of the row and its `source_name`. A plain name is a
+free label, kept as it is: what a script or an agent passes, as in
+`--source pi`. A name ending in `.desktop` is a desktop entry ID, looked up in
+the XDG application directories: its exact ID first, then an ID spelled in
+another case when one entry spells it that way, subdirectories counting as `-`
+(`applications/kde/foo.desktop` is the ID `kde-foo.desktop`).
+An ID no file there names is a usage error listing the directories it searched,
+and a path is refused: put the file in `~/.local/share/applications` and pass
+its ID. The entry is recorded without that suffix, so
+`--source org.gnome.Nautilus.desktop` stores `org.gnome.Nautilus`, the app_id a
+compositor reports for it. Either way the value is trimmed, has to fit in 128
+bytes and cannot hold control characters.
+
+Raffi then reads that desktop entry for the row's icon and for the name the
+preview pane shows: the `Icon=` of the entry whose ID or `StartupWMClass`
+matches the source, and its `Name=` (the `Name[xx]` of your message locale
+when the entry has one), which the JSON rows report as
+`source_name`. A source no entry names keeps the icon its name already
+resolves to and is shown as recorded. To give an agent its own icon and name,
+give it a desktop file:
+
+```ini title="~/.local/share/applications/pi.desktop"
+[Desktop Entry]
+Type=Application
+Name=Pi Agent
+Icon=pi
+Exec=pi
+```
+
+The same file answers both `--source pi.desktop` and, as an ID, a plain
+`--source pi`. Content `exclude_patterns` hides is put on the
 clipboard but not recorded, and `set` prints nothing then. `--json` reports
 the same as one object: `{"id": ..., "recorded": ..., "expires_at": ...,
 "expires_at_iso": ...}`, with the deadline as unix seconds and as RFC 3339.
 CopyQ keeps the content in its own history but does not tell Raffi the id it
 gave it, so `set` prints nothing with that backend, and it rejects
-`--temporary` and `--secret`.
+`--temporary`, `--secret` and `--source`.
 
 `delete` resolves every id it was given before removing anything, so `raffi
 clipboard delete 3fa9c1d2e0 a81be0c44f` removes those two and not whatever
@@ -338,16 +373,20 @@ directly; only `copy` and `set` need the service.
 line on stderr, `{"error": "...", "code": "..."}`, instead of the `raffi
 clipboard:` message, so a wrapper can branch on `not_found`, `ambiguous_ref`,
 `invalid_ref`, `index_not_allowed`, `no_backend`, `recorder_not_running`,
-`unsupported`, `too_large`, `no_history`, `io`, `invalid_argument` or `other`,
-while the exit code stays 1, or 2 for a value that does not parse.
+`daemon_outdated`, `unsupported`, `too_large`, `no_history`, `io`,
+`invalid_argument` or `other`, while the exit code stays 1, or 2 for a value
+that does not parse.
 
 `show --mime` and exporting an image need the `raffi` backend: CopyQ only gives
 Raffi the text of its items. `clear` is `raffi` only too, so use CopyQ's own
 interface to empty its history.
 
-The subcommand does not open the window, scan applications or write schema
-files, but loading the configuration still migrates an old v0 config to the v1
-`launchers:` format, as any other raffi launch does. Deleting and clearing
+The subcommand does not open the window, run launcher discovery or write
+schema files: it reads the history, and the desktop entries under the XDG
+application directories only to name a source it prints (a JSON row with a
+`source`) or checks (`set --source NAME.desktop`). Loading the configuration
+still migrates an old v0 config to the v1 `launchers:` format, as any other
+raffi launch does. Deleting and clearing
 remove the row with SQLite `secure_delete` and then truncate the write-ahead
 log; while another process reads the database, the log keeps old pages until
 the next checkpoint, and either way this removes entries from the history
@@ -362,8 +401,10 @@ should rely on. The flags themselves are in the
 
 **Pick JSON for anything that decides something.** `list --json` prints one
 object per line with `index`, `id`, `kind`, `tier`, `formats`, `text_len`,
-`copied`, `source`, `expires_at`, `expires_at_iso`, `width`, `height` and
-`preview`. Fields that do not apply are `null`. The tab-separated output (id,
+`copied`, `source`, `source_name`, `expires_at`, `expires_at_iso`, `width`,
+`height` and `preview`. Fields that do not apply are `null`: `source_name` is
+the `Name=` of the desktop entry the source names, null when a plain label
+names none or the entry has no source. The tab-separated output (id,
 kind, copy time, preview) is fine for `cut` and `fzf`, but a preview with
 a tab or a line break in it is already flattened, so do not parse content out
 of it.
@@ -389,6 +430,7 @@ for instance). Branch on `code`:
 | `index_not_allowed` | `delete` takes ids, not positions |
 | `no_backend` | Neither CopyQ nor `raffi --cache-daemon` is running |
 | `recorder_not_running` | The `raffi` backend needs `raffi --cache-daemon` for `copy` and `set`, and it is not answering |
+| `daemon_outdated` | `set` needs a `raffi --cache-daemon` that speaks protocol 4 or later, and the running one is older: restart it |
 | `unsupported` | The backend cannot do this, such as `clear` or `--temporary` on CopyQ |
 | `too_large` | The content is over the size limit for its type |
 | `no_history` | There is no history to read |
@@ -418,12 +460,13 @@ Copy Time" installed, are dropped by `--since`.
 **Putting content on the clipboard.** `set` takes the text from its arguments
 or, when there are none, from standard input; it never waits on a terminal. It
 needs `raffi --cache-daemon` to keep serving the selection, running at protocol
-4 or later. A service that is not running gives `recorder_not_running`; one started by an
-older Raffi gives an `io` error asking you to restart it. `status --json` shows
-the `protocol` it speaks, null when nothing answers. Use `--temporary` for
-content that should leave the history after `temporary_timeout`, and `--secret`
-for a password: other clipboard managers skip it, and Raffi records it only
-when `temporary_password_manager` is on. Neither works with CopyQ.
+4 or later. A service that is not running gives `recorder_not_running`; one
+started by an older Raffi gives `daemon_outdated`, asking you to restart it.
+`status --json` shows the `protocol` it speaks, null when nothing answers. Use
+`--temporary` for content that should leave the history after
+`temporary_timeout`, and `--secret` for a password: other clipboard managers
+skip it, and Raffi records it only when `temporary_password_manager` is on.
+Neither works with CopyQ.
 
 A few recipes:
 

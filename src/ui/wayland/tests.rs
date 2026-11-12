@@ -4517,7 +4517,153 @@ fn test_clipboard_rows_are_labelled_once_when_listed() {
     );
     let _ = app.view();
     let _ = app.update(Message::SearchChanged("fire".into()));
-    assert!(app.clipboard.labels.is_empty() && app.clipboard.icons.is_empty());
+    assert!(
+        app.clipboard.labels.is_empty()
+            && app.clipboard.icons.is_empty()
+            && app.clipboard.names.is_empty()
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn test_clipboard_source_icons_go_through_desktop_entries() {
+    let dir = std::env::temp_dir().join(format!("raffi-clip-desktop-icons-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("pi.desktop"),
+        "[Desktop Entry]\nType=Application\nName=Pi Agent\nIcon=pi-agent\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("vscode.desktop"),
+        "[Desktop Entry]\nType=Application\nName=Visual Studio Code\nIcon=vscode-icon\nStartupWMClass=Code\n",
+    )
+    .unwrap();
+
+    let mut app = test_app(clipboard_addons());
+    app.desktop_entries = Some(crate::DesktopEntries::from_dirs(std::slice::from_ref(&dir)));
+    app.icon_map
+        .insert("pi-agent".into(), "/icons/pi-agent.svg".into());
+    app.icon_map
+        .insert("vscode-icon".into(), "/icons/vscode.svg".into());
+
+    let mut item = clip(0, "a", "a");
+    item.source = Some("pi".into());
+    assert_eq!(
+        app.clipboard_source_icon(&item).as_deref(),
+        Some("/icons/pi-agent.svg"),
+        "the ID of a desktop entry resolves to its Icon="
+    );
+    item.source = Some("PI.DESKTOP".into());
+    assert_eq!(
+        app.clipboard_source_icon(&item).as_deref(),
+        Some("/icons/pi-agent.svg"),
+        "the entry is found whatever the case and the suffix"
+    );
+    item.source = Some("Code".into());
+    assert_eq!(
+        app.clipboard_source_icon(&item).as_deref(),
+        Some("/icons/vscode.svg"),
+        "a window class resolves through StartupWMClass"
+    );
+    item.source = Some("unknown-app".into());
+    assert_eq!(app.clipboard_source_icon(&item), None);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn test_clipboard_source_names_come_from_desktop_entries() {
+    let dir = std::env::temp_dir().join(format!("raffi-clip-desktop-names-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("pi.desktop"),
+        "[Desktop Entry]\nType=Application\nName=Pi Agent\nIcon=pi-agent\n",
+    )
+    .unwrap();
+
+    let mut app = test_app(clipboard_addons());
+    app.desktop_entries = Some(crate::DesktopEntries::from_dirs(std::slice::from_ref(&dir)));
+    let mut named = clip(0, "a", "alpha");
+    named.source = Some("pi".into());
+    let mut label = clip(1, "b", "beta");
+    label.source = Some("free label".into());
+    let generation = open_clipboard(&mut app, "clip ");
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page("h", 2, 2, vec![named, label])),
+    ));
+
+    assert_eq!(
+        app.clipboard_source_name(&app.clipboard.items[0])
+            .as_deref(),
+        Some("Pi Agent")
+    );
+    assert_eq!(
+        app.clipboard_source_name(&app.clipboard.items[1])
+            .as_deref(),
+        Some("free label"),
+        "a source no entry names stays as it was recorded"
+    );
+    let preview = app.resolve_selected_preview().unwrap();
+    assert!(
+        preview
+            .metadata
+            .iter()
+            .any(|(key, value)| key == "Source" && value == "Pi Agent"),
+        "{:?}",
+        preview.metadata
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn test_clipboard_row_preparation_resolves_source_names_before_drawing() {
+    let dir = std::env::temp_dir().join(format!("raffi-clip-desktop-prep-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("pi.desktop"),
+        "[Desktop Entry]\nType=Application\nName=Pi Agent\nIcon=pi-agent\n",
+    )
+    .unwrap();
+
+    let mut app = test_app(clipboard_addons());
+    app.desktop_entries = Some(crate::DesktopEntries::from_dirs(std::slice::from_ref(&dir)));
+    // The source resolves straight through the icon map, so nothing in the
+    // icon path would read the desktop entries.
+    app.icon_map.insert("pi".into(), "/icons/pi.svg".into());
+    let mut item = clip(0, "a", "alpha");
+    item.source = Some("pi".into());
+    let generation = open_clipboard(&mut app, "clip ");
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page("h", 1, 1, vec![item])),
+    ));
+
+    assert_eq!(
+        app.clipboard.names.get("pi"),
+        Some(&"Pi Agent".to_string()),
+        "preparing the rows caches the name even when the icon came from the map"
+    );
+    // Without its entries, the app can only draw the cached name: anything
+    // that read the index again would return the recorded source.
+    app.desktop_entries = None;
+    assert_eq!(
+        app.clipboard_source_name(&app.clipboard.items[0])
+            .as_deref(),
+        Some("Pi Agent")
+    );
+    let preview = app.resolve_selected_preview().unwrap();
+    assert!(
+        preview
+            .metadata
+            .iter()
+            .any(|(key, value)| key == "Source" && value == "Pi Agent"),
+        "{:?}",
+        preview.metadata
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 

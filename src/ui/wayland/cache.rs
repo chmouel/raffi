@@ -55,7 +55,7 @@ static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
 /// Length of `bytes` once base64-encoded.
 const fn base64_len(bytes: usize) -> usize {
-    (bytes + 2) / 3 * 4
+    bytes.div_ceil(3) * 4
 }
 
 /// A snapshot file to write after a successful script run.
@@ -147,6 +147,9 @@ pub(crate) enum Request {
         /// The content is a password-manager secret.
         #[serde(default)]
         secret: bool,
+        /// App to record as the source of the copy.
+        #[serde(default)]
+        source: Option<String>,
     },
 }
 
@@ -728,6 +731,7 @@ pub(crate) fn clipboard_set(
     formats: &[(String, Vec<u8>)],
     temporary: bool,
     secret: bool,
+    source: Option<String>,
 ) -> Result<SetOutcome, SetFailure> {
     match probe() {
         Some(info) if info.protocol < PROTOCOL => {
@@ -740,6 +744,7 @@ pub(crate) fn clipboard_set(
         formats: encode_formats(formats),
         temporary,
         secret,
+        source,
     };
     match call(&request, CLIPBOARD_TIMEOUT) {
         Ok(Response::ClipboardSet { id, expires_at }) => Ok(SetOutcome { id, expires_at }),
@@ -975,7 +980,8 @@ pub(crate) fn handle_request(state: &Arc<DaemonState>, request: Request) -> Resp
             formats,
             temporary,
             secret,
-        } => match serve_set(state, &formats, temporary, secret) {
+            source,
+        } => match serve_set(state, &formats, temporary, secret, source.as_deref()) {
             Ok((id, expires_at)) => Response::ClipboardSet { id, expires_at },
             Err(failure) => failure.into(),
         },
@@ -989,12 +995,17 @@ fn serve_set(
     formats: &[SetFormat],
     temporary: bool,
     secret: bool,
+    source: Option<&str>,
 ) -> Result<(Option<String>, Option<i64>), Failure> {
     let config = &state.addons.clipboard;
     let limits = super::clipboard_store::Limits::from_config(config);
     // The request is checked before the service says whether it records at
     // all: a malformed request is refused whatever the state of the server.
     check_set_request(formats, &limits)?;
+    let source = source
+        .map(super::clipboard_store::validate_source)
+        .transpose()
+        .map_err(Failure::invalid)?;
     if !super::clipboard_watch::recording() {
         return Err(Failure::new(
             ErrorCode::NotRecording,
@@ -1002,14 +1013,13 @@ fn serve_set(
              set addons.clipboard.backend to raffi or auto and restart it",
         ));
     }
-    let policy = super::clipboard_policy::Policy::from_config(config)
-        .map_err(|message| Failure::invalid(message))?;
+    let policy = super::clipboard_policy::Policy::from_config(config).map_err(Failure::invalid)?;
     let formats = decode_formats(formats).map_err(Failure::invalid)?;
     let mut store = super::clipboard_store::Store::open_default()
         .map_err(|message| Failure::new(ErrorCode::Io, message))?;
     let now = super::clipboard_store::now_secs();
     let served = record_set(
-        &mut store, formats, temporary, secret, &limits, &policy, now,
+        &mut store, formats, temporary, secret, source, &limits, &policy, now,
     )?;
     super::clipboard_watch::set(served.id.clone(), served.formats)
         .map_err(|message| Failure::new(ErrorCode::Io, message))?;
@@ -1048,14 +1058,19 @@ fn check_set_request(
                 ),
             ));
         }
-        super::clipboard_store::validate_mime(&format.mime)
-            .map_err(|reason| Failure::invalid(format!("the request carries a MIME type: {reason}")))?;
+        super::clipboard_store::validate_mime(&format.mime).map_err(|reason| {
+            Failure::invalid(format!("the request carries a MIME type: {reason}"))
+        })?;
         let limit = format_limit(&format.mime, limits);
         // Base64 is 4 bytes of line for every 3 of content, so the encoded
         // length alone already bounds the decoded one for all but the last
         // few bytes.
         if format.data.len() as u64 > base64_len(limit as usize) as u64 {
-            return Err(too_large(&format.mime, format.data.len() as u64 / 4 * 3, limit));
+            return Err(too_large(
+                &format.mime,
+                format.data.len() as u64 / 4 * 3,
+                limit,
+            ));
         }
         let decoded = decoded_len(&format.data);
         if decoded > limit {
@@ -1092,9 +1107,15 @@ fn format_limit(mime: &str, limits: &super::clipboard_store::Limits) -> u64 {
     }
 }
 
-/// Roughly how many bytes `encoded` base64 holds.
+/// How many bytes `encoded` base64 holds, not counting its padding.
 fn decoded_len(encoded: &str) -> u64 {
-    encoded.len() as u64 / 4 * 3
+    let padding = encoded
+        .bytes()
+        .rev()
+        .take(2)
+        .take_while(|&byte| byte == b'=')
+        .count();
+    (encoded.len() as u64 / 4 * 3).saturating_sub(padding as u64)
 }
 
 /// What a `clipboard set` leaves on the clipboard.
@@ -1119,6 +1140,7 @@ fn record_set(
     formats: Vec<(String, Vec<u8>)>,
     temporary: bool,
     secret: bool,
+    source: Option<String>,
     limits: &super::clipboard_store::Limits,
     policy: &super::clipboard_policy::Policy,
     now: i64,
@@ -1136,7 +1158,7 @@ fn record_set(
     let capture = super::clipboard_store::Capture {
         formats,
         copied_at: now,
-        source: None,
+        source,
         password_marked: secret,
     };
     let inserted = if temporary {
@@ -1158,9 +1180,10 @@ fn record_set(
                 expires_at,
             })
         }
-        Err(super::clipboard_store::Skipped::TooLarge(reason)) => {
-            Err(Failure::new(ErrorCode::TooLarge, format!("too large: {reason}")))
-        }
+        Err(super::clipboard_store::Skipped::TooLarge(reason)) => Err(Failure::new(
+            ErrorCode::TooLarge,
+            format!("too large: {reason}"),
+        )),
         Err(skipped) => Err(Failure::new(ErrorCode::Io, skipped.to_string())),
     }
 }
@@ -1510,6 +1533,14 @@ mod tests {
     use super::super::clipboard_store::{Limits, Store, PASSWORD_MARKER};
     use super::*;
 
+    #[test]
+    fn decoded_len_does_not_count_padding() {
+        assert_eq!(decoded_len("YWJj"), 3);
+        assert_eq!(decoded_len("YWI="), 2);
+        assert_eq!(decoded_len("YWJjZA=="), 4);
+        assert_eq!(decoded_len(""), 0);
+    }
+
     const LIMITS: Limits = Limits {
         max_items: 100,
         max_size: 1 << 30,
@@ -1595,9 +1626,7 @@ mod tests {
         let server_state = state.clone();
         let server = std::thread::spawn(move || {
             if let Ok((mut stream, _)) = listener.accept() {
-                let Incoming::Request(request) =
-                    read_request(&mut stream, MAX_REQUEST_LINE)
-                else {
+                let Incoming::Request(request) = read_request(&mut stream, MAX_REQUEST_LINE) else {
                     panic!("the status request should be read");
                 };
                 let reply = handle_request(&server_state, request);
@@ -1791,6 +1820,7 @@ mod tests {
             formats: encode_formats(&formats),
             temporary: true,
             secret: true,
+            source: Some("kitty".into()),
         };
         let line = serde_json::to_string(&request).unwrap();
         // Bytes travel base64-encoded, so a binary entry stays one JSON line.
@@ -1800,11 +1830,13 @@ mod tests {
             formats,
             temporary,
             secret,
+            source,
         } = parsed
         else {
             panic!("the set request should round trip");
         };
         assert!(temporary && secret);
+        assert_eq!(source.as_deref(), Some("kitty"));
         assert_eq!(
             decode_formats(&formats).unwrap(),
             [
@@ -1825,6 +1857,7 @@ mod tests {
             Request::ClipboardSet {
                 temporary: false,
                 secret: false,
+                source: None,
                 ..
             }
         ));
@@ -1849,12 +1882,27 @@ mod tests {
         ));
     }
 
+    /// A connected socket pair whose ends give up instead of blocking, so a
+    /// broken test fails rather than hanging.
+    fn socket_pair() -> (UnixStream, UnixStream) {
+        let (client, server) = UnixStream::pair().unwrap();
+        for stream in [&client, &server] {
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+        }
+        (client, server)
+    }
+
     /// Sends `requests`, one connection each, and returns the replies.
     fn serve_over_socket(requests: &[Request]) -> Vec<Response> {
         let state = Arc::new(DaemonState::new(quiet_addons()));
         let mut replies = Vec::new();
         for request in requests {
-            let (mut client, server) = UnixStream::pair().unwrap();
+            let (mut client, server) = socket_pair();
             let mut line = serde_json::to_vec(request).unwrap();
             line.push(b'\n');
             client.write_all(&line).unwrap();
@@ -1879,11 +1927,14 @@ mod tests {
     fn the_request_framing_bounds_the_line_the_service_reads() {
         // Room for a full text format or the largest image, base64-encoded.
         assert!(MAX_REQUEST_LINE > base64_len(super::super::clipboard_store::MAX_TEXT_BYTES));
-        assert!(MAX_REQUEST_LINE > base64_len(50 * 1024 * 1024), "the default image limit");
+        assert!(
+            MAX_REQUEST_LINE > base64_len(50 * 1024 * 1024),
+            "the default image limit"
+        );
         assert_eq!(base64_len(3), 4);
         assert_eq!(base64_len(4), 8);
 
-        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let (mut client, mut server) = socket_pair();
         let line = serde_json::to_vec(&Request::Status).unwrap();
         client.write_all(&line).unwrap();
         client.write_all(b"\n").unwrap();
@@ -1896,7 +1947,7 @@ mod tests {
         }
 
         // A line that fits but does not parse is refused too.
-        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let (mut client, mut server) = socket_pair();
         client.write_all(b"{}\n").unwrap();
         assert!(matches!(
             read_request(&mut server, 64),
@@ -1906,12 +1957,10 @@ mod tests {
             })
         ));
 
-        // An empty connection is not worth an answer.
-        let (_client, mut server) = UnixStream::pair().unwrap();
-        assert!(matches!(
-            read_request(&mut server, 64),
-            Incoming::Closed
-        ));
+        // A peer that closes without sending anything is not worth an answer.
+        let (client, mut server) = socket_pair();
+        drop(client);
+        assert!(matches!(read_request(&mut server, 64), Incoming::Closed));
     }
 
     #[test]
@@ -1942,12 +1991,16 @@ mod tests {
             "  ",
             "text/plain\u{0}",
             "text/plain\u{1b}",
-            "no-slash",
+            "no slash",
             "text/plain;",
             "/plain",
         ] {
             let error = check_set_request(&[format(mime, "aGk=")], &limits).unwrap_err();
-            assert_eq!(error.code, ErrorCode::InvalidArgument, "{mime:?}: {error:?}");
+            assert_eq!(
+                error.code,
+                ErrorCode::InvalidArgument,
+                "{mime:?}: {error:?}"
+            );
         }
         let long = format!("text/{}", "a".repeat(MAX_MIME_BYTES));
         assert_eq!(
@@ -1963,15 +2016,25 @@ mod tests {
                 .code,
             ErrorCode::TooLarge
         );
-        let text_limits = Limits { max_size: 8, ..LIMITS };
-        let error = check_set_request(
-            &[format("text/plain", "aGVsbG8gd29ybGQ=")],
-            &text_limits,
-        )
-        .unwrap_err();
+        let text_limits = Limits {
+            max_size: 8,
+            ..LIMITS
+        };
+        let error = check_set_request(&[format("text/plain", "aGVsbG8gd29ybGQ=")], &text_limits)
+            .unwrap_err();
         assert_eq!(error.code, ErrorCode::TooLarge);
         assert!(error.message.contains("of the history"), "{error:?}");
+        // A bare atom name is not a MIME type but a selection offers it, as
+        // the password-manager hint does.
         assert!(check_set_request(&[format("text/plain", "aGk=")], &limits).is_ok());
+        assert!(check_set_request(
+            &[format(
+                super::super::clipboard_policy::PASSWORD_HINT,
+                "aGk="
+            )],
+            &limits
+        )
+        .is_ok());
     }
 
     #[test]
@@ -1989,6 +2052,7 @@ mod tests {
                 formats: oversized,
                 temporary: false,
                 secret: false,
+                source: None,
             },
             Request::ClipboardSet {
                 formats: vec![SetFormat {
@@ -1997,16 +2061,29 @@ mod tests {
                 }],
                 temporary: false,
                 secret: false,
+                source: None,
             },
             Request::Status,
         ]);
         assert!(
-            matches!(&replies[0], Response::Error { code: Some(ErrorCode::TooLarge), .. }),
+            matches!(
+                &replies[0],
+                Response::Error {
+                    code: Some(ErrorCode::TooLarge),
+                    ..
+                }
+            ),
             "{:?}",
             replies[0]
         );
         assert!(
-            matches!(&replies[1], Response::Error { code: Some(ErrorCode::InvalidArgument), .. }),
+            matches!(
+                &replies[1],
+                Response::Error {
+                    code: Some(ErrorCode::InvalidArgument),
+                    ..
+                }
+            ),
             "{:?}",
             replies[1]
         );
@@ -2016,7 +2093,7 @@ mod tests {
     #[test]
     fn a_malformed_request_gets_an_answer_instead_of_a_closed_connection() {
         let state = Arc::new(DaemonState::new(quiet_addons()));
-        let (mut client, server) = UnixStream::pair().unwrap();
+        let (mut client, server) = socket_pair();
         client.write_all(b"{\"type\":\"clipboard_set\"}\n").unwrap();
         let server = std::thread::spawn(move || serve_connection(state, server));
         let mut reader = BufReader::new(client);
@@ -2026,7 +2103,13 @@ mod tests {
         let reply: Response = serde_json::from_str(&reply).unwrap();
         // The MIME list is missing, so the request does not parse.
         assert!(
-            matches!(reply, Response::Error { code: Some(ErrorCode::InvalidArgument), .. }),
+            matches!(
+                reply,
+                Response::Error {
+                    code: Some(ErrorCode::InvalidArgument),
+                    ..
+                }
+            ),
             "{reply:?}"
         );
     }
@@ -2040,6 +2123,7 @@ mod tests {
             text_formats("hello"),
             false,
             false,
+            None,
             &LIMITS,
             &policy,
             NOW,
@@ -2057,6 +2141,7 @@ mod tests {
             text_formats("hello"),
             false,
             false,
+            None,
             &LIMITS,
             &policy,
             NOW + 5,
@@ -2076,6 +2161,7 @@ mod tests {
             text_formats("one-time code"),
             true,
             false,
+            None,
             &LIMITS,
             &policy,
             NOW,
@@ -2089,6 +2175,7 @@ mod tests {
             vec![("image/png".to_string(), b"\x89PNG".to_vec())],
             true,
             false,
+            None,
             &LIMITS,
             &policy,
             NOW,
@@ -2099,6 +2186,96 @@ mod tests {
     }
 
     #[test]
+    fn a_set_records_the_app_it_names_as_its_source() {
+        let (mut store, dir) = set_store("set-source");
+        let served = record_set(
+            &mut store,
+            text_formats("from an agent"),
+            false,
+            false,
+            Some("pi".to_string()),
+            &LIMITS,
+            &Policy::default(),
+            NOW,
+        )
+        .unwrap();
+        let id = served.id.expect("the content was recorded");
+        let page = store.list("", "", 0, &[], NOW).unwrap();
+        let item = page
+            .items
+            .iter()
+            .find(|item| item.id == id)
+            .expect("the recorded entry");
+        assert_eq!(item.source.as_deref(), Some("pi"));
+
+        // Without a source the entry keeps the one it had, here none.
+        let plain = record_set(
+            &mut store,
+            text_formats("from nowhere"),
+            false,
+            false,
+            None,
+            &LIMITS,
+            &Policy::default(),
+            NOW,
+        )
+        .unwrap();
+        let plain = plain.id.expect("the content was recorded");
+        let page = store.list("", "", 0, &[], NOW).unwrap();
+        let item = page.items.iter().find(|item| item.id == plain).unwrap();
+        assert_eq!(item.source, None);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_set_source_the_history_cannot_show_is_refused() {
+        let replies = serve_over_socket(&[
+            Request::ClipboardSet {
+                formats: vec![SetFormat {
+                    mime: "text/plain".into(),
+                    data: "aGk=".into(),
+                }],
+                temporary: false,
+                secret: false,
+                source: Some("pi\u{0}".into()),
+            },
+            Request::ClipboardSet {
+                formats: vec![SetFormat {
+                    mime: "text/plain".into(),
+                    data: "aGk=".into(),
+                }],
+                temporary: false,
+                secret: false,
+                source: Some("   ".into()),
+            },
+            Request::Status,
+        ]);
+        assert!(
+            matches!(
+                &replies[0],
+                Response::Error {
+                    code: Some(ErrorCode::InvalidArgument),
+                    ..
+                }
+            ),
+            "{:?}",
+            replies[0]
+        );
+        assert!(
+            matches!(
+                &replies[1],
+                Response::Error {
+                    code: Some(ErrorCode::InvalidArgument),
+                    ..
+                }
+            ),
+            "{:?}",
+            replies[1]
+        );
+        assert!(matches!(replies[2], Response::Status { .. }));
+    }
+
+    #[test]
     fn a_secret_set_follows_the_password_manager_policy() {
         let (mut store, dir) = set_store("set-secret");
         let served = record_set(
@@ -2106,6 +2283,7 @@ mod tests {
             text_formats("hunter2"),
             false,
             true,
+            None,
             &LIMITS,
             &Policy::default(),
             NOW,
@@ -2130,6 +2308,7 @@ mod tests {
             text_formats("hunter2"),
             false,
             true,
+            None,
             &LIMITS,
             &policy,
             NOW,
@@ -2153,6 +2332,7 @@ mod tests {
             text_formats("secret: hunter2"),
             false,
             false,
+            None,
             &LIMITS,
             &policy,
             NOW,
@@ -2176,15 +2356,13 @@ mod tests {
             vec![("image/png".to_string(), b"\x89PNG\r\n".to_vec())],
             false,
             false,
+            None,
             &limits,
             &Policy::default(),
             NOW,
         )
         .unwrap_err();
-        assert!(
-            error.message.contains("over the 4 byte limit"),
-            "{error:?}"
-        );
+        assert!(error.message.contains("over the 4 byte limit"), "{error:?}");
         assert_eq!(error.code, ErrorCode::TooLarge);
         let _ = fs::remove_dir_all(dir);
     }

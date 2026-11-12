@@ -29,35 +29,88 @@ pub(super) fn expiry_tick() -> UnboundedReceiver<()> {
 }
 
 impl LauncherApp {
+    /// The desktop entries a clipboard source resolves through, read once per
+    /// process when a row first needs one, so a listing that shows no source
+    /// never reads them.
+    fn clipboard_desktop_entries(&self) -> &crate::DesktopEntries {
+        if let Some(entries) = &self.desktop_entries {
+            return entries;
+        }
+        static SHARED: std::sync::OnceLock<crate::DesktopEntries> = std::sync::OnceLock::new();
+        SHARED.get_or_init(crate::read_desktop_entries)
+    }
+
     /// Theme icon for the app a clipboard item was copied from, trying its
-    /// ID as stored and lowercased, as window classes are often capitalised.
+    /// ID as stored and lowercased, as window classes are often capitalised,
+    /// then the icon of the desktop entry that ID or class names.
     pub(super) fn clipboard_source_icon(&self, item: &ClipItem) -> Option<String> {
         let app = item.source.as_deref()?;
         self.resolve_icon_name(app)
             .or_else(|| self.resolve_icon_name(&app.to_lowercase()))
+            .or_else(|| {
+                let icon = self
+                    .clipboard_desktop_entries()
+                    .resolve(app)?
+                    .icon
+                    .as_deref()?;
+                self.resolve_icon_name(icon)
+                    .or_else(|| self.resolve_icon_name(&icon.to_lowercase()))
+            })
     }
 
-    /// Build the labels and look up the source icons of newly listed items,
-    /// so drawing the list does no string building or file checks per row.
+    /// The app name to show for a clipboard source: the desktop entry's
+    /// `Name=` when one resolves, the recorded source otherwise.
+    fn resolve_clipboard_source_name(&self, app: &str) -> String {
+        self.clipboard_desktop_entries()
+            .resolve(app)
+            .and_then(|entry| entry.name.clone())
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| app.to_string())
+    }
+
+    /// The app name to show for a clipboard source, as `index_clipboard_rows`
+    /// cached it, so drawing never reads the desktop entries.
+    pub(super) fn clipboard_source_name(&self, item: &ClipItem) -> Option<String> {
+        let app = item.source.as_deref()?;
+        Some(
+            self.clipboard
+                .names
+                .get(app)
+                .cloned()
+                .unwrap_or_else(|| app.to_string()),
+        )
+    }
+
+    /// Build the labels and look up the source names and icons of newly listed
+    /// items, so drawing the list does no string building, file check or
+    /// desktop entry read per row.
     pub(super) fn index_clipboard_rows(&mut self) {
         let mut labels = Vec::new();
+        let mut names = Vec::new();
         let mut icons = Vec::new();
         for item in &self.clipboard.items {
             if !self.clipboard.labels.contains_key(&item.id) {
                 labels.push((item.id.clone(), (item.title(), item.subtitle())));
             }
-            if let Some(source) = &item.source {
-                if !self.clipboard.icons.contains_key(source)
-                    && !icons.iter().any(|(known, _)| known == source)
-                {
-                    let icon = self
-                        .clipboard_source_icon(item)
-                        .filter(|path| std::path::Path::new(path).exists());
-                    icons.push((source.clone(), icon));
-                }
+            let Some(source) = &item.source else {
+                continue;
+            };
+            if !self.clipboard.names.contains_key(source)
+                && !names.iter().any(|(known, _)| known == source)
+            {
+                names.push((source.clone(), self.resolve_clipboard_source_name(source)));
+            }
+            if !self.clipboard.icons.contains_key(source)
+                && !icons.iter().any(|(known, _)| known == source)
+            {
+                let icon = self
+                    .clipboard_source_icon(item)
+                    .filter(|path| std::path::Path::new(path).exists());
+                icons.push((source.clone(), icon));
             }
         }
         self.clipboard.labels.extend(labels);
+        self.clipboard.names.extend(names);
         self.clipboard.icons.extend(icons);
     }
 

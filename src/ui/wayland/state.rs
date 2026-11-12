@@ -411,6 +411,9 @@ pub(super) struct ClipboardState {
     /// Icon file of each source app, `None` when it has none, resolved once
     /// per browser session.
     pub icons: std::collections::HashMap<String, Option<String>>,
+    /// Name to show for each source app, resolved once per browser session
+    /// while the rows are prepared.
+    pub names: std::collections::HashMap<String, String>,
     pub preview_inflight: Option<String>,
     /// An action is running; further activations are ignored.
     pub pending: bool,
@@ -807,6 +810,10 @@ pub(super) struct LauncherApp {
     pub icon_map: HashMap<String, String>,
     /// Desktop entry icons keyed by executable name.
     pub desktop_icon_map: HashMap<String, String>,
+    /// Desktop entries by ID and window class, for the clipboard source app.
+    /// `None` reads them from the user's directories when a row needs one;
+    /// tests set their own, which keeps them off those directories.
+    pub desktop_entries: Option<crate::DesktopEntries>,
     pub no_icons: bool,
     pub launcher_icon_paths: Vec<Option<String>>,
     pub mru_map: HashMap<String, super::support::MruEntry>,

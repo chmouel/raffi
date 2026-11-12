@@ -69,15 +69,21 @@ pub(crate) fn run_clipboard_cli(
 /// Write what a command produced, then its notices on stderr.
 fn write_output(output: Output) -> Result<(), Error> {
     let mut stdout = std::io::stdout().lock();
-    stdout
-        .write_all(&output.stdout)
-        .and_then(|()| stdout.flush())
-        .map_err(|error| Error::new(Code::Io, format!("cannot write to stdout: {error}")))?;
+    write_stdout(&mut stdout, &output.stdout)?;
     drop(stdout);
     for notice in &output.notices {
         eprintln!("{notice}");
     }
     Ok(())
+}
+
+/// Write and flush `bytes`, so a full disk or a closed pipe is a failure of
+/// the command rather than something the process reports late.
+fn write_stdout(stream: &mut impl Write, bytes: &[u8]) -> Result<(), Error> {
+    stream
+        .write_all(bytes)
+        .and_then(|()| stream.flush())
+        .map_err(|error| Error::new(Code::Io, format!("cannot write to stdout: {error}")))
 }
 
 /// Whether the action prints JSON instead of text, and so gets its errors as
@@ -788,6 +794,32 @@ fn kind_filter(kind: Option<ClipboardKind>) -> Result<&'static str, Error> {
     }
 }
 
+/// The desktop `Name=` behind each source, resolved the first time a row
+/// needs it and kept for the rows of the same app, so a listing reads the
+/// application directories at most once and only when a source is printed.
+#[derive(Default)]
+struct SourceNames {
+    entries: Option<crate::DesktopEntries>,
+    names: HashMap<String, Option<String>>,
+}
+
+impl SourceNames {
+    fn name(&mut self, source: Option<&str>) -> Option<String> {
+        let source = source?;
+        if let Some(known) = self.names.get(source) {
+            return known.clone();
+        }
+        let name = self
+            .entries
+            .get_or_insert_with(crate::read_desktop_entries)
+            .resolve(source)
+            .and_then(|entry| entry.name.clone())
+            .filter(|name| !name.trim().is_empty());
+        self.names.insert(source.to_string(), name.clone());
+        name
+    }
+}
+
 /// One entry as one line of output, in the shape the JSON mode prints.
 #[derive(Debug, Serialize)]
 struct Row {
@@ -800,6 +832,8 @@ struct Row {
     text_len: usize,
     copied: Option<String>,
     source: Option<String>,
+    /// Name= of the desktop entry the source names, null when none does.
+    source_name: Option<String>,
     expires_at: Option<i64>,
     expires_at_iso: Option<String>,
     /// Pixel size of an image entry, null for anything else.
@@ -808,7 +842,12 @@ struct Row {
     preview: String,
 }
 
-fn row(item: &ClipItem, index: Option<usize>, image: Option<&ImageMeta>) -> Row {
+fn row(
+    item: &ClipItem,
+    index: Option<usize>,
+    image: Option<&ImageMeta>,
+    names: Option<&mut SourceNames>,
+) -> Row {
     Row {
         index,
         id: item.id.clone(),
@@ -817,6 +856,7 @@ fn row(item: &ClipItem, index: Option<usize>, image: Option<&ImageMeta>) -> Row 
         formats: item.formats.clone(),
         text_len: item.text_len,
         copied: item.copied.and_then(unix_rfc3339),
+        source_name: names.and_then(|names| names.name(item.source.as_deref())),
         source: item.source.clone(),
         expires_at: item.expires_at,
         expires_at_iso: item.expires_at.and_then(unix_rfc3339),
@@ -920,17 +960,19 @@ enum Sanitize {
 /// DEL become caret notation or a space, C1 controls become a space, and the
 /// bidi overrides that reorder text are dropped.
 fn sanitize(text: &str, mode: Sanitize) -> String {
+    if mode == Sanitize::Spaces {
+        return crate::sanitize_display_text(text);
+    }
     let mut clean = String::with_capacity(text.len());
     for character in text.chars() {
+        if crate::is_bidi_override(character) {
+            continue;
+        }
         match character {
-            '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' => {}
-            '\u{0}'..='\u{1f}' | '\u{7f}' => match mode {
-                Sanitize::Spaces => clean.push(' '),
-                Sanitize::Carets => {
-                    clean.push('^');
-                    clean.push(caret(character));
-                }
-            },
+            '\u{0}'..='\u{1f}' | '\u{7f}' => {
+                clean.push('^');
+                clean.push(caret(character));
+            }
             '\u{80}'..='\u{9f}' => clean.push(' '),
             _ => clean.push(character),
         }
@@ -999,10 +1041,10 @@ fn remaining(seconds: i64) -> String {
 
 /// The copy time, with how long a temporary entry has left.
 fn when_of(item: &ClipItem, clock: Clock) -> String {
-    let mut when = item.copied.and_then(local_time).map_or_else(
-        String::new,
-        |copied| short_copy_time(copied, clock.local),
-    );
+    let mut when = item
+        .copied
+        .and_then(local_time)
+        .map_or_else(String::new, |copied| short_copy_time(copied, clock.local));
     if let Some(deadline) = item.expires_at {
         if !when.is_empty() {
             when.push(' ');
@@ -1128,13 +1170,16 @@ fn parse_since(value: &str, now: i64) -> Result<i64, Error> {
 }
 
 /// The unix instant of a local midnight, which a timezone with a
-/// daylight-saving change at midnight may not have: the hour after it is
-/// the start of that day then.
+/// daylight-saving change at midnight may not have: the first minute of the
+/// day that exists starts it then.
 fn local_midnight_unix(midnight: NaiveDateTime) -> i64 {
-    chrono::Local
-        .from_local_datetime(&midnight)
-        .earliest()
-        .or_else(|| chrono::Local.from_local_datetime(&midnight).latest())
+    day_start_unix(&chrono::Local, midnight)
+}
+
+fn day_start_unix<Tz: TimeZone>(zone: &Tz, midnight: NaiveDateTime) -> i64 {
+    (0..24 * 60)
+        .map(|minutes| midnight + chrono::Duration::minutes(minutes))
+        .find_map(|time| zone.from_local_datetime(&time).earliest())
         .map_or_else(|| midnight.and_utc().timestamp(), |time| time.timestamp())
 }
 
@@ -1196,9 +1241,15 @@ fn list(run: &mut Run, args: &ClipboardListArgs) -> Result<Output, Error> {
             .collect();
         return Ok(Output::text(table(&rows, run.io.width, run.io.color)));
     }
+    // Only the JSON rows carry a source name: the table and the
+    // tab-separated lines skip the desktop entry lookup.
+    let mut sources = SourceNames::default();
     let rows: Vec<Row> = items
         .iter()
-        .map(|(item, index)| row(item, *index, image_of(item)))
+        .map(|(item, index)| {
+            let sources = args.json.then_some(&mut sources);
+            row(item, *index, image_of(item), sources)
+        })
         .collect();
     Ok(Output::text(if args.json {
         json_lines(&rows)?
@@ -1209,9 +1260,10 @@ fn list(run: &mut Run, args: &ClipboardListArgs) -> Result<Output, Error> {
 
 fn show(run: &mut Run, args: &ClipboardShowArgs, refs: &[String]) -> Result<Output, Error> {
     let (item, index, tab) = run.resolve_one(refs)?;
+    let mut sources = SourceNames::default();
     match &run.clips {
-        Clips::CopyQ(copyq) => show_copyq(copyq, &item, &tab, args, index),
-        Clips::Raffi(Some(store)) => show_raffi(store, &item, args, run, index),
+        Clips::CopyQ(copyq) => show_copyq(copyq, &item, &tab, args, index, &mut sources),
+        Clips::Raffi(Some(store)) => show_raffi(store, &item, args, run, index, &mut sources),
         Clips::Raffi(None) => Err(Error::new(Code::NoHistory, "no clipboard history")),
     }
 }
@@ -1222,6 +1274,7 @@ fn show_raffi(
     args: &ClipboardShowArgs,
     run: &Run,
     index: Option<usize>,
+    sources: &mut SourceNames,
 ) -> Result<Output, Error> {
     let formats = store.formats(&item.id, run.clock.secs)?;
     if args.formats {
@@ -1246,7 +1299,7 @@ fn show_raffi(
             _ => exact_text(&formats).map(|bytes| Capped::text(bytes, args.max_bytes)),
         };
         let image = store.image_meta(&item.id, run.clock.secs).ok().flatten();
-        return metadata_line(item, index, text, image.as_ref());
+        return metadata_line(item, index, text, image.as_ref(), sources);
     }
     match item.kind {
         ItemKind::Image => {
@@ -1282,6 +1335,7 @@ fn show_copyq(
     tab: &str,
     args: &ClipboardShowArgs,
     index: Option<usize>,
+    sources: &mut SourceNames,
 ) -> Result<Output, Error> {
     if args.mime.is_some() {
         return Err(Error::new(
@@ -1304,7 +1358,7 @@ fn show_copyq(
                 args.max_bytes,
             )),
         };
-        return metadata_line(item, index, text, None);
+        return metadata_line(item, index, text, None, sources);
     }
     if item.kind == ItemKind::Image {
         return Err(Error::new(
@@ -1328,7 +1382,7 @@ fn copyq_text_error(error: &str) -> Error {
             ),
         );
     }
-    Error::new(Code::Io, error)
+    Error::from(error.to_owned())
 }
 
 /// The formats of an entry with their size, for `show --formats`.
@@ -1379,8 +1433,9 @@ fn metadata_line(
     index: Option<usize>,
     text: Option<Capped>,
     image: Option<&ImageMeta>,
+    sources: &mut SourceNames,
 ) -> Result<Output, Error> {
-    let mut value = serde_json::to_value(row(item, index, image))
+    let mut value = serde_json::to_value(row(item, index, image, Some(sources)))
         .map_err(|error| Error::new(Code::Io, format!("cannot format the entry: {error}")))?;
     let truncated = text.as_ref().is_some_and(|capped| capped.truncated);
     value["text"] = match text {
@@ -1536,12 +1591,13 @@ fn copy(run: &mut Run, refs: &[String]) -> Result<Output, Error> {
 /// copy from another app would be.
 fn set(run: &mut Run, args: &ClipboardSetArgs, input: &mut dyn Read) -> Result<Output, Error> {
     let mime = canonical_mime(args.mime.as_deref().unwrap_or(DEFAULT_MIME))?;
+    let source = source_app(args.source.as_deref(), &crate::desktop_entry_dirs())?;
     let data = content(&mime, args, run.io, &run.settings.limits, input)?;
     check_content(&mime, &data, &run.settings.limits)?;
     match &run.clips {
         Clips::Raffi(_) => {
             let outcome =
-                super::cache::clipboard_set(&[(mime, data)], args.temporary, args.secret)?;
+                super::cache::clipboard_set(&[(mime, data)], args.temporary, args.secret, source)?;
             let recorded = outcome.id.is_some();
             set_output(
                 outcome.id.as_deref(),
@@ -1550,7 +1606,38 @@ fn set(run: &mut Run, args: &ClipboardSetArgs, input: &mut dyn Read) -> Result<O
                 args.json,
             )
         }
-        Clips::CopyQ(copyq) => set_copyq(copyq, &mime, &data, args),
+        Clips::CopyQ(copyq) => set_copyq(copyq, &mime, &data, args, source),
+    }
+}
+
+/// The app name `--source` records, checked before it reaches the history.
+///
+/// A value ending in `.desktop` is a desktop entry ID: it has to be the ID of
+/// an entry of `dirs`, and is recorded without that suffix so it matches the
+/// app_id a compositor reports. Anything else is a free label, kept as it
+/// came.
+fn source_app(source: Option<&str>, dirs: &[std::path::PathBuf]) -> Result<Option<String>, Error> {
+    let Some(source) = source else {
+        return Ok(None);
+    };
+    let source = clipboard_store::validate_source(source).map_err(Error::usage)?;
+    if source.contains(['/', '\\']) || source.starts_with('~') {
+        return Err(Error::usage(format!(
+            "`{source}` is a path; put the file in ~/.local/share/applications and pass its desktop entry ID instead"
+        )));
+    }
+    if !source.to_lowercase().ends_with(".desktop") {
+        return Ok(Some(source));
+    }
+    match crate::DesktopEntries::from_dirs(dirs).resolve_id(&source) {
+        Some(entry) => Ok(Some(entry.id.clone())),
+        None => Err(Error::usage(format!(
+            "no desktop entry `{source}` in {}",
+            dirs.iter()
+                .map(|dir| dir.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
     }
 }
 
@@ -1559,6 +1646,7 @@ fn set_copyq(
     mime: &str,
     data: &[u8],
     args: &ClipboardSetArgs,
+    source: Option<String>,
 ) -> Result<Output, Error> {
     if args.temporary {
         return Err(Error::new(
@@ -1570,6 +1658,12 @@ fn set_copyq(
         return Err(Error::new(
             Code::Unsupported,
             "--secret is not supported by the copyq backend",
+        ));
+    }
+    if source.is_some() {
+        return Err(Error::new(
+            Code::Unsupported,
+            "--source is not supported by the copyq backend",
         ));
     }
     copyq.set(mime, data)?;
@@ -1614,17 +1708,37 @@ fn set_output(
 /// any other recognized text type loses its parameters, so the recorder
 /// extracts its text and applies its policy to it.
 fn canonical_mime(mime: &str) -> Result<String, Error> {
+    let mime = mime.trim();
+    if mime.is_empty() {
+        return Err(Error::new(
+            Code::InvalidArgument,
+            "an empty MIME type names no content",
+        ));
+    }
+    if mime.chars().any(char::is_control) || mime.len() > clipboard_store::MAX_MIME_BYTES {
+        return Err(Error::new(
+            Code::InvalidArgument,
+            format!(
+                "`{}` is not a MIME type: it has a control character or is too long",
+                sanitize(mime, Sanitize::Spaces)
+            ),
+        ));
+    }
+    // The names a selection offers plain text under are not MIME types, but
+    // they are accepted here and stored as the one type they stand for.
+    if is_plain_text(mime) {
+        return Ok(DEFAULT_MIME.to_string());
+    }
     clipboard_store::validate_mime(mime).map_err(|reason| {
         Error::new(
             Code::InvalidArgument,
-            format!("`{}` is not a MIME type: {reason}", sanitize(mime, Sanitize::Spaces)),
+            format!(
+                "`{}` is not a MIME type: {reason}",
+                sanitize(mime, Sanitize::Spaces)
+            ),
         )
     })?;
-    Ok(if is_plain_text(mime) {
-        DEFAULT_MIME.to_string()
-    } else {
-        clipboard_store::canonical_mime(mime)
-    })
+    Ok(clipboard_store::canonical_mime(mime))
 }
 
 /// Whether `mime` is text as far as a Wayland client is concerned: a `text/`
@@ -2309,20 +2423,30 @@ mod tests {
         // wall-clock time twice: what the output carries is the instant, with
         // the offset it really had, not the first time that wall clock read.
         let after = chrono::FixedOffset::east_opt(60 * 60).unwrap();
-        let first = 1_793_171_100; // 2026-10-27T02:05:00+01:00, after the fold
+        let before = chrono::FixedOffset::east_opt(2 * 60 * 60).unwrap();
+        let wall_clock =
+            NaiveDateTime::parse_from_str("2026-10-27 02:05:00", "%Y-%m-%d %H:%M:%S").unwrap();
+        let first = after.from_local_datetime(&wall_clock).unwrap().timestamp();
+        let earlier = before.from_local_datetime(&wall_clock).unwrap().timestamp();
+        assert_eq!(
+            earlier,
+            first - 3600,
+            "the two occurrences are an hour apart"
+        );
         let formatted = rfc3339_at(first, &after).unwrap();
         assert_eq!(formatted, "2026-10-27T02:05:00+01:00");
         let parsed = chrono::DateTime::parse_from_rfc3339(&formatted).unwrap();
-        assert_eq!(parsed.timestamp(), first);
-        let before = chrono::FixedOffset::east_opt(2 * 60 * 60).unwrap();
-        let earlier = rfc3339_at(first - 3600, &before).unwrap();
-        assert_eq!(earlier, "2026-10-27T02:05:00+02:00", "the same wall clock");
-        assert_ne!(
-            chrono::DateTime::parse_from_rfc3339(&earlier)
+        assert_eq!(parsed.timestamp(), first, "not the first occurrence");
+        let formatted = rfc3339_at(earlier, &before).unwrap();
+        assert_eq!(
+            formatted, "2026-10-27T02:05:00+02:00",
+            "the same wall clock"
+        );
+        assert_eq!(
+            chrono::DateTime::parse_from_rfc3339(&formatted)
                 .unwrap()
                 .timestamp(),
-            first,
-            "the two occurrences are an hour apart"
+            earlier
         );
     }
 
@@ -2575,7 +2699,7 @@ mod tests {
         one.copied = Some(NOW);
         one.expires_at = Some(NOW + 45);
         let rows = [
-            row(&one, Some(1), None),
+            row(&one, Some(1), None, None),
             row(
                 &item("a81be0c44f", ItemKind::Image, ""),
                 None,
@@ -2585,6 +2709,7 @@ mod tests {
                     height: 1080,
                     bytes: 1_200_000,
                 }),
+                None,
             ),
         ];
         let lines = json_lines(&rows).unwrap();
@@ -2614,6 +2739,75 @@ mod tests {
         // Anything that is not an image carries null dimensions.
         assert!(parsed[0]["width"].is_null());
         assert!(parsed[0]["height"].is_null());
+    }
+
+    #[test]
+    fn test_json_rows_carry_the_desktop_name_of_their_source() {
+        let dir = temp_applications("row-name");
+        let apps = dir.join("applications");
+        std::fs::write(
+            apps.join("pi.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Pi Agent\n",
+        )
+        .unwrap();
+        let mut sources = SourceNames {
+            entries: Some(crate::DesktopEntries::from_dirs(&[apps])),
+            names: HashMap::new(),
+        };
+        let mut named = item("3fa9c1d2e0", ItemKind::Text, "git push");
+        named.source = Some("pi".into());
+        let mut labelled = item("a81be0c44f", ItemKind::Text, "hello");
+        labelled.source = Some("free label".into());
+        let rows = [
+            row(&named, Some(1), None, Some(&mut sources)),
+            row(&labelled, Some(2), None, Some(&mut sources)),
+            row(
+                &item("b1b2c3d4e5", ItemKind::Text, "plain"),
+                None,
+                None,
+                None,
+            ),
+        ];
+        let lines = json_lines(&rows).unwrap();
+        let parsed: Vec<serde_json::Value> = lines
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(parsed[0]["source"], "pi");
+        assert_eq!(parsed[0]["source_name"], "Pi Agent");
+        assert_eq!(parsed[1]["source"], "free label");
+        assert!(
+            parsed[1]["source_name"].is_null(),
+            "a label no entry names has no name"
+        );
+        assert!(parsed[2]["source"].is_null());
+        assert!(parsed[2]["source_name"].is_null());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_json_rows_carry_the_sanitized_name_of_their_source() {
+        let dir = temp_applications("row-name-sanitized");
+        let apps = dir.join("applications");
+        std::fs::write(
+            apps.join("evil.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Evil\u{1b}[31m\u{202e}txt\n",
+        )
+        .unwrap();
+        let mut sources = SourceNames {
+            entries: Some(crate::DesktopEntries::from_dirs(&[apps])),
+            names: HashMap::new(),
+        };
+        let mut named = item("3fa9c1d2e0", ItemKind::Text, "git push");
+        named.source = Some("evil".into());
+        let rows = [row(&named, Some(1), None, Some(&mut sources))];
+        let lines = json_lines(&rows).unwrap();
+        let parsed: Vec<serde_json::Value> = lines
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(parsed[0]["source_name"], "Evil [31mtxt");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -2662,7 +2856,7 @@ mod tests {
         let nasty = "one\ttwo\r\nthree\u{1b}]52;c;ZXZpbA==\u{7}four";
         let mut entry = item("a1b2c3d4e5", ItemKind::Text, nasty);
         entry.text_len = nasty.len();
-        let lines = tsv(&[row(&entry, Some(1), None)]);
+        let lines = tsv(&[row(&entry, Some(1), None, None)]);
         assert_eq!(lines.lines().count(), 1);
         let fields: Vec<&str> = lines.trim_end().split('\t').collect();
         assert_eq!(fields.len(), 4, "{lines:?}");
@@ -3022,6 +3216,53 @@ mod tests {
     }
 
     #[test]
+    fn test_show_json_reports_an_image_by_its_size() {
+        let (mut store, dir) = temp_store("show-image-json");
+        let mut png = Vec::new();
+        image::RgbaImage::new(6, 2)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let id = store
+            .insert(
+                Capture {
+                    formats: vec![("image/png".into(), png)],
+                    copied_at: 1,
+                    source: None,
+                    password_marked: false,
+                },
+                &LIMITS,
+                NOW,
+            )
+            .unwrap();
+        let settings = settings(3, Vec::new());
+        let mut run = run(store, &settings);
+        let value: serde_json::Value = serde_json::from_slice(
+            &show(
+                &mut run,
+                &ClipboardShowArgs {
+                    reference: vec![id.clone()],
+                    json: true,
+                    ..Default::default()
+                },
+                std::slice::from_ref(&id),
+            )
+            .unwrap()
+            .stdout,
+        )
+        .unwrap();
+        assert_eq!(value["kind"], "image");
+        assert_eq!(value["width"], 6, "the metadata the listing reports");
+        assert_eq!(value["height"], 2);
+        assert_eq!(value["preview"], "PNG image 6×2");
+        // An image has no text to show, so the field is there and null.
+        assert!(value["text"].is_null(), "{value}");
+        assert!(value.get("text").is_some());
+        assert_eq!(value["truncated"], false);
+        drop(run);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn test_a_file_list_is_shown_as_paths() {
         let (mut store, dir) = temp_store("show-files");
         let list = "# copied files\r\nfile:///tmp/a%20b.txt\r\nhttps://example.com/x\r\n";
@@ -3334,6 +3575,158 @@ mod tests {
     }
 
     #[test]
+    fn test_copyq_cannot_record_the_app_that_set_the_content() {
+        let settings = settings(3, Vec::new());
+        let mut run = Run {
+            clips: Clips::CopyQ(CopyQ::with_session("raffi-test")),
+            settings: &settings,
+            clock: Clock::at(NOW),
+            io: Io::pipe(),
+        };
+        let args = ClipboardSetArgs {
+            source: Some("pi".into()),
+            ..set_args(&["hello"], None)
+        };
+        let error = set(&mut run, &args, &mut &b""[..]).unwrap_err();
+        assert_eq!(error.code, Code::Unsupported);
+        assert!(
+            error
+                .message
+                .contains("--source is not supported by the copyq backend"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn test_the_source_app_is_checked_before_it_is_recorded() {
+        let dirs: &[std::path::PathBuf] = &[];
+        assert_eq!(source_app(None, dirs).unwrap(), None);
+        assert_eq!(source_app(Some("pi"), dirs).unwrap().as_deref(), Some("pi"));
+        // The name is trimmed, and an agent's name has to fit on one line.
+        assert_eq!(
+            source_app(Some(" pi "), dirs).unwrap().as_deref(),
+            Some("pi")
+        );
+        for bad in ["", "   ", "p\u{0}i", "pi\u{1b}[31m"] {
+            let error = source_app(Some(bad), dirs).unwrap_err();
+            assert_eq!(error.code, Code::InvalidArgument, "{bad:?}");
+            assert_eq!(error.exit_code(), 2, "{bad:?}");
+        }
+        let long = "a".repeat(clipboard_store::MAX_SOURCE_BYTES + 1);
+        assert_eq!(
+            source_app(Some(&long), dirs).unwrap_err().code,
+            Code::InvalidArgument
+        );
+        assert!(source_app(Some(&"a".repeat(clipboard_store::MAX_SOURCE_BYTES)), dirs).is_ok());
+    }
+
+    /// A directory holding one `applications` tree, as a test's XDG data dir.
+    /// Every caller makes its own name so two tests never share a tree.
+    fn temp_applications(name: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("raffi-clip-source-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("applications")).unwrap();
+        dir
+    }
+
+    #[test]
+    fn test_a_source_desktop_id_resolves_in_the_application_dirs() {
+        let dir = temp_applications("id");
+        let apps = dir.join("applications");
+        std::fs::write(
+            apps.join("pi.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Pi\nIcon=pi-agent\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(apps.join("kde")).unwrap();
+        std::fs::write(
+            apps.join("kde").join("foo.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Foo\n",
+        )
+        .unwrap();
+        let dirs = [apps.clone()];
+
+        // The `.desktop` suffix is dropped, so the value matches an app_id.
+        assert_eq!(
+            source_app(Some("pi.desktop"), &dirs).unwrap().as_deref(),
+            Some("pi")
+        );
+        // The ID keeps the case it was found under.
+        assert_eq!(
+            source_app(Some("PI.DESKTOP"), &dirs).unwrap().as_deref(),
+            Some("pi")
+        );
+        // A subdirectory maps to a `-` in the ID.
+        assert_eq!(
+            source_app(Some("kde-foo.desktop"), &dirs)
+                .unwrap()
+                .as_deref(),
+            Some("kde-foo")
+        );
+        // A window class is not an ID: `--source` names a file.
+        std::fs::write(
+            apps.join("other.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Other\nStartupWMClass=missing.desktop\n",
+        )
+        .unwrap();
+        let missing = source_app(Some("missing.desktop"), &dirs).unwrap_err();
+        assert_eq!(missing.code, Code::InvalidArgument);
+        assert_eq!(missing.exit_code(), 2);
+        assert_eq!(
+            missing.message,
+            format!("no desktop entry `missing.desktop` in {}", apps.display())
+        );
+
+        let missing = source_app(Some("nope.desktop"), &dirs).unwrap_err();
+        assert_eq!(missing.code, Code::InvalidArgument);
+        assert_eq!(missing.exit_code(), 2);
+        assert_eq!(
+            missing.message,
+            format!("no desktop entry `nope.desktop` in {}", apps.display())
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_a_source_that_is_a_path_is_refused() {
+        let dirs: &[std::path::PathBuf] = &[];
+        for path in [
+            "/home/me/.local/share/applications/pi.desktop",
+            "apps/pi.desktop",
+            "~/pi.desktop",
+        ] {
+            let error = source_app(Some(path), dirs).unwrap_err();
+            assert_eq!(error.code, Code::InvalidArgument, "{path}");
+            assert_eq!(error.exit_code(), 2, "{path}");
+            assert!(
+                error.message.contains("~/.local/share/applications"),
+                "{path}: {}",
+                error.message
+            );
+        }
+    }
+
+    #[test]
+    fn test_a_copyq_entry_that_went_away_is_not_found() {
+        let error = copyq_text_error("item is no longer in the clipboard history");
+        assert_eq!(error.code, Code::NotFound);
+    }
+
+    #[test]
+    fn test_a_day_starts_at_its_midnight_in_a_fixed_zone() {
+        let zone = chrono::FixedOffset::east_opt(3600).unwrap();
+        let midnight = chrono::NaiveDate::from_ymd_opt(2026, 3, 29)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+        assert_eq!(
+            day_start_unix(&zone, midnight),
+            midnight.and_utc().timestamp() - 3600
+        );
+    }
+
+    #[test]
     fn test_errors_carry_a_stable_code() {
         let entries = [item("a1b2c3d4e5", ItemKind::Text, "newest")];
         let index = index_of(&entries);
@@ -3392,6 +3785,11 @@ mod tests {
             Code::Io
         );
         assert_eq!(
+            code(Error::from(super::super::clipboard_store::GONE.to_string())),
+            Code::NotFound,
+            "an entry removed while it was read"
+        );
+        assert_eq!(
             code(Error::new(Code::AmbiguousRef, "two entries")),
             Code::AmbiguousRef
         );
@@ -3403,6 +3801,7 @@ mod tests {
                 Code::IndexNotAllowed,
                 Code::NoBackend,
                 Code::RecorderNotRunning,
+                Code::DaemonOutdated,
                 Code::Unsupported,
                 Code::TooLarge,
                 Code::NoHistory,
@@ -3420,6 +3819,7 @@ mod tests {
                 "index_not_allowed",
                 "no_backend",
                 "recorder_not_running",
+                "daemon_outdated",
                 "unsupported",
                 "too_large",
                 "no_history",
@@ -3428,6 +3828,76 @@ mod tests {
                 "other",
             ]
         );
+    }
+
+    #[test]
+    fn test_a_failed_service_call_keeps_the_code_it_gave() {
+        use super::super::cache::{ErrorCode, SetFailure};
+        let cases = [
+            (SetFailure::DaemonOutdated(3), Code::DaemonOutdated),
+            (SetFailure::NotRunning, Code::RecorderNotRunning),
+            (
+                SetFailure::Failed(Some(ErrorCode::TooLarge), "too large: x".into()),
+                Code::TooLarge,
+            ),
+            (
+                SetFailure::Failed(
+                    Some(ErrorCode::InvalidArgument),
+                    "a MIME type cannot hold a control character".into(),
+                ),
+                Code::InvalidArgument,
+            ),
+            (
+                SetFailure::Failed(Some(ErrorCode::NotRecording), "not recording".into()),
+                Code::RecorderNotRunning,
+            ),
+            (
+                SetFailure::Failed(Some(ErrorCode::NotFound), "gone".into()),
+                Code::NotFound,
+            ),
+            (
+                SetFailure::Failed(Some(ErrorCode::Io), "database is locked".into()),
+                Code::Io,
+            ),
+            (
+                SetFailure::Failed(None, "the Raffi server closed the connection".into()),
+                Code::Io,
+            ),
+        ];
+        for (failure, expected) in cases {
+            assert_eq!(Error::from(failure).code, expected);
+        }
+        // The message an older service gives still explains itself.
+        let outdated = Error::from(SetFailure::DaemonOutdated(3));
+        assert!(outdated.message.contains("restart `raffi --cache-daemon`"));
+        assert!(
+            outdated.message.contains("protocol 3"),
+            "{}",
+            outdated.message
+        );
+    }
+
+    #[test]
+    fn test_a_failed_write_is_a_failure_of_the_command() {
+        struct Broken;
+        impl Write for Broken {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::from(std::io::ErrorKind::StorageFull))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let error = write_stdout(&mut Broken, b"content").unwrap_err();
+        assert_eq!(error.code, Code::Io);
+        assert!(error.message.contains("cannot write to stdout"), "{error}");
+        // Under --json it is still the one-line JSON error.
+        let value: serde_json::Value = serde_json::from_str(&error.json_line()).unwrap();
+        assert_eq!(value["code"], "io");
+
+        let mut good = Vec::new();
+        write_stdout(&mut good, b"content").unwrap();
+        assert_eq!(good, b"content");
     }
 
     #[test]

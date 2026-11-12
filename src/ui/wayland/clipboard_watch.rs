@@ -719,6 +719,7 @@ impl Core {
 }
 
 /// How a protocol run ended.
+#[derive(Debug)]
 enum RunError {
     /// The compositor lacks this protocol.
     Unsupported,
@@ -1060,8 +1061,11 @@ pub(crate) fn select(hash: &str) -> Result<(), String> {
 /// a failure the reconnect loop survives: offering a name the protocol
 /// library cannot turn into a C string aborts the thread otherwise.
 fn catch_panic(session: impl FnOnce() -> Result<(), RunError>) -> Result<(), RunError> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(session))
-        .unwrap_or_else(|_| Err(RunError::Failed("the clipboard recorder crashed".to_string())))
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(session)).unwrap_or_else(|_| {
+        Err(RunError::Failed(
+            "the clipboard recorder crashed".to_string(),
+        ))
+    })
 }
 
 /// Own the selection with `formats`, which the socket server has read and
@@ -1254,6 +1258,29 @@ mod tests {
         assert_eq!(data_for(&formats, "UTF8_STRING"), Some(&b"hi"[..]));
         assert_eq!(data_for(&formats, "image/png"), Some(&b"png"[..]));
         assert_eq!(data_for(&formats, OWN_MIME), None);
+    }
+
+    #[test]
+    fn test_a_panicking_session_is_reported_not_fatal() {
+        // A malformed name reaching `offer` panics inside the protocol
+        // library; the recorder has to survive it and reconnect.
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let panicked = catch_panic(|| panic!("boom"));
+        let fine = catch_panic(|| Ok(()));
+        std::panic::set_hook(previous);
+        assert!(
+            matches!(&panicked, Err(RunError::Failed(message)) if message.contains("crashed")),
+            "{panicked:?}"
+        );
+        assert!(fine.is_ok());
+    }
+
+    #[test]
+    fn test_serving_refuses_a_format_the_protocol_cannot_offer() {
+        let error = set(None, vec![("text/plain\u{0}".to_string(), b"hi".to_vec())]).unwrap_err();
+        assert!(error.contains("cannot offer a format"), "{error}");
+        assert!(!error.contains('\u{0}'), "{error}");
     }
 
     fn test_core(loads: mpsc::Sender<Load>) -> Core {

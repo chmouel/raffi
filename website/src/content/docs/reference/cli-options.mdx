@@ -338,12 +338,15 @@ The command exits 0 on success, 1 on an error, printed as `raffi clipboard:
 ...` on stderr, and 2 on a usage error. With `--json` an error prints a single
 line on stderr instead, `{"error": "<message>", "code": "<code>"}`, so a script
 can branch on the `code`: `not_found`, `ambiguous_ref`, `invalid_ref`,
-`index_not_allowed`, `no_backend`, `recorder_not_running`, `unsupported`,
-`too_large`, `no_history`, `io`, `invalid_argument` or `other`. The exit code
+`index_not_allowed`, `no_backend`, `recorder_not_running`, `daemon_outdated`,
+`unsupported`, `too_large`, `no_history`, `io`, `invalid_argument` or `other`. The exit code
 still says what happened: 1, or 2 for a value that does not parse, such as a
-bad `--since`. It does not open the window, scan applications or write schema
-files, but loading the configuration still migrates an old v0 config to the v1
-`launchers:` format, as any other raffi launch does.
+bad `--since`. It does not open the window, run launcher discovery or write
+schema files: apart from the history it reads only the desktop entries under
+the XDG application directories, and only to name a source it prints (a JSON
+row with a `source`) or checks (`set --source NAME.desktop`). Loading the
+configuration still migrates an old v0 config to the v1 `launchers:` format, as
+any other raffi launch does.
 
 ```bash
 raffi clipboard                       # the whole history
@@ -352,7 +355,7 @@ raffi clipboard list -k image --json  # images, one JSON object per line
 raffi clipboard show 1 > out.png      # export an image
 raffi clipboard show --formats 3fa9c1d2e0
 raffi clipboard copy 1
-raffi clipboard set git status --short
+raffi clipboard set "git status --short"
 raffi clipboard delete 3fa9c1d2e0 a81be0c44f
 raffi clipboard clear -y
 raffi clipboard status --json
@@ -366,7 +369,9 @@ to appear in the entry, matched like the browser's search. `-k, --kind`
 `--all` (include text shorter than `min_chars`) and `--json` narrow or reshape
 the listing. Entries matching `exclude_patterns` are never listed. A JSON row
 also carries the search `tier`: 0 when the text starts with the query, 1 when
-it contains it, 2 when it has every word. An image row carries its pixel
+it contains it, 2 when it has every word, and `source_name`: the `Name=` of the
+desktop entry the row's `source` names, null when a plain label names none or
+the entry has no source. An image row carries its pixel
 `width` and `height` (null for anything else), read from the stored header, so
 its preview reads `PNG image 1920×1080` and the terminal table adds the stored
 size, `PNG image 1920×1080 · 1.2 MB`; the CopyQ backend leaves both fields null
@@ -409,7 +414,7 @@ note on stderr, `raffi clipboard: output truncated to N of M bytes`. Under
 Put one entry back on the clipboard with all of its formats. With the `raffi`
 backend, `raffi --cache-daemon` has to be running.
 
-**`set [--mime TYPE] [--temporary] [--secret] [--json] [TEXT...]`**
+**`set [--mime TYPE] [--source APP] [--temporary] [--secret] [--json] [TEXT...]`**
 
 Put new content on the clipboard and record it in the history, the way a copy
 from another application would be. `TEXT` words are joined by single spaces;
@@ -417,17 +422,30 @@ without them the whole input is read, and a terminal is never read, so a bare
 `raffi clipboard set` is an error. `--mime` says what the content is
 (`text/plain` when absent): text has to be UTF-8 and plain text is offered
 under the usual aliases, while any other type passes its bytes through, up to
-`max_image_size` for images and 16 MiB otherwise. `--temporary` records a
-temporary entry whatever the patterns say, `--secret` adds the
+`max_image_size` for images and 16 MiB otherwise. `--source APP` records `APP`
+as the app the copy came from, trimmed, at most 128 bytes and without control
+characters, which is the `source` the listing shows and the JSON row reports;
+without it the entry has no source. A plain `APP` is a free label, kept as it
+is. One ending in `.desktop` is a desktop entry ID, looked up in the XDG
+application directories, exact ID first and another case only when one entry
+spells it that way, and stored without that suffix, so
+`--source org.gnome.Nautilus.desktop` records `org.gnome.Nautilus`, the app_id
+a compositor reports; a path is refused, and so is an ID no file there names,
+with a usage error listing the directories. The entry the source names gives
+the row its icon (`Icon=`) and the name the preview pane shows (`Name=`, or
+its `Name[xx]` for your message locale), matched by ID or by
+`StartupWMClass`, and the JSON row reports that name as
+`source_name`. `--temporary` records a temporary entry
+whatever the patterns say, `--secret` adds the
 `x-kde-passwordManagerHint: secret` marker and leaves the content to
 `temporary_password_manager`, and `--json` prints `{"id": ..., "recorded":
 ..., "expires_at": ..., "expires_at_iso": ...}` instead of the entry id, with
 the deadline as unix seconds and as RFC 3339. Content `exclude_patterns`
 hides goes on the clipboard but is not recorded, and nothing is printed then.
 With the `raffi` backend `raffi --cache-daemon` has to be running, and a
-service from an older Raffi has to be restarted first. CopyQ stores the
-content in its own history but hands out no id, and rejects `--temporary` and
-`--secret`.
+service from an older Raffi has to be restarted first, which `set` reports as
+`daemon_outdated`. CopyQ stores the content in its own history but hands out
+no id, and rejects `--temporary`, `--secret` and `--source`.
 
 **`delete REF...`**
 

@@ -1814,6 +1814,9 @@ impl LauncherApp {
         if let Some(time) = &copied {
             metadata.push(("Copied".to_string(), time.clone()));
         }
+        if let Some(source) = self.clipboard_source_name(item) {
+            metadata.push(("Source".to_string(), source));
+        }
         match self.clipboard.preview(&item.id) {
             None => bodies.push(PreviewBody::Prose {
                 heading: None,

@@ -36,6 +36,8 @@ pub(crate) const TAB: &str = "raffi";
 pub(crate) const MAX_TEXT_BYTES: usize = 16 * 1024 * 1024;
 /// Longest MIME name a format may carry, its parameters included.
 pub(crate) const MAX_MIME_BYTES: usize = 256;
+/// Longest app name recorded as the source of a copy.
+pub(crate) const MAX_SOURCE_BYTES: usize = 128;
 /// Start of a stored image read to find its pixel size without loading it.
 const IMAGE_HEADER_BYTES: usize = 64 * 1024;
 /// Next history position, computed inside the statement that assigns it so
@@ -482,7 +484,8 @@ impl Store {
         }
         for (mime, _) in &mut formats {
             *mime = canonical_mime(mime);
-        }        for (mime, data) in &formats {
+        }
+        for (mime, data) in &formats {
             let limit = if mime.starts_with("image/") {
                 limits.max_image_size
             } else {
@@ -1205,6 +1208,25 @@ pub(crate) fn canonical_mime(mime: &str) -> String {
     }
 }
 
+/// The app name a `clipboard set` records as the source of the copy: trimmed,
+/// non-empty, of at most [`MAX_SOURCE_BYTES`] bytes and free of control
+/// characters, since it is shown in the listing and the JSON output.
+pub(crate) fn validate_source(source: &str) -> Result<String, String> {
+    let source = source.trim();
+    if source.is_empty() {
+        return Err("an app name cannot be empty".to_string());
+    }
+    if source.chars().any(char::is_control) {
+        return Err("an app name cannot hold a control character".to_string());
+    }
+    if source.len() > MAX_SOURCE_BYTES {
+        return Err(format!(
+            "an app name cannot be longer than {MAX_SOURCE_BYTES} bytes"
+        ));
+    }
+    Ok(source.to_string())
+}
+
 /// Whether `mime` is a name a selection can offer: `type/subtype` of RFC 6838
 /// token characters, optional parameters after a `;`, no control character
 /// and at most [`MAX_MIME_BYTES`] bytes. Wayland turns the name into a C
@@ -1227,13 +1249,19 @@ pub(crate) fn validate_mime(mime: &str) -> Result<(), String> {
         None => (mime, None),
     };
     let token = |value: &str| !value.is_empty() && value.chars().all(is_token_char);
-    let Some((kind, subtype)) = base.split_once('/') else {
-        return Err("a MIME type needs a `type/subtype` shape".to_string());
+    // A bare name is not a MIME type, but a selection offers some as atoms:
+    // `x-kde-passwordManagerHint` marks a password-manager secret.
+    let (kind, subtype) = match base.split_once('/') {
+        Some((kind, subtype)) => (kind, Some(subtype)),
+        None if token(base) => (base, None),
+        None => return Err("a MIME type needs a `type/subtype` shape".to_string()),
     };
-    if !token(kind) || !token(subtype) {
-        return Err("the type and subtype of a MIME type are letters, digits and the \
+    if !token(kind) || subtype.is_some_and(|subtype| !token(subtype)) {
+        return Err(
+            "the type and subtype of a MIME type are letters, digits and the \
                     symbols `!#$%&'*+-.^_`|~`"
-            .to_string());
+                .to_string(),
+        );
     }
     if let Some(parameters) = parameters {
         if parameters.trim().is_empty() {
@@ -2605,6 +2633,104 @@ mod tests {
         assert!(store.preview(&text_id, NOW).is_err());
         assert!(store.delete(&text_id).is_err());
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_text_type_keeps_its_meaning_with_parameters() {
+        // A browser offers the parameters; the entry is still an HTML entry
+        // with searchable text, so the policy can see what it holds.
+        let formats = vec![(
+            "text/html;charset=utf-8".to_string(),
+            b"<p>secret: hunter2</p>".to_vec(),
+        )];
+        assert_eq!(
+            text_of(&formats).split_whitespace().collect::<Vec<_>>(),
+            ["secret:", "hunter2"]
+        );
+        assert_eq!(
+            recognized_mime("Text/HTML; charset=UTF-8"),
+            Some("text/html")
+        );
+        assert_eq!(
+            recognized_mime("TEXT/PLAIN;charset=utf-8"),
+            Some("text/plain")
+        );
+        assert_eq!(recognized_mime("text/uri-list"), Some("text/uri-list"));
+        assert_eq!(recognized_mime("image/png"), None);
+        assert_eq!(canonical_mime(" text/plain;charset=utf-8 "), "text/plain");
+        assert_eq!(canonical_mime("image/png"), "image/png");
+
+        let (mut store, dir) = temp_store("mime-parameters");
+        let policy = Policy {
+            exclude: vec![regex::Regex::new("hunter2").unwrap()],
+            ..Policy::default()
+        };
+        assert_eq!(
+            store.insert_filtered(
+                Capture {
+                    formats,
+                    copied_at: 1,
+                    source: None,
+                    password_marked: false,
+                },
+                &LIMITS,
+                &policy,
+                NOW,
+            ),
+            Err(Skipped::Excluded),
+            "an excluded pattern sees HTML that came with a charset"
+        );
+
+        // What is recorded is stored under the name it is looked up by, and
+        // its text is searchable.
+        let id = store
+            .insert(
+                Capture {
+                    formats: vec![(
+                        "text/html;charset=utf-8".into(),
+                        b"<p>Tom &amp; Jerry</p>".to_vec(),
+                    )],
+                    copied_at: 2,
+                    source: None,
+                    password_marked: false,
+                },
+                &LIMITS,
+                NOW,
+            )
+            .unwrap();
+        let page = store.list("Jerry", "", 0, &[], NOW).unwrap();
+        assert_eq!(page.items[0].id, id);
+        assert_eq!(page.items[0].kind, ItemKind::Html);
+        assert_eq!(page.items[0].formats, ["text/html"]);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn only_mime_names_a_selection_can_offer_validate() {
+        for valid in [
+            "text/plain",
+            "text/plain;charset=utf-8",
+            "image/svg+xml",
+            "application/vnd.oasis.opendocument.text",
+            "x-kde-passwordManagerHint",
+        ] {
+            assert!(validate_mime(valid).is_ok(), "{valid}");
+        }
+        // Surrounding whitespace is trimmed rather than refused.
+        assert!(validate_mime(" text/plain\n").is_ok());
+        for invalid in [
+            "",
+            "   ",
+            "text/plain\u{0}",
+            "text/plain\u{1b}[31m",
+            "no slash",
+            "/plain",
+            "text/",
+            "text pl/ain",
+            "text/plain;\u{0}",
+        ] {
+            assert!(validate_mime(invalid).is_err(), "{invalid:?}");
+        }
     }
 
     #[test]

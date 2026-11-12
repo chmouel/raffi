@@ -1155,6 +1155,7 @@ impl LauncherApp {
                 selected_item,
                 icon_map,
                 desktop_icon_map,
+                desktop_entries: None,
                 no_icons,
                 launcher_icon_paths,
                 mru_map,

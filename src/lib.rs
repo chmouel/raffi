@@ -2503,6 +2503,12 @@ pub struct ClipboardSetArgs {
     pub temporary: bool,
     #[options(help = "mark the content as a password-manager secret", no_short)]
     pub secret: bool,
+    #[options(
+        help = "app to record as the source of the copy, a name or a NAME.desktop ID",
+        no_short,
+        meta = "APP"
+    )]
+    pub source: Option<String>,
     #[options(help = "print the recorded entry as one JSON object", no_short)]
     pub json: bool,
     #[options(
@@ -4418,6 +4424,283 @@ fn desktop_entry_icon_map_from_dirs(
 
 pub(crate) fn read_desktop_icon_map() -> HashMap<String, String> {
     desktop_entry_icon_map_from_dirs(&desktop_entry_dirs(), &DefaultBinaryChecker)
+}
+
+/// What a desktop entry says about its application.
+#[cfg_attr(not(feature = "wayland"), allow(dead_code))]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct DesktopEntry {
+    /// The desktop file ID, without its `.desktop` suffix.
+    pub id: String,
+    pub name: Option<String>,
+    pub icon: Option<String>,
+}
+
+/// The desktop entries of the `applications` directories, reachable by ID or
+/// by window class, so a copy recorded from an app finds its name and icon
+/// however the compositor spelled its app_id.
+#[cfg_attr(not(feature = "wayland"), allow(dead_code))]
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DesktopEntries {
+    /// The entries a source can resolve to, by their exact, case-sensitive ID.
+    by_id: HashMap<String, DesktopEntry>,
+    /// Every exact ID a file claimed, hidden tombstones included: the first
+    /// file for an ID wins, so a later directory cannot bring it back.
+    claimed: HashSet<String>,
+    /// Lowercased ID to the exact IDs spelling it, for a case-folded lookup.
+    by_lower: HashMap<String, Vec<String>>,
+    /// Lowercased `StartupWMClass` to the exact ID of the entry declaring it.
+    by_wm_class: HashMap<String, String>,
+}
+
+/// The desktop file ID of `path` found under `dir`: the path below the
+/// directory, its separators turned into `-`.
+#[cfg_attr(not(feature = "wayland"), allow(dead_code))]
+fn desktop_file_id(path: &Path, dir: &Path) -> String {
+    let relative = path
+        .strip_prefix(dir)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('/', "-");
+    match relative.strip_suffix(".desktop") {
+        Some(id) => id.to_string(),
+        None => relative,
+    }
+}
+
+/// Whether `character` is a bidirectional override, which can reorder the text
+/// drawn after it.
+fn is_bidi_override(character: char) -> bool {
+    matches!(character, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+}
+
+/// `text` as it may be shown to a person: C0 controls, DEL and C1 controls
+/// become a space, and the bidi overrides that reorder text are dropped.
+pub(crate) fn sanitize_display_text(text: &str) -> String {
+    let mut clean = String::with_capacity(text.len());
+    for character in text.chars() {
+        if is_bidi_override(character) {
+            continue;
+        }
+        clean.push(if character.is_control() {
+            ' '
+        } else {
+            character
+        });
+    }
+    clean
+}
+
+/// The message locale the desktop entries should be named in: `LC_ALL` first,
+/// then `LC_MESSAGES`, then `LANG`.
+fn message_locale() -> String {
+    message_locale_from(|name| std::env::var(name).ok())
+}
+
+/// `message_locale` over `var`; an empty variable counts as unset.
+fn message_locale_from(var: impl Fn(&str) -> Option<String>) -> String {
+    ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .into_iter()
+        .find_map(|name| var(name).filter(|value| !value.is_empty()))
+        .unwrap_or_default()
+}
+
+/// The `Name[xx]` keys a desktop entry may hold for `locale`, most specific
+/// first: `fr_FR@euro` also accepts `fr_FR`, `fr@euro` and `fr`.
+fn desktop_locale_candidates(locale: &str) -> Vec<String> {
+    let locale = locale.trim();
+    let (locale, modifier) = match locale.split_once('@') {
+        Some((locale, modifier)) => (locale, Some(modifier)),
+        None => (locale, None),
+    };
+    // The encoding takes no part in the match.
+    let locale = locale.split('.').next().unwrap_or_default();
+    if locale.is_empty() || locale == "C" || locale == "POSIX" {
+        return Vec::new();
+    }
+    let (language, country) = match locale.split_once('_') {
+        Some((language, country)) => (language, Some(country)),
+        None => (locale, None),
+    };
+
+    let modifier = modifier.filter(|modifier| !modifier.is_empty());
+    let keys = match country {
+        Some(country) => vec![format!("{language}_{country}"), language.to_string()],
+        None => vec![language.to_string()],
+    };
+    let mut candidates = Vec::new();
+    for key in keys {
+        if let Some(modifier) = modifier {
+            candidates.push(format!("{key}@{modifier}"));
+        }
+        candidates.push(key);
+    }
+    candidates
+}
+
+/// `fr_FR.UTF-8@euro` without its encoding: `fr_FR@euro`.
+fn without_encoding(locale: &str) -> String {
+    let (locale, modifier) = match locale.split_once('@') {
+        Some((locale, modifier)) => (locale, Some(modifier)),
+        None => (locale, None),
+    };
+    let locale = locale.split('.').next().unwrap_or_default();
+    match modifier {
+        Some(modifier) => format!("{locale}@{modifier}"),
+        None => locale.to_string(),
+    }
+}
+
+/// The `Name[xx]` values of an entry, by locale without the encoding. Keys
+/// are visited in order, so `Name[sr_RS]` wins over `Name[sr_RS.UTF-8]`.
+fn localized_desktop_names(keys: &HashMap<String, String>) -> HashMap<String, String> {
+    let mut names = HashMap::new();
+    let mut sorted: Vec<_> = keys.iter().collect();
+    sorted.sort();
+    for (key, value) in sorted {
+        let Some(locale) = key
+            .strip_prefix("Name[")
+            .and_then(|key| key.strip_suffix(']'))
+        else {
+            continue;
+        };
+        names
+            .entry(without_encoding(locale))
+            .or_insert_with(|| value.clone());
+    }
+    names
+}
+
+/// The name of an entry in `locale`, falling back to its plain `Name`. The
+/// value is sanitized once, here, so no display of it has to.
+fn desktop_entry_name(keys: &HashMap<String, String>, locale: &str) -> Option<String> {
+    let candidates = desktop_locale_candidates(locale);
+    let localized = if candidates.is_empty() {
+        None
+    } else {
+        let names = localized_desktop_names(keys);
+        candidates
+            .into_iter()
+            .find_map(|candidate| names.get(&candidate).cloned())
+    };
+    let name = localized
+        .as_deref()
+        .or_else(|| keys.get("Name").map(String::as_str));
+    let name = sanitize_display_text(name?);
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+#[cfg_attr(not(feature = "wayland"), allow(dead_code))]
+impl DesktopEntries {
+    pub(crate) fn from_dirs(dirs: &[PathBuf]) -> Self {
+        Self::from_dirs_with_locale(dirs, &message_locale())
+    }
+
+    /// `locale` picks the `Name[xx]` to prefer. Tests pass it rather than
+    /// setting the process locale, which they share.
+    pub(crate) fn from_dirs_with_locale(dirs: &[PathBuf], locale: &str) -> Self {
+        let mut entries = Self::default();
+
+        for dir in dirs {
+            if !dir.exists() {
+                continue;
+            }
+
+            for entry in walkdir::WalkDir::new(dir)
+                .follow_links(true)
+                .sort_by_file_name()
+                .into_iter()
+                .filter_map(Result::ok)
+            {
+                if !entry.file_type().is_file() {
+                    continue;
+                }
+                if entry.path().extension().and_then(|ext| ext.to_str()) != Some("desktop") {
+                    continue;
+                }
+
+                let Ok(contents) = fs::read_to_string(entry.path()) else {
+                    continue;
+                };
+                let keys = parse_desktop_entry_keys(&contents);
+                if keys.is_empty() {
+                    continue;
+                }
+
+                let id = desktop_file_id(entry.path(), dir);
+                if !entries.claimed.insert(id.clone()) {
+                    continue;
+                }
+                entries
+                    .by_lower
+                    .entry(id.to_lowercase())
+                    .or_default()
+                    .push(id.clone());
+                // `Hidden=true` is a deletion: the ID keeps its place, so the
+                // file it hides stays hidden, but nothing resolves to it.
+                if keys.get("Hidden").is_some_and(|value| parse_bool(value)) {
+                    continue;
+                }
+                if let Some(class) = keys.get("StartupWMClass") {
+                    entries
+                        .by_wm_class
+                        .entry(class.to_lowercase())
+                        .or_insert_with(|| id.clone());
+                }
+                entries.by_id.insert(
+                    id.clone(),
+                    DesktopEntry {
+                        id,
+                        name: desktop_entry_name(&keys, locale),
+                        icon: keys.get("Icon").cloned(),
+                    },
+                );
+            }
+        }
+
+        entries
+    }
+
+    /// The entry with this desktop file ID, with or without the `.desktop`
+    /// suffix. Another case is accepted only when one entry spells the ID
+    /// that way: two spellings make it ambiguous, not a guess.
+    pub(crate) fn resolve_id(&self, source: &str) -> Option<&DesktopEntry> {
+        let source = source.trim();
+        let suffix = ".desktop";
+        let id = match source.get(source.len().saturating_sub(suffix.len())..) {
+            Some(end) if end.eq_ignore_ascii_case(suffix) => &source[..source.len() - suffix.len()],
+            _ => source,
+        };
+        if let Some(entry) = self.by_id.get(id) {
+            return Some(entry);
+        }
+        let known = self.by_lower.get(&id.to_lowercase())?;
+        let [only] = known.as_slice() else {
+            return None;
+        };
+        self.by_id.get(only)
+    }
+
+    /// The entry `source` names: its desktop file ID, or the entry declaring
+    /// it as its `StartupWMClass`.
+    pub(crate) fn resolve(&self, source: &str) -> Option<&DesktopEntry> {
+        self.resolve_id(source).or_else(|| {
+            self.by_wm_class
+                .get(&source.trim().to_lowercase())
+                .and_then(|id| self.by_id.get(id))
+        })
+    }
+}
+
+#[cfg_attr(not(feature = "wayland"), allow(dead_code))]
+pub(crate) fn read_desktop_entries() -> DesktopEntries {
+    // Tests must not read the user's directories; they build the entries
+    // they need with `from_dirs`, as they do for the icon caches.
+    if cfg!(test) {
+        return DesktopEntries::default();
+    }
+    DesktopEntries::from_dirs(&desktop_entry_dirs())
 }
 
 pub(crate) fn resolve_icon_reference(
@@ -6636,6 +6919,7 @@ launchers:
         assert_eq!(set.mime, None);
         assert!(!set.temporary);
         assert!(!set.secret);
+        assert_eq!(set.source, None);
         assert!(!set.json);
         assert!(set.text.is_empty(), "no content reads the input");
 
@@ -6646,6 +6930,8 @@ launchers:
             "image/png",
             "--temporary",
             "--secret",
+            "--source",
+            "pi",
             "--json",
             "one",
             "two",
@@ -6660,6 +6946,7 @@ launchers:
         assert_eq!(set.mime.as_deref(), Some("image/png"));
         assert!(set.temporary);
         assert!(set.secret);
+        assert_eq!(set.source.as_deref(), Some("pi"));
         assert!(set.json);
         assert_eq!(set.text, ["one", "two"]);
     }
@@ -8000,6 +8287,290 @@ Icon=firefox
         assert_eq!(icon_map.get("firefox"), Some(&"firefox".to_string()));
         assert!(!icon_map.contains_key("/usr/bin/env"));
         assert!(!icon_map.contains_key("env"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_desktop_entries_resolve_an_id_or_a_window_class() {
+        let dir = temp_test_dir("desktop-entries");
+        let apps_dir = dir.join("applications");
+        fs::create_dir_all(apps_dir.join("kde")).unwrap();
+
+        fs::write(
+            apps_dir.join("org.gnome.Nautilus.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Files\nIcon=org.gnome.Nautilus\n",
+        )
+        .unwrap();
+        fs::write(
+            apps_dir.join("vscode.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Visual Studio Code\nIcon=vscode\nStartupWMClass=Code\n",
+        )
+        .unwrap();
+        // A subdirectory maps to a `-` in the ID.
+        fs::write(
+            apps_dir.join("kde").join("foo.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Foo\n",
+        )
+        .unwrap();
+        fs::write(apps_dir.join("empty.desktop"), "not a desktop file\n").unwrap();
+
+        let entries = DesktopEntries::from_dirs(&[apps_dir]);
+
+        let nautilus = entries.resolve("org.gnome.Nautilus").unwrap();
+        assert_eq!(nautilus.id, "org.gnome.Nautilus");
+        assert_eq!(nautilus.name.as_deref(), Some("Files"));
+        assert_eq!(nautilus.icon.as_deref(), Some("org.gnome.Nautilus"));
+        assert_eq!(
+            entries.resolve("ORG.GNOME.NAUTILUS.DESKTOP").map(|e| &e.id),
+            Some(&"org.gnome.Nautilus".to_string())
+        );
+        assert_eq!(
+            entries.resolve("kde-foo.desktop").map(|e| &e.id),
+            Some(&"kde-foo".to_string())
+        );
+        assert_eq!(
+            entries.resolve("Code").map(|e| &e.id),
+            Some(&"vscode".to_string()),
+            "a window class resolves through StartupWMClass"
+        );
+        assert_eq!(
+            entries.resolve_id("Code").map(|e| &e.id),
+            None,
+            "an ID-only lookup ignores StartupWMClass"
+        );
+        assert!(entries.resolve("nothing").is_none());
+        assert!(entries.resolve("empty").is_none());
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_desktop_entry_ids_stay_case_sensitive() {
+        let dir = temp_test_dir("desktop-entries-case");
+        let user = dir.join("user/applications");
+        let system = dir.join("system/applications");
+        fs::create_dir_all(&user).unwrap();
+        fs::create_dir_all(&system).unwrap();
+        fs::write(
+            user.join("Foo.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Upper\n",
+        )
+        .unwrap();
+        fs::write(
+            system.join("foo.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Lower\n",
+        )
+        .unwrap();
+        // Two spellings in one directory are distinct IDs too.
+        fs::write(
+            user.join("Bar.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Bar Upper\n",
+        )
+        .unwrap();
+        fs::write(
+            user.join("bar.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Bar Lower\n",
+        )
+        .unwrap();
+
+        let entries = DesktopEntries::from_dirs(&[user.clone(), system.clone()]);
+        let name = |source: &str| entries.resolve_id(source).and_then(|e| e.name.clone());
+
+        assert_eq!(name("Foo").as_deref(), Some("Upper"));
+        assert_eq!(name("Foo.desktop").as_deref(), Some("Upper"));
+        assert_eq!(name("foo").as_deref(), Some("Lower"));
+        assert_eq!(name("Bar").as_deref(), Some("Bar Upper"));
+        assert_eq!(name("bar").as_deref(), Some("Bar Lower"));
+        assert_eq!(
+            name("FOO"),
+            None,
+            "two spellings make the case-insensitive lookup ambiguous"
+        );
+        assert_eq!(name("BAR"), None);
+        // A user file still overrides the system one under the same exact ID.
+        fs::write(
+            system.join("Foo.desktop"),
+            "[Desktop Entry]\nType=Application\nName=System Upper\n",
+        )
+        .unwrap();
+        let entries = DesktopEntries::from_dirs(&[user.clone(), system.clone()]);
+        assert_eq!(
+            entries.resolve_id("Foo").and_then(|e| e.name.clone()),
+            Some("Upper".to_string())
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_a_hidden_desktop_entry_reserves_its_id() {
+        let dir = temp_test_dir("desktop-entries-hidden");
+        let user = dir.join("user/applications");
+        let system = dir.join("system/applications");
+        fs::create_dir_all(&user).unwrap();
+        fs::create_dir_all(&system).unwrap();
+        fs::write(
+            user.join("app.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Old App\nIcon=old\nHidden=true\nStartupWMClass=OldClass\n",
+        )
+        .unwrap();
+        fs::write(
+            system.join("app.desktop"),
+            "[Desktop Entry]\nType=Application\nName=New App\nIcon=new\n",
+        )
+        .unwrap();
+        fs::write(
+            system.join("nodisplay.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Hidden From Menus\nNoDisplay=true\n",
+        )
+        .unwrap();
+
+        let entries = DesktopEntries::from_dirs(&[user, system]);
+
+        assert!(
+            entries.resolve("app").is_none(),
+            "Hidden=true deletes the entry and hides the file it shadows"
+        );
+        assert!(entries.resolve("app.desktop").is_none());
+        assert!(entries.resolve_id("APP").is_none());
+        assert!(
+            entries.resolve("OldClass").is_none(),
+            "a hidden entry declares no window class"
+        );
+        assert_eq!(
+            entries
+                .resolve("nodisplay")
+                .and_then(|entry| entry.name.clone()),
+            Some("Hidden From Menus".to_string()),
+            "NoDisplay keeps its metadata available"
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_desktop_entries_reach_nested_subdirectories() {
+        let dir = temp_test_dir("desktop-entries-nested");
+        let apps = dir.join("applications");
+        fs::create_dir_all(apps.join("vendor/tools")).unwrap();
+        fs::write(
+            apps.join("vendor/tools/foo.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Nested Foo\n",
+        )
+        .unwrap();
+
+        let entries = DesktopEntries::from_dirs(&[apps]);
+        assert_eq!(
+            entries
+                .resolve_id("vendor-tools-foo")
+                .and_then(|entry| entry.name.clone()),
+            Some("Nested Foo".to_string())
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_desktop_entries_prefer_a_localized_name() {
+        let dir = temp_test_dir("desktop-entries-locale");
+        let apps = dir.join("applications");
+        fs::create_dir_all(&apps).unwrap();
+        fs::write(
+            apps.join("files.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Files\nName[fr]=Fichiers\nName[fr_FR]=Fichiers français\nName[fr_CA.UTF-8]=Fichiers canadiens\nName[sr@latin]=Datoteke\nName[sr]=Фајлови\n",
+        )
+        .unwrap();
+        let name = |locale: &str| {
+            DesktopEntries::from_dirs_with_locale(std::slice::from_ref(&apps), locale)
+                .resolve_id("files")
+                .and_then(|entry| entry.name.clone())
+        };
+
+        assert_eq!(name("fr_FR.UTF-8").as_deref(), Some("Fichiers français"));
+        assert_eq!(
+            name("fr_CA.UTF-8").as_deref(),
+            Some("Fichiers canadiens"),
+            "the encoding is not part of the key"
+        );
+        assert_eq!(
+            name("fr_BE@euro").as_deref(),
+            Some("Fichiers"),
+            "a locale without its own name falls back to the language"
+        );
+        assert_eq!(name("sr_RS@latin").as_deref(), Some("Datoteke"));
+        assert_eq!(name("sr_RS").as_deref(), Some("Фајлови"));
+        assert_eq!(
+            name("es_ES").as_deref(),
+            Some("Files"),
+            "a locale no name matches falls back to the plain Name"
+        );
+        assert_eq!(name("C").as_deref(), Some("Files"));
+        assert_eq!(name("").as_deref(), Some("Files"));
+
+        fs::write(
+            apps.join("files.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Files\nName[sr_RS.UTF-8@latin]=Latin Files\n",
+        )
+        .unwrap();
+        assert_eq!(
+            name("sr_RS.UTF-8").as_deref(),
+            Some("Files"),
+            "a key keeps its modifier when its encoding is dropped"
+        );
+        assert_eq!(name("sr_RS@latin").as_deref(), Some("Latin Files"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_an_empty_locale_variable_counts_as_unset() {
+        let locale = |vars: &[(&str, &str)]| {
+            message_locale_from(|name| {
+                vars.iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| value.to_string())
+            })
+        };
+        assert_eq!(
+            locale(&[
+                ("LC_ALL", ""),
+                ("LC_MESSAGES", "fr_FR.UTF-8"),
+                ("LANG", "en_US")
+            ]),
+            "fr_FR.UTF-8"
+        );
+        assert_eq!(locale(&[("LC_ALL", "de_DE"), ("LANG", "en_US")]), "de_DE");
+        assert_eq!(locale(&[]), "");
+    }
+
+    #[test]
+    fn test_desktop_entry_names_are_sanitized_for_display() {
+        let dir = temp_test_dir("desktop-entries-sanitize");
+        let apps = dir.join("applications");
+        fs::create_dir_all(&apps).unwrap();
+        fs::write(
+            apps.join("evil.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Evil\u{1b}[31m\u{202e}txt\u{95}app\n",
+        )
+        .unwrap();
+        fs::write(
+            apps.join("empty.desktop"),
+            "[Desktop Entry]\nType=Application\nName=\u{7}\n",
+        )
+        .unwrap();
+
+        let entries = DesktopEntries::from_dirs_with_locale(&[apps], "C");
+        assert_eq!(
+            entries.resolve_id("evil").and_then(|e| e.name.clone()),
+            Some("Evil [31mtxt app".to_string()),
+            "controls and bidi overrides never reach a display"
+        );
+        assert_eq!(
+            entries.resolve_id("empty").and_then(|e| e.name.clone()),
+            None,
+            "a name of controls alone is no name"
+        );
 
         let _ = fs::remove_dir_all(dir);
     }
