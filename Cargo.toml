@@ -2,7 +2,7 @@
 authors = ["Chmouel Boudjnah <chmouel@chmouel.com>"]
 name = "raffi"
 description = "A fast, keyboard-driven launcher for Wayland desktops"
-version = "0.26.0"
+version = "0.27.0"
 edition = "2021"
 readme = "README.md"
 license = "Apache-2.0"
