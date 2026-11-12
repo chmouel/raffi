@@ -23,7 +23,7 @@ use std::sync::LazyLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chrono::{Local, NaiveDateTime, TimeZone};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
 use super::clipboard::{
     bounded_text, decode_image, inspect_files, ClipItem, ClipPreview, ItemKind, Page,
@@ -137,6 +137,52 @@ pub(crate) fn default_path() -> Result<PathBuf, String> {
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))
         .ok_or("cannot find the data directory: HOME is not set")?;
     Ok(base.join("raffi").join("clipboard.db"))
+}
+
+/// Whether this installation has a history database.
+pub(crate) fn exists() -> bool {
+    default_path().is_ok_and(|path| path.exists())
+}
+
+/// Bytes the history database and its write-ahead log take on disk.
+pub(crate) fn disk_usage() -> u64 {
+    let Ok(path) = default_path() else {
+        return 0;
+    };
+    let mut wal = path.as_os_str().to_owned();
+    wal.push("-wal");
+    [path, PathBuf::from(wal)]
+        .iter()
+        .map(|path| fs::metadata(path).map_or(0, |meta| meta.len()))
+        .sum()
+}
+
+/// What the history holds, for `raffi clipboard status`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Counts {
+    /// Every stored entry, expired ones included.
+    pub total: usize,
+    /// Entries still in the history at the time of the call.
+    pub alive: usize,
+    /// Entries that leave the history when their deadline passes.
+    pub temporary: usize,
+    /// Bytes of every stored format of the live entries.
+    pub bytes: u64,
+}
+
+/// SQL predicate on `items` for a kind filter, `None` for an unknown one.
+/// Listing and deletion both go through it, so a kind means the same thing in
+/// both and no unknown value ever reaches a `DELETE`.
+pub(crate) fn kind_predicate(kind: &str) -> Option<&'static str> {
+    Some(match kind {
+        "text" => "kind = 'text'",
+        "html" => "kind = 'html'",
+        "image" => "kind = 'image'",
+        "files" => "kind = 'files'",
+        "url" => "kind IN ('text', 'html') AND is_url = 1",
+        "other" => "kind = 'other'",
+        _ => return None,
+    })
 }
 
 pub(crate) struct Store {
@@ -306,6 +352,26 @@ impl Store {
         Self::open(&default_path()?)
     }
 
+    /// Open the history without creating a directory or a file, so a command
+    /// that only reads or reports never leaves a database behind.
+    pub(crate) fn open_existing() -> Result<Option<Self>, String> {
+        Self::open_existing_at(&default_path()?)
+    }
+
+    /// Like `open_existing`, at an explicit path. The open itself refuses to
+    /// create the file, so a database removed since the existence check
+    /// cannot come back as an empty one.
+    pub(crate) fn open_existing_at(path: &Path) -> Result<Option<Self>, String> {
+        if !path.exists() {
+            return Ok(None);
+        }
+        Self::open_read_write(path).map(Some)
+    }
+
+    fn open_read_write(path: &Path) -> Result<Self, String> {
+        Self::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)
+    }
+
     pub(crate) fn open(path: &Path) -> Result<Self, String> {
         if let Some(dir) = path.parent() {
             if !dir.exists() {
@@ -316,7 +382,14 @@ impl Store {
                     .map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
             }
         }
-        let conn = Connection::open(path).map_err(db_error)?;
+        Self::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
+        )
+    }
+
+    fn open_with_flags(path: &Path, flags: OpenFlags) -> Result<Self, String> {
+        let conn = Connection::open_with_flags(path, flags).map_err(db_error)?;
         // SQLite gives the WAL and shared memory files the same mode.
         let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
         conn.busy_timeout(BUSY_TIMEOUT).map_err(db_error)?;
@@ -626,11 +699,7 @@ impl Store {
             .map_err(db_error)?
             .unwrap_or_default();
 
-        let filter = match only_kind {
-            "image" => "kind = 'image'",
-            "url" => "kind IN ('text', 'html') AND is_url = 1",
-            _ => "1",
-        };
+        let filter = kind_predicate(only_kind).unwrap_or("1");
         // Words and phrase are matched in SQLite against the lowercased
         // `search` column, so only matching entries reach Rust. With
         // `?3` the phrase and `?4...` the words: tier 0 when the text starts
@@ -817,7 +886,9 @@ impl Store {
         Ok(formats)
     }
 
-    pub(crate) fn delete(&self, hash: &str) -> Result<(), String> {
+    /// Remove the entry `hash`. Reports whether the log was emptied, which
+    /// it cannot be while another connection reads it.
+    pub(crate) fn delete(&self, hash: &str) -> Result<bool, String> {
         let removed = self
             .conn
             .execute("DELETE FROM items WHERE hash = ?1", [hash])
@@ -825,8 +896,68 @@ impl Store {
         if removed == 0 {
             return Err("item is no longer in the clipboard history".into());
         }
-        self.truncate_wal();
-        Ok(())
+        Ok(self.truncate_wal())
+    }
+
+    /// Delete every entry matching the SQL `filter`, hidden and expired ones
+    /// included, and report how many entries went and whether the log was
+    /// emptied.
+    pub(crate) fn clear(&mut self, filter: &str) -> Result<(usize, bool), String> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(db_error)?;
+        tx.execute(
+            &format!("DELETE FROM formats WHERE item_id IN (SELECT id FROM items WHERE {filter})"),
+            [],
+        )
+        .map_err(db_error)?;
+        let removed = tx
+            .execute(&format!("DELETE FROM items WHERE {filter}"), [])
+            .map_err(db_error)?;
+        tx.commit().map_err(db_error)?;
+        Ok((removed, self.truncate_wal()))
+    }
+
+    /// Entries matching the SQL `filter`: every stored one, and how many are
+    /// still in the history at `now`.
+    pub(crate) fn count(&self, filter: &str, now: i64) -> Result<(usize, usize), String> {
+        let (total, alive): (i64, i64) = self
+            .conn
+            .query_row(
+                &format!(
+                    "SELECT COUNT(*), COALESCE(SUM(CASE WHEN {ALIVE} THEN 1 ELSE 0 END), 0)
+                     FROM items WHERE {filter}"
+                ),
+                [now],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(db_error)?;
+        Ok((total.max(0) as usize, alive.max(0) as usize))
+    }
+
+    /// Entries stored, entries alive at `now`, how many of those are
+    /// temporary, and the bytes they take.
+    pub(crate) fn counts(&self, now: i64) -> Result<Counts, String> {
+        let (total, alive) = self.count("1", now)?;
+        let (temporary, bytes): (i64, i64) = self
+            .conn
+            .query_row(
+                &format!(
+                    "SELECT COALESCE(SUM(CASE WHEN expires_at IS NOT NULL THEN 1 ELSE 0 END), 0),
+                             COALESCE(SUM(size), 0)
+                     FROM items WHERE {ALIVE}"
+                ),
+                [now],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(db_error)?;
+        Ok(Counts {
+            total,
+            alive,
+            temporary: temporary.max(0) as usize,
+            bytes: bytes.max(0) as u64,
+        })
     }
 
     /// Delete the entries that reached their deadline at `now`, with the
@@ -875,7 +1006,7 @@ impl Store {
     /// content of deleted entries does not stay in old log frames. Returns
     /// whether the log was emptied: it is not while another connection is
     /// reading, and the sweeper tries again later.
-    fn truncate_wal(&self) -> bool {
+    pub(crate) fn truncate_wal(&self) -> bool {
         self.conn
             .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
                 row.get::<_, i64>(0)
@@ -962,7 +1093,7 @@ fn kind_of(mimes: &[&str]) -> ItemKind {
     }
 }
 
-fn kind_name(kind: ItemKind) -> &'static str {
+pub(crate) fn kind_name(kind: ItemKind) -> &'static str {
     match kind {
         ItemKind::Text => "text",
         ItemKind::Image => "image",
@@ -1956,6 +2087,174 @@ mod tests {
         // Opening it again changes nothing.
         let store = Store::open(&path).unwrap();
         assert_eq!(store.list("", "", 0, &[], NOW).unwrap().items.len(), 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_clear_removes_every_entry_and_scrubs_the_log() {
+        let (mut store, dir) = temp_store("clear");
+        let secret = "zq-cleared-secret-1234";
+        store.insert(text(secret, 1), &LIMITS, NOW).unwrap();
+        store
+            .insert(text("keep me for now", 2), &LIMITS, NOW)
+            .unwrap();
+        store
+            .insert(
+                Capture {
+                    formats: vec![("image/png".into(), png(3, 2))],
+                    copied_at: 3,
+                    source: None,
+                    password_marked: false,
+                },
+                &LIMITS,
+                NOW,
+            )
+            .unwrap();
+        store
+            .insert_filtered(text("code: 9999", NOW), &LIMITS, &temporary_policy(60), NOW)
+            .unwrap();
+        assert_eq!(rows(&store), (4, 4));
+
+        // A reader still scanning keeps the log from being emptied.
+        let reader = Connection::open(dir.join("clipboard.db")).unwrap();
+        reader
+            .execute_batch("BEGIN; SELECT COUNT(*) FROM items;")
+            .unwrap();
+        let (removed, emptied) = store.clear("1").unwrap();
+        assert_eq!(removed, 4);
+        assert!(!emptied, "a concurrent reader keeps the log");
+        reader.execute_batch("COMMIT").unwrap();
+        drop(reader);
+        // The retry the CLI makes empties it, with this connection still open.
+        assert!(store.truncate_wal());
+        assert_eq!(rows(&store), (0, 0));
+        for name in ["clipboard.db", "clipboard.db-wal"] {
+            let bytes = fs::read(dir.join(name)).unwrap_or_default();
+            assert!(
+                !bytes
+                    .windows(secret.len())
+                    .any(|window| window == secret.as_bytes()),
+                "{secret} is still in {name}"
+            );
+        }
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_clear_can_keep_one_kind() {
+        let (mut store, dir) = temp_store("clear-kind");
+        store.insert(text("an entry", 1), &LIMITS, NOW).unwrap();
+        store.insert(text("short", 2), &LIMITS, NOW).unwrap();
+        store
+            .insert(
+                Capture {
+                    formats: vec![("image/png".into(), png(3, 2))],
+                    copied_at: 3,
+                    source: None,
+                    password_marked: false,
+                },
+                &LIMITS,
+                NOW,
+            )
+            .unwrap();
+        let (removed, _) = store.clear(kind_predicate("image").unwrap()).unwrap();
+        assert_eq!(removed, 1);
+        assert_eq!(
+            titles(&store.list("", "", 0, &[], NOW).unwrap()),
+            ["short", "an entry"]
+        );
+        // Only the image went, formats and all.
+        assert_eq!(rows(&store), (2, 2));
+
+        // Exclusions are not eligibility here: clear takes hidden entries too.
+        let exclude = [regex::Regex::new("^an").unwrap()];
+        assert_eq!(
+            titles(&store.list("", "", 0, &exclude, NOW).unwrap()),
+            ["short"]
+        );
+        assert_eq!(store.count("1", NOW).unwrap(), (2, 2));
+        assert_eq!(store.clear("1").unwrap().0, 2);
+        assert_eq!(rows(&store), (0, 0));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_kind_predicates_are_explicit() {
+        assert_eq!(kind_predicate("text"), Some("kind = 'text'"));
+        assert_eq!(kind_predicate("html"), Some("kind = 'html'"));
+        assert_eq!(kind_predicate("files"), Some("kind = 'files'"));
+        assert_eq!(kind_predicate("other"), Some("kind = 'other'"));
+        assert_eq!(kind_predicate("image"), Some("kind = 'image'"));
+        assert_eq!(
+            kind_predicate("url"),
+            Some("kind IN ('text', 'html') AND is_url = 1")
+        );
+        assert_eq!(kind_predicate("images"), None);
+        assert_eq!(kind_predicate(""), None);
+        assert_eq!(
+            DocumentedKinds::ALL,
+            ["text", "html", "image", "files", "url", "other"],
+            "the CLI accepts exactly these"
+        );
+    }
+
+    /// The `-k` values, so a new one has to be added here too.
+    struct DocumentedKinds;
+
+    impl DocumentedKinds {
+        const ALL: [&'static str; 6] = ["text", "html", "image", "files", "url", "other"];
+    }
+
+    #[test]
+    fn test_counts_report_the_live_entries() {
+        let (mut store, dir) = temp_store("counts");
+        store.insert(text("kept entry", 1), &LIMITS, NOW).unwrap();
+        store
+            .insert_filtered(text("code: 1234", NOW), &LIMITS, &temporary_policy(60), NOW)
+            .unwrap();
+        let counts = store.counts(NOW).unwrap();
+        assert_eq!((counts.total, counts.alive, counts.temporary), (2, 2, 1));
+        assert_eq!(counts.bytes, 10 + 10);
+        // The temporary entry is gone from the history, the row is not.
+        let counts = store.counts(NOW + 60).unwrap();
+        assert_eq!((counts.total, counts.alive, counts.temporary), (2, 1, 0));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_opening_an_absent_history_creates_nothing() {
+        // `default_path` refuses in tests, so this covers the branch the CLI
+        // takes on an installation without a database.
+        assert!(!exists());
+        assert!(Store::open_existing().is_err());
+        assert_eq!(disk_usage(), 0);
+
+        let dir = temp_dir("opening");
+        let path = dir.join("clipboard.db");
+        let mut store = Store::open(&path).unwrap();
+        store.insert(text("an entry", 1), &LIMITS, NOW).unwrap();
+        drop(store);
+        // Opening an existing file works; a missing one is not created here.
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.count("1", NOW).unwrap(), (1, 1));
+        drop(store);
+        let opened = Store::open_existing_at(&path).unwrap().unwrap();
+        assert_eq!(opened.count("1", NOW).unwrap(), (1, 1));
+        drop(opened);
+        let absent = dir.join("absent.db");
+        assert!(!absent.exists());
+        assert!(Store::open_existing_at(&absent).unwrap().is_none());
+        assert!(!absent.exists(), "the check must not create the file");
+        let orphan = dir.join("missing").join("clipboard.db");
+        assert!(Store::open_existing_at(&orphan).unwrap().is_none());
+        assert!(
+            !dir.join("missing").exists(),
+            "the check must not create the directory"
+        );
+        // Even when the file vanished after the check, the open cannot put
+        // an empty database back in its place.
+        assert!(Store::open_read_write(&absent).is_err());
+        assert!(!absent.exists());
         let _ = fs::remove_dir_all(dir);
     }
 

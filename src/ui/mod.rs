@@ -17,7 +17,7 @@ use self::wayland::WaylandUI;
 #[cfg(feature = "wayland")]
 pub(crate) use self::wayland::THUMBNAIL_DIR_NAME;
 #[cfg(feature = "wayland")]
-pub(crate) use self::wayland::{clear_wayland_caches, run_cache_daemon};
+pub(crate) use self::wayland::{clear_wayland_caches, run_cache_daemon, run_clipboard_cli};
 
 /// Font and padding sizes derived from the base font_size.
 /// All sizes scale proportionally from the base.
@@ -162,6 +162,14 @@ pub trait UI {
         addons: &AddonsConfig,
         settings: &UISettings,
     ) -> Result<String>;
+}
+
+/// Whether `fd` is a terminal, so only the commands that dress their output
+/// up for a human have to ask.
+#[cfg(feature = "wayland")]
+pub(crate) fn is_tty(fd: i32) -> bool {
+    // SAFETY: isatty only reads the state of the descriptor.
+    unsafe { libc::isatty(fd) == 1 }
 }
 
 pub fn get_ui(ui_type: UIType) -> Box<dyn UI> {

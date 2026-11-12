@@ -2403,6 +2403,154 @@ pub struct Args {
     pub cache_daemon: bool,
     #[options(help = "start with vim keybindings in normal mode", no_short)]
     pub vim_mode: bool,
+    #[options(command)]
+    pub command: Option<Subcommand>,
+}
+
+/// Subcommand to run instead of opening the launcher.
+#[derive(Debug, Options, Clone)]
+pub enum Subcommand {
+    #[options(help = "manage the clipboard history from the command line")]
+    Clipboard(ClipboardArgs),
+}
+
+/// `raffi clipboard`: the clipboard history, without the window.
+#[derive(Debug, Options, Clone, Default)]
+pub struct ClipboardArgs {
+    #[options(help = "print help message")]
+    pub help: bool,
+    #[options(command)]
+    pub action: Option<ClipboardCommand>,
+}
+
+/// Action of `raffi clipboard`. Without one, the history is listed.
+#[derive(Debug, Options, Clone)]
+pub enum ClipboardCommand {
+    #[options(help = "list the history, newest first")]
+    List(ClipboardListArgs),
+    #[options(help = "print one entry to stdout")]
+    Show(ClipboardShowArgs),
+    #[options(help = "put one entry back on the clipboard")]
+    Copy(ClipboardCopyArgs),
+    #[options(help = "delete entries")]
+    Delete(ClipboardDeleteArgs),
+    #[options(help = "delete every entry")]
+    Clear(ClipboardClearArgs),
+    #[options(help = "report the backend, the recorder and the history size")]
+    Status(ClipboardStatusArgs),
+}
+
+#[derive(Debug, Options, Clone, Default)]
+pub struct ClipboardListArgs {
+    #[options(help = "print help message")]
+    pub help: bool,
+    #[options(help = "only entries of this kind", short = "k", meta = "KIND")]
+    pub kind: Option<ClipboardKind>,
+    #[options(help = "stop after N entries", short = "n", meta = "N")]
+    pub limit: Option<usize>,
+    #[options(
+        help = "also list text shorter than addons.clipboard.min_chars",
+        no_short
+    )]
+    pub all: bool,
+    #[options(help = "print one JSON object per entry", no_short)]
+    pub json: bool,
+    #[options(free, help = "words to search for")]
+    pub query: Vec<String>,
+}
+
+#[derive(Debug, Options, Clone, Default)]
+pub struct ClipboardShowArgs {
+    #[options(help = "print help message")]
+    pub help: bool,
+    #[options(help = "export exactly the format MIME", no_short, meta = "MIME")]
+    pub mime: Option<String>,
+    #[options(help = "list the formats of the entry and their size", no_short)]
+    pub formats: bool,
+    #[options(help = "print the entry's metadata instead", no_short)]
+    pub json: bool,
+    #[options(free, help = "entry to export: an index or an id prefix")]
+    pub reference: Vec<String>,
+}
+
+#[derive(Debug, Options, Clone, Default)]
+pub struct ClipboardCopyArgs {
+    #[options(help = "print help message")]
+    pub help: bool,
+    #[options(free, help = "entry to copy: an index or an id prefix")]
+    pub reference: Vec<String>,
+}
+
+#[derive(Debug, Options, Clone, Default)]
+pub struct ClipboardDeleteArgs {
+    #[options(help = "print help message")]
+    pub help: bool,
+    #[options(free, help = "entries to delete: id prefixes")]
+    pub reference: Vec<String>,
+}
+
+#[derive(Debug, Options, Clone, Default)]
+pub struct ClipboardClearArgs {
+    #[options(help = "print help message")]
+    pub help: bool,
+    #[options(help = "only delete entries of this kind", short = "k", meta = "KIND")]
+    pub kind: Option<ClipboardKind>,
+    #[options(help = "do not ask for confirmation", short = "y")]
+    pub yes: bool,
+}
+
+#[derive(Debug, Options, Clone, Default)]
+pub struct ClipboardStatusArgs {
+    #[options(help = "print help message")]
+    pub help: bool,
+    #[options(help = "print the status as one JSON object", no_short)]
+    pub json: bool,
+}
+
+/// Kind filter of `list -k` and `clear -k`, each one an explicit predicate on
+/// the history so no unknown value ever reaches a deletion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipboardKind {
+    Text,
+    Html,
+    Image,
+    Files,
+    Url,
+    Other,
+}
+
+impl ClipboardKind {
+    #[cfg(feature = "wayland")]
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Html => "html",
+            Self::Image => "image",
+            Self::Files => "files",
+            Self::Url => "url",
+            Self::Other => "other",
+        }
+    }
+}
+
+impl std::str::FromStr for ClipboardKind {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(match value.to_ascii_lowercase().as_str() {
+            "text" => Self::Text,
+            "html" => Self::Html,
+            "image" => Self::Image,
+            "files" => Self::Files,
+            "url" => Self::Url,
+            "other" => Self::Other,
+            other => {
+                return Err(format!(
+                    "unknown kind `{other}`: use text, html, image, files, url or other"
+                ))
+            }
+        })
+    }
 }
 
 fn resolve_window_dimensions(general: &GeneralConfig) -> (f32, f32) {
@@ -4678,6 +4826,24 @@ pub fn run(args: Args) -> Result<()> {
         return Ok(());
     }
 
+    // The clipboard command reads the config and stops there: no schema
+    // writing, no application scan, no window.
+    #[cfg(feature = "wayland")]
+    if let Some(Subcommand::Clipboard(clipboard)) = &args.command {
+        let config = load_config(&args, configfile)?;
+        return match ui::run_clipboard_cli(&config.addons.clipboard, clipboard) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                eprintln!("raffi clipboard: {error}");
+                std::process::exit(1);
+            }
+        };
+    }
+    #[cfg(not(feature = "wayland"))]
+    if args.command.is_some() {
+        anyhow::bail!("`raffi clipboard` requires the native UI build (the wayland feature)");
+    }
+
     // Keep the schema files next to the config in sync with this binary
     if let Err(e) = write_schemas_for_config(configfile) {
         eprintln!("Warning: could not write schema files next to config: {e:#}");
@@ -5352,6 +5518,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.entries.len(), 2);
@@ -5438,6 +5605,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -5588,6 +5756,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            command: None,
         };
         let env_provider = MockEnvProvider {
             vars: {
@@ -5747,6 +5916,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -5850,6 +6020,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -6054,6 +6225,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -6099,6 +6271,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -6180,6 +6353,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -6227,6 +6401,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.general.font_size, Some(16.0));
@@ -6270,6 +6445,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert_eq!(parsed_config.general.theme, Some("light".to_string()));
@@ -6358,6 +6534,61 @@ launchers:
     fn test_last_query_flag_is_parsed() {
         let args = Args::parse_args_default::<&str>(&["--last-query"]).unwrap();
         assert!(args.last_query);
+    }
+
+    #[test]
+    fn test_clipboard_subcommand_is_parsed() {
+        let args = Args::parse_args_default::<&str>(&["clipboard"]).unwrap();
+        let Some(Subcommand::Clipboard(clipboard)) = args.command else {
+            panic!("the clipboard command should be parsed");
+        };
+        assert!(clipboard.action.is_none(), "no action lists the history");
+
+        let args = Args::parse_args_default::<&str>(&[
+            "-c",
+            "x.yaml",
+            "clipboard",
+            "list",
+            "-k",
+            "image",
+            "foo",
+            "bar",
+        ])
+        .unwrap();
+        assert_eq!(args.configfile.as_deref(), Some("x.yaml"));
+        let Some(Subcommand::Clipboard(clipboard)) = args.command else {
+            panic!("the clipboard command should be parsed");
+        };
+        let Some(ClipboardCommand::List(list)) = clipboard.action else {
+            panic!("the list action should be parsed");
+        };
+        assert_eq!(list.kind, Some(ClipboardKind::Image));
+        assert_eq!(list.query, ["foo", "bar"]);
+
+        let args =
+            Args::parse_args_default::<&str>(&["clipboard", "delete", "1", "3fa9c1"]).unwrap();
+        let Some(Subcommand::Clipboard(clipboard)) = args.command else {
+            panic!("the clipboard command should be parsed");
+        };
+        let Some(ClipboardCommand::Delete(delete)) = clipboard.action else {
+            panic!("the delete action should be parsed");
+        };
+        assert_eq!(delete.reference, ["1", "3fa9c1"]);
+
+        let args =
+            Args::parse_args_default::<&str>(&["clipboard", "clear", "-y", "-k", "url"]).unwrap();
+        let Some(Subcommand::Clipboard(clipboard)) = args.command else {
+            panic!("the clipboard command should be parsed");
+        };
+        let Some(ClipboardCommand::Clear(clear)) = clipboard.action else {
+            panic!("the clear action should be parsed");
+        };
+        assert!(clear.yes);
+        assert_eq!(clear.kind, Some(ClipboardKind::Url));
+
+        assert!(Args::parse_args_default::<&str>(&["clipboard", "publish"]).is_err());
+        assert!(Args::parse_args_default::<&str>(&["clipboard", "list", "-k", "nope"]).is_err());
+        assert!(Args::parse_args_default::<&str>(&["clipboard", "status", "--json"]).is_ok());
     }
 
     #[test]
@@ -6463,6 +6694,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -6535,6 +6767,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -6621,6 +6854,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -6672,6 +6906,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
         assert!(parsed_config.addons.text_snippets.is_empty());
@@ -6719,6 +6954,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -6769,6 +7005,7 @@ launchers:
                 cache_daemon: false,
                 options: Vec::new(),
                 vim_mode: false,
+                command: None,
             };
             read_config_from_reader(Cursor::new(yaml), &args)
         };
@@ -7187,6 +7424,7 @@ shell:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -7240,6 +7478,7 @@ shell:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 
@@ -7292,6 +7531,7 @@ shell:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
 

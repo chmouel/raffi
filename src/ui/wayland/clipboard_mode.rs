@@ -483,14 +483,14 @@ impl LauncherApp {
         self.clipboard.pending = true;
         self.clipboard.error = None;
         Task::perform(async move { history.delete(&reference) }, move |result| {
-            Message::ClipboardDeleteDone(session, result.map(|()| id.clone()))
+            Message::ClipboardDeleteDone(session, result.map(|emptied| (id.clone(), emptied)))
         })
     }
 
     pub(super) fn handle_clipboard_delete_done(
         &mut self,
         session: u64,
-        result: Result<String, String>,
+        result: Result<(String, bool), String>,
     ) -> Task<Message> {
         let state = &mut self.clipboard;
         if !state.active || session != state.session || !state.pending {
@@ -498,7 +498,7 @@ impl LauncherApp {
         }
         state.pending = false;
         match result {
-            Ok(id) => {
+            Ok((id, emptied)) => {
                 state.items.retain(|item| item.id != id);
                 state.previews.retain(|(cached, _)| *cached != id);
                 if state.preview_inflight.as_deref() == Some(id.as_str()) {
@@ -506,6 +506,13 @@ impl LauncherApp {
                 }
                 state.total = state.total.saturating_sub(1);
                 self.clamp_clipboard_selection();
+                if !emptied {
+                    self.clipboard.error = Some(
+                        "Deleted; the database log still holds old pages until the next \
+                         checkpoint"
+                            .into(),
+                    );
+                }
             }
             Err(error) => {
                 self.clipboard.error = Some(error);

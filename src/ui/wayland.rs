@@ -15,6 +15,7 @@ mod browser_history_mode;
 mod browser_tabs;
 mod cache;
 mod clipboard;
+mod clipboard_cli;
 mod clipboard_history;
 mod clipboard_mode;
 mod clipboard_policy;
@@ -76,6 +77,7 @@ use std::sync::{Arc, Mutex};
 use super::{UISettings, UI};
 use crate::{AddonsConfig, RaffiConfig};
 
+pub(crate) use self::clipboard_cli::run_clipboard_cli;
 pub(crate) use self::slack_api::clear_cache as clear_slack_cache;
 use self::state::{LauncherApp, SharedSelection};
 use self::theme::ThemeColors;

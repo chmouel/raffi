@@ -4668,6 +4668,47 @@ fn test_clipboard_actions_are_captured_and_never_fall_back() {
 }
 
 #[test]
+fn test_a_delete_whose_checkpoint_was_blocked_still_removes_the_row() {
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip ");
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page("a", 1, 1, vec![clip(0, "a", "a")])),
+    ));
+    app.clipboard.pending = true;
+    let session = app.clipboard.session;
+    let _ = app.update(Message::ClipboardDeleteDone(
+        session,
+        Ok(("a".into(), false)),
+    ));
+    assert!(!app.clipboard.pending);
+    assert!(app.clipboard.items.is_empty());
+    assert!(
+        app.clipboard
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("still holds old pages"),
+        "{:?}",
+        app.clipboard.error
+    );
+
+    // A checkpoint that completed says nothing.
+    app.clipboard.error = None;
+    let generation = app.clipboard.generation;
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page("a", 1, 1, vec![clip(0, "a", "a")])),
+    ));
+    app.clipboard.pending = true;
+    let _ = app.update(Message::ClipboardDeleteDone(
+        app.clipboard.session,
+        Ok(("a".into(), true)),
+    ));
+    assert!(app.clipboard.error.is_none());
+}
+
+#[test]
 fn test_clipboard_ctrl_tab_cycles_views() {
     use super::state::ClipboardView;
     let mut app = test_app(clipboard_addons());

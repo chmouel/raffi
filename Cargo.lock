@@ -3522,6 +3522,7 @@ dependencies = [
  "serde_yaml",
  "shlex",
  "unicode-normalization",
+ "unicode-width",
  "ureq",
  "walkdir",
  "wayland-client",

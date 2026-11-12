@@ -320,6 +320,86 @@ behind your back: run it from a terminal or a user service such as
   ```
 
 
+## Clipboard
+
+`raffi clipboard` manages the [clipboard history](../../features/clipboard-history/)
+from the command line, without opening a window. The global flags above still
+apply, so `-c` and `-o addons.clipboard.backend=...` choose the config and the
+history it reads. On a terminal it prints a table; when its output is
+redirected it prints one entry per line, tab separated: id, kind, copy time and
+preview. The preview is the entry's one-line title, cut short; `show` writes
+the content. A reference is either a position in the default list (up to five
+digits, for `show` and `copy` only) or the first six or more characters of an
+id, and `-` reads references from the input, one per line, taking the first
+field of each. An id stays the same while its entry stays in the history; a
+position changes whenever the history does.
+
+The command exits 0 on success, 1 on an error, printed as `raffi clipboard:
+...` on stderr, and 2 on a usage error. It does not open the window, scan
+applications or write schema files, but loading the configuration still
+migrates an old v0 config to the v1 `launchers:` format, as any other raffi
+launch does.
+
+```bash
+raffi clipboard                       # the whole history
+raffi clipboard list git -n 10        # ten entries matching `git`
+raffi clipboard list -k image --json  # images, one JSON object per line
+raffi clipboard show 1 > out.png      # export an image
+raffi clipboard show --formats 3fa9c1d2e0
+raffi clipboard copy 1
+raffi clipboard delete 3fa9c1d2e0 a81be0c44f
+raffi clipboard clear -y
+raffi clipboard status --json
+```
+
+**`list [QUERY...]`**
+
+List the history, newest first; the default action. Every word of `QUERY` has
+to appear in the entry, matched like the browser's search. `-k, --kind`
+(`text`, `html`, `image`, `files`, `url`, `other`), `-n, --limit N`,
+`--all` (include text shorter than `min_chars`) and `--json` narrow or reshape
+the listing. Entries matching `exclude_patterns` are never listed. A JSON row
+also carries the search `tier`: 0 when the text starts with the query, 1 when
+it contains it, 2 when it has every word.
+
+**`show REF`**
+
+Write one entry to stdout: its text exactly as stored, one path per line for a
+copied file list, or the picture for an image, which needs its output
+redirected. An entry that only holds HTML prints the text extracted from it;
+`--mime text/html` writes the stored HTML itself. `--mime TYPE` writes exactly
+that stored format, `--formats` lists the formats with their size, `--json`
+prints the entry's metadata instead.
+`--mime` and image export need the `raffi` backend. An entry over 16 MiB is not
+read from CopyQ.
+
+**`copy REF`**
+
+Put one entry back on the clipboard with all of its formats. With the `raffi`
+backend, `raffi --cache-daemon` has to be running.
+
+**`delete REF...`**
+
+Remove entries by id. Every reference is resolved before anything is removed,
+and repeats collapse. Prints `Deleted N entries` on a terminal. The row goes
+with SQLite `secure_delete`, and the write-ahead log is truncated afterwards;
+when another process is reading the database, old pages stay in the log until
+the next checkpoint, and the command says so. This is removal from the history,
+not a forensic erase of the disk.
+
+**`clear [-k KIND] [-y|--yes]`**
+
+Remove every entry, including the ones `exclude_patterns` hides, or only those
+of one kind with `-k`. Asks for confirmation on a terminal, and needs `--yes`
+when its input is not one. `raffi` backend only.
+
+**`status [--json]`**
+
+Report the backend in use, whether a recorder is running, the database path and
+size, the number of entries and the configured limits. Works with the recorder
+stopped. A backend that keeps its own storage, such as CopyQ, reports no
+database path or size.
+
 ## Examples
 
 ### Basic Usage

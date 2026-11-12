@@ -357,6 +357,33 @@ impl History {
         }
     }
 
+    /// The concrete backend this history stands for, looked up once so every
+    /// command of an invocation works on the same history. Under `auto` with
+    /// no recorder running, the history Raffi recorded earlier is used when
+    /// its database is still there.
+    pub(crate) fn resolve(&self) -> Result<Backend, String> {
+        match self {
+            Self::CopyQ(copyq) => Ok(Backend::CopyQ(copyq.clone())),
+            Self::Raffi => Ok(Backend::Raffi),
+            Self::Auto => match detect_backend() {
+                Ok(Self::CopyQ(copyq)) => Ok(Backend::CopyQ(copyq)),
+                Ok(_) => Ok(Backend::Raffi),
+                Err(error) => {
+                    if !super::clipboard_store::exists() {
+                        return Err(error);
+                    }
+                    if crate::ui::is_tty(libc::STDERR_FILENO) {
+                        eprintln!(
+                            "raffi: no clipboard service is running, reading the history \
+                             Raffi recorded"
+                        );
+                    }
+                    Ok(Backend::Raffi)
+                }
+            },
+        }
+    }
+
     /// This history, with `Auto` replaced by the backend it stands for.
     fn resolved(&self) -> Result<Self, String> {
         match self {
@@ -417,13 +444,23 @@ impl History {
         }
     }
 
-    pub(crate) fn delete(&self, item: &ItemRef) -> Result<(), String> {
+    /// Remove `item` from the clipboard history. Reports whether the
+    /// database log was emptied, which only the raffi backend has.
+    pub(crate) fn delete(&self, item: &ItemRef) -> Result<bool, String> {
         match self.resolved()? {
-            Self::CopyQ(copyq) => copyq.delete(item),
+            Self::CopyQ(copyq) => copyq.delete(item).map(|()| true),
             Self::Raffi => super::clipboard_store::Store::open_default()?.delete(&item.id),
             Self::Auto => Err(NO_BACKEND.to_string()),
         }
     }
+}
+
+/// A history resolved to the one backend it stands for, kept for the whole
+/// invocation so ids from one backend are never sent to another.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Backend {
+    Raffi,
+    CopyQ(CopyQ),
 }
 
 /// CopyQ command line access, optionally to a named session.
@@ -501,7 +538,7 @@ impl CopyQ {
     }
 
     /// Complete text of `item`, through the preview script without its image.
-    fn full_text(&self, item: &ItemRef) -> Result<String, String> {
+    pub(crate) fn full_text(&self, item: &ItemRef) -> Result<String, String> {
         let output = self.eval(
             PREVIEW_SCRIPT,
             &[
@@ -851,7 +888,7 @@ fn uri_lines(list: &str) -> impl Iterator<Item = &str> {
 }
 
 /// Display names for the entries of a `text/uri-list`, local paths decoded.
-fn parse_uri_list(list: &str, limit: usize) -> Vec<String> {
+pub(super) fn parse_uri_list(list: &str, limit: usize) -> Vec<String> {
     uri_lines(list)
         .take(limit)
         .map(|uri| local_path(uri).unwrap_or_else(|| uri.to_string()))
@@ -892,7 +929,7 @@ fn image_title(formats: &[String]) -> String {
 }
 
 /// Nerd Font return arrow standing in for a line break in a row title.
-const LINE_BREAK_MARK: char = '\u{f0311}';
+pub(super) const LINE_BREAK_MARK: char = '\u{f0311}';
 
 /// Collapse whitespace and keep at most `max_chars` characters, marking line
 /// breaks with `LINE_BREAK_MARK` so multi-line entries stay recognisable.

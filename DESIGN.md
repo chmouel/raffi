@@ -25,6 +25,7 @@ src/main.rs
        -> read_config(...)
             -> migrate v0 config if needed
             -> process_config(...)
+       -> a `clipboard` subcommand reads the history and returns
        -> choose UI backend
        -> ui.show(...)
        -> execute_chosen_command(...)
@@ -37,6 +38,9 @@ Primary modules:
 - `src/ui/fuzzel.rs`: builds fuzzel input and reads the selected item
 - `src/ui/wayland.rs`: launches the native iced application
 - `src/ui/wayland/*.rs`: native UI state, routing, rendering, addon logic, tests
+- `src/ui/wayland/clipboard_cli.rs`: the `raffi clipboard` subcommand, which
+  lists, exports, copies, deletes and reports the same history the clipboard
+  addon browses, resolved to one backend per invocation
 
 ## Configuration Model
 

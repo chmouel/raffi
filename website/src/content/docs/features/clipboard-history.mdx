@@ -206,6 +206,91 @@ window that had focus when it opened, copies the item, closes, and sends Ctrl+V
 closed, or you are not on Hyprland, Raffi shows an error and does not fall back
 to copying.
 
+## Command line
+
+`raffi clipboard` reads and edits the same history without opening the window,
+so a script, a key binding or a picker can use it. It takes the backend from
+`addons.clipboard.backend` like the browser does, and honours
+`exclude_patterns` the same way.
+
+```bash
+raffi clipboard                 # the same as `raffi clipboard list`
+raffi clipboard list git        # entries containing `git`, newest first
+raffi clipboard list -k image   # images only
+raffi clipboard list --all      # including text shorter than min_chars
+```
+
+On a terminal it prints a table: the position, the start of the id, the copy
+time, the kind and the entry, with `⏱ 45s` for the time a temporary entry has
+left. When its output is redirected it prints one entry per line instead, tab
+separated: the complete id, the kind, the copy time and the preview. The
+preview is the entry's one-line title, cut short, not its content: use `show`
+to get the text or the picture itself. `cut -f1` then gives the id of every
+entry.
+
+An id stays the same for as long as its entry stays in the history, so it is
+what scripts and key bindings should use. The position at the start of the
+table changes whenever the history does: it is shorthand for what you just
+saw, so `raffi clipboard show 2` does what you expect while you look at the
+list, and `delete` insists on an id.
+
+To pick one entry with [fzf](https://github.com/junegunn/fzf):
+
+```bash
+raffi clipboard list | fzf --delimiter '\t' --with-nth 4.. \
+    --preview 'raffi clipboard show {1}' | cut -f1 | raffi clipboard copy -
+```
+
+`{1}` is the first field of the line under the cursor, the id, and `-` tells
+`copy` to read references from its input, one per line, taking the first field
+of each. The same works with `delete`.
+
+`show` writes the entry itself: the text of a text entry, one path per line
+for a copied file list, the picture of an image. An entry that only holds HTML
+prints the text extracted from it, without the markup; `raffi clipboard show
+--mime text/html` writes the HTML itself instead. It refuses to write an image
+to a terminal, where the bytes would land in your prompt, so redirect them:
+
+```bash
+raffi clipboard show 1 > out.png        # 1 is an image
+raffi clipboard show --mime text/html 3 # exactly that format of the entry
+raffi clipboard show --formats 3        # what the entry holds, and how big
+```
+
+`copy` puts the entry back on the clipboard with all of its formats. With the
+`raffi` backend that needs `raffi --cache-daemon` running: only a running
+process can keep serving the selection after the command returns.
+
+`delete` resolves every id it was given before removing anything, so `raffi
+clipboard delete 3fa9c1d2e0 a81be0c44f` removes those two and not whatever
+moved into their place. `clear` empties the history, entries hidden by
+`exclude_patterns` included, and asks first:
+
+```bash
+raffi clipboard clear             # asks in a terminal
+raffi clipboard clear -y          # a script has to say so
+raffi clipboard clear -k image -y # only the images
+```
+
+`raffi clipboard status` says which backend is in use, whether a recorder is
+running, where the database is and how much of the limits the history uses.
+Listing, exporting, deleting and clearing all work with the `raffi` backend
+while `raffi --cache-daemon` is stopped, since they read the database
+directly; only `copy` needs the service.
+
+`list --json`, `show --json` and `status --json` print JSON for scripts, and
+`raffi clipboard --help` lists every option. `show --mime` and exporting an
+image need the `raffi` backend: CopyQ only gives Raffi the text of its items.
+`clear` is `raffi` only too, so use CopyQ's own interface to empty its history.
+
+The subcommand does not open the window, scan applications or write schema
+files, but loading the configuration still migrates an old v0 config to the v1
+`launchers:` format, as any other raffi launch does. Deleting and clearing
+remove the row with SQLite `secure_delete` and then truncate the write-ahead
+log; while another process reads the database, the log keeps old pages until
+the next checkpoint, and either way this removes entries from the history
+rather than erasing the disk forensically.
+
 ## Raffi backend
 
 With `backend: raffi`, or under `auto` when CopyQ is not running, Raffi

@@ -86,7 +86,7 @@ Most addons start with a keyword followed by a space. Others answer as soon as y
 
 - [File browser](https://chmouel.github.io/raffi/features/file-browser/): start with `/` or `~/`, with previews of PDFs, images, videos and source code
 - Emoji and Nerd Font icons: `emoji `
-- [Clipboard history](https://chmouel.github.io/raffi/features/clipboard-history/) from CopyQ: `clip `
+- [Clipboard history](https://chmouel.github.io/raffi/features/clipboard-history/) from CopyQ or Raffi itself: `clip `, or `raffi clipboard` from a script
 - [Text snippets](https://chmouel.github.io/raffi/features/text-snippets/), [web searches](https://chmouel.github.io/raffi/features/web-search/) and [script filters](https://chmouel.github.io/raffi/features/script-filters/), each under a keyword you choose
 - [Installed apps](https://chmouel.github.io/raffi/features/installed-apps/), with their actions such as opening a private window
 

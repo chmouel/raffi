@@ -712,7 +712,7 @@ pub(crate) enum Message {
     /// The open window of the launcher at this config index, looked up
     /// before starting it: focus it, or launch when there is none.
     LauncherRaiseChecked(usize, Option<super::actions::DeferredAction>),
-    ClipboardDeleteDone(u64, std::result::Result<String, String>),
+    ClipboardDeleteDone(u64, std::result::Result<(String, bool), String>),
     /// Text typed in the masked password prompt, never shown by `Debug`.
     PromptChanged(crate::secret::Secret),
     /// A password manager operation started with this generation finished.
