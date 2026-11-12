@@ -29,6 +29,8 @@ wayland = [
   "chrono",
   "shlex",
   "wayland-client",
+  "wayland-protocols",
+  "wayland-protocols-wlr",
   "calloop",
   "calloop-wayland-source",
   "jiff",
@@ -61,6 +63,8 @@ schemars = { version = "1.2", features = ["derive"] }
 jsonschema = { version = "0.60.0", default-features = false, optional = true }
 chrono = { version = "0.4.45", default-features = false, features = ["clock"], optional = true }
 wayland-client = { version = "0.31", optional = true }
+wayland-protocols = { version = "0.32", features = ["client", "staging"], optional = true }
+wayland-protocols-wlr = { version = "0.3", features = ["client"], optional = true }
 calloop = { version = "0.14", optional = true }
 calloop-wayland-source = { version = "0.4", optional = true }
 base64 = { version = "0.23", optional = true }

@@ -32,10 +32,13 @@ const DAEMON_CLIENT_TIMEOUT: Duration = Duration::from_millis(100);
 const PROBE_TIMEOUT: Duration = Duration::from_millis(500);
 /// Waited refreshes run Slack and script filters, which can be slow.
 const WAIT_TIMEOUT: Duration = Duration::from_secs(120);
+const CLIPBOARD_TIMEOUT: Duration = Duration::from_secs(5);
+pub(crate) const CLIPBOARD_NOT_RUNNING: &str =
+    "Raffi clipboard service is not running: start `raffi --cache-daemon`";
 const WARM_TICK: Duration = Duration::from_secs(30);
 /// Protocol revision reported by `Status`; daemons from before it existed
-/// report 0 and ignore `wait`.
-pub(crate) const PROTOCOL: u32 = 1;
+/// report 0 and ignore `wait`. Revision 2 adds `clipboard_select`.
+pub(crate) const PROTOCOL: u32 = 2;
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
 /// A snapshot file to write after a successful script run.
@@ -113,6 +116,10 @@ pub(crate) enum Request {
     /// Warm every enabled source, replying once all are done.
     RefreshAll,
     Clear,
+    /// Put a `raffi` clipboard backend entry back on the clipboard.
+    ClipboardSelect {
+        id: String,
+    },
 }
 
 /// Replies sent by the cache service.
@@ -238,7 +245,17 @@ pub(crate) fn addons_digest(addons: &AddonsConfig) -> String {
     let script_filters = config_digest(&addons.script_filters);
     let browser_history = config_digest(&addons.browser_history);
     let slack = config_digest(&addons.slack);
-    stable_hash(&format!("{script_filters}:{browser_history}:{slack}"))
+    let clipboard = &addons.clipboard;
+    let clipboard = format!(
+        "{:?}:{}:{}:{}",
+        clipboard.backend,
+        clipboard.max_items(),
+        clipboard.max_size_bytes(),
+        clipboard.max_image_size_bytes()
+    );
+    stable_hash(&format!(
+        "{script_filters}:{browser_history}:{slack}:{clipboard}"
+    ))
 }
 
 pub(super) fn cache_root() -> Result<PathBuf> {
@@ -522,6 +539,25 @@ pub(crate) fn probe() -> Option<ServerInfo> {
     }
 }
 
+/// Ask the cache service to put the `raffi` backend clipboard entry `id`
+/// back on the clipboard. Blocking: run it off the UI thread.
+pub(crate) fn clipboard_select(id: &str) -> Result<(), String> {
+    match call(
+        &Request::ClipboardSelect { id: id.to_string() },
+        CLIPBOARD_TIMEOUT,
+    ) {
+        Ok(Response::Error { message }) => Err(message),
+        Ok(_) => Ok(()),
+        Err(CallError::Unreachable) => Err(CLIPBOARD_NOT_RUNNING.to_string()),
+        Err(CallError::Failed(message)) => Err(message),
+    }
+}
+
+/// Whether a cache service listens on the socket.
+pub(crate) fn listening() -> bool {
+    cache_socket_path().is_ok_and(|path| UnixStream::connect(path).is_ok())
+}
+
 /// Send waited refresh requests in order and report the first failure.
 /// Blocking: run it off the UI thread.
 pub(crate) fn refresh(requests: Vec<Request>) -> Result<(), CallError> {
@@ -704,6 +740,10 @@ pub(crate) fn handle_request(state: &Arc<DaemonState>, request: Request) -> Resp
             }
             Response::Ok
         }
+        Request::ClipboardSelect { id } => match super::clipboard_watch::select(&id) {
+            Ok(()) => Response::Ok,
+            Err(message) => Response::Error { message },
+        },
     }
 }
 
@@ -778,6 +818,10 @@ pub(crate) fn run(config: ParsedConfig) -> Result<()> {
     let state = Arc::new(DaemonState::new(config.addons));
     eprintln!("raffi: cache service listening on {}", socket.display());
     super::hot_files::keep_warm();
+    let clipboard = &state.addons.clipboard;
+    if clipboard.backend == crate::ClipboardBackend::Raffi && clipboard.enabled != Some(false) {
+        super::clipboard_watch::start(super::clipboard_store::Limits::from_config(clipboard));
+    }
     warm_loop(state.clone());
     serve(listener, state)
 }

@@ -651,12 +651,42 @@
           "default": null
         },
         "enabled": {
-          "description": "Unset turns it on when a CopyQ process is running at startup;\n`true` or `false` overrides the detection.",
+          "description": "Unset turns it on when the backend is running at startup (a CopyQ\nprocess, or `raffi --cache-daemon` for the `raffi` backend);\n`true` or `false` overrides the detection.",
           "type": [
             "boolean",
             "null"
           ],
           "default": null
+        },
+        "max_image_size_mb": {
+          "description": "`raffi` backend: images larger than this many MB are not recorded\n(default: 50).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "max_items": {
+          "description": "`raffi` backend: entries kept in the history (default: 1000).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "default": null,
+          "minimum": 0
+        },
+        "max_size_mb": {
+          "description": "`raffi` backend: total size of the history in MB before the oldest\nentries are dropped (default: 500).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
         },
         "min_chars": {
           "description": "Hide text entries shorter than this many characters, ignoring\nsurrounding whitespace (default: 3). Images and files are always shown.",
@@ -690,6 +720,11 @@
           "description": "CopyQ, through its command line scripting API",
           "type": "string",
           "const": "copyq"
+        },
+        {
+          "description": "Raffi's own history, recorded by `raffi --cache-daemon`",
+          "type": "string",
+          "const": "raffi"
         }
       ]
     },

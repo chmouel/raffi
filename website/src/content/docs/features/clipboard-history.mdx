@@ -1,21 +1,23 @@
 ---
 title: Clipboard History
-description: Browse, preview and paste your CopyQ clipboard history from Raffi
+description: Browse, preview and paste your clipboard history from Raffi, kept by CopyQ or by Raffi itself
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import clipboardScreenshot from '../../../assets/screenshots/clipboard-history.png';
 
-Raffi can browse the clipboard history kept by [CopyQ](https://hluk.github.io/CopyQ/).
-CopyQ records and stores the history. Raffi gives you a keyboard-driven list
-with search, previews, and copy or paste of any past item.
+Raffi can browse the clipboard history kept by [CopyQ](https://hluk.github.io/CopyQ/),
+or record one itself with the [Raffi backend](#raffi-backend). Raffi gives you
+a keyboard-driven list with search, previews, and copy or paste of any past
+item.
 
 <Image src={clipboardScreenshot} alt="Clipboard history with a demo release checklist selected and its multiline text in the preview pane" width={800} />
 
 <Aside type="note">
 The clipboard browser turns itself on
-when CopyQ is running as Raffi starts, unless you set `enabled` yourself.
+when its backend is running as Raffi starts (CopyQ, or `raffi --cache-daemon`
+for the Raffi backend), unless you set `enabled` yourself.
 </Aside>
 
 ## Setup
@@ -189,6 +191,58 @@ window that had focus when it opened, copies the item, closes, and sends Ctrl+V
 closed, or you are not on Hyprland, Raffi shows an error and does not fall back
 to copying.
 
+## Raffi backend
+
+With `backend: raffi`, Raffi records the clipboard itself and CopyQ is not
+needed. Listing and previews read a local database, so the history opens
+faster than through CopyQ, and copy times, source app icons and password
+skipping work without extra commands. CopyQ stays the default.
+
+The recorder runs inside the Raffi server
+([`raffi --cache-daemon`](../../reference/cli-options/#cache-management)),
+so start it and keep it running:
+
+```bash
+raffi --cache-daemon
+```
+
+```yaml
+addons:
+  clipboard:
+    backend: raffi
+    max_items: 1000       # entries kept
+    max_size_mb: 500      # total size before the oldest entries go
+    max_image_size_mb: 50 # larger images are not recorded
+```
+
+The server watches the clipboard through the compositor's data-control
+protocol (`ext-data-control-v1`, or `wlr-data-control-unstable-v1` on older
+compositors), which Hyprland, Sway, niri and most wlroots compositors offer.
+For every copy it keeps:
+
+- the text, as plain text, with `text/html` and file lists when the source
+  offers them;
+- one picture, in the best raster format offered (PNG, then JPEG, WebP, GIF,
+  BMP), plus SVG when offered. Browsers offer one picture in many encodings,
+  so only the best one is stored;
+- the copy time, and the app that had focus (Hyprland, Sway and niri).
+
+Copying the same content again moves it to the top. Copies marked
+`x-kde-passwordManagerHint`, as KeePassXC and other password managers do,
+are never recorded. The primary selection is ignored, and Raffi does not
+import an existing CopyQ history.
+
+When you copy an entry from the list, the server puts it on the clipboard
+with every stored format and keeps serving it, so it can still be pasted
+after Raffi closes. If another app later closes, its last copy stays
+available too, as with any clipboard manager.
+
+The history lives in `~/.local/share/raffi/clipboard.db` (or under
+`$XDG_DATA_HOME`), readable only by you. Restart the server after changing
+the backend or the limits. The shipped `misc/systemd/raffi-cache.service`
+grants write access to `~/.local/share/raffi` only, so update its
+`ExecStartPre` and `ReadWritePaths` lines if you move `$XDG_DATA_HOME`.
+
 ## Privacy
 
 Clipboard queries are saved in Raffi's search history and in the last-query
@@ -200,8 +254,8 @@ window closes.
 
 **`addons.clipboard.enabled`** `boolean` (default: unset)
 
-Turns the clipboard browser on or off. When unset, it is on if CopyQ is
-running as Raffi starts.
+Turns the clipboard browser on or off. When unset, it is on if the backend
+is running as Raffi starts: CopyQ, or `raffi --cache-daemon` for `raffi`.
 
 **`addons.clipboard.trigger`** `string` (default: `clip`)
 
@@ -213,9 +267,23 @@ Hide text entries shorter than this many characters, not counting
 surrounding spaces and newlines. `0` lists everything. Images and files are
 always listed.
 
-**`addons.clipboard.backend`** `string` (default: `copyq`)
+**`addons.clipboard.backend`** `copyq | raffi` (default: `copyq`)
 
-Clipboard manager to read from. `copyq` is the only supported value.
+Clipboard manager to read from: CopyQ, or the history the Raffi server
+records (see [Raffi backend](#raffi-backend)).
+
+**`addons.clipboard.max_items`** `integer` (default: `1000`)
+
+`raffi` backend: entries kept. The oldest ones are dropped beyond it.
+
+**`addons.clipboard.max_size_mb`** `integer` (default: `500`)
+
+`raffi` backend: total size of the history in MB before the oldest entries
+are dropped. The newest entry is always kept.
+
+**`addons.clipboard.max_image_size_mb`** `integer` (default: `50`)
+
+`raffi` backend: images larger than this many MB are not recorded.
 
 **`addons.clipboard.action`** `copy | hypr_paste` (default: `copy`)
 
@@ -250,6 +318,11 @@ addons:
 server. Start CopyQ, then press **Ctrl+R**.
 
 "CopyQ is not installed" means Raffi could not find the `copyq` command.
+
+"Raffi clipboard service is not running" means the `raffi` backend is set
+but no `raffi --cache-daemon` is running. Start it, then press **Ctrl+R**. If
+the server log says the compositor does not support data-control, your
+compositor cannot share the clipboard with a clipboard manager.
 
 "Clipboard history kept changing" appears when items keep arriving during a
 scan. Press **Ctrl+R** to try again.

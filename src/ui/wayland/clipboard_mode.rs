@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use iced::Task;
 
-use super::clipboard::{ClipItem, CopyQ, Page};
+use super::clipboard::{ClipItem, History, Page};
 use super::state::{LauncherApp, Message};
 use crate::ClipboardAction;
 
@@ -50,8 +50,9 @@ impl LauncherApp {
         let query = state.query.clone();
         let kind = state.view.kind();
         let min_chars = self.addons.clipboard.min_chars();
+        let history = History::new(self.addons.clipboard.backend);
         Task::perform(
-            async move { CopyQ::default().list_page("", 0, &query, kind, min_chars) },
+            async move { history.list_page("", 0, &query, kind, min_chars) },
             move |result| Message::ClipboardPage(generation, result),
         )
     }
@@ -121,9 +122,10 @@ impl LauncherApp {
             let query = state.query.clone();
             let kind = state.view.kind();
             let min_chars = self.addons.clipboard.min_chars();
+            let history = History::new(self.addons.clipboard.backend);
             let start = page.next;
             Task::perform(
-                async move { CopyQ::default().list_page(&tab, start, &query, kind, min_chars) },
+                async move { history.list_page(&tab, start, &query, kind, min_chars) },
                 move |result| Message::ClipboardPage(generation, result),
             )
         } else {
@@ -232,11 +234,11 @@ impl LauncherApp {
         let id = item.id.clone();
         let reference = item.reference(&state.tab);
         let session = state.session;
+        let history = History::new(self.addons.clipboard.backend);
         state.preview_inflight = Some(id.clone());
-        Task::perform(
-            async move { CopyQ::default().preview(&reference) },
-            move |result| Message::ClipboardPreview(session, id.clone(), result),
-        )
+        Task::perform(async move { history.preview(&reference) }, move |result| {
+            Message::ClipboardPreview(session, id.clone(), result)
+        })
     }
 
     pub(super) fn handle_clipboard_preview(
@@ -276,10 +278,11 @@ impl LauncherApp {
             config.action
         };
         let session = state.session;
+        let history = History::new(self.addons.clipboard.backend);
 
         let task = match action {
             ClipboardAction::Copy => Task::perform(
-                async move { CopyQ::default().select(&reference).map(|()| None) },
+                async move { history.select(&reference).map(|()| None) },
                 move |result| Message::ClipboardActionDone(session, result),
             ),
             ClipboardAction::HyprPaste => {
@@ -299,7 +302,7 @@ impl LauncherApp {
                 Task::perform(
                     async move {
                         target.check_target()?;
-                        CopyQ::default().select(&reference)?;
+                        history.select(&reference)?;
                         Ok(Some(target))
                     },
                     move |result| Message::ClipboardActionDone(session, result),
@@ -362,12 +365,12 @@ impl LauncherApp {
         let reference = item.reference(&state.tab);
         let id = item.id.clone();
         let session = state.session;
+        let history = History::new(self.addons.clipboard.backend);
         self.clipboard.pending = true;
         self.clipboard.error = None;
-        Task::perform(
-            async move { CopyQ::default().delete(&reference) },
-            move |result| Message::ClipboardDeleteDone(session, result.map(|()| id.clone())),
-        )
+        Task::perform(async move { history.delete(&reference) }, move |result| {
+            Message::ClipboardDeleteDone(session, result.map(|()| id.clone()))
+        })
     }
 
     pub(super) fn handle_clipboard_delete_done(

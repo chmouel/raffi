@@ -210,18 +210,23 @@ fn read_capped(path: &Path) -> Result<String, String> {
     fs::read_to_string(path).map_err(|error| format!("cannot read {display}: {error}"))
 }
 
-/// Turn the clipboard addon on when its setting is unset and CopyQ, the only
-/// backend it browses, is running.
+/// Turn the clipboard addon on when its setting is unset and its backend is
+/// running: CopyQ, or `raffi --cache-daemon` for the `raffi` backend.
 pub(super) fn resolve_clipboard_addon(
     config: &mut crate::ClipboardAddonConfig,
     cmdlines: impl FnOnce() -> Vec<Vec<String>>,
 ) {
     if config.enabled.is_none() {
-        config.enabled = Some(
-            cmdlines()
-                .iter()
-                .any(|args| matches!(parse_cmdline(args), Some(Backend::CopyQ))),
-        );
+        let running = |args: &Vec<String>| match config.backend {
+            crate::ClipboardBackend::Copyq => {
+                matches!(parse_cmdline(args), Some(Backend::CopyQ))
+            }
+            crate::ClipboardBackend::Raffi => {
+                args.first().map(|arg| basename(arg)) == Some("raffi")
+                    && args.iter().any(|arg| arg == "--cache-daemon")
+            }
+        };
+        config.enabled = Some(cmdlines().iter().any(running));
     }
 }
 
@@ -495,6 +500,20 @@ mod tests {
         );
         assert_eq!(resolve(Some(false), vec![cmd("copyq")]), Some(false));
         assert_eq!(resolve(Some(true), Vec::new()), Some(true));
+
+        let raffi = |running: Vec<Vec<String>>| {
+            let mut config = crate::ClipboardAddonConfig {
+                backend: crate::ClipboardBackend::Raffi,
+                ..Default::default()
+            };
+            resolve_clipboard_addon(&mut config, || running);
+            config.enabled
+        };
+        assert_eq!(
+            raffi(vec![cmd("/usr/bin/raffi --cache-daemon")]),
+            Some(true)
+        );
+        assert_eq!(raffi(vec![cmd("copyq"), cmd("raffi")]), Some(false));
     }
 
     #[test]

@@ -698,6 +698,8 @@ pub enum ClipboardBackend {
     /// CopyQ, through its command line scripting API
     #[default]
     Copyq,
+    /// Raffi's own history, recorded by `raffi --cache-daemon`
+    Raffi,
 }
 
 /// What the clipboard addon does with the selected history item
@@ -715,7 +717,8 @@ pub enum ClipboardAction {
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct ClipboardAddonConfig {
-    /// Unset turns it on when a CopyQ process is running at startup;
+    /// Unset turns it on when the backend is running at startup (a CopyQ
+    /// process, or `raffi --cache-daemon` for the `raffi` backend);
     /// `true` or `false` overrides the detection.
     #[serde(default)]
     pub enabled: Option<bool>,
@@ -728,6 +731,17 @@ pub struct ClipboardAddonConfig {
     pub min_chars: Option<usize>,
     #[serde(default)]
     pub backend: ClipboardBackend,
+    /// `raffi` backend: entries kept in the history (default: 1000).
+    #[serde(default)]
+    pub max_items: Option<usize>,
+    /// `raffi` backend: total size of the history in MB before the oldest
+    /// entries are dropped (default: 500).
+    #[serde(default)]
+    pub max_size_mb: Option<u64>,
+    /// `raffi` backend: images larger than this many MB are not recorded
+    /// (default: 50).
+    #[serde(default)]
+    pub max_image_size_mb: Option<u64>,
     /// Action on Enter (default: `copy`).
     #[serde(default = "default_clipboard_action")]
     pub action: ClipboardAction,
@@ -760,6 +774,20 @@ impl ClipboardAddonConfig {
         self.min_chars.unwrap_or(3)
     }
 
+    pub fn max_items(&self) -> usize {
+        self.max_items.unwrap_or(1000).max(1)
+    }
+
+    pub fn max_size_bytes(&self) -> u64 {
+        self.max_size_mb.unwrap_or(500).saturating_mul(1024 * 1024)
+    }
+
+    pub fn max_image_size_bytes(&self) -> u64 {
+        self.max_image_size_mb
+            .unwrap_or(50)
+            .saturating_mul(1024 * 1024)
+    }
+
     /// Whether either action needs the Hyprland paste target.
     pub fn uses_hypr_paste(&self) -> bool {
         self.is_enabled()
@@ -775,6 +803,9 @@ impl Default for ClipboardAddonConfig {
             trigger: None,
             min_chars: None,
             backend: ClipboardBackend::default(),
+            max_items: None,
+            max_size_mb: None,
+            max_image_size_mb: None,
             action: default_clipboard_action(),
             secondary_action: default_clipboard_secondary_action(),
             close_on_action: None,
@@ -6608,6 +6639,9 @@ launchers:
         assert_eq!(defaults.action, ClipboardAction::Copy);
         assert_eq!(defaults.secondary_action, ClipboardAction::HyprPaste);
         assert!(!defaults.uses_hypr_paste());
+        assert_eq!(defaults.max_items(), 1000);
+        assert_eq!(defaults.max_size_bytes(), 500 * 1024 * 1024);
+        assert_eq!(defaults.max_image_size_bytes(), 50 * 1024 * 1024);
 
         let config = parse(
             r#"
@@ -6616,7 +6650,10 @@ addons:
     enabled: true
     trigger: cb
     min_chars: 1
-    backend: copyq
+    backend: raffi
+    max_items: 200
+    max_size_mb: 64
+    max_image_size_mb: 8
     action: hypr_paste
     secondary_action: copy
 shell:
@@ -6629,6 +6666,10 @@ shell:
         assert!(config.is_enabled());
         assert_eq!(config.trigger(), "cb");
         assert_eq!(config.min_chars(), 1);
+        assert_eq!(config.backend, ClipboardBackend::Raffi);
+        assert_eq!(config.max_items(), 200);
+        assert_eq!(config.max_size_bytes(), 64 * 1024 * 1024);
+        assert_eq!(config.max_image_size_bytes(), 8 * 1024 * 1024);
         assert_eq!(config.action, ClipboardAction::HyprPaste);
         assert_eq!(config.secondary_action, ClipboardAction::Copy);
         assert!(config.uses_hypr_paste());

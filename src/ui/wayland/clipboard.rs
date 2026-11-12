@@ -24,11 +24,11 @@ const DELETE_SCRIPT: &str = include_str!("copyq/delete.js");
 /// Rows scanned per `copyq eval` while listing or searching.
 pub(super) const PAGE_SIZE: usize = 400;
 /// Characters of text sent back for each row label.
-const EXCERPT_CHARS: usize = 300;
+pub(super) const EXCERPT_CHARS: usize = 300;
 const LIST_TIMEOUT: Duration = Duration::from_secs(5);
 const LIST_MAX_OUTPUT: usize = 4 * 1024 * 1024;
 /// Text shown in the preview pane, matching the file preview limits.
-const PREVIEW_TEXT_BYTES: usize = super::preview::MAX_FILE_PREVIEW_BYTES;
+pub(super) const PREVIEW_TEXT_BYTES: usize = super::preview::MAX_FILE_PREVIEW_BYTES;
 const PREVIEW_TEXT_LINES: usize = super::preview::MAX_FILE_PREVIEW_LINES;
 /// Largest encoded image fetched for a preview.
 pub(super) const MAX_IMAGE_BYTES: usize = 32 * 1024 * 1024;
@@ -278,6 +278,64 @@ struct SelectReply {
     error: Option<String>,
 }
 
+/// The clipboard manager holding the history, from `addons.clipboard.backend`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum History {
+    CopyQ(CopyQ),
+    /// History recorded by `raffi --cache-daemon`: read from its database,
+    /// put back on the clipboard through the service.
+    Raffi,
+}
+
+impl History {
+    pub(crate) fn new(backend: crate::ClipboardBackend) -> Self {
+        match backend {
+            crate::ClipboardBackend::Copyq => Self::CopyQ(CopyQ::default()),
+            crate::ClipboardBackend::Raffi => Self::Raffi,
+        }
+    }
+
+    pub(crate) fn list_page(
+        &self,
+        tab: &str,
+        start: usize,
+        query: &str,
+        only_kind: &str,
+        min_chars: usize,
+    ) -> Result<Page, String> {
+        match self {
+            Self::CopyQ(copyq) => copyq.list_page(tab, start, query, only_kind, min_chars),
+            Self::Raffi => {
+                if !super::cache::listening() {
+                    return Err(super::cache::CLIPBOARD_NOT_RUNNING.to_string());
+                }
+                super::clipboard_store::Store::open_default()?.list(query, only_kind, min_chars)
+            }
+        }
+    }
+
+    pub(crate) fn preview(&self, item: &ItemRef) -> Result<ClipPreview, String> {
+        match self {
+            Self::CopyQ(copyq) => copyq.preview(item),
+            Self::Raffi => super::clipboard_store::Store::open_default()?.preview(&item.id),
+        }
+    }
+
+    pub(crate) fn select(&self, item: &ItemRef) -> Result<(), String> {
+        match self {
+            Self::CopyQ(copyq) => copyq.select(item),
+            Self::Raffi => super::cache::clipboard_select(&item.id),
+        }
+    }
+
+    pub(crate) fn delete(&self, item: &ItemRef) -> Result<(), String> {
+        match self {
+            Self::CopyQ(copyq) => copyq.delete(item),
+            Self::Raffi => super::clipboard_store::Store::open_default()?.delete(&item.id),
+        }
+    }
+}
+
 /// CopyQ command line access, optionally to a named session.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct CopyQ {
@@ -479,7 +537,7 @@ fn parse_preview(output: &[u8]) -> Result<ClipPreview, String> {
     })
 }
 
-fn decode_image(mime: &str, bytes: &[u8]) -> Result<PreviewImage, String> {
+pub(super) fn decode_image(mime: &str, bytes: &[u8]) -> Result<PreviewImage, String> {
     let (width, height) =
         image_dimensions(bytes).ok_or_else(|| format!("Preview is not available for {mime}"))?;
     if width == 0 || height == 0 {
@@ -561,7 +619,7 @@ pub(crate) fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
 
 /// Cut preview text to the preview pane limits. `full_len` is the length of
 /// the whole text as reported by CopyQ.
-fn bounded_text(text: &str, full_len: usize) -> (String, bool) {
+pub(super) fn bounded_text(text: &str, full_len: usize) -> (String, bool) {
     let mut truncated = text.encode_utf16().count() < full_len;
     let mut end = text.len().min(PREVIEW_TEXT_BYTES);
     while !text.is_char_boundary(end) {
@@ -601,7 +659,7 @@ fn local_path(uri: &str) -> Option<String> {
     super::preview::percent_decode_path(path)
 }
 
-fn inspect_files(list: &str) -> Vec<PreviewFile> {
+pub(super) fn inspect_files(list: &str) -> Vec<PreviewFile> {
     uri_lines(list)
         .take(MAX_PREVIEW_FILES)
         .map(|uri| match local_path(uri) {

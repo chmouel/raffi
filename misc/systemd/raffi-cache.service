@@ -9,12 +9,16 @@ Type=simple
 ExecStart=%h/.local/bin/raffi --cache-daemon
 Restart=on-failure
 RestartSec=5
-# The service only needs the user's runtime and cache directories.
+# The service only needs the user's runtime and cache directories, plus the
+# clipboard history database directory. ReadWritePaths must exist before the
+# sandbox is set up, so it is created outside the sandbox first. Adjust both
+# lines if XDG_DATA_HOME is not ~/.local/share.
+ExecStartPre=+mkdir -p -m 0700 %h/.local/share/raffi
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%t %h/.cache
+ReadWritePaths=%t %h/.cache %h/.local/share/raffi
 
 [Install]
 WantedBy=graphical-session.target

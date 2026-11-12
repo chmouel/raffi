@@ -17,6 +17,8 @@ mod cache;
 mod clipboard;
 mod clipboard_history;
 mod clipboard_mode;
+mod clipboard_store;
+mod clipboard_watch;
 mod color;
 mod command_list;
 mod currency;
