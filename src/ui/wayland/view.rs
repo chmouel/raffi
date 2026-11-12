@@ -580,9 +580,12 @@ fn icon_element<'a>(path: &Path, size: f32) -> Option<Element<'a, Message>> {
 }
 
 fn faded_icon_element<'a>(path: &Path, size: f32, opacity: f32) -> Option<Element<'a, Message>> {
-    if !path.exists() {
-        return None;
-    }
+    path.exists()
+        .then(|| existing_icon_element(path, size, opacity))
+}
+
+/// Like `faded_icon_element`, for a path already known to exist.
+fn existing_icon_element<'a>(path: &Path, size: f32, opacity: f32) -> Element<'a, Message> {
     let is_svg = path
         .extension()
         .and_then(|ext| ext.to_str())
@@ -590,7 +593,7 @@ fn faded_icon_element<'a>(path: &Path, size: f32, opacity: f32) -> Option<Elemen
         .unwrap_or(false);
 
     let thumbnail = is_svg.then(|| super::thumbnails::for_svg(path)).flatten();
-    Some(if is_svg && thumbnail.is_none() {
+    if is_svg && thumbnail.is_none() {
         svg(iced::widget::svg::Handle::from_path(path))
             .width(Length::Fixed(size))
             .height(Length::Fixed(size))
@@ -604,7 +607,7 @@ fn faded_icon_element<'a>(path: &Path, size: f32, opacity: f32) -> Option<Elemen
             .content_fit(iced::ContentFit::Contain)
             .opacity(opacity)
             .into()
-    })
+    }
 }
 
 /// Build an image (or SVG) widget that fills the preview pane viewport at
@@ -2638,14 +2641,24 @@ impl LauncherApp {
 
             for item in &state.items {
                 let is_selected = self.selected_index == special_item_idx;
+                let (title, subtitle): (std::borrow::Cow<'_, str>, std::borrow::Cow<'_, str>) =
+                    match state.labels.get(&item.id) {
+                        Some((title, subtitle)) => (title.into(), subtitle.into()),
+                        None => (item.title().into(), item.subtitle().into()),
+                    };
                 let text_col = Column::new()
-                    .push(text(item.title()).size(fs.item).color(t.text_main))
-                    .push(text(item.subtitle()).size(fs.subtitle).color(t.text_muted));
+                    .push(text(title).size(fs.item).color(t.text_main))
+                    .push(text(subtitle).size(fs.subtitle).color(t.text_muted));
                 let mut item_row = Row::new().spacing(16).align_y(iced::Alignment::Center);
-                if let Some(icon) = self
-                    .clipboard_source_icon(item)
-                    .and_then(|path| icon_element(Path::new(&path), 40.0))
-                {
+                let icon = match item.source.as_ref().and_then(|app| state.icons.get(app)) {
+                    Some(known) => known
+                        .as_deref()
+                        .map(|path| existing_icon_element(Path::new(path), 40.0, 1.0)),
+                    None => self
+                        .clipboard_source_icon(item)
+                        .and_then(|path| icon_element(Path::new(&path), 40.0)),
+                };
+                if let Some(icon) = icon {
                     item_row = item_row.push(icon);
                 }
                 let item_row = item_row.push(text_col.width(Length::Fill));

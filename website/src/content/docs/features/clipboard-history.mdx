@@ -287,6 +287,12 @@ are deleted, and the system clipboard is left alone. An entry you re-published
 from the history stays on the clipboard after the entry itself is gone, and a
 copy another app made meanwhile is never disturbed.
 
+Deleted and expired entries are overwritten in `clipboard.db` and its
+write-ahead log rather than left in free space, so their text cannot be
+recovered from the file afterwards. The file itself does not shrink: SQLite
+reuses the freed space for new copies, and it stays bounded by the history
+limits, so no `VACUUM` is needed.
+
 ### Password managers
 
 Password managers mark the secrets they copy with the

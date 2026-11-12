@@ -381,6 +381,8 @@ pub(super) struct ClipboardState {
     pub active: bool,
     pub loading: bool,
     pub generation: u64,
+    /// `generation`, shared with running listings so a replaced one stops.
+    pub latest: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// Bumped when the browser opens or closes, to drop late previews and
     /// action results.
     pub session: u64,
@@ -403,6 +405,12 @@ pub(super) struct ClipboardState {
     pub follow: Option<String>,
     /// Recent previews by item id, oldest first.
     pub previews: Vec<(String, Result<super::clipboard::ClipPreview, String>)>,
+    /// Title and subtitle of each listed item by id, built once when it is
+    /// listed rather than on every redraw.
+    pub labels: std::collections::HashMap<String, (String, String)>,
+    /// Icon file of each source app, `None` when it has none, resolved once
+    /// per browser session.
+    pub icons: std::collections::HashMap<String, Option<String>>,
     pub preview_inflight: Option<String>,
     /// An action is running; further activations are ignored.
     pub pending: bool,
@@ -412,11 +420,29 @@ impl ClipboardState {
     pub fn clear(&mut self) {
         let generation = self.generation.wrapping_add(1);
         let session = self.session.wrapping_add(1);
+        let latest = std::mem::take(&mut self.latest);
+        latest.store(generation, std::sync::atomic::Ordering::Relaxed);
         *self = Self {
             generation,
+            latest,
             session,
             ..Self::default()
         };
+    }
+
+    /// Start a new scan generation.
+    pub fn next_generation(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
+        self.latest
+            .store(self.generation, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// What tells a listing for the current generation that a later scan
+    /// replaced it.
+    pub fn scan_cancel(&self) -> super::clipboard_store::Cancel {
+        let generation = self.generation;
+        let latest = self.latest.clone();
+        std::sync::Arc::new(move || latest.load(std::sync::atomic::Ordering::Relaxed) != generation)
     }
 
     /// Rows the browser adds to the list: one status row while nothing is

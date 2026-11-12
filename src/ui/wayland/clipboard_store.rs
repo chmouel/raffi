@@ -39,7 +39,10 @@ pub(crate) const MAX_TEXT_BYTES: usize = 16 * 1024 * 1024;
 /// concurrent connections cannot hand out the same one.
 const NEXT_SEQ: &str = "(SELECT COALESCE(MAX(seq), 0) + 1 FROM items)";
 const BUSY_TIMEOUT: Duration = Duration::from_secs(2);
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
+/// SQLite virtual machine steps between two checks of a listing's cancel
+/// flag.
+const CANCEL_CHECK_STEPS: i32 = 4096;
 /// How often the sweeper looks for entries that reached their deadline.
 const SWEEP_INTERVAL: Duration = Duration::from_secs(1);
 /// SQL predicate on `items`, with `now` bound as the first parameter: the
@@ -53,6 +56,10 @@ const EXPIRED: &str = "(expires_at IS NOT NULL AND expires_at <= ?1)";
 /// data, so that the marker survives the empty-format filter and the entry
 /// is served with it again.
 const PASSWORD_MARKER: &[u8] = b"secret";
+
+/// Reports that the listing it was handed to has been replaced by a newer
+/// one and can stop.
+pub(crate) type Cancel = std::sync::Arc<dyn Fn() -> bool + Send + Sync>;
 
 /// Unix time, injected into every operation that depends on the clock.
 pub(crate) fn now_secs() -> i64 {
@@ -134,6 +141,8 @@ pub(crate) fn default_path() -> Result<PathBuf, String> {
 
 pub(crate) struct Store {
     conn: Connection,
+    /// The write-ahead log next to the database.
+    wal: PathBuf,
 }
 
 fn db_error(error: rusqlite::Error) -> String {
@@ -142,12 +151,28 @@ fn db_error(error: rusqlite::Error) -> String {
 
 /// Create the schema, or upgrade a database written by an older Raffi.
 /// Version 2 added `items.expires_at`; the rows recorded before it have no
-/// deadline and are kept as they are.
+/// deadline and are kept as they are. Version 3 added `items.search`, filled
+/// in for the existing rows.
+///
+/// The daemon's threads open the database at the same time, so the checks
+/// and changes run in one write transaction: whoever comes second waits and
+/// then finds the schema current.
 fn migrate(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
-         PRAGMA foreign_keys = ON;
-         CREATE TABLE IF NOT EXISTS items (
+         PRAGMA foreign_keys = ON;",
+    )
+    .map_err(db_error)?;
+    if schema_version(conn)? >= SCHEMA_VERSION {
+        return Ok(());
+    }
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
+        .map_err(db_error)?;
+    if schema_version(&tx)? >= SCHEMA_VERSION {
+        return Ok(());
+    }
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS items (
              id INTEGER PRIMARY KEY,
              hash TEXT NOT NULL UNIQUE,
              seq INTEGER NOT NULL,
@@ -160,7 +185,8 @@ fn migrate(conn: &Connection) -> Result<(), String> {
              copied_at INTEGER NOT NULL,
              source TEXT,
              size INTEGER NOT NULL,
-             expires_at INTEGER
+             expires_at INTEGER,
+             search TEXT NOT NULL DEFAULT ''
          );
          CREATE TABLE IF NOT EXISTS formats (
              item_id INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
@@ -170,19 +196,59 @@ fn migrate(conn: &Connection) -> Result<(), String> {
          );",
     )
     .map_err(db_error)?;
-    if !has_column(conn, "items", "expires_at")? {
-        conn.execute_batch("ALTER TABLE items ADD COLUMN expires_at INTEGER")
+    if !has_column(&tx, "items", "expires_at")? {
+        tx.execute_batch("ALTER TABLE items ADD COLUMN expires_at INTEGER")
             .map_err(db_error)?;
     }
-    conn.execute_batch(
+    if !has_column(&tx, "items", "search")? {
+        add_search_column(&tx)?;
+    }
+    tx.execute_batch(
         "CREATE INDEX IF NOT EXISTS items_seq ON items (seq);
          CREATE INDEX IF NOT EXISTS items_kind ON items (kind, seq);
          CREATE INDEX IF NOT EXISTS items_expires_at ON items (expires_at)
              WHERE expires_at IS NOT NULL;",
     )
     .map_err(db_error)?;
-    conn.pragma_update(None, "user_version", SCHEMA_VERSION)
+    tx.pragma_update(None, "user_version", SCHEMA_VERSION)
+        .map_err(db_error)?;
+    tx.commit().map_err(db_error)
+}
+
+fn schema_version(conn: &Connection) -> Result<i64, String> {
+    conn.pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(db_error)
+}
+
+/// Add `items.search` and fill it from the text of every existing entry,
+/// inside the migration's transaction so a crash cannot leave entries
+/// unsearchable.
+fn add_search_column(tx: &Connection) -> Result<(), String> {
+    tx.execute_batch("ALTER TABLE items ADD COLUMN search TEXT NOT NULL DEFAULT ''")
+        .map_err(db_error)?;
+    let rows: Vec<(i64, String)> = {
+        let mut statement = tx
+            .prepare("SELECT id, text FROM items WHERE text != ''")
+            .map_err(db_error)?;
+        let rows = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(db_error)?;
+        rows.collect::<Result<_, _>>().map_err(db_error)?
+    };
+    for (id, text) in rows {
+        tx.execute(
+            "UPDATE items SET search = ?1 WHERE id = ?2",
+            params![searchable(&text), id],
+        )
+        .map_err(db_error)?;
+    }
+    Ok(())
+}
+
+/// What a query is matched against: the text trimmed and lowercased once at
+/// capture, so a search does not lowercase the whole history again.
+fn searchable(text: &str) -> String {
+    text.trim().to_lowercase()
 }
 
 fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
@@ -202,6 +268,11 @@ fn sweep(store: &mut Store, now: i64) -> Result<usize, String> {
     let removed = store.expire(now)?;
     if removed > 0 {
         crate::debug_log!("clipboard: removed {removed} expired entries");
+    }
+    // A delete whose log could not be emptied, because a listing was still
+    // reading, is retried here until it succeeds.
+    if store.wal_has_frames() {
+        store.truncate_wal();
     }
     Ok(removed)
 }
@@ -249,8 +320,17 @@ impl Store {
         // SQLite gives the WAL and shared memory files the same mode.
         let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
         conn.busy_timeout(BUSY_TIMEOUT).map_err(db_error)?;
+        // Deleted entries, temporary and password-manager ones above all,
+        // are overwritten instead of lingering in free pages of the file.
+        conn.pragma_update(None, "secure_delete", "ON")
+            .map_err(db_error)?;
         migrate(&conn)?;
-        Ok(Self { conn })
+        let mut wal = path.as_os_str().to_owned();
+        wal.push("-wal");
+        Ok(Self {
+            conn,
+            wal: PathBuf::from(wal),
+        })
     }
 
     /// Record `capture`, or move the identical entry to the top. Returns the
@@ -394,8 +474,8 @@ impl Store {
                 tx.execute(
                     &format!(
                         "INSERT INTO items (hash, seq, kind, formats, text, text_len, trim_len,
-                             is_url, copied_at, source, size, expires_at)
-                         VALUES (?1, {NEXT_SEQ}, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"
+                             is_url, copied_at, source, size, expires_at, search)
+                         VALUES (?1, {NEXT_SEQ}, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
                     ),
                     params![
                         hash,
@@ -409,6 +489,7 @@ impl Store {
                         source,
                         size as i64,
                         expires_at,
+                        searchable(&text),
                     ],
                 )
                 .map_err(db_error)?;
@@ -472,7 +553,47 @@ impl Store {
 
     /// Every matching entry that is alive at `now`, newest first, as one
     /// complete page. Matching and ranking follow the CopyQ listing script.
+    #[cfg(test)]
     pub(crate) fn list(
+        &self,
+        query: &str,
+        only_kind: &str,
+        min_chars: usize,
+        exclude: &[regex::Regex],
+        now: i64,
+    ) -> Result<Page, String> {
+        self.list_rows(query, only_kind, min_chars, exclude, now)
+    }
+
+    /// Like `list`, but gives up with an error as soon as `cancel` reports
+    /// that a newer listing replaced this one, even in the middle of the
+    /// SQLite scan.
+    pub(crate) fn list_until(
+        &mut self,
+        query: &str,
+        only_kind: &str,
+        min_chars: usize,
+        exclude: &[regex::Regex],
+        now: i64,
+        cancel: Option<Cancel>,
+    ) -> Result<Page, String> {
+        let Some(cancel) = cancel else {
+            return self.list_rows(query, only_kind, min_chars, exclude, now);
+        };
+        if cancel() {
+            return Err("clipboard listing replaced by a newer one".into());
+        }
+        self.conn
+            .progress_handler(CANCEL_CHECK_STEPS, Some(move || cancel()))
+            .map_err(db_error)?;
+        let result = self.list_rows(query, only_kind, min_chars, exclude, now);
+        self.conn
+            .progress_handler(0, None::<fn() -> bool>)
+            .map_err(db_error)?;
+        result
+    }
+
+    fn list_rows(
         &self,
         query: &str,
         only_kind: &str,
@@ -510,22 +631,44 @@ impl Store {
             "url" => "kind IN ('text', 'html') AND is_url = 1",
             _ => "1",
         };
-        // Without a query only the start of each text is needed, unless
-        // exclusions must see the complete text.
-        let text = if terms.is_empty() && exclude.is_empty() {
+        // Words and phrase are matched in SQLite against the lowercased
+        // `search` column, so only matching entries reach Rust. With
+        // `?3` the phrase and `?4...` the words: tier 0 when the text starts
+        // with the phrase, 1 when it contains it, 2 when it has every word.
+        let mut values: Vec<rusqlite::types::Value> = vec![now.into(), (min_chars as i64).into()];
+        let (tier, matching) = if terms.is_empty() {
+            ("0".to_string(), String::new())
+        } else {
+            values.push(phrase.clone().into());
+            let mut matching = String::new();
+            for term in &terms {
+                values.push(term.clone().into());
+                matching.push_str(&format!(" AND instr(search, ?{}) > 0", values.len()));
+            }
+            (
+                "CASE WHEN instr(search, ?3) = 1 THEN 0
+                      WHEN instr(search, ?3) > 0 THEN 1 ELSE 2 END"
+                    .to_string(),
+                matching,
+            )
+        };
+        // Only the start of each text is shown, so the complete text is
+        // read only when exclusions must see it.
+        let text = if exclude.is_empty() {
             format!("substr(text, 1, {EXCERPT_CHARS})")
         } else {
             "text".to_string()
         };
         let sql = format!(
-            "SELECT hash, kind, formats, {text}, text_len, copied_at, source, expires_at
+            "SELECT hash, kind, formats, {text}, text_len, copied_at, source, expires_at, {tier}
              FROM items
              WHERE {ALIVE} AND {filter} AND NOT (kind IN ('text', 'html') AND trim_len < ?2)
+                 {matching}
              ORDER BY seq DESC"
         );
         let mut statement = self.conn.prepare(&sql).map_err(db_error)?;
         let rows = statement
-            .query_map(params![now, min_chars as i64], |row| {
+            .query_map(rusqlite::params_from_iter(values), |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -535,20 +678,18 @@ impl Store {
                     row.get::<_, i64>(5)?,
                     row.get::<_, Option<String>>(6)?,
                     row.get::<_, Option<i64>>(7)?,
+                    row.get::<_, i64>(8)?,
                 ))
             })
             .map_err(db_error)?;
 
         let mut items = Vec::new();
         for (row, entry) in rows.enumerate() {
-            let (hash, kind, formats, text, text_len, copied_at, source, expires_at) =
+            let (hash, kind, formats, text, text_len, copied_at, source, expires_at, tier) =
                 entry.map_err(db_error)?;
             if is_excluded(&text, exclude) {
                 continue;
             }
-            let Some(tier) = tier_of(&text, &terms, &phrase) else {
-                continue;
-            };
             items.push(ClipItem {
                 row,
                 id: hash,
@@ -556,7 +697,7 @@ impl Store {
                 kind: parse_kind(&kind),
                 text_len: text_len.max(0) as usize,
                 excerpt: text.chars().take(EXCERPT_CHARS).collect(),
-                tier,
+                tier: tier.clamp(0, 2) as u8,
                 copied: local_time(copied_at),
                 source,
                 oversized: false,
@@ -684,12 +825,25 @@ impl Store {
         if removed == 0 {
             return Err("item is no longer in the clipboard history".into());
         }
+        self.truncate_wal();
         Ok(())
     }
 
     /// Delete the entries that reached their deadline at `now`, with the
     /// formats stored for them, and report how many entries went.
     pub(crate) fn expire(&mut self, now: i64) -> Result<usize, String> {
+        // Checked first without a write lock, which most ticks do not need.
+        let due: bool = self
+            .conn
+            .query_row(
+                &format!("SELECT EXISTS (SELECT 1 FROM items WHERE {EXPIRED})"),
+                [now],
+                |row| row.get(0),
+            )
+            .map_err(db_error)?;
+        if !due {
+            return Ok(0);
+        }
         let tx = self
             .conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -713,7 +867,24 @@ impl Store {
             .execute(&format!("DELETE FROM items WHERE {EXPIRED}"), [now])
             .map_err(db_error)?;
         tx.commit().map_err(db_error)?;
+        self.truncate_wal();
         Ok(removed)
+    }
+
+    /// Copy the write-ahead log into the database and empty it, so the
+    /// content of deleted entries does not stay in old log frames. Returns
+    /// whether the log was emptied: it is not while another connection is
+    /// reading, and the sweeper tries again later.
+    fn truncate_wal(&self) -> bool {
+        self.conn
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .is_ok_and(|busy| busy == 0)
+    }
+
+    fn wal_has_frames(&self) -> bool {
+        fs::metadata(&self.wal).is_ok_and(|meta| meta.len() > 0)
     }
 }
 
@@ -879,26 +1050,6 @@ fn is_url(text: &str) -> bool {
         && !text
             .chars()
             .any(|c| c.is_control() || c.is_whitespace() || c == '<' || c == '>')
-}
-
-/// 0 when the text starts with the query, 1 when it contains it, 2 when it
-/// contains every word, `None` otherwise.
-fn tier_of(text: &str, terms: &[String], phrase: &str) -> Option<u8> {
-    if terms.is_empty() {
-        return Some(0);
-    }
-    let lower = text.to_lowercase();
-    if !terms.iter().all(|term| lower.contains(term.as_str())) {
-        return None;
-    }
-    if !lower.contains(phrase) {
-        return Some(2);
-    }
-    Some(if lower.trim().starts_with(phrase) {
-        0
-    } else {
-        1
-    })
 }
 
 #[cfg(test)]
@@ -1110,6 +1261,128 @@ mod tests {
         };
         assert_eq!(store.insert(empty, &limits, NOW), Err(Skipped::Empty));
         assert_eq!(store.list("", "", 0, &[], NOW).unwrap().total, 0);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_search_folds_unicode_case_and_ignores_surrounding_space() {
+        let (mut store, dir) = temp_store("search-unicode");
+        for (index, value) in ["  Été à PARIS\n", "visite de paris en été", "Straße"]
+            .into_iter()
+            .enumerate()
+        {
+            store
+                .insert(text(value, index as i64), &LIMITS, NOW)
+                .unwrap();
+        }
+        let page = store.list("éTÉ À paris", "", 0, &[], NOW).unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].tier, 0);
+        let page = store.list("PARIS été", "", 0, &[], NOW).unwrap();
+        let tiers: Vec<u8> = page.items.iter().map(|item| item.tier).collect();
+        assert_eq!(tiers, [2, 2]);
+        assert_eq!(
+            titles(&store.list("STRAßE", "", 0, &[], NOW).unwrap()),
+            ["Straße"]
+        );
+        assert!(store
+            .list("nowhere", "", 0, &[], NOW)
+            .unwrap()
+            .items
+            .is_empty());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_a_replaced_listing_stops() {
+        let (mut store, dir) = temp_store("search-cancel");
+        store
+            .conn
+            .execute_batch(
+                "INSERT INTO items (hash, seq, kind, formats, text, text_len, trim_len, is_url,
+                     copied_at, size, search)
+                 WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 20000)
+                 SELECT 'h' || i, i, 'text', 'text/plain', 'entry ' || i, 10, 10, 0, 1, 10,
+                     'entry ' || i
+                 FROM n;",
+            )
+            .unwrap();
+        let replaced: Cancel = std::sync::Arc::new(|| true);
+        assert!(store
+            .list_until("entry", "", 0, &[], NOW, Some(replaced))
+            .is_err());
+
+        // Replaced while SQLite is scanning: the progress handler stops it.
+        let checks = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = checks.clone();
+        let mid_scan: Cancel = std::sync::Arc::new(move || {
+            counted.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 2
+        });
+        let error = store
+            .list_until("entry 1", "", 0, &[], NOW, Some(mid_scan))
+            .unwrap_err();
+        assert!(error.contains("interrupt"), "{error}");
+        assert!(checks.load(std::sync::atomic::Ordering::Relaxed) >= 3);
+
+        // The connection lists and records normally afterwards.
+        let current: Cancel = std::sync::Arc::new(|| false);
+        let page = store
+            .list_until("entry 19999", "", 0, &[], NOW, Some(current))
+            .unwrap();
+        assert_eq!(titles(&page), ["entry 19999"]);
+        store.insert(text("after", 2), &LIMITS, NOW).unwrap();
+        assert_eq!(
+            titles(&store.list("after", "", 0, &[], NOW).unwrap()),
+            ["after"]
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_concurrent_opens_upgrade_an_old_database_once() {
+        let dir = temp_dir("upgrade-race");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("clipboard.db");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE items (
+                 id INTEGER PRIMARY KEY, hash TEXT NOT NULL UNIQUE, seq INTEGER NOT NULL,
+                 kind TEXT NOT NULL, formats TEXT NOT NULL, text TEXT NOT NULL,
+                 text_len INTEGER NOT NULL, trim_len INTEGER NOT NULL, is_url INTEGER NOT NULL,
+                 copied_at INTEGER NOT NULL, source TEXT, size INTEGER NOT NULL,
+                 expires_at INTEGER
+             );
+             CREATE TABLE formats (
+                 item_id INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+                 mime TEXT NOT NULL, data BLOB NOT NULL, PRIMARY KEY (item_id, mime)
+             );
+             PRAGMA user_version = 2;
+             INSERT INTO items (hash, seq, kind, formats, text, text_len, trim_len, is_url,
+                     copied_at, source, size)
+             VALUES ('old', 1, 'text', 'text/plain', 'Kept Entry', 10, 10, 0, 900, NULL, 10);",
+        )
+        .unwrap();
+        drop(conn);
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(6));
+        let openers: Vec<_> = (0..6)
+            .map(|_| {
+                let barrier = barrier.clone();
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    Store::open(&path).map(|_| ())
+                })
+            })
+            .collect();
+        for opener in openers {
+            opener.join().unwrap().unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        assert_eq!(
+            titles(&store.list("kept", "", 0, &[], NOW).unwrap()),
+            ["Kept Entry"]
+        );
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -1666,6 +1939,11 @@ mod tests {
             titles(&store.list("", "", 0, &[], NOW).unwrap()),
             ["kept entry"]
         );
+        // The search column is filled in for the existing rows.
+        assert_eq!(
+            titles(&store.list("KEPT", "", 0, &[], NOW).unwrap()),
+            ["kept entry"]
+        );
         assert_eq!(deadline(&store, "old"), None);
         assert_eq!(sweep(&mut store, i64::MAX).unwrap(), 0);
         let version: i64 = store
@@ -1678,6 +1956,46 @@ mod tests {
         // Opening it again changes nothing.
         let store = Store::open(&path).unwrap();
         assert_eq!(store.list("", "", 0, &[], NOW).unwrap().items.len(), 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_expired_and_deleted_content_is_scrubbed_from_disk() {
+        let (mut store, dir) = temp_store("scrub");
+        store.conn.busy_timeout(Duration::from_millis(50)).unwrap();
+        let secret = "zq-expiring-secret-4711";
+        store
+            .insert_filtered(text(secret, 1_000), &LIMITS, &temporary_policy(60), 1_000)
+            .unwrap();
+        let deleted = "zq-deleted-entry-0815";
+        let hash = store.insert(text(deleted, 1_001), &LIMITS, 1_001).unwrap();
+        assert_eq!(store.expire(1_059).unwrap(), 0, "nothing is due yet");
+
+        // A listing still reading keeps the log from being emptied.
+        let reader = Connection::open(dir.join("clipboard.db")).unwrap();
+        reader
+            .execute_batch("BEGIN; SELECT COUNT(*) FROM items;")
+            .unwrap();
+        assert_eq!(store.expire(1_060).unwrap(), 1);
+        store.delete(&hash).unwrap();
+        reader.execute_batch("COMMIT").unwrap();
+
+        // The sweeper empties it on its next tick, with both connections
+        // still open so closing them cannot be what cleans up.
+        assert_eq!(sweep(&mut store, 1_061).unwrap(), 0);
+        for name in ["clipboard.db", "clipboard.db-wal"] {
+            let bytes = fs::read(dir.join(name)).unwrap_or_default();
+            for gone in [secret, deleted] {
+                assert!(
+                    !bytes
+                        .windows(gone.len())
+                        .any(|window| window == gone.as_bytes()),
+                    "{gone} is still in {name}"
+                );
+            }
+        }
+        drop(reader);
+        drop(store);
         let _ = fs::remove_dir_all(dir);
     }
 

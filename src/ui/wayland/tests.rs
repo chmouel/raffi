@@ -4481,6 +4481,47 @@ fn test_clipboard_rows_use_the_source_app_icon() {
 }
 
 #[test]
+fn test_clipboard_rows_are_labelled_once_when_listed() {
+    let dir = std::env::temp_dir().join(format!("raffi-clip-icons-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let icon = dir.join("kitty.png");
+    std::fs::write(&icon, b"png").unwrap();
+    let mut app = test_app(clipboard_addons());
+    app.icon_map
+        .insert("kitty".into(), icon.to_string_lossy().into_owned());
+    app.icon_map.insert(
+        "gone".into(),
+        dir.join("gone.png").to_string_lossy().into_owned(),
+    );
+    let generation = open_clipboard(&mut app, "clip ");
+    let mut first = clip(0, "a", "alpha");
+    first.source = Some("kitty".into());
+    let mut second = clip(1, "b", "beta");
+    second.source = Some("gone".into());
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page("h", 2, 2, vec![first, second])),
+    ));
+    assert_eq!(
+        app.clipboard.labels.get("a"),
+        Some(&("alpha".to_string(), "Text · 5 characters".to_string()))
+    );
+    assert_eq!(
+        app.clipboard.icons.get("kitty"),
+        Some(&Some(icon.to_string_lossy().into_owned()))
+    );
+    assert_eq!(
+        app.clipboard.icons.get("gone"),
+        Some(&None),
+        "a missing icon file is remembered as no icon"
+    );
+    let _ = app.view();
+    let _ = app.update(Message::SearchChanged("fire".into()));
+    assert!(app.clipboard.labels.is_empty() && app.clipboard.icons.is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn test_clipboard_previews_are_bound_to_session_and_item() {
     let mut app = test_app(clipboard_addons());
     let generation = open_clipboard(&mut app, "clip ");

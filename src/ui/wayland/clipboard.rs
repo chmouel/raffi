@@ -316,6 +316,9 @@ impl History {
         }
     }
 
+    /// Scan from `start`. `cancel` reports that a newer scan replaced this
+    /// one, so the listing can stop early.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn list_page(
         &self,
         tab: &str,
@@ -324,19 +327,24 @@ impl History {
         only_kind: &str,
         min_chars: usize,
         exclude: &[regex::Regex],
+        cancel: super::clipboard_store::Cancel,
     ) -> Result<Page, String> {
+        if cancel() {
+            return Err("clipboard listing replaced by a newer one".into());
+        }
         match self {
             Self::CopyQ(copyq) => copyq.list_page(tab, start, query, only_kind, min_chars, exclude),
             Self::Raffi => {
                 if !super::cache::listening() {
                     return Err(super::cache::CLIPBOARD_NOT_RUNNING.to_string());
                 }
-                super::clipboard_store::Store::open_default()?.list(
+                super::clipboard_store::Store::open_default()?.list_until(
                     query,
                     only_kind,
                     min_chars,
                     exclude,
                     super::clipboard_store::now_secs(),
+                    Some(cancel),
                 )
             }
         }
@@ -658,11 +666,49 @@ pub(super) fn decode_image(mime: &str, bytes: &[u8]) -> Result<PreviewImage, Str
         ));
     }
     Ok(PreviewImage {
-        handle: iced::widget::image::Handle::from_bytes(bytes.to_vec()),
+        handle: preview_handle(bytes, width.max(height)),
         mime: mime.to_string(),
         width,
         height,
     })
+}
+
+/// Longest side of an image preview. Larger images are scaled down here, on
+/// the preview task, so the renderer never decodes or keeps a full-size
+/// copy of a screenshot that is shown a few hundred pixels wide.
+const PREVIEW_MAX_SIDE: u32 = 1200;
+
+fn preview_handle(bytes: &[u8], longest_side: u32) -> iced::widget::image::Handle {
+    if longest_side > PREVIEW_MAX_SIDE {
+        if let Some(thumbnail) = thumbnail(bytes, PREVIEW_MAX_SIDE) {
+            return thumbnail;
+        }
+    }
+    iced::widget::image::Handle::from_bytes(bytes.to_vec())
+}
+
+/// `bytes` decoded, scaled to fit in `max_side` and turned upright, or
+/// `None` when the image crate cannot read it.
+fn thumbnail(bytes: &[u8], max_side: u32) -> Option<iced::widget::image::Handle> {
+    use image::ImageDecoder;
+    let mut decoder = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?
+        .into_decoder()
+        .ok()?;
+    let orientation = decoder
+        .orientation()
+        .unwrap_or(image::metadata::Orientation::NoTransforms);
+    let mut scaled = image::DynamicImage::from_decoder(decoder)
+        .ok()?
+        .thumbnail(max_side, max_side);
+    scaled.apply_orientation(orientation);
+    let rgba = scaled.into_rgba8();
+    Some(iced::widget::image::Handle::from_rgba(
+        rgba.width(),
+        rgba.height(),
+        rgba.into_raw(),
+    ))
 }
 
 /// Pixel size of a PNG, JPEG, GIF, BMP or WebP image, read from its header
@@ -960,6 +1006,39 @@ mod tests {
         bytes.extend(height.to_be_bytes());
         bytes.extend([8, 6, 0, 0, 0]);
         bytes
+    }
+
+    #[test]
+    fn test_large_image_previews_are_scaled_down() {
+        let encode = |width: u32, height: u32| {
+            let mut bytes = Vec::new();
+            image::RgbaImage::new(width, height)
+                .write_to(
+                    &mut std::io::Cursor::new(&mut bytes),
+                    image::ImageFormat::Png,
+                )
+                .unwrap();
+            bytes
+        };
+        let large = decode_image("image/png", &encode(3200, 40)).unwrap();
+        assert_eq!((large.width, large.height), (3200, 40));
+        match &large.handle {
+            iced::widget::image::Handle::Rgba { width, height, .. } => {
+                assert_eq!((*width, *height), (PREVIEW_MAX_SIDE, 15));
+            }
+            other => panic!("expected a scaled RGBA preview, got {other:?}"),
+        }
+        let small = decode_image("image/png", &encode(40, 30)).unwrap();
+        assert!(matches!(
+            small.handle,
+            iced::widget::image::Handle::Bytes(..)
+        ));
+        // A header the image crate cannot decode keeps the encoded bytes.
+        let broken = decode_image("image/png", &png(4000, 10)).unwrap();
+        assert!(matches!(
+            broken.handle,
+            iced::widget::image::Handle::Bytes(..)
+        ));
     }
 
     #[test]

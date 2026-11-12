@@ -76,6 +76,123 @@ enum Command {
         hash: String,
         secret: bool,
     },
+    /// From the loader: the formats of an entry to put on the clipboard.
+    Loaded {
+        load: Load,
+        result: Result<Formats, String>,
+    },
+}
+
+/// An entry to read from the history and put on the clipboard. The reads
+/// happen on the loader thread, so a large entry or a busy database never
+/// holds up the clipboard event loop.
+struct Load {
+    ticket: Ticket,
+    hash: String,
+    /// Where the socket server waits for the outcome, for a selection made
+    /// in the UI; `None` when putting back the last copy.
+    reply: Option<mpsc::Sender<Result<(), String>>>,
+}
+
+/// Identifies one load and the clipboard it was asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Ticket {
+    request: u64,
+    external: u64,
+}
+
+/// The request the loader should still work on, 0 when none: a load
+/// replaced while it waits in the queue is skipped, and does not move its
+/// entry to the top of the history.
+static WANTED: AtomicU64 = AtomicU64::new(0);
+
+/// Loads in flight. Only the newest one is published, and only while no
+/// app copied anything since it was asked for, so a slow load never replaces
+/// a newer selection.
+#[derive(Debug, Default)]
+struct Loads {
+    latest: u64,
+    external: u64,
+    /// The newest load was asked for in the UI and has not finished: putting
+    /// back the last copy must not replace it.
+    explicit_pending: bool,
+}
+
+impl Loads {
+    /// A ticket for a new load, `explicit` when the user asked for it, or
+    /// `None` when an automatic restore would replace the user's choice.
+    fn request(&mut self, explicit: bool) -> Option<Ticket> {
+        if !explicit && self.explicit_pending {
+            return None;
+        }
+        // Shared across reconnections, so a load finishing after one never
+        // matches a request made after it.
+        static REQUEST: AtomicU64 = AtomicU64::new(0);
+        self.latest = REQUEST.fetch_add(1, Ordering::Relaxed) + 1;
+        self.explicit_pending = explicit;
+        WANTED.store(self.latest, Ordering::Relaxed);
+        Some(Ticket {
+            request: self.latest,
+            external: self.external,
+        })
+    }
+
+    /// Another app put something on the clipboard. The load in flight is
+    /// now stale, so it no longer holds back putting that copy back.
+    fn external_copy(&mut self) {
+        self.external += 1;
+        self.explicit_pending = false;
+        WANTED.store(0, Ordering::Relaxed);
+    }
+
+    fn accepts(&self, ticket: Ticket) -> bool {
+        ticket.request == self.latest && ticket.external == self.external
+    }
+
+    /// The load `ticket` came back from the loader, used or not.
+    fn finished(&mut self, ticket: Ticket) {
+        if ticket.request == self.latest {
+            self.explicit_pending = false;
+        }
+    }
+}
+
+/// Read each requested entry, move it to the top of the history, and hand
+/// its formats back to the clipboard thread.
+fn load_entries(loads: mpsc::Receiver<Load>) {
+    let mut store: Option<Store> = None;
+    for load in loads {
+        let wanted = || WANTED.load(Ordering::Relaxed) == load.ticket.request;
+        let result = (|| {
+            if !wanted() {
+                return Err("replaced by a newer selection".to_string());
+            }
+            if store.is_none() {
+                store = Some(Store::open_default()?);
+            }
+            let store = store.as_ref().expect("opened above");
+            let formats = store.formats(&load.hash, now_secs())?;
+            if !wanted() {
+                return Err("replaced by a newer selection".to_string());
+            }
+            store.bump(&load.hash)?;
+            Ok(formats)
+        })();
+        let commands = COMMANDS
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        match commands {
+            Some(commands) => {
+                let _ = commands.send(Command::Loaded { load, result });
+            }
+            None => {
+                if let Some(reply) = load.reply {
+                    let _ = reply.send(Err("the clipboard recorder stopped".into()));
+                }
+            }
+        }
+    }
 }
 
 static COMMANDS: Mutex<Option<channel::Sender<Command>>> = Mutex::new(None);
@@ -391,11 +508,15 @@ fn unchecked_text_format<'a>(failed: &'a [String], policy: &Policy) -> Option<&'
 
 /// Read and store each job in turn.
 fn record(jobs: mpsc::Receiver<Job>, limits: Limits, policy: Policy) {
-    let mut store = match Store::open_default() {
-        Ok(store) => store,
-        Err(error) => {
-            eprintln!("raffi: clipboard history unavailable: {error}");
-            return;
+    // Retried, so a database briefly locked at startup, by a migration for
+    // instance, does not stop recording until the next restart.
+    let mut store = loop {
+        match Store::open_default() {
+            Ok(store) => break store,
+            Err(error) => {
+                eprintln!("raffi: clipboard history unavailable, retrying: {error}");
+                std::thread::sleep(RECONNECT_DELAY);
+            }
         }
     };
     for job in jobs {
@@ -452,8 +573,9 @@ type Formats = Vec<(String, Vec<u8>)>;
 
 /// State shared by both protocol implementations.
 struct Core {
-    store: Store,
     jobs: mpsc::SyncSender<Job>,
+    loads: mpsc::Sender<Load>,
+    pending: Loads,
     /// `temporary_password_manager`: record the copies a password manager
     /// marked instead of skipping them unread.
     password_manager: bool,
@@ -481,6 +603,9 @@ impl Core {
                 })
             })
             .flatten();
+        if !offered.iter().any(|mime| mime == OWN_MIME) {
+            self.pending.external_copy();
+        }
         let generation = self.persist.selection(own);
         let Some(plan) = plan_reads(offered, self.password_manager) else {
             return Vec::new();
@@ -516,12 +641,36 @@ impl Core {
         writers
     }
 
-    /// Load the entry `hash` to serve it, returning the MIME types to offer.
-    fn load(&mut self, hash: &str) -> Result<Vec<String>, String> {
-        let formats = self.store.formats(hash, now_secs())?;
+    /// Ask the loader for the entry `hash`, to put it on the clipboard once
+    /// it is read. `reply` is set for a selection made in the UI; without it
+    /// this puts back the last copy, which never replaces such a selection
+    /// still loading.
+    fn load(&mut self, hash: String, reply: Option<mpsc::Sender<Result<(), String>>>) {
+        let Some(ticket) = self.pending.request(reply.is_some()) else {
+            return;
+        };
+        let load = Load {
+            ticket,
+            hash,
+            reply,
+        };
+        if let Err(mpsc::SendError(load)) = self.loads.send(load) {
+            if let Some(reply) = load.reply {
+                let _ = reply.send(Err("the clipboard loader stopped".into()));
+            }
+        }
+    }
+
+    /// Serve the loaded `formats` of `hash`, returning the MIME types to
+    /// offer, or `None` when a newer selection replaced this load.
+    fn loaded(&mut self, ticket: Ticket, hash: String, formats: Formats) -> Option<Vec<String>> {
+        self.pending.finished(ticket);
+        if !self.pending.accepts(ticket) {
+            return None;
+        }
         let mimes = offered_mimes(&formats);
-        self.served = Some((hash.to_string(), Arc::new(formats)));
-        Ok(mimes)
+        self.served = Some((hash, Arc::new(formats)));
+        Some(mimes)
     }
 
     fn send(&self, mime: &str, fd: OwnedFd) {
@@ -571,7 +720,7 @@ macro_rules! data_control {
                 $source::{self, $Source},
             };
 
-            use super::{Command, Core, RunError, COMMANDS};
+            use super::{Command, Core, Load, RunError, COMMANDS};
 
             type Mimes = Mutex<Vec<String>>;
 
@@ -637,9 +786,26 @@ macro_rules! data_control {
             impl State {
                 fn handle(&mut self, command: Command) {
                     match command {
-                        Command::Select { hash, reply } => {
-                            let result = self.select(&hash);
-                            let _ = reply.send(result);
+                        Command::Select { hash, reply } => self.core.load(hash, Some(reply)),
+                        Command::Loaded { load, result } => {
+                            let Load { ticket, hash, reply } = load;
+                            self.core.pending.finished(ticket);
+                            let result = result.and_then(|formats| {
+                                match self.core.loaded(ticket, hash.clone(), formats) {
+                                    Some(mimes) => self.publish(mimes),
+                                    None => Err("the clipboard changed before the entry was ready".into()),
+                                }
+                            });
+                            match reply {
+                                Some(reply) => {
+                                    let _ = reply.send(result);
+                                }
+                                None => {
+                                    if let Err(error) = result {
+                                        eprintln!("raffi: cannot keep the last copy on the clipboard: {error}");
+                                    }
+                                }
+                            }
                         }
                         Command::Recorded {
                             generation,
@@ -655,13 +821,11 @@ macro_rules! data_control {
 
                 /// Put back the entry whose source app left the clipboard empty.
                 fn restore(&mut self, hash: &str) {
-                    if let Err(error) = self.select(hash) {
-                        eprintln!("raffi: cannot keep the last copy on the clipboard: {error}");
-                    }
+                    self.core.load(hash.to_string(), None);
                 }
 
-                fn select(&mut self, hash: &str) -> Result<(), String> {
-                    let mimes = self.core.load(hash)?;
+                /// Own the selection with the entry now in `core.served`.
+                fn publish(&mut self, mimes: Vec<String>) -> Result<(), String> {
                     let source = self.manager.create_data_source(&self.qh, ());
                     for mime in mimes {
                         source.offer(mime);
@@ -670,8 +834,7 @@ macro_rules! data_control {
                     if let Some(old) = self.source.replace(source) {
                         old.destroy();
                     }
-                    self.conn.flush().map_err(|error| error.to_string())?;
-                    self.core.store.bump(hash)
+                    self.conn.flush().map_err(|error| error.to_string())
                 }
             }
 
@@ -778,10 +941,15 @@ pub(crate) fn start(limits: Limits, policy: Policy) {
         policy.temporary_password_manager
     );
     let (jobs, queue) = mpsc::sync_channel::<Job>(MAX_PENDING_JOBS);
+    let (loads, requested) = mpsc::channel::<Load>();
     let password_manager = policy.temporary_password_manager;
     std::thread::Builder::new()
         .name("raffi-clipboard-record".into())
         .spawn(move || record(queue, limits, policy))
+        .ok();
+    std::thread::Builder::new()
+        .name("raffi-clipboard-load".into())
+        .spawn(move || load_entries(requested))
         .ok();
     std::thread::Builder::new()
         .name("raffi-clipboard".into())
@@ -790,8 +958,9 @@ pub(crate) fn start(limits: Limits, policy: Policy) {
             loop {
                 let core = || {
                     Ok(Core {
-                        store: Store::open_default()?,
                         jobs: jobs.clone(),
+                        loads: loads.clone(),
+                        pending: Loads::default(),
                         password_manager,
                         served: None,
                         persist: Persist::default(),
@@ -1006,6 +1175,116 @@ mod tests {
         assert_eq!(data_for(&formats, "UTF8_STRING"), Some(&b"hi"[..]));
         assert_eq!(data_for(&formats, "image/png"), Some(&b"png"[..]));
         assert_eq!(data_for(&formats, OWN_MIME), None);
+    }
+
+    fn test_core(loads: mpsc::Sender<Load>) -> Core {
+        let (jobs, _) = mpsc::sync_channel(1);
+        Core {
+            jobs,
+            loads,
+            pending: Loads::default(),
+            password_manager: false,
+            served: None,
+            persist: Persist::default(),
+        }
+    }
+
+    #[test]
+    fn test_only_the_newest_load_is_published() {
+        let (loads, requested) = mpsc::channel();
+        let mut core = test_core(loads);
+        core.load("old".into(), None);
+        core.load("new".into(), None);
+        let old = requested.recv().unwrap();
+        let new = requested.recv().unwrap();
+        let text = || vec![("text/plain".to_string(), b"x".to_vec())];
+        assert_eq!(core.loaded(old.ticket, old.hash, text()), None);
+        assert!(core.served.is_none());
+        let mimes = core.loaded(new.ticket, new.hash, text()).unwrap();
+        assert!(mimes.contains(&OWN_MIME.to_string()));
+        assert_eq!(core.served.as_ref().unwrap().0, "new");
+    }
+
+    #[test]
+    fn test_a_copy_made_while_loading_wins() {
+        let (loads, requested) = mpsc::channel();
+        let mut core = test_core(loads);
+        let text = || vec![("text/plain".to_string(), b"x".to_vec())];
+
+        // Raffi's own offer showing up does not cancel the load.
+        core.load("a".into(), None);
+        let load = requested.recv().unwrap();
+        assert!(core
+            .capture(&mimes(&[OWN_MIME, "text/plain"]), |_, _| {})
+            .is_empty());
+        assert!(core.loaded(load.ticket, load.hash, text()).is_some());
+
+        // A copy from another app does.
+        core.load("b".into(), None);
+        let load = requested.recv().unwrap();
+        assert!(core
+            .capture(&mimes(&["application/x-unknown"]), |_, _| {})
+            .is_empty());
+        assert_eq!(core.loaded(load.ticket, load.hash, text()), None);
+        assert_eq!(core.served.as_ref().unwrap().0, "a");
+    }
+
+    #[test]
+    fn test_putting_back_the_last_copy_never_replaces_a_selection() {
+        let (loads, requested) = mpsc::channel();
+        let mut core = test_core(loads);
+        let text = || vec![("text/plain".to_string(), b"x".to_vec())];
+
+        // The user picks B, then A's source exits while B loads.
+        let (reply, answer) = mpsc::channel();
+        core.load("b".into(), Some(reply));
+        core.load("a".into(), None);
+        let b = requested.recv().unwrap();
+        assert!(requested.try_recv().is_err(), "the restore of A is dropped");
+        assert!(core.loaded(b.ticket, b.hash, text()).is_some());
+        assert_eq!(core.served.as_ref().unwrap().0, "b");
+        drop(answer);
+
+        // Once B is served, putting back the last copy works again, and a
+        // selection made while it loads replaces it.
+        core.load("b".into(), None);
+        let restore = requested.recv().unwrap();
+        let (reply, _answer) = mpsc::channel();
+        core.load("c".into(), Some(reply));
+        let c = requested.recv().unwrap();
+        assert_eq!(core.loaded(restore.ticket, restore.hash, text()), None);
+        assert!(core.loaded(c.ticket, c.hash, text()).is_some());
+        assert_eq!(core.served.as_ref().unwrap().0, "c");
+    }
+
+    #[test]
+    fn test_a_copy_made_during_a_selection_can_still_be_put_back() {
+        let (loads, requested) = mpsc::channel();
+        let mut core = test_core(loads);
+        let text = || vec![("text/plain".to_string(), b"x".to_vec())];
+
+        // B loads, another app copies C, then C's source exits.
+        let (reply, _answer) = mpsc::channel();
+        core.load("b".into(), Some(reply));
+        let b = requested.recv().unwrap();
+        assert!(core
+            .capture(&mimes(&["application/x-unknown"]), |_, _| {})
+            .is_empty());
+        core.load("c".into(), None);
+        let c = requested.recv().expect("the restore of C is queued");
+        assert_eq!(core.loaded(b.ticket, b.hash, text()), None);
+        assert!(core.loaded(c.ticket, c.hash, text()).is_some());
+        assert_eq!(core.served.as_ref().unwrap().0, "c");
+    }
+
+    #[test]
+    fn test_load_reports_a_stopped_loader() {
+        let (loads, requested) = mpsc::channel();
+        drop(requested);
+        let mut core = test_core(loads);
+        let (reply, answer) = mpsc::channel();
+        core.load("a".into(), Some(reply));
+        assert!(answer.recv().unwrap().is_err());
     }
 
     #[test]

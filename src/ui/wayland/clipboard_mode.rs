@@ -37,6 +37,30 @@ impl LauncherApp {
             .or_else(|| self.resolve_icon_name(&app.to_lowercase()))
     }
 
+    /// Build the labels and look up the source icons of newly listed items,
+    /// so drawing the list does no string building or file checks per row.
+    pub(super) fn index_clipboard_rows(&mut self) {
+        let mut labels = Vec::new();
+        let mut icons = Vec::new();
+        for item in &self.clipboard.items {
+            if !self.clipboard.labels.contains_key(&item.id) {
+                labels.push((item.id.clone(), (item.title(), item.subtitle())));
+            }
+            if let Some(source) = &item.source {
+                if !self.clipboard.icons.contains_key(source)
+                    && !icons.iter().any(|(known, _)| known == source)
+                {
+                    let icon = self
+                        .clipboard_source_icon(item)
+                        .filter(|path| std::path::Path::new(path).exists());
+                    icons.push((source.clone(), icon));
+                }
+            }
+        }
+        self.clipboard.labels.extend(labels);
+        self.clipboard.icons.extend(icons);
+    }
+
     /// Enter or update the clipboard browser for `query`.
     pub(super) fn handle_clipboard_query(&mut self, query: String, tasks: &mut Vec<Task<Message>>) {
         let state = &mut self.clipboard;
@@ -59,18 +83,19 @@ impl LauncherApp {
     /// stay visible until the first page arrives.
     fn start_clipboard_scan(&mut self) -> Task<Message> {
         let state = &mut self.clipboard;
-        state.generation = state.generation.wrapping_add(1);
+        state.next_generation();
         state.loading = true;
         state.fresh = true;
         state.scanned = 0;
         let generation = state.generation;
+        let cancel = state.scan_cancel();
         let query = state.query.clone();
         let kind = state.view.kind();
         let min_chars = self.addons.clipboard.min_chars();
         let exclude = self.addons.clipboard.exclude_regexes();
         let history = History::new(self.addons.clipboard.backend);
         Task::perform(
-            async move { history.list_page("", 0, &query, kind, min_chars, &exclude?) },
+            async move { history.list_page("", 0, &query, kind, min_chars, &exclude?, cancel) },
             move |result| Message::ClipboardPage(generation, result),
         )
     }
@@ -133,13 +158,14 @@ impl LauncherApp {
         state.items.sort_by_key(|item| (item.tier, item.row));
         let mut seen = HashSet::new();
         state.items.retain(|item| seen.insert(item.id.clone()));
-
         let follow = state.follow.clone();
+        self.index_clipboard_rows();
         self.restore_clipboard_selection(follow.as_deref());
 
         let state = &mut self.clipboard;
         if page.next < state.total && advanced {
             let generation = state.generation;
+            let cancel = state.scan_cancel();
             let tab = state.tab.clone();
             let query = state.query.clone();
             let kind = state.view.kind();
@@ -148,7 +174,9 @@ impl LauncherApp {
             let history = History::new(self.addons.clipboard.backend);
             let start = page.next;
             Task::perform(
-                async move { history.list_page(&tab, start, &query, kind, min_chars, &exclude?) },
+                async move {
+                    history.list_page(&tab, start, &query, kind, min_chars, &exclude?, cancel)
+                },
                 move |result| Message::ClipboardPage(generation, result),
             )
         } else {
