@@ -10,10 +10,10 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
-use chrono::{Datelike, NaiveDateTime};
+use chrono::{Datelike, NaiveDateTime, TimeZone};
 use serde::Deserialize;
 
-use super::actions::run_bounded;
+use super::actions::{run_bounded, run_bounded_with_input};
 use super::clipboard_store::is_excluded;
 
 const PRELUDE: &str = include_str!("copyq/prelude.js");
@@ -91,9 +91,9 @@ pub(crate) struct ClipItem {
     /// 0: text starts with the query, 1: contains it, 2: contains every word.
     #[serde(rename = "t")]
     pub tier: u8,
-    /// Local copy time, when CopyQ stored one.
+    /// Unix copy time, when the backend stored one.
     #[serde(rename = "c", default, deserialize_with = "copy_time")]
-    pub copied: Option<NaiveDateTime>,
+    pub copied: Option<i64>,
     /// App ID or window class of the app focused when the item was copied,
     /// when CopyQ stored one.
     #[serde(rename = "s", default, deserialize_with = "source_app")]
@@ -117,12 +117,31 @@ fn source_app<'de, D: serde::Deserializer<'de>>(
 
 fn copy_time<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
-) -> Result<Option<NaiveDateTime>, D::Error> {
+) -> Result<Option<i64>, D::Error> {
     let raw = String::deserialize(deserializer)?;
-    Ok(NaiveDateTime::parse_from_str(&raw, COPY_TIME_FORMAT).ok())
+    Ok(NaiveDateTime::parse_from_str(&raw, COPY_TIME_FORMAT)
+        .ok()
+        .and_then(local_unix))
 }
 
 const COPY_TIME_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
+
+/// The unix instant of a local wall-clock time, for a backend that gives no
+/// offset. An ambiguous time takes its first occurrence.
+fn local_unix(time: NaiveDateTime) -> Option<i64> {
+    chrono::Local
+        .from_local_datetime(&time)
+        .earliest()
+        .map(|time| time.timestamp())
+}
+
+/// The local wall-clock time of the unix instant `secs`, for display.
+pub(crate) fn local_time(secs: i64) -> Option<NaiveDateTime> {
+    chrono::Local
+        .timestamp_opt(secs, 0)
+        .single()
+        .map(|time| time.naive_local())
+}
 
 /// Short copy time for a row: the hour today, the day for the last week,
 /// the date otherwise.
@@ -467,6 +486,9 @@ pub(crate) enum Backend {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct CopyQ {
     session: Option<String>,
+    /// Stands in for the `copyq` executable in tests.
+    #[cfg(test)]
+    program: Option<String>,
 }
 
 impl CopyQ {
@@ -474,7 +496,25 @@ impl CopyQ {
     pub(crate) fn with_session(session: &str) -> Self {
         Self {
             session: Some(session.to_string()),
+            program: None,
         }
+    }
+
+    #[cfg(test)]
+    fn with_program(program: &str, session: Option<&str>) -> Self {
+        Self {
+            session: session.map(str::to_string),
+            program: Some(program.to_string()),
+        }
+    }
+
+    /// The executable the commands run, which tests point elsewhere.
+    fn program(&self) -> &str {
+        #[cfg(test)]
+        if let Some(program) = &self.program {
+            return program;
+        }
+        "copyq"
     }
 
     fn eval(
@@ -494,6 +534,23 @@ impl CopyQ {
             .arg("--")
             .args(args);
         run_bounded(command, timeout, max_output).map_err(copyq_error)
+    }
+
+    /// Run one CopyQ command with `input` on its standard input, for the
+    /// content that is too large or too binary to pass as an argument.
+    fn run_with_input(
+        &self,
+        args: &[&str],
+        input: &[u8],
+        timeout: Duration,
+        max_output: usize,
+    ) -> Result<Vec<u8>, String> {
+        let mut argv: Vec<&str> = vec![self.program()];
+        if let Some(session) = &self.session {
+            argv.extend(["-s", session.as_str()]);
+        }
+        argv.extend(args);
+        run_bounded_with_input(&argv, input, timeout, max_output).map_err(copyq_error)
     }
 
     /// Scan `PAGE_SIZE` rows from `start`, returning those matching `query`.
@@ -593,6 +650,14 @@ impl CopyQ {
                 .error
                 .unwrap_or_else(|| "CopyQ could not copy the item".into()))
         }
+    }
+
+    /// Put `data` on the clipboard as `mime`, which also adds it to CopyQ's
+    /// history. CopyQ reads the content from its standard input, so no size
+    /// or encoding limit applies.
+    pub(crate) fn set(&self, mime: &str, data: &[u8]) -> Result<(), String> {
+        self.run_with_input(&["copy", mime, "-"], data, SELECT_TIMEOUT, 64 * 1024)
+            .map(|_| ())
     }
 
     /// Remove `item` from the clipboard history.
@@ -988,6 +1053,76 @@ mod tests {
         }
     }
 
+    /// Writes an executable stand-in for `copyq` that records its argv and
+    /// its standard input.
+    fn recording_copyq(
+        name: &str,
+    ) -> (
+        String,
+        std::path::PathBuf,
+        std::path::PathBuf,
+        std::path::PathBuf,
+    ) {
+        use std::os::unix::fs::PermissionsExt;
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("raffi-copyq-{name}-{unique}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (argv, stdin) = (dir.join("argv"), dir.join("stdin"));
+        let program = dir.join("copyq");
+        std::fs::write(
+            &program,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$0\" \"$@\" > '{}'\ncat > '{}'\n",
+                argv.display(),
+                stdin.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (program.display().to_string(), dir, argv, stdin)
+    }
+
+    #[test]
+    fn test_set_runs_copyq_with_the_content_on_its_input() {
+        let (program, dir, argv, stdin) = recording_copyq("set");
+        CopyQ::with_program(&program, Some("raffi-test"))
+            .set("text/plain", "h\u{e9}llo\n".as_bytes())
+            .unwrap();
+        let argv_lines: Vec<String> = std::fs::read_to_string(&argv)
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect();
+        // The executable is the one copyq was run as, never a stray `copy`.
+        assert!(argv_lines[0].ends_with("copyq"), "{argv_lines:?}");
+        assert_eq!(
+            &argv_lines[1..],
+            ["-s", "raffi-test", "copy", "text/plain", "-"],
+            "{argv_lines:?}"
+        );
+        assert_eq!(std::fs::read(&stdin).unwrap(), "h\u{e9}llo\n".as_bytes());
+
+        // Only the default session drops the `-s` pair.
+        CopyQ::with_program(&program, None)
+            .set("image/png", b"\x89PNG")
+            .unwrap();
+        let argv_lines: Vec<String> = std::fs::read_to_string(&argv)
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect();
+        assert_eq!(
+            &argv_lines[1..],
+            ["copy", "image/png", "-"],
+            "{argv_lines:?}"
+        );
+        assert_eq!(std::fs::read(&stdin).unwrap(), b"\x89PNG");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn test_scripts_have_no_backslashes() {
         // CopyQ would expand them as escape sequences in a command-line script.
@@ -1016,9 +1151,11 @@ mod tests {
         assert_eq!(page.items[0].copied, None);
         assert_eq!(page.items[0].source, None);
         assert_eq!(page.items[1].source.as_deref(), Some("Firefox"));
-        let copied = page.items[1].copied.unwrap();
         assert_eq!(
-            copied.format(COPY_TIME_FORMAT).to_string(),
+            local_time(page.items[1].copied.unwrap())
+                .unwrap()
+                .format(COPY_TIME_FORMAT)
+                .to_string(),
             "2026-10-16 14:32:05"
         );
         assert_eq!(

@@ -22,12 +22,11 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use chrono::{Local, NaiveDateTime, TimeZone};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
 use super::clipboard::{
-    bounded_text, decode_image, inspect_files, ClipItem, ClipPreview, ItemKind, Page,
-    EXCERPT_CHARS, MAX_IMAGE_BYTES, PREVIEW_TEXT_BYTES,
+    bounded_text, decode_image, image_dimensions, inspect_files, ClipItem, ClipPreview, ItemKind,
+    Page, EXCERPT_CHARS, MAX_IMAGE_BYTES, PREVIEW_TEXT_BYTES,
 };
 use super::clipboard_policy::{Disposition, Policy, PASSWORD_HINT};
 
@@ -35,6 +34,10 @@ use super::clipboard_policy::{Disposition, Policy, PASSWORD_HINT};
 pub(crate) const TAB: &str = "raffi";
 /// Text formats larger than this are not recorded.
 pub(crate) const MAX_TEXT_BYTES: usize = 16 * 1024 * 1024;
+/// Longest MIME name a format may carry, its parameters included.
+pub(crate) const MAX_MIME_BYTES: usize = 256;
+/// Start of a stored image read to find its pixel size without loading it.
+const IMAGE_HEADER_BYTES: usize = 64 * 1024;
 /// Next history position, computed inside the statement that assigns it so
 /// concurrent connections cannot hand out the same one.
 const NEXT_SEQ: &str = "(SELECT COALESCE(MAX(seq), 0) + 1 FROM items)";
@@ -52,10 +55,19 @@ const ALIVE: &str = "(expires_at IS NULL OR expires_at > ?1)";
 /// entry reached its deadline at that second.
 const EXPIRED: &str = "(expires_at IS NOT NULL AND expires_at <= ?1)";
 
+/// Message of a lookup that finds the entry gone, which the command line
+/// reports as `not_found` rather than as a database failure.
+pub(crate) const GONE: &str = "item is no longer in the clipboard history";
+
+/// Whether `message` is [`GONE`].
+pub(crate) fn is_gone(message: &str) -> bool {
+    message == GONE
+}
+
 /// Stored for the password-manager marker when the source offers it with no
 /// data, so that the marker survives the empty-format filter and the entry
 /// is served with it again.
-const PASSWORD_MARKER: &[u8] = b"secret";
+pub(crate) const PASSWORD_MARKER: &[u8] = b"secret";
 
 /// Reports that the listing it was handed to has been replaced by a newer
 /// one and can stop.
@@ -155,6 +167,15 @@ pub(crate) fn disk_usage() -> u64 {
         .iter()
         .map(|path| fs::metadata(path).map_or(0, |meta| meta.len()))
         .sum()
+}
+
+/// The pixel size of a stored image, with its format and stored size.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ImageMeta {
+    pub mime: String,
+    pub width: u32,
+    pub height: u32,
+    pub bytes: usize,
 }
 
 /// What the history holds, for `raffi clipboard status`.
@@ -429,13 +450,39 @@ impl Store {
         policy: &Policy,
         now: i64,
     ) -> Result<String, Skipped> {
+        self.record(capture, limits, policy, now, false)
+    }
+
+    /// Like `insert_filtered`, but keeps the entry temporary even when no
+    /// temporary pattern matches: `raffi clipboard set --temporary` asked for
+    /// it. Exclusion patterns and password-manager rules still win.
+    pub(crate) fn insert_temporary(
+        &mut self,
+        capture: Capture,
+        limits: &Limits,
+        policy: &Policy,
+        now: i64,
+    ) -> Result<String, Skipped> {
+        self.record(capture, limits, policy, now, true)
+    }
+
+    fn record(
+        &mut self,
+        capture: Capture,
+        limits: &Limits,
+        policy: &Policy,
+        now: i64,
+        force_temporary: bool,
+    ) -> Result<String, Skipped> {
         let password_marked = capture.password_marked;
         let mut formats = capture.formats;
         formats.retain(|(_, data)| !data.is_empty());
         if formats.is_empty() {
             return Err(Skipped::Empty);
         }
-        for (mime, data) in &formats {
+        for (mime, _) in &mut formats {
+            *mime = canonical_mime(mime);
+        }        for (mime, data) in &formats {
             let limit = if mime.starts_with("image/") {
                 limits.max_image_size
             } else {
@@ -485,12 +532,15 @@ impl Store {
             .collect();
         let kind = kind_of(&mimes);
         let text = text_of(&formats);
-        let expires_at = deadline_for(
+        let deadline = deadline_for(
             policy.disposition(&text, password_marked),
             password_marked,
             capture.copied_at,
             policy.temporary_timeout,
         )?;
+        let expires_at = deadline.or_else(|| {
+            force_temporary.then(|| capture.copied_at.saturating_add(policy.temporary_timeout))
+        });
         if expires_at.is_some_and(|deadline| deadline <= now) {
             return Err(Skipped::Expired);
         }
@@ -611,6 +661,19 @@ impl Store {
                 .map_err(db_error)?;
         }
         Ok(())
+    }
+
+    /// The deadline of the entry `hash`, `None` when it stays in the history.
+    pub(crate) fn deadline(&self, hash: &str) -> Result<Option<i64>, String> {
+        self.conn
+            .query_row(
+                "SELECT expires_at FROM items WHERE hash = ?1",
+                [hash],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(db_error)?
+            .ok_or_else(|| GONE.to_string())
     }
 
     /// Move the entry `hash` to the top, as when it is copied again.
@@ -767,7 +830,7 @@ impl Store {
                 text_len: text_len.max(0) as usize,
                 excerpt: text.chars().take(EXCERPT_CHARS).collect(),
                 tier: tier.clamp(0, 2) as u8,
-                copied: local_time(copied_at),
+                copied: Some(copied_at),
                 source,
                 oversized: false,
                 expires_at,
@@ -794,7 +857,7 @@ impl Store {
             )
             .optional()
             .map_err(db_error)?
-            .ok_or_else(|| "item is no longer in the clipboard history".to_string())
+            .ok_or_else(|| GONE.to_string())
     }
 
     pub(crate) fn preview(&self, hash: &str, now: i64) -> Result<ClipPreview, String> {
@@ -810,7 +873,7 @@ impl Store {
             )
             .optional()
             .map_err(db_error)?
-            .ok_or_else(|| "item is no longer in the clipboard history".to_string())?;
+            .ok_or_else(|| GONE.to_string())?;
         let kind = parse_kind(&kind);
         let mut statement = self
             .conn
@@ -886,6 +949,42 @@ impl Store {
         Ok(formats)
     }
 
+    /// Pixel size of the image format an entry holds, read from the start
+    /// of the stored bytes rather than the whole picture.
+    pub(crate) fn image_meta(&self, hash: &str, now: i64) -> Result<Option<ImageMeta>, String> {
+        let id = self.item_id(hash, now)?;
+        let row = self
+            .conn
+            .query_row(
+                "SELECT mime, length(data), substr(data, 1, ?2) FROM formats
+                 WHERE item_id = ?1 AND mime LIKE 'image/%'
+                 ORDER BY CASE mime
+                     WHEN 'image/png' THEN 0
+                     WHEN 'image/svg+xml' THEN 3
+                     ELSE 1
+                 END, mime
+                 LIMIT 1",
+                params![id, IMAGE_HEADER_BYTES as i64],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, Vec<u8>>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(db_error)?;
+        Ok(row.and_then(|(mime, bytes, header)| {
+            image_dimensions(&header).map(|(width, height)| ImageMeta {
+                mime,
+                width,
+                height,
+                bytes: bytes.max(0) as usize,
+            })
+        }))
+    }
+
     /// Remove the entry `hash`. Reports whether the log was emptied, which
     /// it cannot be while another connection reads it.
     pub(crate) fn delete(&self, hash: &str) -> Result<bool, String> {
@@ -894,7 +993,7 @@ impl Store {
             .execute("DELETE FROM items WHERE hash = ?1", [hash])
             .map_err(db_error)?;
         if removed == 0 {
-            return Err("item is no longer in the clipboard history".into());
+            return Err(GONE.to_string());
         }
         Ok(self.truncate_wal())
     }
@@ -1034,13 +1133,6 @@ fn preview_image_format(formats: &[(String, usize)]) -> Option<(String, usize)> 
         .cloned()
 }
 
-fn local_time(secs: i64) -> Option<NaiveDateTime> {
-    Local
-        .timestamp_opt(secs, 0)
-        .single()
-        .map(|time| time.naive_local())
-}
-
 /// 128-bit FNV-1a over every format, length-prefixed so that boundaries
 /// between formats cannot collide.
 fn fingerprint<'a>(formats: impl Iterator<Item = (&'a str, &'a [u8])>) -> String {
@@ -1080,17 +1172,98 @@ fn deadline_for(
 }
 
 fn kind_of(mimes: &[&str]) -> ItemKind {
+    let known = |name: &str| mimes.iter().any(|mime| recognized_mime(mime) == Some(name));
     if mimes.iter().any(|mime| mime.starts_with("image/")) {
         ItemKind::Image
-    } else if mimes.contains(&"text/uri-list") {
+    } else if known("text/uri-list") {
         ItemKind::Files
-    } else if mimes.contains(&"text/plain") {
+    } else if known("text/plain") {
         ItemKind::Text
-    } else if mimes.contains(&"text/html") {
+    } else if known("text/html") {
         ItemKind::Html
     } else {
         ItemKind::Other
     }
+}
+
+/// The name of a text type Raffi knows, whatever case and parameters it came
+/// with: a browser offers `text/html;charset=utf-8` for an HTML entry.
+pub(crate) fn recognized_mime(mime: &str) -> Option<&'static str> {
+    let base = mime.split(';').next().unwrap_or(mime).trim();
+    ["text/plain", "text/html", "text/uri-list"]
+        .into_iter()
+        .find(|known| base.eq_ignore_ascii_case(known))
+}
+
+/// The name a format is stored and looked up under: a recognized text type
+/// loses its parameters and case, anything else is stored as it came.
+pub(crate) fn canonical_mime(mime: &str) -> String {
+    let mime = mime.trim();
+    match recognized_mime(mime) {
+        Some(known) => known.to_string(),
+        None => mime.to_string(),
+    }
+}
+
+/// Whether `mime` is a name a selection can offer: `type/subtype` of RFC 6838
+/// token characters, optional parameters after a `;`, no control character
+/// and at most [`MAX_MIME_BYTES`] bytes. Wayland turns the name into a C
+/// string, so a NUL would abort the process that offers it.
+pub(crate) fn validate_mime(mime: &str) -> Result<(), String> {
+    let mime = mime.trim();
+    if mime.is_empty() {
+        return Err("a MIME type cannot be empty".to_string());
+    }
+    if mime.chars().any(char::is_control) {
+        return Err("a MIME type cannot hold a control character".to_string());
+    }
+    if mime.len() > MAX_MIME_BYTES {
+        return Err(format!(
+            "a MIME type cannot be longer than {MAX_MIME_BYTES} bytes"
+        ));
+    }
+    let (base, parameters) = match mime.split_once(';') {
+        Some((base, parameters)) => (base.trim(), Some(parameters)),
+        None => (mime, None),
+    };
+    let token = |value: &str| !value.is_empty() && value.chars().all(is_token_char);
+    let Some((kind, subtype)) = base.split_once('/') else {
+        return Err("a MIME type needs a `type/subtype` shape".to_string());
+    };
+    if !token(kind) || !token(subtype) {
+        return Err("the type and subtype of a MIME type are letters, digits and the \
+                    symbols `!#$%&'*+-.^_`|~`"
+            .to_string());
+    }
+    if let Some(parameters) = parameters {
+        if parameters.trim().is_empty() {
+            return Err("the parameters of a MIME type cannot be empty".to_string());
+        }
+    }
+    Ok(())
+}
+
+/// Characters an RFC 7230 token is made of, which MIME type and subtype names
+/// are a subset of.
+fn is_token_char(character: char) -> bool {
+    character.is_ascii_alphanumeric()
+        || matches!(
+            character,
+            '!' | '#'
+                | '$'
+                | '%'
+                | '&'
+                | '\''
+                | '*'
+                | '+'
+                | '-'
+                | '.'
+                | '^'
+                | '_'
+                | '`'
+                | '|'
+                | '~'
+        )
 }
 
 pub(crate) fn kind_name(kind: ItemKind) -> &'static str {
@@ -1126,12 +1299,12 @@ pub(crate) fn is_excluded(text: &str, patterns: &[regex::Regex]) -> bool {
 }
 
 /// Searchable text: plain text, else the file list, else the HTML with its
-/// tags removed.
+/// tags removed. A recognized type counts whatever parameters it came with.
 pub(crate) fn text_of(formats: &[(String, Vec<u8>)]) -> String {
     let format = |name: &str| {
         formats
             .iter()
-            .find(|(mime, _)| mime == name)
+            .find(|(mime, data)| !data.is_empty() && recognized_mime(mime) == Some(name))
             .map(|(_, data)| String::from_utf8_lossy(data).into_owned())
     };
     if let Some(text) = format("text/plain").or_else(|| format("text/uri-list")) {
@@ -1322,7 +1495,7 @@ mod tests {
         assert_eq!(titles(&page), ["first entry", "second entry"]);
         assert_eq!(page.total, 2);
         assert_eq!(page.head, first);
-        assert_eq!(page.items[0].copied, local_time(300));
+        assert_eq!(page.items[0].copied, Some(300));
         assert_eq!(page.items[0].source.as_deref(), Some("kitty"));
 
         store.bump(&page.items[1].id).unwrap();

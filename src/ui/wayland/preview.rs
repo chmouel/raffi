@@ -1809,6 +1809,7 @@ impl LauncherApp {
         let now = Local::now().naive_local();
         let copied = item
             .copied
+            .and_then(super::clipboard::local_time)
             .map(|time| super::clipboard::human_copy_time(time, now));
         if let Some(time) = &copied {
             metadata.push(("Copied".to_string(), time.clone()));

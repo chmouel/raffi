@@ -2432,6 +2432,8 @@ pub enum ClipboardCommand {
     Show(ClipboardShowArgs),
     #[options(help = "put one entry back on the clipboard")]
     Copy(ClipboardCopyArgs),
+    #[options(help = "put new content on the clipboard")]
+    Set(ClipboardSetArgs),
     #[options(help = "delete entries")]
     Delete(ClipboardDeleteArgs),
     #[options(help = "delete every entry")]
@@ -2448,6 +2450,14 @@ pub struct ClipboardListArgs {
     pub kind: Option<ClipboardKind>,
     #[options(help = "stop after N entries", short = "n", meta = "N")]
     pub limit: Option<usize>,
+    #[options(help = "skip the first N entries", no_short, meta = "N")]
+    pub offset: Option<usize>,
+    #[options(
+        help = "only entries copied since a duration (30s, 15m, 2h, 3d) or a timestamp",
+        no_short,
+        meta = "WHEN"
+    )]
+    pub since: Option<String>,
     #[options(
         help = "also list text shorter than addons.clipboard.min_chars",
         no_short
@@ -2469,6 +2479,8 @@ pub struct ClipboardShowArgs {
     pub formats: bool,
     #[options(help = "print the entry's metadata instead", no_short)]
     pub json: bool,
+    #[options(help = "write at most N bytes of the entry", no_short, meta = "N")]
+    pub max_bytes: Option<usize>,
     #[options(free, help = "entry to export: an index or an id prefix")]
     pub reference: Vec<String>,
 }
@@ -2479,6 +2491,25 @@ pub struct ClipboardCopyArgs {
     pub help: bool,
     #[options(free, help = "entry to copy: an index or an id prefix")]
     pub reference: Vec<String>,
+}
+
+#[derive(Debug, Options, Clone, Default)]
+pub struct ClipboardSetArgs {
+    #[options(help = "print help message")]
+    pub help: bool,
+    #[options(help = "MIME type of the content", no_short, meta = "TYPE")]
+    pub mime: Option<String>,
+    #[options(help = "record the entry as a temporary one", no_short)]
+    pub temporary: bool,
+    #[options(help = "mark the content as a password-manager secret", no_short)]
+    pub secret: bool,
+    #[options(help = "print the recorded entry as one JSON object", no_short)]
+    pub json: bool,
+    #[options(
+        free,
+        help = "content to put on the clipboard, read from the input when absent"
+    )]
+    pub text: Vec<String>,
 }
 
 #[derive(Debug, Options, Clone, Default)]
@@ -4834,8 +4865,10 @@ pub fn run(args: Args) -> Result<()> {
         return match ui::run_clipboard_cli(&config.addons.clipboard, clipboard) {
             Ok(()) => Ok(()),
             Err(error) => {
-                eprintln!("raffi clipboard: {error}");
-                std::process::exit(1);
+                if !error.is_reported() {
+                    eprintln!("raffi clipboard: {error}");
+                }
+                std::process::exit(error.exit_code());
             }
         };
     }
@@ -6589,6 +6622,46 @@ launchers:
         assert!(Args::parse_args_default::<&str>(&["clipboard", "publish"]).is_err());
         assert!(Args::parse_args_default::<&str>(&["clipboard", "list", "-k", "nope"]).is_err());
         assert!(Args::parse_args_default::<&str>(&["clipboard", "status", "--json"]).is_ok());
+    }
+
+    #[test]
+    fn test_clipboard_set_is_parsed() {
+        let args = Args::parse_args_default::<&str>(&["clipboard", "set"]).unwrap();
+        let Some(Subcommand::Clipboard(clipboard)) = args.command else {
+            panic!("the clipboard command should be parsed");
+        };
+        let Some(ClipboardCommand::Set(set)) = clipboard.action else {
+            panic!("the set action should be parsed");
+        };
+        assert_eq!(set.mime, None);
+        assert!(!set.temporary);
+        assert!(!set.secret);
+        assert!(!set.json);
+        assert!(set.text.is_empty(), "no content reads the input");
+
+        let args = Args::parse_args_default::<&str>(&[
+            "clipboard",
+            "set",
+            "--mime",
+            "image/png",
+            "--temporary",
+            "--secret",
+            "--json",
+            "one",
+            "two",
+        ])
+        .unwrap();
+        let Some(Subcommand::Clipboard(clipboard)) = args.command else {
+            panic!("the clipboard command should be parsed");
+        };
+        let Some(ClipboardCommand::Set(set)) = clipboard.action else {
+            panic!("the set action should be parsed");
+        };
+        assert_eq!(set.mime.as_deref(), Some("image/png"));
+        assert!(set.temporary);
+        assert!(set.secret);
+        assert!(set.json);
+        assert_eq!(set.text, ["one", "two"]);
     }
 
     #[test]

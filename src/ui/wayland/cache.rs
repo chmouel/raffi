@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{AddonsConfig, ParsedConfig, ScriptFilterConfig};
 
+use super::clipboard_store::MAX_MIME_BYTES;
 use super::script_filters::{self, PreviewRequest};
 use super::types::{ScriptFilterResult, ScriptFilterView};
 
@@ -38,9 +39,24 @@ pub(crate) const CLIPBOARD_NOT_RUNNING: &str =
 const WARM_TICK: Duration = Duration::from_secs(30);
 /// Protocol revision reported by `Status`; daemons from before it existed
 /// report 0 and ignore `wait`. Revision 2 adds `clipboard_select`, revision
-/// 3 the `clipboard` status flag.
-pub(crate) const PROTOCOL: u32 = 3;
+/// 3 the `clipboard` status flag, revision 4 `clipboard_set`.
+pub(crate) const PROTOCOL: u32 = 4;
+/// Upper bound on the formats one `clipboard set` request may carry.
+const MAX_SET_FORMATS: usize = 32;
+/// Largest single format a request may carry, whatever the configured image
+/// limit: the service has to bound the line it reads before decoding it.
+const MAX_SET_FORMAT_BYTES: u64 = 64 * 1024 * 1024;
+/// Longest request line the service reads: one format at
+/// [`MAX_SET_FORMAT_BYTES`], base64-encoded, with the MIME names and the JSON
+/// framing of [`MAX_SET_FORMATS`] formats around it.
+const MAX_REQUEST_LINE: usize =
+    base64_len(MAX_SET_FORMAT_BYTES as usize) + MAX_SET_FORMATS * (MAX_MIME_BYTES + 16) + 4096;
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+
+/// Length of `bytes` once base64-encoded.
+const fn base64_len(bytes: usize) -> usize {
+    (bytes + 2) / 3 * 4
+}
 
 /// A snapshot file to write after a successful script run.
 #[derive(Debug, Clone)]
@@ -121,6 +137,26 @@ pub(crate) enum Request {
     ClipboardSelect {
         id: String,
     },
+    /// Put new content on the clipboard, recording it first when the policy
+    /// allows. The command exits, so the service has to own the selection.
+    ClipboardSet {
+        formats: Vec<SetFormat>,
+        /// Record the entry as a temporary one.
+        #[serde(default)]
+        temporary: bool,
+        /// The content is a password-manager secret.
+        #[serde(default)]
+        secret: bool,
+    },
+}
+
+/// One MIME type of a `clipboard set` request, with its bytes base64-encoded:
+/// the socket carries one JSON line per request, and a text entry can be 16
+/// MiB of them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct SetFormat {
+    pub mime: String,
+    pub data: String,
 }
 
 /// Replies sent by the cache service.
@@ -138,6 +174,14 @@ pub(crate) enum Response {
         #[serde(default)]
         clipboard: bool,
     },
+    /// The content is on the clipboard. `id` is the history entry it was
+    /// recorded as, absent when the policy kept it out of the history.
+    ClipboardSet {
+        #[serde(default)]
+        id: Option<String>,
+        #[serde(default)]
+        expires_at: Option<i64>,
+    },
     ScriptFilter {
         payload: Option<String>,
         stale: bool,
@@ -149,7 +193,67 @@ pub(crate) enum Response {
     Ok,
     Error {
         message: String,
+        /// Stable reason, when the failure has one a client can act on.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code: Option<ErrorCode>,
     },
+}
+
+/// Stable reasons a clipboard request fails. A reply carries one so a client
+/// does not have to read the message to know what went wrong.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ErrorCode {
+    /// The content is larger than the limit of its type.
+    TooLarge,
+    /// The request, or a MIME type in it, does not make sense.
+    InvalidArgument,
+    /// The service does not record the clipboard.
+    NotRecording,
+    /// The entry left the history.
+    NotFound,
+    /// The database or the clipboard recorder failed.
+    Io,
+}
+
+impl Response {
+    /// A failure with nothing but a message to go on.
+    fn failed(message: impl Into<String>) -> Self {
+        Self::Error {
+            message: message.into(),
+            code: None,
+        }
+    }
+}
+
+impl From<Failure> for Response {
+    fn from(failure: Failure) -> Self {
+        Self::Error {
+            message: failure.message,
+            code: Some(failure.code),
+        }
+    }
+}
+
+/// A refused request: the message a client prints, and the code it branches
+/// on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Failure {
+    pub code: ErrorCode,
+    pub message: String,
+}
+
+impl Failure {
+    fn new(code: ErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+
+    fn invalid(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::InvalidArgument, message)
+    }
 }
 
 pub(crate) struct DaemonState {
@@ -554,7 +658,7 @@ pub(crate) fn clipboard_select(id: &str) -> Result<(), String> {
         &Request::ClipboardSelect { id: id.to_string() },
         CLIPBOARD_TIMEOUT,
     ) {
-        Ok(Response::Error { message }) => Err(message),
+        Ok(Response::Error { message, .. }) => Err(message),
         Ok(_) => Ok(()),
         Err(CallError::Unreachable) => Err(CLIPBOARD_NOT_RUNNING.to_string()),
         Err(CallError::Failed(message)) => Err(message),
@@ -564,13 +668,115 @@ pub(crate) fn clipboard_select(id: &str) -> Result<(), String> {
 /// Whether a running cache service records the clipboard history.
 /// Blocking: run it off the UI thread.
 pub(crate) fn clipboard_recording() -> bool {
-    matches!(
-        try_request(&Request::Status, PROBE_TIMEOUT),
-        Some(Response::Status {
-            clipboard: true,
+    clipboard_report().is_some_and(|(recording, _)| recording)
+}
+
+/// Whether a running cache service records the clipboard history, and the
+/// protocol revision it speaks. Blocking: run it off the UI thread.
+pub(crate) fn clipboard_report() -> Option<(bool, u32)> {
+    match try_request(&Request::Status, PROBE_TIMEOUT)? {
+        Response::Status {
+            clipboard,
+            protocol,
             ..
+        } => Some((clipboard, protocol)),
+        _ => None,
+    }
+}
+
+/// The history entry a `clipboard set` was recorded as, with the deadline it
+/// leaves the history at. Both are absent when the policy kept the content
+/// out of the history.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SetOutcome {
+    pub id: Option<String>,
+    pub expires_at: Option<i64>,
+}
+
+/// Why a `clipboard set` failed, so the command line can print the stable
+/// code a script branches on instead of reading the message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SetFailure {
+    /// The service speaks an older protocol and cannot set the clipboard.
+    DaemonOutdated(u32),
+    /// No service listens on the socket.
+    NotRunning,
+    /// The service, or the socket, failed: its code when it gave one.
+    Failed(Option<ErrorCode>, String),
+}
+
+impl std::fmt::Display for SetFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DaemonOutdated(protocol) => write!(
+                formatter,
+                "the running Raffi service is from an older Raffi and cannot set the \
+                 clipboard; restart `raffi --cache-daemon` (it speaks protocol \
+                 {protocol}, this raffi {PROTOCOL})"
+            ),
+            Self::NotRunning => formatter.write_str(CLIPBOARD_NOT_RUNNING),
+            Self::Failed(_, message) => formatter.write_str(message),
+        }
+    }
+}
+
+/// Ask the cache service to put `formats` on the clipboard. The service
+/// records them in the history first when its policy allows, and owns the
+/// selection afterwards, since this process exits. Blocking: run it off the
+/// UI thread.
+pub(crate) fn clipboard_set(
+    formats: &[(String, Vec<u8>)],
+    temporary: bool,
+    secret: bool,
+) -> Result<SetOutcome, SetFailure> {
+    match probe() {
+        Some(info) if info.protocol < PROTOCOL => {
+            return Err(SetFailure::DaemonOutdated(info.protocol))
+        }
+        Some(_) => {}
+        None => return Err(SetFailure::NotRunning),
+    }
+    let request = Request::ClipboardSet {
+        formats: encode_formats(formats),
+        temporary,
+        secret,
+    };
+    match call(&request, CLIPBOARD_TIMEOUT) {
+        Ok(Response::ClipboardSet { id, expires_at }) => Ok(SetOutcome { id, expires_at }),
+        Ok(Response::Error { message, code }) => Err(SetFailure::Failed(code, message)),
+        Ok(_) => Err(SetFailure::Failed(
+            None,
+            "the Raffi server sent an unexpected reply".into(),
+        )),
+        Err(CallError::Unreachable) => Err(SetFailure::NotRunning),
+        Err(CallError::Failed(message)) => Err(SetFailure::Failed(None, message)),
+    }
+}
+
+fn encode_formats(formats: &[(String, Vec<u8>)]) -> Vec<SetFormat> {
+    use base64::Engine;
+    let engine = base64::engine::general_purpose::STANDARD;
+    formats
+        .iter()
+        .map(|(mime, data)| SetFormat {
+            mime: mime.clone(),
+            data: engine.encode(data),
         })
-    )
+        .collect()
+}
+
+fn decode_formats(formats: &[SetFormat]) -> Result<Vec<(String, Vec<u8>)>, String> {
+    use base64::Engine;
+    let engine = base64::engine::general_purpose::STANDARD;
+    formats
+        .iter()
+        .map(|format| {
+            engine
+                .decode(&format.data)
+                .map(|data| (format.mime.clone(), data))
+                .map_err(|error| format!("cannot read the `{}` content: {error}", format.mime))
+        })
+        .collect()
 }
 
 /// Whether a cache service listens on the socket.
@@ -583,7 +789,7 @@ pub(crate) fn listening() -> bool {
 pub(crate) fn refresh(requests: Vec<Request>) -> Result<(), CallError> {
     let mut errors = Vec::new();
     for request in &requests {
-        if let Response::Error { message } = call(request, WAIT_TIMEOUT)? {
+        if let Response::Error { message, .. } = call(request, WAIT_TIMEOUT)? {
             errors.push(message);
         }
     }
@@ -657,7 +863,7 @@ pub(crate) fn handle_request(state: &Arc<DaemonState>, request: Request) -> Resp
                     payload: read_list(&key).map(|snapshot| snapshot.payload),
                     stale: false,
                 },
-                Err(message) => Response::Error { message },
+                Err(message) => Response::failed(message),
             }
         }
         Request::GetScriptFilter {
@@ -732,7 +938,7 @@ pub(crate) fn handle_request(state: &Arc<DaemonState>, request: Request) -> Resp
         Request::RefreshSource { source, wait: true } => {
             match logged(&source, || warm_named(state, &source)) {
                 Ok(()) => Response::Ok,
-                Err(message) => Response::Error { message },
+                Err(message) => Response::failed(message),
             }
         }
         Request::RefreshSource {
@@ -747,7 +953,7 @@ pub(crate) fn handle_request(state: &Arc<DaemonState>, request: Request) -> Resp
         }
         Request::RefreshAll => match logged("all sources", || warm_all(state)) {
             Ok(()) => Response::Ok,
-            Err(message) => Response::Error { message },
+            Err(message) => Response::failed(message),
         },
         Request::Clear => {
             clear_snapshots();
@@ -763,9 +969,212 @@ pub(crate) fn handle_request(state: &Arc<DaemonState>, request: Request) -> Resp
         }
         Request::ClipboardSelect { id } => match super::clipboard_watch::select(&id) {
             Ok(()) => Response::Ok,
-            Err(message) => Response::Error { message },
+            Err(message) => Response::failed(message),
+        },
+        Request::ClipboardSet {
+            formats,
+            temporary,
+            secret,
+        } => match serve_set(state, &formats, temporary, secret) {
+            Ok((id, expires_at)) => Response::ClipboardSet { id, expires_at },
+            Err(failure) => failure.into(),
         },
     }
+}
+
+/// Put the content of a `clipboard set` on the clipboard, recording it in the
+/// history first when the policy allows, and report the entry it landed in.
+fn serve_set(
+    state: &Arc<DaemonState>,
+    formats: &[SetFormat],
+    temporary: bool,
+    secret: bool,
+) -> Result<(Option<String>, Option<i64>), Failure> {
+    let config = &state.addons.clipboard;
+    let limits = super::clipboard_store::Limits::from_config(config);
+    // The request is checked before the service says whether it records at
+    // all: a malformed request is refused whatever the state of the server.
+    check_set_request(formats, &limits)?;
+    if !super::clipboard_watch::recording() {
+        return Err(Failure::new(
+            ErrorCode::NotRecording,
+            "the Raffi server is not recording the clipboard; \
+             set addons.clipboard.backend to raffi or auto and restart it",
+        ));
+    }
+    let policy = super::clipboard_policy::Policy::from_config(config)
+        .map_err(|message| Failure::invalid(message))?;
+    let formats = decode_formats(formats).map_err(Failure::invalid)?;
+    let mut store = super::clipboard_store::Store::open_default()
+        .map_err(|message| Failure::new(ErrorCode::Io, message))?;
+    let now = super::clipboard_store::now_secs();
+    let served = record_set(
+        &mut store, formats, temporary, secret, &limits, &policy, now,
+    )?;
+    super::clipboard_watch::set(served.id.clone(), served.formats)
+        .map_err(|message| Failure::new(ErrorCode::Io, message))?;
+    Ok((served.id, served.expires_at))
+}
+
+/// Check the framing of a `clipboard set` request, and the size of its
+/// encoded content, before any of it is decoded: the service must not
+/// allocate what it is about to refuse.
+fn check_set_request(
+    formats: &[SetFormat],
+    limits: &super::clipboard_store::Limits,
+) -> Result<(), Failure> {
+    if formats.is_empty() {
+        return Err(Failure::invalid("the request holds no content to set"));
+    }
+    if formats.len() > MAX_SET_FORMATS {
+        return Err(Failure::new(
+            ErrorCode::TooLarge,
+            format!(
+                "the request holds {} formats, more than the {MAX_SET_FORMATS} \
+                 the service reads",
+                formats.len()
+            ),
+        ));
+    }
+    let mut total = 0u64;
+    for format in formats {
+        if format.mime.len() > MAX_MIME_BYTES {
+            return Err(Failure::new(
+                ErrorCode::InvalidArgument,
+                format!(
+                    "a MIME type of {} bytes, more than the {MAX_MIME_BYTES} the \
+                     service reads",
+                    format.mime.len()
+                ),
+            ));
+        }
+        super::clipboard_store::validate_mime(&format.mime)
+            .map_err(|reason| Failure::invalid(format!("the request carries a MIME type: {reason}")))?;
+        let limit = format_limit(&format.mime, limits);
+        // Base64 is 4 bytes of line for every 3 of content, so the encoded
+        // length alone already bounds the decoded one for all but the last
+        // few bytes.
+        if format.data.len() as u64 > base64_len(limit as usize) as u64 {
+            return Err(too_large(&format.mime, format.data.len() as u64 / 4 * 3, limit));
+        }
+        let decoded = decoded_len(&format.data);
+        if decoded > limit {
+            return Err(too_large(&format.mime, decoded, limit));
+        }
+        total = total.saturating_add(decoded);
+    }
+    if total > limits.max_size {
+        return Err(Failure::new(
+            ErrorCode::TooLarge,
+            format!(
+                "the request holds {total} bytes, over the {} byte limit of the history",
+                limits.max_size
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn too_large(mime: &str, bytes: u64, limit: u64) -> Failure {
+    Failure::new(
+        ErrorCode::TooLarge,
+        format!("{mime} is {bytes} bytes, over the {limit} byte limit"),
+    )
+}
+
+/// The size a format of `mime` may reach: what the store records, capped so
+/// that a request can never carry more than the service reads.
+fn format_limit(mime: &str, limits: &super::clipboard_store::Limits) -> u64 {
+    if mime.starts_with("image/") {
+        limits.max_image_size.min(MAX_SET_FORMAT_BYTES)
+    } else {
+        super::clipboard_store::MAX_TEXT_BYTES as u64
+    }
+}
+
+/// Roughly how many bytes `encoded` base64 holds.
+fn decoded_len(encoded: &str) -> u64 {
+    encoded.len() as u64 / 4 * 3
+}
+
+/// What a `clipboard set` leaves on the clipboard.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Served {
+    /// The formats the selection offers.
+    formats: Vec<(String, Vec<u8>)>,
+    /// The history entry they were recorded as, absent when the policy kept
+    /// them out of it.
+    id: Option<String>,
+    /// When that entry leaves the history.
+    expires_at: Option<i64>,
+}
+
+/// Record the content of a `clipboard set` in `store`, and report the formats
+/// to serve, the entry they were recorded as, and its deadline. Content the
+/// policy keeps out of the history is still served, with the password-manager
+/// hint when it is a secret.
+#[allow(clippy::too_many_arguments)]
+fn record_set(
+    store: &mut super::clipboard_store::Store,
+    formats: Vec<(String, Vec<u8>)>,
+    temporary: bool,
+    secret: bool,
+    limits: &super::clipboard_store::Limits,
+    policy: &super::clipboard_policy::Policy,
+    now: i64,
+) -> Result<Served, Failure> {
+    // The policy is applied before the store takes the content, so what it
+    // keeps out of the history is served again without copying it.
+    let text = super::clipboard_store::text_of(&formats);
+    if policy.disposition(&text, secret) == super::clipboard_policy::Disposition::Skip {
+        return Ok(Served {
+            formats: with_hint(formats, secret),
+            id: None,
+            expires_at: None,
+        });
+    }
+    let capture = super::clipboard_store::Capture {
+        formats,
+        copied_at: now,
+        source: None,
+        password_marked: secret,
+    };
+    let inserted = if temporary {
+        store.insert_temporary(capture, limits, policy, now)
+    } else {
+        store.insert_filtered(capture, limits, policy, now)
+    };
+    match inserted {
+        Ok(hash) => {
+            let expires_at = store
+                .deadline(&hash)
+                .map_err(|message| Failure::new(ErrorCode::Io, message))?;
+            let stored = store
+                .formats(&hash, now)
+                .map_err(|message| Failure::new(ErrorCode::Io, message))?;
+            Ok(Served {
+                formats: stored,
+                id: Some(hash),
+                expires_at,
+            })
+        }
+        Err(super::clipboard_store::Skipped::TooLarge(reason)) => {
+            Err(Failure::new(ErrorCode::TooLarge, format!("too large: {reason}")))
+        }
+        Err(skipped) => Err(Failure::new(ErrorCode::Io, skipped.to_string())),
+    }
+}
+
+/// `formats` plus the password-manager hint, so a secret nobody records is
+/// still skipped by the other clipboard managers.
+fn with_hint(mut formats: Vec<(String, Vec<u8>)>, secret: bool) -> Vec<(String, Vec<u8>)> {
+    if secret {
+        formats.push((
+            super::clipboard_policy::PASSWORD_HINT.to_string(),
+            super::clipboard_store::PASSWORD_MARKER.to_vec(),
+        ));
+    }
+    formats
 }
 
 /// Runs a refresh someone asked for, logging when it starts and how it ended.
@@ -797,18 +1206,43 @@ fn preview_target_from_key(key: &str, ttl: Duration) -> Option<SnapshotTarget> {
     })
 }
 
-fn read_line(stream: &mut UnixStream) -> Option<Request> {
-    let mut reader = BufReader::new(stream);
-    let mut line = String::new();
-    reader.read_line(&mut line).ok()?;
-    serde_json::from_str(&line).ok()
+/// What one connection carried.
+enum Incoming {
+    Request(Request),
+    /// A line the service read but cannot serve.
+    Refused(Failure),
+    /// Nothing to answer: the peer closed the connection.
+    Closed,
+}
+
+/// Read one request line, refusing anything longer than `limit` bytes before
+/// the rest of it is read.
+fn read_request(stream: &mut UnixStream, limit: usize) -> Incoming {
+    let mut reader = BufReader::new(stream).take(limit as u64 + 1);
+    let mut line = Vec::new();
+    if reader.read_until(b'\n', &mut line).is_err() || line.is_empty() {
+        return Incoming::Closed;
+    }
+    if line.len() > limit {
+        return Incoming::Refused(Failure::new(
+            ErrorCode::TooLarge,
+            format!("the request is longer than the {limit} bytes the service reads"),
+        ));
+    }
+    match serde_json::from_slice(&line) {
+        Ok(request) => Incoming::Request(request),
+        Err(error) => Incoming::Refused(Failure::invalid(format!(
+            "cannot read the request: {error}"
+        ))),
+    }
 }
 
 fn serve_connection(state: Arc<DaemonState>, mut stream: UnixStream) {
-    let Some(request) = read_line(&mut stream) else {
-        return;
+    let reply = match read_request(&mut stream, MAX_REQUEST_LINE) {
+        Incoming::Request(request) => handle_request(&state, request),
+        Incoming::Refused(failure) => failure.into(),
+        Incoming::Closed => return,
     };
-    let reply = handle_request(&state, request);
     if let Ok(mut line) = serde_json::to_vec(&reply) {
         line.push(b'\n');
         let _ = stream.write_all(&line);
@@ -1072,7 +1506,16 @@ pub(crate) fn parse_list(
 
 #[cfg(test)]
 mod tests {
+    use super::super::clipboard_policy::{Policy, PASSWORD_HINT};
+    use super::super::clipboard_store::{Limits, Store, PASSWORD_MARKER};
     use super::*;
+
+    const LIMITS: Limits = Limits {
+        max_items: 100,
+        max_size: 1 << 30,
+        max_image_size: 1 << 20,
+    };
+    const NOW: i64 = 1_700_000_000;
 
     fn tempdir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -1152,7 +1595,11 @@ mod tests {
         let server_state = state.clone();
         let server = std::thread::spawn(move || {
             if let Ok((mut stream, _)) = listener.accept() {
-                let request = read_line(&mut stream).unwrap();
+                let Incoming::Request(request) =
+                    read_request(&mut stream, MAX_REQUEST_LINE)
+                else {
+                    panic!("the status request should be read");
+                };
                 let reply = handle_request(&server_state, request);
                 let mut line = serde_json::to_vec(&reply).unwrap();
                 line.push(b'\n');
@@ -1279,7 +1726,7 @@ mod tests {
         };
         assert!(matches!(
             handle_request(&state, unknown),
-            Response::Error { message } if message.contains("nope")
+            Response::Error { message, .. } if message.contains("nope")
         ));
         assert!(matches!(
             handle_request(&state, Request::RefreshAll),
@@ -1319,5 +1766,426 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(reply, Response::Status { protocol: 0, .. }));
+    }
+
+    fn set_store(name: &str) -> (Store, PathBuf) {
+        let dir = tempdir(name);
+        let store = Store::open(&dir.join("clipboard.db")).unwrap();
+        (store, dir)
+    }
+
+    fn text_formats(value: &str) -> Vec<(String, Vec<u8>)> {
+        vec![("text/plain".to_string(), value.as_bytes().to_vec())]
+    }
+
+    #[test]
+    fn clipboard_set_requests_carry_their_bytes_unchanged() {
+        let formats = [
+            ("text/plain".to_string(), "héllo\n".as_bytes().to_vec()),
+            (
+                "image/png".to_string(),
+                vec![0x89, b'P', b'N', b'G', 0, 0xff],
+            ),
+        ];
+        let request = Request::ClipboardSet {
+            formats: encode_formats(&formats),
+            temporary: true,
+            secret: true,
+        };
+        let line = serde_json::to_string(&request).unwrap();
+        // Bytes travel base64-encoded, so a binary entry stays one JSON line.
+        assert!(line.contains("aMOpbGxvCg=="), "{line}");
+        let parsed: Request = serde_json::from_str(&line).unwrap();
+        let Request::ClipboardSet {
+            formats,
+            temporary,
+            secret,
+        } = parsed
+        else {
+            panic!("the set request should round trip");
+        };
+        assert!(temporary && secret);
+        assert_eq!(
+            decode_formats(&formats).unwrap(),
+            [
+                ("text/plain".to_string(), "héllo\n".as_bytes().to_vec()),
+                (
+                    "image/png".to_string(),
+                    vec![0x89, b'P', b'N', b'G', 0, 0xff]
+                ),
+            ]
+        );
+
+        // Flags a client never sent default to off, and broken base64 is an
+        // error rather than empty content.
+        let bare: Request =
+            serde_json::from_str(r#"{"type":"clipboard_set","formats":[]}"#).unwrap();
+        assert!(matches!(
+            bare,
+            Request::ClipboardSet {
+                temporary: false,
+                secret: false,
+                ..
+            }
+        ));
+        let broken = [SetFormat {
+            mime: "text/plain".into(),
+            data: "not base64!".into(),
+        }];
+        assert!(decode_formats(&broken)
+            .unwrap_err()
+            .contains("cannot read the `text/plain` content"));
+
+        let reply = serde_json::to_string(&Response::ClipboardSet {
+            id: Some("3fa9c1d2e0".into()),
+            expires_at: Some(NOW + 60),
+        })
+        .unwrap();
+        let reply: Response = serde_json::from_str(&reply).unwrap();
+        assert!(matches!(
+            reply,
+            Response::ClipboardSet { id: Some(id), expires_at: Some(deadline) }
+                if id == "3fa9c1d2e0" && deadline == NOW + 60
+        ));
+    }
+
+    /// Sends `requests`, one connection each, and returns the replies.
+    fn serve_over_socket(requests: &[Request]) -> Vec<Response> {
+        let state = Arc::new(DaemonState::new(quiet_addons()));
+        let mut replies = Vec::new();
+        for request in requests {
+            let (mut client, server) = UnixStream::pair().unwrap();
+            let mut line = serde_json::to_vec(request).unwrap();
+            line.push(b'\n');
+            client.write_all(&line).unwrap();
+            let mut server = server;
+            let reply = match read_request(&mut server, MAX_REQUEST_LINE) {
+                Incoming::Request(request) => handle_request(&state, request),
+                Incoming::Refused(failure) => failure.into(),
+                Incoming::Closed => panic!("the request should be read"),
+            };
+            let mut line = serde_json::to_vec(&reply).unwrap();
+            line.push(b'\n');
+            server.write_all(&line).unwrap();
+            let mut reader = BufReader::new(client);
+            let mut reply = String::new();
+            reader.read_line(&mut reply).unwrap();
+            replies.push(serde_json::from_str(&reply).unwrap());
+        }
+        replies
+    }
+
+    #[test]
+    fn the_request_framing_bounds_the_line_the_service_reads() {
+        // Room for a full text format or the largest image, base64-encoded.
+        assert!(MAX_REQUEST_LINE > base64_len(super::super::clipboard_store::MAX_TEXT_BYTES));
+        assert!(MAX_REQUEST_LINE > base64_len(50 * 1024 * 1024), "the default image limit");
+        assert_eq!(base64_len(3), 4);
+        assert_eq!(base64_len(4), 8);
+
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let line = serde_json::to_vec(&Request::Status).unwrap();
+        client.write_all(&line).unwrap();
+        client.write_all(b"\n").unwrap();
+        match read_request(&mut server, 16) {
+            Incoming::Refused(failure) => {
+                assert_eq!(failure.code, ErrorCode::TooLarge);
+                assert!(failure.message.contains("longer than"), "{failure:?}");
+            }
+            _ => panic!("a request longer than the framing allows is refused"),
+        }
+
+        // A line that fits but does not parse is refused too.
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        client.write_all(b"{}\n").unwrap();
+        assert!(matches!(
+            read_request(&mut server, 64),
+            Incoming::Refused(Failure {
+                code: ErrorCode::InvalidArgument,
+                ..
+            })
+        ));
+
+        // An empty connection is not worth an answer.
+        let (_client, mut server) = UnixStream::pair().unwrap();
+        assert!(matches!(
+            read_request(&mut server, 64),
+            Incoming::Closed
+        ));
+    }
+
+    #[test]
+    fn a_set_request_is_bounded_before_its_content_is_decoded() {
+        let limits = Limits {
+            max_image_size: 4,
+            ..LIMITS
+        };
+        let format = |mime: &str, encoded: &str| SetFormat {
+            mime: mime.to_string(),
+            data: encoded.to_string(),
+        };
+        // Empty content, too many formats, a MIME name that is not one, and
+        // content over the limit of its type are all refused before decoding.
+        assert_eq!(
+            check_set_request(&[], &limits).unwrap_err().code,
+            ErrorCode::InvalidArgument
+        );
+        let many: Vec<SetFormat> = (0..MAX_SET_FORMATS + 1)
+            .map(|_| format("text/plain", "aGk="))
+            .collect();
+        assert_eq!(
+            check_set_request(&many, &limits).unwrap_err().code,
+            ErrorCode::TooLarge
+        );
+        for mime in [
+            "",
+            "  ",
+            "text/plain\u{0}",
+            "text/plain\u{1b}",
+            "no-slash",
+            "text/plain;",
+            "/plain",
+        ] {
+            let error = check_set_request(&[format(mime, "aGk=")], &limits).unwrap_err();
+            assert_eq!(error.code, ErrorCode::InvalidArgument, "{mime:?}: {error:?}");
+        }
+        let long = format!("text/{}", "a".repeat(MAX_MIME_BYTES));
+        assert_eq!(
+            check_set_request(&[format(&long, "aGk=")], &limits)
+                .unwrap_err()
+                .code,
+            ErrorCode::InvalidArgument
+        );
+        // base64 of 8 bytes is 12, over the 4 byte image limit.
+        assert_eq!(
+            check_set_request(&[format("image/png", "iVBORw0K")], &limits)
+                .unwrap_err()
+                .code,
+            ErrorCode::TooLarge
+        );
+        let text_limits = Limits { max_size: 8, ..LIMITS };
+        let error = check_set_request(
+            &[format("text/plain", "aGVsbG8gd29ybGQ=")],
+            &text_limits,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, ErrorCode::TooLarge);
+        assert!(error.message.contains("of the history"), "{error:?}");
+        assert!(check_set_request(&[format("text/plain", "aGk=")], &limits).is_ok());
+    }
+
+    #[test]
+    fn a_refused_set_does_not_stop_the_service() {
+        // Both requests are refused before the daemon records anything, and
+        // the service answers the next one as if nothing happened.
+        let oversized: Vec<SetFormat> = (0..MAX_SET_FORMATS + 1)
+            .map(|_| SetFormat {
+                mime: "text/plain".into(),
+                data: "aGk=".into(),
+            })
+            .collect();
+        let replies = serve_over_socket(&[
+            Request::ClipboardSet {
+                formats: oversized,
+                temporary: false,
+                secret: false,
+            },
+            Request::ClipboardSet {
+                formats: vec![SetFormat {
+                    mime: "text/plain\u{0}".into(),
+                    data: "aGk=".into(),
+                }],
+                temporary: false,
+                secret: false,
+            },
+            Request::Status,
+        ]);
+        assert!(
+            matches!(&replies[0], Response::Error { code: Some(ErrorCode::TooLarge), .. }),
+            "{:?}",
+            replies[0]
+        );
+        assert!(
+            matches!(&replies[1], Response::Error { code: Some(ErrorCode::InvalidArgument), .. }),
+            "{:?}",
+            replies[1]
+        );
+        assert!(matches!(replies[2], Response::Status { .. }));
+    }
+
+    #[test]
+    fn a_malformed_request_gets_an_answer_instead_of_a_closed_connection() {
+        let state = Arc::new(DaemonState::new(quiet_addons()));
+        let (mut client, server) = UnixStream::pair().unwrap();
+        client.write_all(b"{\"type\":\"clipboard_set\"}\n").unwrap();
+        let server = std::thread::spawn(move || serve_connection(state, server));
+        let mut reader = BufReader::new(client);
+        let mut reply = String::new();
+        reader.read_line(&mut reply).unwrap();
+        server.join().unwrap();
+        let reply: Response = serde_json::from_str(&reply).unwrap();
+        // The MIME list is missing, so the request does not parse.
+        assert!(
+            matches!(reply, Response::Error { code: Some(ErrorCode::InvalidArgument), .. }),
+            "{reply:?}"
+        );
+    }
+
+    #[test]
+    fn a_set_is_recorded_where_a_copy_would_land() {
+        let (mut store, dir) = set_store("set-record");
+        let policy = Policy::default();
+        let served = record_set(
+            &mut store,
+            text_formats("hello"),
+            false,
+            false,
+            &LIMITS,
+            &policy,
+            NOW,
+        )
+        .unwrap();
+        let id = served.id.clone().expect("the content was recorded");
+        assert_eq!(id.len(), 32, "a history id");
+        assert_eq!(served.expires_at, None);
+        assert_eq!(served.formats, text_formats("hello"));
+        assert_eq!(store.count("1", NOW).unwrap(), (1, 1));
+
+        // The same content again is the same entry, moved to the top.
+        let again = record_set(
+            &mut store,
+            text_formats("hello"),
+            false,
+            false,
+            &LIMITS,
+            &policy,
+            NOW + 5,
+        )
+        .unwrap();
+        assert_eq!(again.id, Some(id));
+        assert_eq!(store.count("1", NOW).unwrap(), (1, 1));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_temporary_set_gets_the_configured_timeout() {
+        let (mut store, dir) = set_store("set-temporary");
+        let policy = Policy::default();
+        let served = record_set(
+            &mut store,
+            text_formats("one-time code"),
+            true,
+            false,
+            &LIMITS,
+            &policy,
+            NOW,
+        )
+        .unwrap();
+        assert_eq!(served.expires_at, Some(NOW + policy.temporary_timeout));
+        // An image has no text for a temporary pattern to match, and is
+        // temporary all the same.
+        let image = record_set(
+            &mut store,
+            vec![("image/png".to_string(), b"\x89PNG".to_vec())],
+            true,
+            false,
+            &LIMITS,
+            &policy,
+            NOW,
+        )
+        .unwrap();
+        assert_eq!(image.expires_at, Some(NOW + policy.temporary_timeout));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_secret_set_follows_the_password_manager_policy() {
+        let (mut store, dir) = set_store("set-secret");
+        let served = record_set(
+            &mut store,
+            text_formats("hunter2"),
+            false,
+            true,
+            &LIMITS,
+            &Policy::default(),
+            NOW,
+        )
+        .unwrap();
+        // Not opted in: off the history, on the clipboard with its hint.
+        assert_eq!(served.id, None);
+        assert_eq!(served.expires_at, None);
+        assert!(served
+            .formats
+            .iter()
+            .any(|(mime, data)| mime == PASSWORD_HINT && data.as_slice() == PASSWORD_MARKER));
+        assert_eq!(store.count("1", NOW).unwrap(), (0, 0));
+
+        // Opted in: a temporary entry, served with the hint.
+        let policy = Policy {
+            temporary_password_manager: true,
+            ..Policy::default()
+        };
+        let served = record_set(
+            &mut store,
+            text_formats("hunter2"),
+            false,
+            true,
+            &LIMITS,
+            &policy,
+            NOW,
+        )
+        .unwrap();
+        assert!(served.id.is_some());
+        assert_eq!(served.expires_at, Some(NOW + policy.temporary_timeout));
+        assert!(served.formats.iter().any(|(mime, _)| mime == PASSWORD_HINT));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_excluded_set_is_served_but_kept_out_of_the_history() {
+        let (mut store, dir) = set_store("set-excluded");
+        let policy = Policy {
+            exclude: vec![regex::Regex::new("^secret:").unwrap()],
+            ..Policy::default()
+        };
+        let served = record_set(
+            &mut store,
+            text_formats("secret: hunter2"),
+            false,
+            false,
+            &LIMITS,
+            &policy,
+            NOW,
+        )
+        .unwrap();
+        assert_eq!(served.id, None);
+        assert_eq!(served.formats, text_formats("secret: hunter2"));
+        assert_eq!(store.count("1", NOW).unwrap(), (0, 0));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_set_over_the_limits_is_refused() {
+        let (mut store, dir) = set_store("set-too-large");
+        let limits = Limits {
+            max_image_size: 4,
+            ..LIMITS
+        };
+        let error = record_set(
+            &mut store,
+            vec![("image/png".to_string(), b"\x89PNG\r\n".to_vec())],
+            false,
+            false,
+            &limits,
+            &Policy::default(),
+            NOW,
+        )
+        .unwrap_err();
+        assert!(
+            error.message.contains("over the 4 byte limit"),
+            "{error:?}"
+        );
+        assert_eq!(error.code, ErrorCode::TooLarge);
+        let _ = fs::remove_dir_all(dir);
     }
 }

@@ -4527,7 +4527,16 @@ fn test_clipboard_previews_are_bound_to_session_and_item() {
     let generation = open_clipboard(&mut app, "clip ");
     let mut copied = clip(1, "b", "b");
     let copy_time = chrono::Local::now().naive_local() - chrono::Duration::days(3);
-    copied.copied = Some(copy_time);
+    copied.copied = Some(raffi_time(&copy_time));
+
+    fn raffi_time(time: &chrono::NaiveDateTime) -> i64 {
+        use chrono::TimeZone;
+        chrono::Local
+            .from_local_datetime(time)
+            .earliest()
+            .map(|time| time.timestamp())
+            .unwrap()
+    }
     let weekday = copy_time.format("%A at %H:%M").to_string();
     let _ = app.update(Message::ClipboardPage(
         generation,

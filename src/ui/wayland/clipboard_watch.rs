@@ -69,6 +69,13 @@ enum Command {
         hash: String,
         reply: mpsc::Sender<Result<(), String>>,
     },
+    /// From the socket server: own the selection with content it already
+    /// read, `hash` being the history entry when it was recorded.
+    Serve {
+        hash: Option<String>,
+        formats: Arc<Formats>,
+        reply: mpsc::Sender<Result<(), String>>,
+    },
     /// From the recorder: the selection `generation` was stored as `hash`, a
     /// password-manager secret when `secret`.
     Recorded {
@@ -147,6 +154,13 @@ impl Loads {
 
     fn accepts(&self, ticket: Ticket) -> bool {
         ticket.request == self.latest && ticket.external == self.external
+    }
+
+    /// A selection served at once, which no load still in flight may replace.
+    fn supersede(&mut self) {
+        if let Some(ticket) = self.request(true) {
+            self.finished(ticket);
+        }
     }
 
     /// The load `ticket` came back from the loader, used or not.
@@ -579,8 +593,9 @@ struct Core {
     /// `temporary_password_manager`: record the copies a password manager
     /// marked instead of skipping them unread.
     password_manager: bool,
-    /// The entry Raffi currently owns the selection with, and its formats.
-    served: Option<(String, Arc<Formats>)>,
+    /// The entry Raffi currently owns the selection with (`None` when that
+    /// content was not recorded), and its formats.
+    served: Option<(Option<String>, Arc<Formats>)>,
     persist: Persist,
 }
 
@@ -597,9 +612,9 @@ impl Core {
             .iter()
             .any(|mime| mime == OWN_MIME)
             .then(|| {
-                self.served.as_ref().map(|(hash, formats)| {
+                self.served.as_ref().and_then(|(hash, formats)| {
                     let secret = formats.iter().any(|(mime, _)| mime == PASSWORD_HINT);
-                    (hash.clone(), secret)
+                    hash.clone().map(|hash| (hash, secret))
                 })
             })
             .flatten();
@@ -663,7 +678,12 @@ impl Core {
 
     /// Serve the loaded `formats` of `hash`, returning the MIME types to
     /// offer, or `None` when a newer selection replaced this load.
-    fn loaded(&mut self, ticket: Ticket, hash: String, formats: Formats) -> Option<Vec<String>> {
+    fn loaded(
+        &mut self,
+        ticket: Ticket,
+        hash: Option<String>,
+        formats: Formats,
+    ) -> Option<Vec<String>> {
         self.pending.finished(ticket);
         if !self.pending.accepts(ticket) {
             return None;
@@ -671,6 +691,17 @@ impl Core {
         let mimes = offered_mimes(&formats);
         self.served = Some((hash, Arc::new(formats)));
         Some(mimes)
+    }
+
+    /// Own the selection with content read elsewhere, `hash` being the
+    /// history entry it was recorded as. Returns the MIME types to offer.
+    fn serve(&mut self, hash: Option<String>, formats: Arc<Formats>) -> Vec<String> {
+        // Whatever was still loading is out of date: this content replaces
+        // the selection the moment it is published.
+        self.pending.supersede();
+        let mimes = offered_mimes(&formats);
+        self.served = Some((hash, formats));
+        mimes
     }
 
     fn send(&self, mime: &str, fd: OwnedFd) {
@@ -787,11 +818,19 @@ macro_rules! data_control {
                 fn handle(&mut self, command: Command) {
                     match command {
                         Command::Select { hash, reply } => self.core.load(hash, Some(reply)),
+                        Command::Serve {
+                            hash,
+                            formats,
+                            reply,
+                        } => {
+                            let mimes = self.core.serve(hash, formats);
+                            let _ = reply.send(self.publish(mimes));
+                        }
                         Command::Loaded { load, result } => {
                             let Load { ticket, hash, reply } = load;
                             self.core.pending.finished(ticket);
                             let result = result.and_then(|formats| {
-                                match self.core.loaded(ticket, hash.clone(), formats) {
+                                match self.core.loaded(ticket, Some(hash), formats) {
                                     Some(mimes) => self.publish(mimes),
                                     None => Err("the clipboard changed before the entry was ready".into()),
                                 }
@@ -967,7 +1006,7 @@ pub(crate) fn start(limits: Limits, policy: Policy) {
                         persist: Persist::default(),
                     })
                 };
-                let result = match Connection::connect_to_env() {
+                let session = || match Connection::connect_to_env() {
                     Ok(conn) => match ext::run(&conn, core) {
                         Err(RunError::Unsupported) => wlr::run(&conn, core),
                         other => other,
@@ -976,13 +1015,14 @@ pub(crate) fn start(limits: Limits, policy: Policy) {
                         "cannot connect to the Wayland compositor: {error}"
                     ))),
                 };
-                let message = match result {
+                let message = match catch_panic(session) {
                     Ok(()) => continue,
                     Err(RunError::Unsupported) => {
                         eprintln!(
                             "raffi: the compositor does not support data-control; \
                              the clipboard history is not recorded"
                         );
+                        RECORDING.store(false, Ordering::Relaxed);
                         return;
                     }
                     Err(RunError::Failed(message)) => message,
@@ -1010,6 +1050,38 @@ pub(crate) fn recording() -> bool {
 /// Put the history entry `hash` on the clipboard. Called by the socket
 /// server for the UI.
 pub(crate) fn select(hash: &str) -> Result<(), String> {
+    ask(|reply| Command::Select {
+        hash: hash.to_string(),
+        reply,
+    })
+}
+
+/// Run one clipboard session, turning a panic inside a Wayland callback into
+/// a failure the reconnect loop survives: offering a name the protocol
+/// library cannot turn into a C string aborts the thread otherwise.
+fn catch_panic(session: impl FnOnce() -> Result<(), RunError>) -> Result<(), RunError> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(session))
+        .unwrap_or_else(|_| Err(RunError::Failed("the clipboard recorder crashed".to_string())))
+}
+
+/// Own the selection with `formats`, which the socket server has read and
+/// recorded already. `hash` names the history entry they landed in, if any.
+pub(crate) fn set(hash: Option<String>, formats: Formats) -> Result<(), String> {
+    for (mime, _) in &formats {
+        if let Err(reason) = super::clipboard_store::validate_mime(mime) {
+            return Err(format!("cannot offer a format: {reason}"));
+        }
+    }
+    let formats = Arc::new(formats);
+    ask(|reply| Command::Serve {
+        hash,
+        formats,
+        reply,
+    })
+}
+
+/// Run `command` on the clipboard thread and wait for its outcome.
+fn ask(build: impl FnOnce(mpsc::Sender<Result<(), String>>) -> Command) -> Result<(), String> {
     let sender = COMMANDS
         .lock()
         .unwrap_or_else(|error| error.into_inner())
@@ -1021,10 +1093,7 @@ pub(crate) fn select(hash: &str) -> Result<(), String> {
         })?;
     let (reply, answer) = mpsc::channel();
     sender
-        .send(Command::Select {
-            hash: hash.to_string(),
-            reply,
-        })
+        .send(build(reply))
         .map_err(|_| "the clipboard recorder stopped".to_string())?;
     answer
         .recv_timeout(SELECT_TIMEOUT)
@@ -1208,11 +1277,54 @@ mod tests {
         let old = requested.recv().unwrap();
         let new = requested.recv().unwrap();
         let text = || vec![("text/plain".to_string(), b"x".to_vec())];
-        assert_eq!(core.loaded(old.ticket, old.hash, text()), None);
+        assert_eq!(core.loaded(old.ticket, Some(old.hash), text()), None);
         assert!(core.served.is_none());
-        let mimes = core.loaded(new.ticket, new.hash, text()).unwrap();
+        let mimes = core.loaded(new.ticket, Some(new.hash), text()).unwrap();
         assert!(mimes.contains(&OWN_MIME.to_string()));
-        assert_eq!(core.served.as_ref().unwrap().0, "new");
+        assert_eq!(core.served.as_ref().unwrap().0.as_deref(), Some("new"));
+    }
+
+    #[test]
+    fn test_content_served_at_once_replaces_a_load_in_flight() {
+        let (loads, requested) = mpsc::channel();
+        let mut core = test_core(loads);
+        let text = || vec![("text/plain".to_string(), b"x".to_vec())];
+
+        // An automatic restore is loading when `clipboard set` content arrives.
+        core.load("a".into(), None);
+        let restore = requested.recv().unwrap();
+        let mimes = core.serve(Some("h".into()), Arc::new(text()));
+        assert!(mimes.contains(&"text/plain".to_string()));
+        assert!(mimes.contains(&OWN_MIME.to_string()));
+        assert_eq!(core.served.as_ref().unwrap().0.as_deref(), Some("h"));
+        // The load it replaced never reaches the clipboard.
+        assert_eq!(
+            core.loaded(restore.ticket, Some(restore.hash), text()),
+            None
+        );
+        assert_eq!(core.served.as_ref().unwrap().0.as_deref(), Some("h"));
+
+        // Serving does not hold back the restores that follow it.
+        core.load("b".into(), None);
+        let later = requested.recv().unwrap();
+        assert!(core
+            .loaded(later.ticket, Some(later.hash), text())
+            .is_some());
+        assert_eq!(core.served.as_ref().unwrap().0.as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn test_content_outside_the_history_is_not_put_back() {
+        let (loads, _requested) = mpsc::channel();
+        let mut core = test_core(loads);
+        let text = || vec![("text/plain".to_string(), b"x".to_vec())];
+        let offered = core.serve(None, Arc::new(text()));
+        assert!(offered.contains(&OWN_MIME.to_string()));
+        assert!(core
+            .capture(&mimes(&[OWN_MIME, "text/plain"]), |_, _| {})
+            .is_empty());
+        // Raffi owns the selection, but there is no entry to serve again.
+        assert_eq!(core.persist.cleared(), None);
     }
 
     #[test]
@@ -1227,7 +1339,7 @@ mod tests {
         assert!(core
             .capture(&mimes(&[OWN_MIME, "text/plain"]), |_, _| {})
             .is_empty());
-        assert!(core.loaded(load.ticket, load.hash, text()).is_some());
+        assert!(core.loaded(load.ticket, Some(load.hash), text()).is_some());
 
         // A copy from another app does.
         core.load("b".into(), None);
@@ -1235,8 +1347,8 @@ mod tests {
         assert!(core
             .capture(&mimes(&["application/x-unknown"]), |_, _| {})
             .is_empty());
-        assert_eq!(core.loaded(load.ticket, load.hash, text()), None);
-        assert_eq!(core.served.as_ref().unwrap().0, "a");
+        assert_eq!(core.loaded(load.ticket, Some(load.hash), text()), None);
+        assert_eq!(core.served.as_ref().unwrap().0.as_deref(), Some("a"));
     }
 
     #[test]
@@ -1251,8 +1363,8 @@ mod tests {
         core.load("a".into(), None);
         let b = requested.recv().unwrap();
         assert!(requested.try_recv().is_err(), "the restore of A is dropped");
-        assert!(core.loaded(b.ticket, b.hash, text()).is_some());
-        assert_eq!(core.served.as_ref().unwrap().0, "b");
+        assert!(core.loaded(b.ticket, Some(b.hash), text()).is_some());
+        assert_eq!(core.served.as_ref().unwrap().0.as_deref(), Some("b"));
         drop(answer);
 
         // Once B is served, putting back the last copy works again, and a
@@ -1262,9 +1374,12 @@ mod tests {
         let (reply, _answer) = mpsc::channel();
         core.load("c".into(), Some(reply));
         let c = requested.recv().unwrap();
-        assert_eq!(core.loaded(restore.ticket, restore.hash, text()), None);
-        assert!(core.loaded(c.ticket, c.hash, text()).is_some());
-        assert_eq!(core.served.as_ref().unwrap().0, "c");
+        assert_eq!(
+            core.loaded(restore.ticket, Some(restore.hash), text()),
+            None
+        );
+        assert!(core.loaded(c.ticket, Some(c.hash), text()).is_some());
+        assert_eq!(core.served.as_ref().unwrap().0.as_deref(), Some("c"));
     }
 
     #[test]
@@ -1282,9 +1397,9 @@ mod tests {
             .is_empty());
         core.load("c".into(), None);
         let c = requested.recv().expect("the restore of C is queued");
-        assert_eq!(core.loaded(b.ticket, b.hash, text()), None);
-        assert!(core.loaded(c.ticket, c.hash, text()).is_some());
-        assert_eq!(core.served.as_ref().unwrap().0, "c");
+        assert_eq!(core.loaded(b.ticket, Some(b.hash), text()), None);
+        assert!(core.loaded(c.ticket, Some(c.hash), text()).is_some());
+        assert_eq!(core.served.as_ref().unwrap().0.as_deref(), Some("c"));
     }
 
     #[test]
