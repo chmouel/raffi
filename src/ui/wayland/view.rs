@@ -1049,6 +1049,11 @@ impl LauncherApp {
             (None, Some(search)) => (search.placeholder.as_str(), search.term.as_str()),
             (None, None) => (placeholder, self.search_query.as_str()),
         };
+        let save = self.snippet_save.as_ref().filter(|_| self.clipboard.active);
+        let (placeholder, value) = match save {
+            Some(save) => (save.placeholder(), save.buffer.as_str()),
+            None => (placeholder, value),
+        };
         let (placeholder, value) = self
             .action_menu
             .as_ref()
@@ -1060,6 +1065,7 @@ impl LauncherApp {
         let vim_normal = self.view.vim.is_normal()
             && prompt.is_none()
             && search.is_none()
+            && save.is_none()
             && self.action_menu.is_none();
         let mut search_input = text_input(placeholder, value)
             .id(self.view.search_input_id.clone())
@@ -2290,11 +2296,18 @@ impl LauncherApp {
             }
             for (row, index) in filtered.into_iter().enumerate() {
                 let entry = &menu.entries[index];
+                let mut action_row = Row::new().spacing(12).align_y(iced::Alignment::Center);
+                if let Some(glyph) = entry.glyph {
+                    action_row = action_row.push(
+                        text(glyph)
+                            .size(fs.item)
+                            .width(Length::Fixed(fs.item + 8.0))
+                            .align_x(iced::alignment::Horizontal::Center),
+                    );
+                }
                 items = items.push(
                     button(
-                        Row::new()
-                            .spacing(12)
-                            .align_y(iced::Alignment::Center)
+                        action_row
                             .push(text(&entry.label).size(fs.item).width(Length::Fill))
                             .push(text(&entry.shortcut).size(fs.hint).color(t.text_muted)),
                     )
@@ -3388,6 +3401,23 @@ impl LauncherApp {
             }
             hint_spans.push(span("Ctrl+D").size(fs.hint).color(t.accent));
             hint_spans.push(span(" delete").size(fs.hint).color(t.text_muted));
+        }
+        if self.snippet_save_open() {
+            hint_spans.clear();
+            if let Some(error) = &self.clipboard.error {
+                hint_spans.push(span(error.as_str()).size(fs.hint).color(t.ansi[1]));
+                hint_spans.push(sep.clone());
+            }
+            hint_spans.push(span("Enter").size(fs.hint).color(t.accent));
+            let action = match self.snippet_save.as_ref().map(|save| save.name.is_some()) {
+                Some(true) => " save",
+                _ => " next",
+            };
+            hint_spans.push(span(action).size(fs.hint).color(t.text_muted));
+            hint_spans.push(sep.clone());
+            hint_spans.push(span("Esc").size(fs.hint).color(t.accent));
+            hint_spans.push(span(" cancel").size(fs.hint).color(t.text_muted));
+            return self.shell("", hint_spans, items_column);
         }
         if self.vault.prompt.is_some() {
             hint_spans.clear();

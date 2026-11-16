@@ -42,7 +42,7 @@ use super::script_filters::{
 use super::secret_io::{SecretError, SystemRunner};
 use super::snippets::{
     compute_previews, execute_text_snippet_command, expand_final, fetch_clipboard, filter_snippets,
-    missing_clipboard, read_snippet_dir, read_snippet_file, snippet_mru_key,
+    missing_clipboard, read_snippet_dir, read_snippet_file, read_snippet_markdown, snippet_mru_key,
 };
 use super::state::{
     CachedRate, ClipboardData, ClipboardState, CurrencyConversion, CurrencyConversionRequest,
@@ -1147,6 +1147,7 @@ impl LauncherApp {
                 launcher_documents,
                 configs,
                 action_menu: None,
+                snippet_save: None,
                 onboarding: Default::default(),
                 search_query: initial_query.clone(),
                 select_1_query: None,
@@ -1513,6 +1514,23 @@ impl LauncherApp {
                 Message::Submit => return self.submit_vault_prompt(),
                 Message::Cancel => return self.cancel_vault_prompt(),
                 ref message if is_user_input(message) => return Task::none(),
+                _ => {}
+            }
+        }
+        if self.snippet_save_open() {
+            match message {
+                Message::SearchChanged(value) => return self.handle_snippet_save_input(value),
+                Message::Submit => return self.submit_snippet_save(),
+                Message::Cancel => return self.cancel_snippet_save(),
+                ref message
+                    if is_user_input(message)
+                        || matches!(
+                            message,
+                            Message::ServerRefresh(_) | Message::SaveClipboardSnippet(_)
+                        ) =>
+                {
+                    return Task::none();
+                }
                 _ => {}
             }
         }
@@ -1890,6 +1908,10 @@ impl LauncherApp {
                 self.handle_server_history_reloaded(session, key, library)
             }
             Message::DeleteSelected if self.clipboard.active => self.handle_clipboard_delete(),
+            Message::SaveClipboardSnippet(source) => self.handle_save_clipboard_snippet(source),
+            Message::ClipboardSnippetText(session, source, result) => {
+                self.handle_clipboard_snippet_text(session, source, result)
+            }
             Message::DeleteSelected => self.handle_command_list_close(),
             Message::WindowsChanged => self.handle_windows_changed(),
             Message::LauncherRaiseChecked(index, focus) => {
@@ -2105,6 +2127,7 @@ impl LauncherApp {
         self.query_class = class;
         if !matches!(qmode, QueryMode::Clipboard { .. }) {
             self.clipboard.clear();
+            self.snippet_save = None;
         }
         // Staying in the same command list keeps its loaded items.
         if !matches!(&qmode, QueryMode::CommandList { addon, .. }
@@ -2696,6 +2719,12 @@ impl LauncherApp {
                     .directory
                     .as_ref()
                     .map(|path| (path, read_snippet_dir as Reader))
+            })
+            .or_else(|| {
+                config
+                    .markdown
+                    .as_ref()
+                    .map(|path| (path, read_snippet_markdown as Reader))
             });
         if let Some((path, read)) = path_source {
             if let Some(cached) = self.text_snippets.file_cache.get(path).cloned() {
@@ -3814,7 +3843,9 @@ impl LauncherApp {
 
     /// Whether a password or bookmark-search prompt owns the text field.
     pub(super) fn text_prompt_active(&self) -> bool {
-        self.vault.prompt.is_some() || (self.bookmarks.prompt.is_some() && !self.view.help_active)
+        self.vault.prompt.is_some()
+            || (self.bookmarks.prompt.is_some() && !self.view.help_active)
+            || self.snippet_save_open()
     }
 
     /// A text prompt must always be typeable, even when vim normal mode was
@@ -5965,6 +5996,7 @@ impl LauncherApp {
         self.text_snippets.clear();
         self.emoji.clear();
         self.clipboard.clear();
+        self.snippet_save = None;
         self.command_list.clear();
         self.bookmarks.prompt = None;
         self.devtools.clear();
@@ -6090,7 +6122,7 @@ impl LauncherApp {
     }
 
     /// The text shown in the shared search field: an action menu, a bookmark
-    /// search prompt, or the query itself.
+    /// search prompt, the snippet save prompt, or the query itself.
     fn field_text(&self) -> &str {
         if let Some(menu) = &self.action_menu {
             return menu.query.as_str();
@@ -6102,6 +6134,11 @@ impl LauncherApp {
             .filter(|_| !self.view.help_active)
         {
             return prompt.term.as_str();
+        }
+        if self.snippet_save_open() {
+            if let Some(save) = &self.snippet_save {
+                return save.buffer.as_str();
+            }
         }
         self.search_query.as_str()
     }
@@ -6116,6 +6153,11 @@ impl LauncherApp {
             return move_cursor_to_end(input_id);
         }
         let text = edit(self.field_text());
+        if self.snippet_save_open() {
+            return self
+                .handle_snippet_save_input(text)
+                .chain(move_cursor_to_end(input_id));
+        }
         self.update(Message::SearchChanged(text))
             .chain(move_cursor_to_end(input_id))
     }

@@ -226,12 +226,29 @@ fn db_error(error: rusqlite::Error) -> String {
 /// The daemon's threads open the database at the same time, so the checks
 /// and changes run in one write transaction: whoever comes second waits and
 /// then finds the schema current.
+/// Switch to WAL mode. SQLite reports BUSY for the switch of a database that
+/// another connection is switching or opening, without waiting for the busy
+/// timeout, so it is retried until that timeout has passed.
+fn enable_wal(conn: &Connection) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + BUSY_TIMEOUT;
+    loop {
+        match conn.execute_batch("PRAGMA journal_mode = WAL;") {
+            Ok(()) => return Ok(()),
+            Err(rusqlite::Error::SqliteFailure(error, _))
+                if error.code == rusqlite::ErrorCode::DatabaseBusy
+                    && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => return Err(db_error(error)),
+        }
+    }
+}
+
 fn migrate(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch(
-        "PRAGMA journal_mode = WAL;
-         PRAGMA foreign_keys = ON;",
-    )
-    .map_err(db_error)?;
+    enable_wal(conn)?;
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
+        .map_err(db_error)?;
     if schema_version(conn)? >= SCHEMA_VERSION {
         return Ok(());
     }
@@ -861,6 +878,36 @@ impl Store {
             .optional()
             .map_err(db_error)?
             .ok_or_else(|| GONE.to_string())
+    }
+
+    /// Complete text of the live entry `hash`, for saving as a snippet.
+    /// Refuses password-manager copies and entries that are not plain text.
+    pub(crate) fn snippet_text(&self, hash: &str, now: i64) -> Result<String, String> {
+        let (id, kind, text): (i64, String, String) = self
+            .conn
+            .query_row(
+                &format!("SELECT id, kind, text FROM items WHERE hash = ?2 AND {ALIVE}"),
+                params![now, hash],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(db_error)?
+            .ok_or_else(|| GONE.to_string())?;
+        if parse_kind(&kind) != ItemKind::Text {
+            return Err("Only plain text can be saved as a snippet".into());
+        }
+        let marked: bool = self
+            .conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM formats WHERE item_id = ?1 AND mime = ?2)",
+                params![id, PASSWORD_HINT],
+                |row| row.get(0),
+            )
+            .map_err(db_error)?;
+        if marked {
+            return Err("Password-manager copies are not saved as snippets".into());
+        }
+        Ok(text)
     }
 
     pub(crate) fn preview(&self, hash: &str, now: i64) -> Result<ClipPreview, String> {
@@ -1773,6 +1820,34 @@ mod tests {
         let all = store.list("", "", 3, &[], NOW).unwrap();
         assert!(!titles(&all).contains(&"ok".to_string()));
         assert_eq!(all.items.len(), 6);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_snippet_text_is_the_full_text_and_refuses_password_copies() {
+        let (mut store, dir) = temp_store("snippet-text");
+        let long = "x".repeat(PREVIEW_TEXT_BYTES + 100);
+        let plain = store
+            .insert_filtered(text(&long, 1_000), &LIMITS, &Policy::default(), 1_000)
+            .unwrap();
+        assert_eq!(store.snippet_text(&plain, 1_000).unwrap(), long);
+        let policy = Policy {
+            temporary_password_manager: true,
+            ..Policy::default()
+        };
+        let secret = store
+            .insert_filtered(
+                Capture {
+                    password_marked: true,
+                    ..text("hunter2", 1_001)
+                },
+                &LIMITS,
+                &policy,
+                1_001,
+            )
+            .unwrap();
+        let error = store.snippet_text(&secret, 1_001).unwrap_err();
+        assert!(error.contains("Password-manager"), "{error}");
         let _ = fs::remove_dir_all(dir);
     }
 

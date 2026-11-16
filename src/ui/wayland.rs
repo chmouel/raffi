@@ -19,6 +19,7 @@ mod clipboard_cli;
 mod clipboard_history;
 mod clipboard_mode;
 mod clipboard_policy;
+mod clipboard_snippet;
 mod clipboard_store;
 mod clipboard_watch;
 mod color;

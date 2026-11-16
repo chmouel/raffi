@@ -334,8 +334,8 @@ text_snippets:
 
 Snippet sources are a list under `addons.text_snippets` (default: `[]`).
 Each source needs a `name`, a `keyword` and one of `snippets`, `file`,
-`directory` or `command`. If you set more than one, Raffi uses the first in
-that order and ignores the rest.
+`directory`, `markdown` or `command`. If you set more than one, Raffi uses the
+first in that order and ignores the rest.
 
 **`name`** `string` (required)
 
@@ -370,6 +370,11 @@ Path to a YAML file of snippets, in the same format as `snippets`. See
 
 Path to a directory of `.snippet` files. See
 [Directory source](#directory-source).
+
+**`markdown`** `string`
+
+Path to a markdown file of `## Name` sections. See
+[Markdown source](#markdown-source).
 
 **`command`** `string`
 
@@ -507,6 +512,44 @@ john@example.com
 Files without the `---` separator, with an unknown header line, or with no
 content are skipped. Snippets are listed by name until usage reorders them.
 
+### Markdown source
+
+`markdown` points to a markdown file of `## Name` sections. The clipboard
+browser can save a text entry to it (see
+[Saving from the clipboard](#saving-from-the-clipboard)). A missing file is an
+empty source, and the first save creates it.
+
+```yaml raffi.yaml
+addons:
+  text_snippets:
+    - name: "Notes"
+      keyword: "nt"
+      markdown: "~/notes/snippets.md"
+```
+
+```markdown snippets.md
+## Greeting
+
+Hello, world!
+
+## Signature
+keyword: !sig
+
+Best regards,
+John Doe
+```
+
+A section starts at a `## ` heading and runs to the next one. A `keyword:`
+line right after the heading sets the keyword, and the blank line after it
+(or after the heading) is not part of the value. Lines inside a value that
+begin with `## ` are written with an extra leading backslash, which Raffi
+removes when it reads them back. Headings inside a fenced code block still
+start a new snippet, so keep `## ` out of code in these files. A section with
+no value is skipped.
+
+Like the other file sources, the file is read once per session. Press
+Ctrl+R to read it again after editing it by hand.
+
 ### Command source
 
 `command` runs a program and lists what it prints. Raffi passes no query to
@@ -536,6 +579,41 @@ addons:
 `title` becomes the snippet name and `arg` its value. The optional `keyword`
 sets the [snippet keyword](#snippet-keywords-and-search), and `icon.path` the
 icon. `{shell:...}` placeholders in command output are not run.
+
+## Saving from the clipboard
+
+The clipboard browser can save a text entry to a `directory` or
+[`markdown`](#markdown-source) source. Press Right with the cursor at the end
+of the search field to open the actions, which list **Save to snippets** once
+per such source. Choose it, then:
+
+1. Type the name. The search field starts with the first non-blank line of the
+   entry, trimmed to 60 characters.
+2. Press Enter, then type an optional keyword and press Enter again. Enter
+   with an empty keyword saves without one.
+
+The full text is saved, as long as it is plain text. A `directory` source gets
+a new `.snippet` file named after the snippet, such as `release-notes.snippet`,
+and a `markdown` source gets a new section at the end of the file. Existing
+files are never replaced. New files are created readable by you only (mode
+0600), and a `markdown` file that already exists keeps its permissions. A
+source that also sets `snippets` or `file` has no save action, since Raffi
+reads those first and would not show the new snippet.
+
+Raffi refuses an entry that is not text, a password-manager copy, and a name
+the source already has, so rename the snippet or edit the file to replace one.
+Trailing newlines of the entry are dropped. Esc cancels.
+
+While the name or keyword is being asked for, the prompt owns the keyboard and
+the list behind it does not react. Saving drops Raffi's cached copy of the
+source, so typing the source's keyword again shows the new snippet. Ctrl+R
+reads the list you are looking at again.
+
+The entry is saved as it was copied. When the source expands
+[placeholders](#dynamic-placeholders) (the default), placeholders in the copied
+text, such as `{date}` or `{shell:...}`, are escaped with a backslash so the
+snippet pastes the same text instead of running them. A source with
+`placeholders: false` stores the text unchanged.
 
 ## Dynamic Placeholders
 

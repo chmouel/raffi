@@ -13741,3 +13741,278 @@ fn test_clear_query_and_delete_word_edit_the_action_menu_filter() {
     assert_eq!(app.action_menu.as_ref().unwrap().query, "");
     assert_eq!(app.search_query, "sys ");
 }
+
+#[test]
+fn test_clipboard_entry_saves_to_a_markdown_snippet_source() {
+    let dir = super::snippets::TestDir::new("save-flow");
+    let path = dir.path().join("notes.md");
+    let path_str = path.to_string_lossy().to_string();
+    let mut addons = clipboard_addons();
+    addons.text_snippets.push(crate::TextSnippetSourceConfig {
+        name: "Notes".into(),
+        keyword: "nt".into(),
+        markdown: Some(path_str.clone()),
+        ..Default::default()
+    });
+    let mut app = test_app(addons);
+    let generation = open_clipboard(&mut app, "clip ");
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page("h", 3, 1, vec![clip(0, "a", "alpha")])),
+    ));
+    let entry = app.selected_actions();
+    assert!(
+        entry
+            .iter()
+            .any(|action| action.label == "Save to snippets: Notes"),
+        "{:?}",
+        entry.iter().map(|action| &action.label).collect::<Vec<_>>()
+    );
+
+    let _ = app.update(Message::SaveClipboardSnippet(0));
+    assert!(app.clipboard.pending);
+    let session = app.clipboard.session;
+    let _ = app.update(Message::ClipboardSnippetText(
+        session,
+        0,
+        Ok("Hello there\nsecond line".into()),
+    ));
+    let save = app.snippet_save.as_ref().expect("name prompt is open");
+    assert_eq!(save.buffer, "Hello there");
+
+    let _ = app.update(Message::SearchChanged("Greeting".into()));
+    let _ = app.update(Message::Submit);
+    let _ = app.update(Message::SearchChanged("!hi".into()));
+    let _ = app.update(Message::Submit);
+    assert!(app.snippet_save.is_none());
+    let saved = super::snippets::read_snippet_markdown(&path_str).unwrap();
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].name, "Greeting");
+    assert_eq!(saved[0].keyword.as_deref(), Some("!hi"));
+    assert_eq!(saved[0].value, "Hello there\nsecond line");
+
+    // The same name again is refused and the prompt stays open.
+    let _ = app.update(Message::SaveClipboardSnippet(0));
+    let session = app.clipboard.session;
+    let _ = app.update(Message::ClipboardSnippetText(
+        session,
+        0,
+        Ok("again".into()),
+    ));
+    let _ = app.update(Message::SearchChanged("Greeting".into()));
+    let _ = app.update(Message::Submit);
+    let _ = app.update(Message::Submit);
+    assert!(app.snippet_save.is_some());
+    assert!(app
+        .clipboard
+        .error
+        .as_deref()
+        .unwrap_or("")
+        .contains("already exists"));
+    let _ = app.update(Message::Cancel);
+    assert!(app.snippet_save.is_none());
+}
+
+#[test]
+fn test_markdown_only_snippet_source_lists_under_its_keyword() {
+    let dir = super::snippets::TestDir::new("md-keyword");
+    let path = dir.path().join("notes.md");
+    std::fs::write(&path, "## Greeting\n\nHello\n").unwrap();
+    let mut addons = AddonsConfig::default();
+    addons.text_snippets.push(crate::TextSnippetSourceConfig {
+        name: "Notes".into(),
+        keyword: "nt".into(),
+        markdown: Some(path.to_string_lossy().to_string()),
+        ..Default::default()
+    });
+    let mut app = test_app(addons);
+    let _ = app.update(Message::SearchChanged("nt ".into()));
+    assert!(app.text_snippets.active);
+    assert_eq!(
+        app.text_snippets
+            .items
+            .iter()
+            .map(|snippet| snippet.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Greeting"]
+    );
+}
+
+#[test]
+fn test_clipboard_entry_saves_to_a_directory_snippet_source() {
+    let guard = super::snippets::TestDir::new("save-dir");
+    let dir = guard.path().join("snippets");
+    let dir_str = dir.to_string_lossy().to_string();
+    let mut addons = clipboard_addons();
+    addons.text_snippets.push(crate::TextSnippetSourceConfig {
+        name: "Snippets".into(),
+        keyword: "snip".into(),
+        directory: Some(dir_str.clone()),
+        action: Some("hypr_paste".into()),
+        secondary_action: Some("copy".into()),
+        restore_clipboard: true,
+        ..Default::default()
+    });
+    let mut app = test_app(addons);
+    let generation = open_clipboard(&mut app, "clip ");
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page("h", 3, 1, vec![clip(0, "a", "alpha")])),
+    ));
+    assert!(app
+        .selected_actions()
+        .iter()
+        .any(|action| action.label == "Save to snippets: Snippets"));
+
+    let _ = app.update(Message::SaveClipboardSnippet(0));
+    let session = app.clipboard.session;
+    let _ = app.update(Message::ClipboardSnippetText(
+        session,
+        0,
+        Ok("line one\nline two".into()),
+    ));
+    let _ = app.update(Message::SearchChanged("Release notes".into()));
+    let _ = app.update(Message::Submit);
+    let _ = app.update(Message::SearchChanged("!rn".into()));
+    let _ = app.update(Message::Submit);
+    assert!(app.snippet_save.is_none(), "{:?}", app.clipboard.error);
+
+    // The keyword view lists what was just saved.
+    let _ = app.update(Message::SearchChanged("snip ".into()));
+    let items: Vec<_> = app
+        .text_snippets
+        .items
+        .iter()
+        .map(|s| (s.name.as_str(), s.keyword.as_deref(), s.value.as_str()))
+        .collect();
+    assert_eq!(
+        items,
+        [("Release notes", Some("!rn"), "line one\nline two")]
+    );
+}
+
+/// A clipboard browser with two entries and the save prompt open on a text.
+fn snippet_prompt_app(dir: &super::snippets::TestDir) -> LauncherApp {
+    let mut addons = clipboard_addons();
+    addons.text_snippets.push(crate::TextSnippetSourceConfig {
+        name: "Notes".into(),
+        keyword: "nt".into(),
+        markdown: Some(dir.path().join("notes.md").to_string_lossy().to_string()),
+        ..Default::default()
+    });
+    let mut app = test_app(addons);
+    let generation = open_clipboard(&mut app, "clip ");
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page(
+            "h",
+            3,
+            2,
+            vec![clip(0, "a", "alpha"), clip(1, "b", "beta")],
+        )),
+    ));
+    let _ = app.update(Message::SaveClipboardSnippet(0));
+    let session = app.clipboard.session;
+    let _ = app.update(Message::ClipboardSnippetText(
+        session,
+        0,
+        Ok("Hello there".into()),
+    ));
+    assert!(app.snippet_save_open());
+    app
+}
+
+#[test]
+fn test_snippet_save_prompt_ignores_list_shortcuts() {
+    let dir = super::snippets::TestDir::new("prompt-keys");
+    let mut app = snippet_prompt_app(&dir);
+    let view = format!("{:?}", app.clipboard.view);
+    let selected = app.selected_index;
+    for message in [
+        Message::SubmitRepeat,
+        Message::DeleteSelected,
+        Message::CycleView(false),
+        Message::CycleView(true),
+        Message::ToggleHelp,
+        Message::ClipboardRefresh,
+        Message::ServerRefresh(false),
+        Message::ClipboardSelected(1),
+        Message::MoveDown,
+        Message::OpenActions,
+        Message::SaveClipboardSnippet(0),
+    ] {
+        let _ = app.update(message.clone());
+        assert!(app.snippet_save_open(), "{message:?}");
+        assert!(!app.clipboard.pending, "{message:?}");
+        assert!(!app.view.help_active, "{message:?}");
+        assert!(app.action_menu.is_none(), "{message:?}");
+        assert_eq!(format!("{:?}", app.clipboard.view), view, "{message:?}");
+        assert_eq!(app.selected_index, selected, "{message:?}");
+        assert_eq!(app.clipboard.items.len(), 2, "{message:?}");
+        assert_eq!(app.search_query, "clip ", "{message:?}");
+        assert_eq!(app.snippet_save.as_ref().unwrap().buffer, "Hello there");
+    }
+}
+
+#[test]
+fn test_delete_word_and_clear_query_edit_the_snippet_save_prompt() {
+    let dir = super::snippets::TestDir::new("prompt-edit");
+    let mut app = snippet_prompt_app(&dir);
+    let _ = app.update(Message::DeleteWord);
+    assert_eq!(app.snippet_save.as_ref().unwrap().buffer, "Hello ");
+    assert_eq!(app.search_query, "clip ", "the hidden query is untouched");
+    let _ = app.update(Message::ClearQuery);
+    assert_eq!(app.snippet_save.as_ref().unwrap().buffer, "");
+    assert_eq!(app.search_query, "clip ");
+}
+
+#[test]
+fn test_snippet_save_prompt_dies_with_its_clipboard_session() {
+    let dir = super::snippets::TestDir::new("prompt-session");
+    let mut app = snippet_prompt_app(&dir);
+    app.clipboard.clear();
+    assert!(!app.snippet_save_open());
+    let _ = app.update(Message::SearchChanged("zzz".into()));
+    assert!(app.snippet_save.is_none());
+
+    let mut app = snippet_prompt_app(&dir);
+    app.clipboard.clear();
+    let _ = app.update(Message::SearchChanged("clip ".into()));
+    assert!(app.clipboard.active);
+    assert!(
+        !app.snippet_save_open(),
+        "a prompt from an earlier browser session must not come back"
+    );
+    let _ = app.update(Message::Submit);
+    assert!(!dir.path().join("notes.md").exists());
+}
+
+#[test]
+fn test_action_menu_entries_have_glyphs_unless_icons_are_off() {
+    let setup = |no_icons: bool| {
+        let mut addons = clipboard_addons();
+        addons.text_snippets.push(crate::TextSnippetSourceConfig {
+            name: "Snippets".into(),
+            keyword: "snip".into(),
+            directory: Some("/nonexistent/raffi-glyph-test".into()),
+            ..Default::default()
+        });
+        let mut app = test_app(addons);
+        app.no_icons = no_icons;
+        let generation = open_clipboard(&mut app, "clip ");
+        let _ = app.update(Message::ClipboardPage(
+            generation,
+            Ok(clip_page("h", 3, 1, vec![clip(0, "a", "alpha")])),
+        ));
+        app.selected_actions()
+    };
+    let with_icons = setup(false);
+    assert!(with_icons.len() >= 2);
+    assert!(with_icons.iter().all(|entry| entry.glyph.is_some()));
+    let save = with_icons
+        .iter()
+        .find(|entry| entry.label.starts_with("Save to snippets"))
+        .unwrap();
+    assert!(save.shortcut.is_empty());
+    assert!(setup(true).iter().all(|entry| entry.glyph.is_none()));
+}

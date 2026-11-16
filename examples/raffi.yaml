@@ -292,7 +292,15 @@ addons:
   #     # Download the work templates linked in the text snippets documentation.
   #     keyword: "sn"
   #     icon: "snippets"
+  #     # A directory or markdown source also gets "Save to snippets" in the
+  #     # clipboard browser's action menu (Right arrow), which adds to it.
   #     directory: "~/.local/share/snippets"
+  #   - name: "Notes"
+  #     keyword: "nt"
+  #     icon: "document"
+  #     # Markdown file of "## Name" sections. Clipboard entries saved with
+  #     # "Save to snippets" in the clipboard browser are appended to it.
+  #     markdown: "~/notes/snippets.md"
 
   web_searches:
     - name: "Google"

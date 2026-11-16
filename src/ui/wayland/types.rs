@@ -706,6 +706,10 @@ pub(crate) enum Message {
     ),
     /// Ctrl+D: delete the clipboard entry, or run the row's close action.
     DeleteSelected,
+    /// Save the selected clipboard text to the snippet source at this config index.
+    SaveClipboardSnippet(usize),
+    /// The text for `SaveClipboardSnippet` arrived: session, source index, text.
+    ClipboardSnippetText(u64, usize, std::result::Result<String, String>),
     /// The compositor reported windows or workspaces changing while the
     /// window switcher is open.
     WindowsChanged,

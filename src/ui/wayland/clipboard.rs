@@ -481,6 +481,16 @@ impl History {
             Self::Auto => Err(NO_BACKEND.to_string()),
         }
     }
+
+    /// Complete text of `item` for saving as a snippet.
+    pub(crate) fn snippet_text(&self, item: &ItemRef) -> Result<String, String> {
+        match self.resolved()? {
+            Self::CopyQ(copyq) => copyq.snippet_text(item),
+            Self::Raffi => super::clipboard_store::Store::open_default()?
+                .snippet_text(&item.id, super::clipboard_store::now_secs()),
+            Self::Auto => Err(NO_BACKEND.to_string()),
+        }
+    }
 }
 
 /// A history resolved to the one backend it stands for, kept for the whole
@@ -533,7 +543,7 @@ impl CopyQ {
         timeout: Duration,
         max_output: usize,
     ) -> Result<Vec<u8>, String> {
-        let mut command = Command::new("copyq");
+        let mut command = Command::new(self.program());
         if let Some(session) = &self.session {
             command.args(["-s", session]);
         }
@@ -605,7 +615,17 @@ impl CopyQ {
 
     /// Complete text of `item`, through the preview script without its image.
     pub(crate) fn full_text(&self, item: &ItemRef) -> Result<String, String> {
-        let output = self.eval(
+        parse_full_text(&self.full_text_output(item)?)
+    }
+
+    /// Complete text of `item` for saving as a snippet; refused for a copy
+    /// a password manager marked.
+    pub(crate) fn snippet_text(&self, item: &ItemRef) -> Result<String, String> {
+        parse_snippet_text(&self.full_text_output(item)?)
+    }
+
+    fn full_text_output(&self, item: &ItemRef) -> Result<Vec<u8>, String> {
+        self.eval(
             PREVIEW_SCRIPT,
             &[
                 &item.tab,
@@ -616,8 +636,7 @@ impl CopyQ {
             ],
             PREVIEW_TIMEOUT,
             EXCLUDE_TEXT_CHARS + 64 * 1024,
-        )?;
-        parse_full_text(&output)
+        )
     }
 
     pub(crate) fn preview(&self, item: &ItemRef) -> Result<ClipPreview, String> {
@@ -741,12 +760,31 @@ fn hide_excluded(
 
 /// Text of a preview reply, which must hold the complete text.
 fn parse_full_text(output: &[u8]) -> Result<String, String> {
+    full_text_of(preview_header(output)?)
+}
+
+/// Like `parse_full_text`, but refuses an entry a password manager marked.
+fn parse_snippet_text(output: &[u8]) -> Result<String, String> {
+    let header = preview_header(output)?;
+    if header
+        .sizes
+        .iter()
+        .any(|(format, _)| format == super::clipboard_policy::PASSWORD_HINT)
+    {
+        return Err("Password-manager copies are not saved as snippets".into());
+    }
+    full_text_of(header)
+}
+
+fn preview_header(output: &[u8]) -> Result<PreviewHeader, String> {
     let header = output
         .split(|&byte| byte == b'\n')
         .next()
         .unwrap_or_default();
-    let header: PreviewHeader = serde_json::from_slice(header)
-        .map_err(|_| "CopyQ returned an unexpected preview".to_string())?;
+    serde_json::from_slice(header).map_err(|_| "CopyQ returned an unexpected preview".to_string())
+}
+
+fn full_text_of(header: PreviewHeader) -> Result<String, String> {
     if !header.ok {
         return Err(header
             .error
@@ -1533,6 +1571,43 @@ mod tests {
         assert!(parse_full_text(cut).is_err());
         let gone = br#"{"ok":false,"error":"item is no longer in the clipboard history"}"#;
         assert!(parse_full_text(gone).unwrap_err().contains("no longer"));
+    }
+
+    #[test]
+    fn test_copyq_snippet_text_refuses_password_manager_copies() {
+        use std::os::unix::fs::PermissionsExt;
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("raffi-copyq-snippet-{unique}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let reply = dir.join("reply");
+        let program = dir.join("copyq");
+        std::fs::write(&program, format!("#!/bin/sh\ncat '{}'\n", reply.display())).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let history = History::CopyQ(CopyQ::with_program(&program.display().to_string(), None));
+        let item = ItemRef {
+            tab: "&clipboard".into(),
+            id: "a".into(),
+            row: 0,
+        };
+
+        let plain = r#"{"ok":true,"k":"text","n":6,"sizes":[["text/plain",6]],"text":"hunter","image":"","sent":-1}"#;
+        std::fs::write(&reply, plain).unwrap();
+        assert_eq!(history.snippet_text(&item).unwrap(), "hunter");
+
+        let marked = r#"{"ok":true,"k":"text","n":6,"sizes":[["text/plain",6],["x-kde-passwordManagerHint",6]],"text":"hunter","image":"","sent":-1}"#;
+        std::fs::write(&reply, marked).unwrap();
+        assert_eq!(
+            history.snippet_text(&item).unwrap_err(),
+            "Password-manager copies are not saved as snippets"
+        );
+        let Backend::CopyQ(copyq) = history.resolve().unwrap() else {
+            panic!("expected the CopyQ backend");
+        };
+        assert_eq!(copyq.full_text(&item).unwrap(), "hunter");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// Runs against a disposable CopyQ session filled with synthetic items:

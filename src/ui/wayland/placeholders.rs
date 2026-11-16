@@ -170,6 +170,28 @@ fn scan_token(s: &str, allow_shell: bool) -> Option<(Name, String, usize)> {
     Some((name, after[..close].to_string(), 1 + ident_len + close + 1))
 }
 
+/// `text` as a template that expands back to exactly `text`: every
+/// placeholder is escaped, and a backslash in front of one stays a backslash.
+pub(super) fn escape_literal(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut index = 0;
+    while index < text.len() {
+        let rest = &text[index..];
+        if rest.starts_with('{') {
+            if let Some((_, _, len)) = scan_token(rest, true) {
+                out.push('\\');
+                out.push_str(&rest[..len]);
+                index += len;
+                continue;
+            }
+        }
+        let ch = rest.chars().next().unwrap_or_default();
+        out.push(ch);
+        index += ch.len_utf8();
+    }
+    out
+}
+
 fn parse(template: &str, allow_shell: bool) -> Vec<Piece> {
     let mut pieces = Vec::new();
     let mut text = String::new();
@@ -950,6 +972,50 @@ mod tests {
             run("if x {\n  log(\"{date}\")\n}").unwrap(),
             "if x {\n  log(\"2026-01-31\")\n}"
         );
+    }
+
+    #[test]
+    fn test_escape_literal_expands_back_to_the_text() {
+        for text in [
+            "{shell:touch x}",
+            "{shell:printf '%s' '\\}' | tr a b}",
+            "{date}",
+            "{date +1d:%A}",
+            "{cursor}",
+            "{clipboard|trim}",
+            "{clipboard:2|upper}",
+            "{env:HOME} {random:1-6} {snippet:sig}",
+            "\\{date}",
+            "\\\\{date}",
+            "\\{nope} C:\\path\\",
+            "{\"json\": 1}",
+            "{{date}}",
+            "{{{cursor}",
+            "{date",
+            "{shell:echo",
+            "é{time}ü {datetime}",
+            "plain text",
+            "",
+        ] {
+            let escaped = escape_literal(text);
+            for allow_shell in [true, false] {
+                let mut fake = Fake::at(2026, 1, 31, 9, 5);
+                let expanded = expand(&escaped, &mut fake, &[], allow_shell, Mode::Final).unwrap();
+                assert_eq!(expanded.text, text, "{escaped:?} allow_shell={allow_shell}");
+                assert_eq!(expanded.cursor_moves, None, "{escaped:?}");
+                assert!(fake.shell_calls.is_empty(), "{escaped:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_escape_literal_leaves_other_braces_alone() {
+        assert_eq!(
+            escape_literal("{\"json\": 1} fn() { }"),
+            "{\"json\": 1} fn() { }"
+        );
+        assert_eq!(escape_literal("{date}"), "\\{date}");
+        assert_eq!(escape_literal("\\{date}"), "\\\\{date}");
     }
 
     #[test]

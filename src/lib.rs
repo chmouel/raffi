@@ -674,6 +674,10 @@ pub struct TextSnippetSourceConfig {
     pub command: Option<String>,
     #[serde(default)]
     pub directory: Option<String>,
+    /// Markdown file of `## Name` snippets. Read as the source, and the file
+    /// that clipboard entries are saved to with the browser's save action.
+    #[serde(default)]
+    pub markdown: Option<String>,
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
@@ -3696,6 +3700,7 @@ fn process_config(config: Config, args: &Args) -> Result<ParsedConfig> {
         ts.file = ts.file.as_ref().map(|s| expand_config_value(s));
         ts.command = ts.command.as_ref().map(|s| expand_config_value(s));
         ts.directory = ts.directory.as_ref().map(|s| expand_config_value(s));
+        ts.markdown = ts.markdown.as_ref().map(|s| expand_config_value(s));
     }
     addons.launcher_keywords = launcher_keywords(&rafficonfigs);
 
@@ -7173,6 +7178,52 @@ launchers:
         assert_eq!(dynamic.args, vec!["-j".to_string()]);
         assert!(dynamic.snippets.is_none());
         assert!(dynamic.file.is_none());
+    }
+
+    #[test]
+    fn test_text_snippet_markdown_config_parsing() {
+        let yaml_config = r#"
+        addons:
+          text_snippets:
+            - name: "Notes"
+              keyword: "nt"
+              markdown: "~/notes/snippets.md"
+        shell:
+          binary: sh
+          description: "Shell"
+        "#;
+        let args = Args {
+            help: false,
+            version: false,
+            configfile: None,
+            print_only: false,
+            refresh_cache: false,
+            no_icons: true,
+            default_script_shell: None,
+            ui_type: None,
+            app_name: None,
+            initial_query: None,
+            last_query: false,
+            select_1: false,
+            theme: None,
+            opacity: None,
+            generate_schemas: false,
+            check_config: false,
+            debug_file: None,
+            install_browser_host: false,
+            uninstall_browser_host: false,
+            force: false,
+            keep_open: false,
+            cache_daemon: false,
+            options: Vec::new(),
+            vim_mode: false,
+            command: None,
+        };
+        let parsed_config = read_config_from_reader(Cursor::new(yaml_config), &args).unwrap();
+        let notes = &parsed_config.addons.text_snippets[0];
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(notes.markdown, Some(format!("{home}/notes/snippets.md")));
+        assert!(notes.file.is_none() && notes.directory.is_none());
     }
 
     #[test]

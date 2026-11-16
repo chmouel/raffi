@@ -18,6 +18,8 @@ enum Target {
 pub(super) struct ActionEntry {
     pub label: String,
     pub shortcut: String,
+    /// Emoji shown before the label; `None` with `--no-icons`.
+    pub glyph: Option<&'static str>,
     message: Message,
     modifiers: Modifiers,
 }
@@ -28,6 +30,35 @@ pub(super) struct ActionMenu {
     pub selected: usize,
     pub entries: Vec<ActionEntry>,
     target: Target,
+}
+
+/// The emoji of an action, from what it does and, for Enter-style actions,
+/// from the wording of its description.
+fn action_glyph(label: &str, message: &Message) -> &'static str {
+    match message {
+        Message::DeleteSelected => "🗑️",
+        Message::SaveClipboardSnippet(_) => "💾",
+        Message::VaultShortcut(EntryAction::Copy(Field::Otp)) => "🔢",
+        Message::VaultShortcut(_) => "👤",
+        Message::FileBrowserOpenSelected => "📂",
+        Message::FileBrowserOpenFileManager => "🗂️",
+        Message::FileBrowserCopyPath => "🔗",
+        Message::FileBrowserCopyImage => "🖼️",
+        _ => {
+            let label = label.to_lowercase();
+            if label.contains("paste") {
+                "📥"
+            } else if label.contains("type") {
+                "⌨️"
+            } else if label.contains("copy") {
+                "📋"
+            } else if label.contains("open") || label.contains("launch") {
+                "🚀"
+            } else {
+                "▶️"
+            }
+        }
+    }
 }
 
 impl ActionMenu {
@@ -51,6 +82,7 @@ impl LauncherApp {
         if self.view.help_active
             || self.vault.prompt.is_some()
             || self.bookmarks.prompt.is_some()
+            || self.snippet_save_open()
             || self.selected_index < self.keyword_rows()
         {
             return None;
@@ -141,7 +173,7 @@ impl LauncherApp {
                 }
             }
         }
-        metadata
+        let mut entries: Vec<ActionEntry> = metadata
             .into_iter()
             .filter_map(|(shortcut, label)| {
                 let (message, modifiers) = match shortcut.as_str() {
@@ -169,11 +201,42 @@ impl LauncherApp {
                     _ => return None,
                 };
                 Some(ActionEntry {
+                    glyph: (!self.no_icons).then(|| action_glyph(&label, &message)),
                     label,
                     shortcut,
                     message,
                     modifiers,
                 })
+            })
+            .collect();
+        entries.extend(self.clipboard_snippet_entries());
+        entries
+    }
+
+    /// One save action per directory or markdown source, for a selected text entry of the
+    /// clipboard browser.
+    fn clipboard_snippet_entries(&self) -> Vec<ActionEntry> {
+        let Some(item) = self
+            .selected_clipboard_item()
+            .and_then(|index| self.clipboard.items.get(index))
+        else {
+            return Vec::new();
+        };
+        if item.kind != super::clipboard::ItemKind::Text {
+            return Vec::new();
+        }
+        self.addons
+            .text_snippets
+            .iter()
+            .enumerate()
+            .filter(|(_, config)| super::snippets::snippet_save_path(config).is_some())
+            .map(|(index, config)| ActionEntry {
+                label: format!("Save to snippets: {}", config.name),
+                shortcut: String::new(),
+                glyph: (!self.no_icons)
+                    .then(|| action_glyph("", &Message::SaveClipboardSnippet(index))),
+                message: Message::SaveClipboardSnippet(index),
+                modifiers: Modifiers::empty(),
             })
             .collect()
     }
@@ -253,5 +316,30 @@ impl LauncherApp {
             _ => return None,
         }
         Some(Task::none())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_action_glyph_follows_the_action_then_the_wording() {
+        assert_eq!(
+            action_glyph("Delete this entry", &Message::DeleteSelected),
+            "🗑️"
+        );
+        assert_eq!(action_glyph("", &Message::SaveClipboardSnippet(0)), "💾");
+        assert_eq!(
+            action_glyph("Copy with all formats", &Message::Submit),
+            "📋"
+        );
+        assert_eq!(
+            action_glyph("Paste into original window (Hyprland)", &Message::Submit),
+            "📥"
+        );
+        assert_eq!(action_glyph("Type the password", &Message::Submit), "⌨️");
+        assert_eq!(action_glyph("Open with xdg-open", &Message::Submit), "🚀");
+        assert_eq!(action_glyph("Something else", &Message::Submit), "▶️");
     }
 }

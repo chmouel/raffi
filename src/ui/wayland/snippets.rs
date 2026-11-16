@@ -161,6 +161,295 @@ pub(super) fn read_snippet_dir(path: &str) -> Result<Vec<TextSnippet>, String> {
     Ok(snippets)
 }
 
+/// Snippets of a markdown `markdown` source. A missing file is an empty
+/// source, so the first save creates it. Blocking.
+pub(super) fn read_snippet_markdown(path: &str) -> Result<Vec<TextSnippet>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(contents) => Ok(parse_markdown_snippets(&contents)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(error) => Err(format!("cannot read {path}: {error}")),
+    }
+}
+
+/// Whether `line` is a heading once its escaping backslashes are dropped.
+fn is_heading_like(line: &str) -> bool {
+    line.trim_start_matches('\\').starts_with("## ")
+}
+
+/// Parse `## Name` sections. Each section may start with a `keyword:` line
+/// and one blank line; the body runs to the next heading, without the blank
+/// lines that end it. Body lines that would read as headings are written with
+/// one extra leading backslash, which is removed again here.
+pub(super) fn parse_markdown_snippets(contents: &str) -> Vec<TextSnippet> {
+    let mut snippets = Vec::new();
+    let mut current: Option<(String, Option<String>, Vec<String>)> = None;
+    // 0: a keyword or blank line may follow the heading, 1: only a blank
+    // line may follow, 2: the body.
+    let mut phase = 0u8;
+    for line in contents.lines() {
+        if let Some(name) = line.strip_prefix("## ") {
+            if let Some(done) = current.take() {
+                push_markdown_section(done, &mut snippets);
+            }
+            current = Some((name.trim().to_string(), None, Vec::new()));
+            phase = 0;
+            continue;
+        }
+        let Some((_, keyword, body)) = current.as_mut() else {
+            continue;
+        };
+        if phase < 2 {
+            if phase == 0 {
+                if let Some(value) = line.strip_prefix("keyword:") {
+                    *keyword = Some(value.trim().to_string());
+                    phase = 1;
+                    continue;
+                }
+            }
+            phase = 2;
+            if line.is_empty() {
+                continue;
+            }
+        }
+        let unescaped = if line.starts_with('\\') && is_heading_like(line) {
+            &line[1..]
+        } else {
+            line
+        };
+        body.push(unescaped.to_string());
+    }
+    if let Some(done) = current {
+        push_markdown_section(done, &mut snippets);
+    }
+    snippets
+}
+
+fn push_markdown_section(
+    (name, keyword, mut body): (String, Option<String>, Vec<String>),
+    snippets: &mut Vec<TextSnippet>,
+) {
+    while body.last().is_some_and(|line| line.is_empty()) {
+        body.pop();
+    }
+    if name.is_empty() || body.is_empty() {
+        return;
+    }
+    snippets.push(TextSnippet {
+        name,
+        value: body.join("\n"),
+        keyword: keyword.filter(|keyword| !keyword.is_empty()),
+        icon: None,
+    });
+}
+
+/// The markdown section of `snippet`, ending in a newline.
+pub(super) fn render_markdown_snippet(snippet: &TextSnippet) -> String {
+    let mut out = format!("## {}\n", snippet.name);
+    if let Some(keyword) = &snippet.keyword {
+        out.push_str(&format!("keyword: {keyword}\n"));
+    }
+    out.push('\n');
+    for line in snippet.value.trim_end_matches('\n').split('\n') {
+        if is_heading_like(line) {
+            out.push('\\');
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
+/// Create `dir` and its missing parents, private to the user when new.
+fn create_private_dir(dir: &std::path::Path) -> Result<(), String> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+        .map_err(|error| format!("cannot create {}: {error}", dir.display()))
+}
+
+/// Append `snippet` to the markdown file at `path`, creating the file (mode
+/// 0600) and its folder when needed. Refuses a name that is already in the
+/// file. The section goes out in one append write, so an existing file keeps
+/// its mode and a failed write never leaves a temporary file. Blocking.
+pub(super) fn append_markdown_snippet(path: &str, snippet: &TextSnippet) -> Result<(), String> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let existing = match std::fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(format!("cannot read {path}: {error}")),
+    };
+    if parse_markdown_snippets(&existing)
+        .iter()
+        .any(|saved| saved.name == snippet.name)
+    {
+        return Err(format!("A snippet named '{}' already exists", snippet.name));
+    }
+    let mut section = String::new();
+    if !existing.is_empty() {
+        if !existing.ends_with('\n') {
+            section.push('\n');
+        }
+        if !existing.ends_with("\n\n") {
+            section.push('\n');
+        }
+    }
+    section.push_str(&render_markdown_snippet(snippet));
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        if !parent.as_os_str().is_empty() {
+            create_private_dir(parent)?;
+        }
+    }
+    std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .mode(0o600)
+        .open(path)
+        .and_then(|mut file| file.write_all(section.as_bytes()))
+        .map_err(|error| format!("cannot write {path}: {error}"))
+}
+
+/// Where a clipboard entry can be saved for a source: the directory of
+/// `.snippet` files or the markdown file that the source is read from. `None`
+/// when the source is read from somewhere else, since a save would not show.
+pub(super) fn snippet_save_path(config: &crate::TextSnippetSourceConfig) -> Option<&str> {
+    if config.snippets.is_some() || config.file.is_some() {
+        return None;
+    }
+    config.directory.as_deref().or(config.markdown.as_deref())
+}
+
+/// File name stem of a snippet called `name`: lowercase letters and digits
+/// joined by single dashes.
+fn snippet_file_stem(name: &str) -> String {
+    let mut stem = String::new();
+    for c in name.chars().flat_map(char::to_lowercase) {
+        if c.is_alphanumeric() {
+            stem.push(c);
+        } else if !stem.is_empty() && !stem.ends_with('-') {
+            stem.push('-');
+        }
+    }
+    let stem: String = stem.trim_end_matches('-').chars().take(60).collect();
+    if stem.is_empty() {
+        "snippet".into()
+    } else {
+        stem.trim_end_matches('-').to_string()
+    }
+}
+
+/// The `.snippet` file text of `snippet`: name, optional `keyword:`, a `---`
+/// line, then the value.
+pub(super) fn render_snippet_file(snippet: &TextSnippet) -> String {
+    let mut out = format!("{}\n", snippet.name);
+    if let Some(keyword) = &snippet.keyword {
+        out.push_str(&format!("keyword: {keyword}\n"));
+    }
+    out.push_str("---\n");
+    out.push_str(snippet.value.trim_end_matches('\n'));
+    out.push('\n');
+    out
+}
+
+/// Attempts at a free `-N` file name before a directory save gives up.
+const MAX_SAVE_NAME_ATTEMPTS: u32 = 1000;
+
+/// A temporary file name in `dir` that no other save, process or leftover
+/// shares. It has no `.snippet` extension, so a reader never sees it.
+fn unique_temp_path(dir: &std::path::Path) -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.subsec_nanos());
+    dir.join(format!(
+        ".raffi-save-{}-{}-{nanos}.tmp",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ))
+}
+
+/// Write `snippet` as a new `.snippet` file (mode 0600) in the directory at
+/// `path`, creating the folder when needed. Refuses a name the directory
+/// already has and never replaces a file: the text is written to a private
+/// temporary file, then hard-linked to the first free name. Blocking.
+pub(super) fn save_snippet_to_dir(path: &str, snippet: &TextSnippet) -> Result<(), String> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    if snippet.name.trim().is_empty() || snippet.name.contains('\n') {
+        return Err("The snippet name must be one non-empty line".into());
+    }
+    if snippet.value.trim().is_empty() {
+        return Err("The snippet has no text".into());
+    }
+    let dir = std::path::Path::new(path);
+    create_private_dir(dir)?;
+    if read_snippet_dir(path)?
+        .iter()
+        .any(|saved| saved.name == snippet.name)
+    {
+        return Err(format!("A snippet named '{}' already exists", snippet.name));
+    }
+    let stem = snippet_file_stem(&snippet.name);
+    let temp = unique_temp_path(dir);
+    let written = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&temp)
+        .and_then(|mut file| file.write_all(render_snippet_file(snippet).as_bytes()));
+    let published = written
+        .map_err(|error| format!("cannot write {path}: {error}"))
+        .and_then(|()| {
+            for attempt in 1..=MAX_SAVE_NAME_ATTEMPTS {
+                let target = if attempt == 1 {
+                    dir.join(format!("{stem}.snippet"))
+                } else {
+                    dir.join(format!("{stem}-{attempt}.snippet"))
+                };
+                match std::fs::hard_link(&temp, &target) {
+                    Ok(()) => return Ok(()),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(error) => {
+                        return Err(format!("cannot write {}: {error}", target.display()))
+                    }
+                }
+            }
+            Err(format!(
+                "cannot find a free file name for '{stem}' in {path}"
+            ))
+        });
+    let _ = std::fs::remove_file(&temp);
+    published
+}
+
+/// Save `snippet` to the target of `config`. With placeholders enabled, the
+/// value is escaped so the saved snippet pastes as copied. Blocking.
+pub(super) fn save_snippet(
+    config: &crate::TextSnippetSourceConfig,
+    snippet: &TextSnippet,
+) -> Result<(), String> {
+    let escaped;
+    let snippet = if config.placeholders {
+        escaped = TextSnippet {
+            value: placeholders::escape_literal(&snippet.value),
+            ..snippet.clone()
+        };
+        &escaped
+    } else {
+        snippet
+    };
+    match (&config.directory, snippet_save_path(config)) {
+        (Some(_), Some(path)) => save_snippet_to_dir(path, snippet),
+        (None, Some(path)) => append_markdown_snippet(path, snippet),
+        _ => Err("No directory or markdown snippet file is configured".into()),
+    }
+}
+
 /// Every snippet of `config`, whatever kind of source it is. Blocking.
 pub(super) fn load_snippet_source(
     config: &crate::TextSnippetSourceConfig,
@@ -171,6 +460,8 @@ pub(super) fn load_snippet_source(
         read_snippet_file(file)
     } else if let Some(directory) = &config.directory {
         read_snippet_dir(directory)
+    } else if let Some(markdown) = &config.markdown {
+        read_snippet_markdown(markdown)
     } else if let Some(command) = &config.command {
         run_text_snippet_command(command, &config.args)
     } else {
@@ -502,10 +793,43 @@ pub(super) fn expand_final(
     )
 }
 
+/// A uniquely named temporary directory for tests, removed on drop.
+#[cfg(test)]
+pub(super) struct TestDir(std::path::PathBuf);
+
+#[cfg(test)]
+impl TestDir {
+    pub(super) fn new(name: &str) -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "raffi-{name}-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        Self(path)
+    }
+
+    pub(super) fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        compute_previews, filter_snippets, missing_clipboard, parse_snippet_file, truncate_preview,
+        append_markdown_snippet, compute_previews, filter_snippets, missing_clipboard,
+        parse_markdown_snippets, parse_snippet_file, read_snippet_markdown,
+        render_markdown_snippet, save_snippet, save_snippet_to_dir, snippet_save_path,
+        truncate_preview, TestDir,
     };
     use crate::ui::wayland::state::ClipboardData;
     use crate::TextSnippet;
@@ -672,5 +996,294 @@ mod tests {
         assert!(needs.current);
         assert_eq!(needs.history.iter().copied().collect::<Vec<_>>(), vec![1]);
         assert!(missing_clipboard(&snippets, &data).is_empty());
+    }
+
+    fn temp_markdown(name: &str) -> (TestDir, std::path::PathBuf, String) {
+        let dir = TestDir::new(name);
+        let path = dir.path().join("snippets.md");
+        let path_str = path.to_string_lossy().to_string();
+        (dir, path, path_str)
+    }
+
+    #[test]
+    fn test_parse_markdown_snippets_reads_sections_keywords_and_bodies() {
+        let md = "# Snippets\n\nintro text is ignored\n\n## Greeting\n\nHello,\nworld\n\n\
+                  ## Signature\nkeyword: !sig\n\nBest regards\n\n## Empty\n\n## Last\n\nend\n";
+        let parsed = parse_markdown_snippets(md);
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed[0].name, "Greeting");
+        assert_eq!(parsed[0].value, "Hello,\nworld");
+        assert_eq!(parsed[0].keyword, None);
+        assert_eq!(parsed[1].keyword.as_deref(), Some("!sig"));
+        assert_eq!(parsed[1].value, "Best regards");
+        assert_eq!(parsed[2].name, "Last");
+    }
+
+    #[test]
+    fn test_markdown_body_round_trips_headings_and_keyword_lookalikes() {
+        let tricky = "## not a section\n\\## escaped\nkeyword: looks like a header\n\n- kept";
+        let original = snippet("Tricky", tricky, Some("!t"));
+        let rendered = render_markdown_snippet(&original);
+        let parsed = parse_markdown_snippets(&rendered);
+        assert_eq!(parsed, vec![original]);
+    }
+
+    #[test]
+    fn test_markdown_body_without_keyword_round_trips_a_keyword_first_line() {
+        let original = snippet("Header", "keyword: body text", None);
+        let parsed = parse_markdown_snippets(&render_markdown_snippet(&original));
+        assert_eq!(parsed, vec![original]);
+    }
+
+    #[test]
+    fn test_append_markdown_snippet_creates_the_file_and_adds_sections() {
+        let (_dir, path, path_str) = temp_markdown("md-append");
+        append_markdown_snippet(&path_str, &snippet("First", "one", None)).unwrap();
+        append_markdown_snippet(&path_str, &snippet("Second", "two", Some("!2"))).unwrap();
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            contents,
+            "## First\n\none\n\n## Second\nkeyword: !2\n\ntwo\n"
+        );
+        let read = read_snippet_markdown(&path_str).unwrap();
+        assert_eq!(
+            read.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            ["First", "Second"]
+        );
+        assert_eq!(
+            std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_append_markdown_snippet_refuses_a_duplicate_name() {
+        let (_dir, _path, path_str) = temp_markdown("md-duplicate");
+        append_markdown_snippet(&path_str, &snippet("Same", "one", None)).unwrap();
+        let before = std::fs::read_to_string(&path_str).unwrap();
+        let error = append_markdown_snippet(&path_str, &snippet("Same", "two", None)).unwrap_err();
+        assert!(error.contains("already exists"), "{error}");
+        assert_eq!(std::fs::read_to_string(&path_str).unwrap(), before);
+    }
+
+    #[test]
+    fn test_append_markdown_snippet_separates_from_a_file_without_newline() {
+        let (_dir, path, path_str) = temp_markdown("md-no-newline");
+        std::fs::write(&path, "## Hand written\n\nbody").unwrap();
+        append_markdown_snippet(&path_str, &snippet("Added", "more", None)).unwrap();
+        let parsed = read_snippet_markdown(&path_str).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].value, "body");
+        assert_eq!(parsed[1].value, "more");
+    }
+
+    #[test]
+    fn test_read_missing_markdown_file_is_an_empty_source() {
+        let (_dir, _path, path_str) = temp_markdown("md-missing");
+        assert!(read_snippet_markdown(&path_str).unwrap().is_empty());
+    }
+
+    fn temp_dir_path(name: &str) -> (TestDir, String) {
+        let dir = TestDir::new(name);
+        let path = dir.path().join("snippets").to_string_lossy().to_string();
+        (dir, path)
+    }
+
+    #[test]
+    fn test_save_snippet_to_dir_round_trips_through_the_directory_reader() {
+        let (_guard, dir) = temp_dir_path("dir-roundtrip");
+        let tricky = "first\n---\nkeyword: not a header\n## heading\n\n  indented\nlast";
+        save_snippet_to_dir(&dir, &snippet("My Sig: v2!", tricky, Some("!sig"))).unwrap();
+        save_snippet_to_dir(&dir, &snippet("plain", "text", None)).unwrap();
+        let read = super::read_snippet_dir(&dir).unwrap();
+        assert_eq!(read.len(), 2);
+        let sig = read.iter().find(|s| s.name == "My Sig: v2!").unwrap();
+        assert_eq!(sig.value, tricky);
+        assert_eq!(sig.keyword.as_deref(), Some("!sig"));
+        assert!(std::path::Path::new(&dir)
+            .join("my-sig-v2.snippet")
+            .is_file());
+        assert!(std::fs::read_dir(&dir)
+            .unwrap()
+            .all(|e| e.unwrap().path().extension().unwrap() == "snippet"));
+    }
+
+    #[test]
+    fn test_save_snippet_to_dir_refuses_duplicates_and_keeps_colliding_file_names() {
+        let (_guard, dir) = temp_dir_path("dir-collide");
+        save_snippet_to_dir(&dir, &snippet("A b", "one", None)).unwrap();
+        let error = save_snippet_to_dir(&dir, &snippet("A b", "two", None)).unwrap_err();
+        assert!(error.contains("already exists"), "{error}");
+        // A different name with the same file stem gets its own file.
+        save_snippet_to_dir(&dir, &snippet("a-b", "three", None)).unwrap();
+        let read = super::read_snippet_dir(&dir).unwrap();
+        assert_eq!(read.len(), 2);
+        assert!(std::path::Path::new(&dir).join("a-b-2.snippet").is_file());
+        let value = |name: &str| read.iter().find(|s| s.name == name).unwrap().value.clone();
+        assert_eq!(value("A b"), "one");
+        assert_eq!(value("a-b"), "three");
+    }
+
+    #[test]
+    fn test_save_snippet_to_dir_refuses_bad_names_and_empty_text() {
+        let (_guard, dir) = temp_dir_path("dir-bad");
+        assert!(save_snippet_to_dir(&dir, &snippet("  ", "x", None)).is_err());
+        assert!(save_snippet_to_dir(&dir, &snippet("two\nlines", "x", None)).is_err());
+        assert!(save_snippet_to_dir(&dir, &snippet("n", " \n ", None)).is_err());
+        // A name that is all punctuation still gets a usable file name.
+        save_snippet_to_dir(&dir, &snippet("???", "x", None)).unwrap();
+        assert!(std::path::Path::new(&dir).join("snippet.snippet").is_file());
+        // A path separator in the name cannot leave the directory.
+        save_snippet_to_dir(&dir, &snippet("../../evil", "x", None)).unwrap();
+        assert!(std::path::Path::new(&dir).join("evil.snippet").is_file());
+    }
+
+    fn mode_of(path: impl AsRef<std::path::Path>) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[test]
+    fn test_append_markdown_snippet_keeps_the_content_and_mode_of_an_existing_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_dir, path, path_str) = temp_markdown("md-mode");
+        std::fs::write(&path, "## Old\n\nbody\n").unwrap();
+        for mode in [0o600, 0o644] {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+            let name = format!("Added {mode:o}");
+            append_markdown_snippet(&path_str, &snippet(&name, "more", None)).unwrap();
+            assert_eq!(mode_of(&path), mode);
+        }
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            contents.starts_with("## Old\n\nbody\n\n## Added 600\n"),
+            "{contents}"
+        );
+        assert_eq!(read_snippet_markdown(&path_str).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_new_snippet_files_and_folders_are_private() {
+        let (_dir, path, path_str) = temp_markdown("md-private");
+        let nested = path.parent().unwrap().join("a/b/snippets.md");
+        append_markdown_snippet(&nested.to_string_lossy(), &snippet("N", "x", None)).unwrap();
+        assert_eq!(mode_of(&nested), 0o600);
+        assert_eq!(mode_of(nested.parent().unwrap()), 0o700);
+        append_markdown_snippet(&path_str, &snippet("M", "x", None)).unwrap();
+        assert_eq!(mode_of(&path), 0o600);
+
+        let (_guard, dir) = temp_dir_path("dir-private");
+        save_snippet_to_dir(&dir, &snippet("Private", "x", None)).unwrap();
+        assert_eq!(mode_of(&dir), 0o700);
+        assert_eq!(
+            mode_of(std::path::Path::new(&dir).join("private.snippet")),
+            0o600
+        );
+    }
+
+    #[test]
+    fn test_save_snippet_to_dir_ignores_a_planted_temporary_symlink() {
+        let (guard, dir) = temp_dir_path("dir-symlink");
+        std::fs::create_dir_all(&dir).unwrap();
+        let decoy = guard.path().join("decoy");
+        std::fs::write(&decoy, "untouched").unwrap();
+        for name in ["target.snippet.tmp", "target.tmp", "target.snippet"] {
+            std::os::unix::fs::symlink(&decoy, std::path::Path::new(&dir).join(name)).unwrap();
+        }
+        save_snippet_to_dir(&dir, &snippet("Target", "text", None)).unwrap();
+        assert_eq!(std::fs::read_to_string(&decoy).unwrap(), "untouched");
+        let saved = super::read_snippet_dir(&dir).unwrap();
+        assert!(saved
+            .iter()
+            .any(|s| s.name == "Target" && s.value == "text"));
+    }
+
+    #[test]
+    fn test_save_snippet_to_dir_leaves_no_temporary_file() {
+        let (_guard, dir) = temp_dir_path("dir-clean");
+        save_snippet_to_dir(&dir, &snippet("One", "x", None)).unwrap();
+        let _ = save_snippet_to_dir(&dir, &snippet("One", "y", None));
+        let names: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(names, ["one.snippet"]);
+    }
+
+    #[test]
+    fn test_same_stem_saves_never_overwrite_each_other() {
+        let (_guard, dir) = temp_dir_path("dir-stem");
+        let names = ["A b", "a-b", "A_b", "a b!"];
+        for (index, name) in names.iter().enumerate() {
+            save_snippet_to_dir(&dir, &snippet(name, &format!("value {index}"), None)).unwrap();
+        }
+        let read = super::read_snippet_dir(&dir).unwrap();
+        assert_eq!(read.len(), names.len());
+        for (index, name) in names.iter().enumerate() {
+            let saved = read.iter().find(|s| s.name == *name).unwrap();
+            assert_eq!(saved.value, format!("value {index}"));
+        }
+    }
+
+    #[test]
+    fn test_save_snippet_escapes_placeholders_only_when_the_source_expands_them() {
+        let value = "run {shell:touch x} on {date}";
+        let (_guard, dir) = temp_dir_path("dir-escape");
+        let source = |placeholders: bool, directory: String| crate::TextSnippetSourceConfig {
+            directory: Some(directory),
+            placeholders,
+            ..Default::default()
+        };
+        let on = format!("{dir}/on");
+        save_snippet(&source(true, on.clone()), &snippet("Run", value, None)).unwrap();
+        let stored = std::fs::read_to_string(format!("{on}/run.snippet")).unwrap();
+        assert!(
+            stored.contains("run \\{shell:touch x} on \\{date}"),
+            "{stored}"
+        );
+
+        let off = format!("{dir}/off");
+        save_snippet(&source(false, off.clone()), &snippet("Run", value, None)).unwrap();
+        let stored = std::fs::read_to_string(format!("{off}/run.snippet")).unwrap();
+        assert!(stored.contains(value) && !stored.contains('\\'), "{stored}");
+
+        let markdown = format!("{dir}/snippets.md");
+        let config = crate::TextSnippetSourceConfig {
+            markdown: Some(markdown.clone()),
+            placeholders: true,
+            ..Default::default()
+        };
+        save_snippet(&config, &snippet("Run", value, None)).unwrap();
+        let stored = std::fs::read_to_string(markdown).unwrap();
+        assert!(
+            stored.contains("run \\{shell:touch x} on \\{date}"),
+            "{stored}"
+        );
+    }
+
+    #[test]
+    fn test_snippet_save_path_follows_the_source_that_is_read() {
+        let config = |f: &dyn Fn(&mut crate::TextSnippetSourceConfig)| {
+            let mut c = crate::TextSnippetSourceConfig::default();
+            f(&mut c);
+            c
+        };
+        let dir = config(&|c| c.directory = Some("/d".into()));
+        assert_eq!(snippet_save_path(&dir), Some("/d"));
+        let md = config(&|c| c.markdown = Some("/m.md".into()));
+        assert_eq!(snippet_save_path(&md), Some("/m.md"));
+        // The directory is read before the markdown file, so it is the target.
+        let both = config(&|c| {
+            c.directory = Some("/d".into());
+            c.markdown = Some("/m.md".into());
+        });
+        assert_eq!(snippet_save_path(&both), Some("/d"));
+        // Inline and `file` sources are read first, so a save would not show.
+        let inline = config(&|c| {
+            c.snippets = Some(Vec::new());
+            c.directory = Some("/d".into());
+        });
+        assert_eq!(snippet_save_path(&inline), None);
+        assert_eq!(snippet_save_path(&config(&|_| {})), None);
     }
 }

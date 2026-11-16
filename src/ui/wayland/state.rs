@@ -802,6 +802,8 @@ pub(super) struct LauncherApp {
     pub filtered_config_scores: Vec<Option<super::ranking::ScoredMatch>>,
     pub search_query: String,
     pub action_menu: Option<super::action_menu::ActionMenu>,
+    /// Name and keyword prompt of a clipboard entry being saved as a snippet.
+    pub snippet_save: Option<super::clipboard_snippet::SnippetSave>,
     pub onboarding: super::onboarding::Onboarding,
     pub select_1_query: Option<String>,
     pub select_1_ready: bool,

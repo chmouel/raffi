@@ -2388,6 +2388,14 @@
         "keyword": {
           "type": "string"
         },
+        "markdown": {
+          "description": "Markdown file of `## Name` snippets. Read as the source, and the file\nthat clipboard entries are saved to with the browser's save action.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "name": {
           "type": "string"
         },
