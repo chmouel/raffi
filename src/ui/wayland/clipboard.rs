@@ -199,8 +199,19 @@ impl ClipItem {
         }
     }
 
-    /// Type and size details for the result row.
+    /// Type, size and copy time details for the result row.
     pub(crate) fn subtitle(&self) -> String {
+        let details = self.details();
+        match self.copied.and_then(local_time) {
+            Some(time) => format!(
+                "{details} · {}",
+                short_copy_time(time, chrono::Local::now().naive_local())
+            ),
+            None => details,
+        }
+    }
+
+    fn details(&self) -> String {
         let label = self.kind.label();
         match self.kind {
             ItemKind::Text | ItemKind::Html => match self.text_len {
@@ -1156,10 +1167,13 @@ mod tests {
                 .to_string(),
             "2026-10-16 14:32:05"
         );
+        let copied = local_time(page.items[1].copied.unwrap()).unwrap();
         assert_eq!(
             page.items[1].subtitle(),
-            "Image",
-            "rows leave the copy time out"
+            format!(
+                "Image · {}",
+                short_copy_time(copied, chrono::Local::now().naive_local())
+            )
         );
         let odd = br#"{"tab":"t","total":1,"head":"h","next":1,"stable":true,"items":[{"r":0,"id":"a","f":[],"k":"text","n":0,"p":"","t":0,"c":"soon"}]}"#;
         assert_eq!(parse_page(odd).unwrap().items[0].copied, None);
