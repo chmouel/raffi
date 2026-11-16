@@ -39,8 +39,9 @@ pub(crate) const CLIPBOARD_NOT_RUNNING: &str =
 const WARM_TICK: Duration = Duration::from_secs(30);
 /// Protocol revision reported by `Status`; daemons from before it existed
 /// report 0 and ignore `wait`. Revision 2 adds `clipboard_select`, revision
-/// 3 the `clipboard` status flag, revision 4 `clipboard_set`.
-pub(crate) const PROTOCOL: u32 = 4;
+/// 3 the `clipboard` status flag, revision 4 `clipboard_set`, revision 5 its
+/// `expires_in`.
+pub(crate) const PROTOCOL: u32 = 5;
 /// Upper bound on the formats one `clipboard set` request may carry.
 const MAX_SET_FORMATS: usize = 32;
 /// Largest single format a request may carry, whatever the configured image
@@ -147,6 +148,10 @@ pub(crate) enum Request {
         /// The content is a password-manager secret.
         #[serde(default)]
         secret: bool,
+        /// Seconds after which the entry leaves the history and the
+        /// clipboard is cleared, when it still holds the content.
+        #[serde(default)]
+        expires_in: Option<i64>,
         /// App to record as the source of the copy.
         #[serde(default)]
         source: Option<String>,
@@ -731,6 +736,7 @@ pub(crate) fn clipboard_set(
     formats: &[(String, Vec<u8>)],
     temporary: bool,
     secret: bool,
+    expires_in: Option<i64>,
     source: Option<String>,
 ) -> Result<SetOutcome, SetFailure> {
     match probe() {
@@ -744,6 +750,7 @@ pub(crate) fn clipboard_set(
         formats: encode_formats(formats),
         temporary,
         secret,
+        expires_in,
         source,
     };
     match call(&request, CLIPBOARD_TIMEOUT) {
@@ -980,8 +987,16 @@ pub(crate) fn handle_request(state: &Arc<DaemonState>, request: Request) -> Resp
             formats,
             temporary,
             secret,
+            expires_in,
             source,
-        } => match serve_set(state, &formats, temporary, secret, source.as_deref()) {
+        } => match serve_set(
+            state,
+            &formats,
+            temporary,
+            secret,
+            expires_in,
+            source.as_deref(),
+        ) {
             Ok((id, expires_at)) => Response::ClipboardSet { id, expires_at },
             Err(failure) => failure.into(),
         },
@@ -995,6 +1010,7 @@ fn serve_set(
     formats: &[SetFormat],
     temporary: bool,
     secret: bool,
+    expires_in: Option<i64>,
     source: Option<&str>,
 ) -> Result<(Option<String>, Option<i64>), Failure> {
     let config = &state.addons.clipboard;
@@ -1002,6 +1018,15 @@ fn serve_set(
     // The request is checked before the service says whether it records at
     // all: a malformed request is refused whatever the state of the server.
     check_set_request(formats, &limits)?;
+    if let Some(secs) = expires_in {
+        let problem = match u64::try_from(secs) {
+            Ok(secs) => crate::temporary_timeout_problem(secs),
+            Err(_) => Some("must be greater than zero".to_string()),
+        };
+        if let Some(problem) = problem {
+            return Err(Failure::invalid(format!("expires_in: {problem}")));
+        }
+    }
     let source = source
         .map(super::clipboard_store::validate_source)
         .transpose()
@@ -1019,9 +1044,12 @@ fn serve_set(
         .map_err(|message| Failure::new(ErrorCode::Io, message))?;
     let now = super::clipboard_store::now_secs();
     let served = record_set(
-        &mut store, formats, temporary, secret, source, &limits, &policy, now,
+        &mut store, formats, temporary, secret, expires_in, source, &limits, &policy, now,
     )?;
-    super::clipboard_watch::set(served.id.clone(), served.formats)
+    // Only an explicit lifetime takes the content off the clipboard, recorded
+    // or not.
+    let clear_at = expires_in.map(|secs| now.saturating_add(secs));
+    super::clipboard_watch::set(served.id.clone(), served.formats, clear_at)
         .map_err(|message| Failure::new(ErrorCode::Io, message))?;
     Ok((served.id, served.expires_at))
 }
@@ -1133,18 +1161,30 @@ struct Served {
 /// Record the content of a `clipboard set` in `store`, and report the formats
 /// to serve, the entry they were recorded as, and its deadline. Content the
 /// policy keeps out of the history is still served, with the password-manager
-/// hint when it is a secret.
+/// hint when it is a secret. `expires_in` overrides the configured timeout,
+/// and records a secret even when the password-manager opt-in is off.
 #[allow(clippy::too_many_arguments)]
 fn record_set(
     store: &mut super::clipboard_store::Store,
     formats: Vec<(String, Vec<u8>)>,
     temporary: bool,
     secret: bool,
+    expires_in: Option<i64>,
     source: Option<String>,
     limits: &super::clipboard_store::Limits,
     policy: &super::clipboard_policy::Policy,
     now: i64,
 ) -> Result<Served, Failure> {
+    let opted_in;
+    let policy = if secret && expires_in.is_some() && !policy.temporary_password_manager {
+        opted_in = super::clipboard_policy::Policy {
+            temporary_password_manager: true,
+            ..policy.clone()
+        };
+        &opted_in
+    } else {
+        policy
+    };
     // The policy is applied before the store takes the content, so what it
     // keeps out of the history is served again without copying it.
     let text = super::clipboard_store::text_of(&formats);
@@ -1161,10 +1201,13 @@ fn record_set(
         source,
         password_marked: secret,
     };
-    let inserted = if temporary {
-        store.insert_temporary(capture, limits, policy, now)
-    } else {
-        store.insert_filtered(capture, limits, policy, now)
+    let lifetime = expires_in.or(temporary.then_some(policy.temporary_timeout));
+    let inserted = match lifetime {
+        Some(lifetime) if expires_in.is_some() => {
+            store.insert_expiring(capture, lifetime, limits, policy, now)
+        }
+        Some(lifetime) => store.insert_temporary(capture, lifetime, limits, policy, now),
+        None => store.insert_filtered(capture, limits, policy, now),
     };
     match inserted {
         Ok(hash) => {
@@ -1820,6 +1863,7 @@ mod tests {
             formats: encode_formats(&formats),
             temporary: true,
             secret: true,
+            expires_in: Some(30),
             source: Some("kitty".into()),
         };
         let line = serde_json::to_string(&request).unwrap();
@@ -1830,12 +1874,14 @@ mod tests {
             formats,
             temporary,
             secret,
+            expires_in,
             source,
         } = parsed
         else {
             panic!("the set request should round trip");
         };
         assert!(temporary && secret);
+        assert_eq!(expires_in, Some(30));
         assert_eq!(source.as_deref(), Some("kitty"));
         assert_eq!(
             decode_formats(&formats).unwrap(),
@@ -1857,6 +1903,7 @@ mod tests {
             Request::ClipboardSet {
                 temporary: false,
                 secret: false,
+                expires_in: None,
                 source: None,
                 ..
             }
@@ -2052,6 +2099,7 @@ mod tests {
                 formats: oversized,
                 temporary: false,
                 secret: false,
+                expires_in: None,
                 source: None,
             },
             Request::ClipboardSet {
@@ -2061,6 +2109,7 @@ mod tests {
                 }],
                 temporary: false,
                 secret: false,
+                expires_in: None,
                 source: None,
             },
             Request::Status,
@@ -2124,6 +2173,7 @@ mod tests {
             false,
             false,
             None,
+            None,
             &LIMITS,
             &policy,
             NOW,
@@ -2141,6 +2191,7 @@ mod tests {
             text_formats("hello"),
             false,
             false,
+            None,
             None,
             &LIMITS,
             &policy,
@@ -2162,6 +2213,7 @@ mod tests {
             true,
             false,
             None,
+            None,
             &LIMITS,
             &policy,
             NOW,
@@ -2175,6 +2227,7 @@ mod tests {
             vec![("image/png".to_string(), b"\x89PNG".to_vec())],
             true,
             false,
+            None,
             None,
             &LIMITS,
             &policy,
@@ -2193,6 +2246,7 @@ mod tests {
             text_formats("from an agent"),
             false,
             false,
+            None,
             Some("pi".to_string()),
             &LIMITS,
             &Policy::default(),
@@ -2215,6 +2269,7 @@ mod tests {
             false,
             false,
             None,
+            None,
             &LIMITS,
             &Policy::default(),
             NOW,
@@ -2228,6 +2283,91 @@ mod tests {
     }
 
     #[test]
+    fn an_expiring_set_gets_its_own_lifetime() {
+        let (mut store, dir) = set_store("set-expire");
+        let policy = Policy::default();
+        let served = record_set(
+            &mut store,
+            text_formats("one-time code"),
+            false,
+            false,
+            Some(5),
+            None,
+            &LIMITS,
+            &policy,
+            NOW,
+        )
+        .unwrap();
+        assert!(served.id.is_some());
+        assert_eq!(served.expires_at, Some(NOW + 5));
+
+        // A secret with a lifetime is recorded without the opt-in, as a
+        // temporary entry served with the hint.
+        let secret = record_set(
+            &mut store,
+            text_formats("hunter2"),
+            false,
+            true,
+            Some(30),
+            None,
+            &LIMITS,
+            &policy,
+            NOW,
+        )
+        .unwrap();
+        assert!(secret.id.is_some());
+        assert_eq!(secret.expires_at, Some(NOW + 30));
+        assert!(secret.formats.iter().any(|(mime, _)| mime == PASSWORD_HINT));
+
+        // Exclusion patterns still keep it out of the history.
+        let excluded = Policy {
+            exclude: vec![regex::Regex::new("^secret:").unwrap()],
+            ..Policy::default()
+        };
+        let skipped = record_set(
+            &mut store,
+            text_formats("secret: hunter2"),
+            false,
+            true,
+            Some(30),
+            None,
+            &LIMITS,
+            &excluded,
+            NOW,
+        )
+        .unwrap();
+        assert_eq!(skipped.id, None);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_expiring_set_with_an_unusable_lifetime_is_refused() {
+        for expires_in in [0, -5, i64::MAX] {
+            let replies = serve_over_socket(&[Request::ClipboardSet {
+                formats: vec![SetFormat {
+                    mime: "text/plain".into(),
+                    data: "aGk=".into(),
+                }],
+                temporary: false,
+                secret: false,
+                expires_in: Some(expires_in),
+                source: None,
+            }]);
+            assert!(
+                matches!(
+                    &replies[0],
+                    Response::Error {
+                        code: Some(ErrorCode::InvalidArgument),
+                        message,
+                    } if message.starts_with("expires_in: ")
+                ),
+                "{expires_in}: {:?}",
+                replies[0]
+            );
+        }
+    }
+
+    #[test]
     fn a_set_source_the_history_cannot_show_is_refused() {
         let replies = serve_over_socket(&[
             Request::ClipboardSet {
@@ -2237,6 +2377,7 @@ mod tests {
                 }],
                 temporary: false,
                 secret: false,
+                expires_in: None,
                 source: Some("pi\u{0}".into()),
             },
             Request::ClipboardSet {
@@ -2246,6 +2387,7 @@ mod tests {
                 }],
                 temporary: false,
                 secret: false,
+                expires_in: None,
                 source: Some("   ".into()),
             },
             Request::Status,
@@ -2284,6 +2426,7 @@ mod tests {
             false,
             true,
             None,
+            None,
             &LIMITS,
             &Policy::default(),
             NOW,
@@ -2309,6 +2452,7 @@ mod tests {
             false,
             true,
             None,
+            None,
             &LIMITS,
             &policy,
             NOW,
@@ -2333,6 +2477,7 @@ mod tests {
             false,
             false,
             None,
+            None,
             &LIMITS,
             &policy,
             NOW,
@@ -2356,6 +2501,7 @@ mod tests {
             vec![("image/png".to_string(), b"\x89PNG\r\n".to_vec())],
             false,
             false,
+            None,
             None,
             &limits,
             &Policy::default(),

@@ -6,6 +6,7 @@ can never act on the real desktop.
 """
 import json
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -193,7 +194,7 @@ def main():
         sources = ["code", "kitty", "firefox", "firefox"]
         if "var stable =" in script:
             emit({"tab": "Clipboard", "total": len(texts), "head": "demo-0", "next": len(texts), "stable": True,
-                  "items": [{"r": i, "id": f"demo-{i}", "f": ["text/plain"], "k": "text", "n": len(text), "p": text, "t": 0, "c": "2026-10-19 10:30:00", "s": sources[i]} for i, text in enumerate(texts)]})
+                  "items": [{"r": i, "id": f"demo-{i}", "f": ["text/plain"], "k": "text", "n": len(text), "p": text, "t": 0, "c": "2026-10-19 10:30:00", "s": sources[i], "expires_at": int(time.time()) + [0, 45, 10, 0][i] if i in (1, 2) else None} for i, text in enumerate(texts)]})
         elif "var maxText =" in script:
             row = int(args[args.index("--") + 3])
             text = texts[row]

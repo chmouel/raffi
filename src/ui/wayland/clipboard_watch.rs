@@ -70,10 +70,12 @@ enum Command {
         reply: mpsc::Sender<Result<(), String>>,
     },
     /// From the socket server: own the selection with content it already
-    /// read, `hash` being the history entry when it was recorded.
+    /// read, `hash` being the history entry when it was recorded, until the
+    /// unix time `clear_at` when one is set.
     Serve {
         hash: Option<String>,
         formats: Arc<Formats>,
+        clear_at: Option<i64>,
         reply: mpsc::Sender<Result<(), String>>,
     },
     /// From the recorder: the selection `generation` was stored as `hash`, a
@@ -86,7 +88,7 @@ enum Command {
     /// From the loader: the formats of an entry to put on the clipboard.
     Loaded {
         load: Load,
-        result: Result<Formats, String>,
+        result: Result<(Formats, Option<i64>), String>,
     },
 }
 
@@ -185,12 +187,12 @@ fn load_entries(loads: mpsc::Receiver<Load>) {
                 store = Some(Store::open_default()?);
             }
             let store = store.as_ref().expect("opened above");
-            let formats = store.formats(&load.hash, now_secs())?;
+            let selection = store.selection(&load.hash, now_secs())?;
             if !wanted() {
                 return Err("replaced by a newer selection".to_string());
             }
             store.bump(&load.hash)?;
-            Ok(formats)
+            Ok(selection)
         })();
         let commands = COMMANDS
             .lock()
@@ -583,7 +585,7 @@ fn record(jobs: mpsc::Receiver<Job>, limits: Limits, policy: Policy) {
 }
 
 /// Stored MIME types with their data.
-type Formats = Vec<(String, Vec<u8>)>;
+pub(crate) type Formats = Vec<(String, Vec<u8>)>;
 
 /// State shared by both protocol implementations.
 struct Core {
@@ -596,6 +598,8 @@ struct Core {
     /// The entry Raffi currently owns the selection with (`None` when that
     /// content was not recorded), and its formats.
     served: Option<(Option<String>, Arc<Formats>)>,
+    /// Unix time at which the served content is taken off the clipboard.
+    clear_at: Option<i64>,
     persist: Persist,
 }
 
@@ -683,25 +687,60 @@ impl Core {
         ticket: Ticket,
         hash: Option<String>,
         formats: Formats,
+        clear_at: Option<i64>,
     ) -> Option<Vec<String>> {
         self.pending.finished(ticket);
-        if !self.pending.accepts(ticket) {
+        if !self.pending.accepts(ticket) || clear_at.is_some_and(|deadline| deadline <= now_secs())
+        {
             return None;
         }
         let mimes = offered_mimes(&formats);
+        self.clear_at = clear_at;
         self.served = Some((hash, Arc::new(formats)));
         Some(mimes)
     }
 
     /// Own the selection with content read elsewhere, `hash` being the
-    /// history entry it was recorded as. Returns the MIME types to offer.
-    fn serve(&mut self, hash: Option<String>, formats: Arc<Formats>) -> Vec<String> {
+    /// history entry it was recorded as, until `clear_at`. Returns the MIME
+    /// types to offer.
+    fn serve(
+        &mut self,
+        hash: Option<String>,
+        formats: Arc<Formats>,
+        clear_at: Option<i64>,
+    ) -> Vec<String> {
         // Whatever was still loading is out of date: this content replaces
         // the selection the moment it is published.
         self.pending.supersede();
         let mimes = offered_mimes(&formats);
         self.served = Some((hash, formats));
+        self.clear_at = clear_at;
         mimes
+    }
+
+    /// Raffi no longer owns the selection.
+    fn lost(&mut self) {
+        self.served = None;
+        self.clear_at = None;
+    }
+
+    /// How long the event loop may wait before the served content is due to
+    /// be cleared, at the unix time `now`.
+    fn until_clear(&self, now: i64) -> Option<Duration> {
+        self.clear_at
+            .map(|deadline| Duration::from_secs(deadline.saturating_sub(now).max(0) as u64))
+    }
+
+    /// Whether the served content reached its deadline at `now`. It is then
+    /// forgotten, so it is neither served again nor put back once the
+    /// selection is cleared.
+    fn take_expired(&mut self, now: i64) -> bool {
+        if !self.clear_at.is_some_and(|deadline| deadline <= now) {
+            return false;
+        }
+        self.lost();
+        self.persist.selection(None);
+        true
     }
 
     fn send(&self, mime: &str, fd: OwnedFd) {
@@ -804,11 +843,15 @@ macro_rules! data_control {
                     done: false,
                 };
                 let result = loop {
-                    if let Err(error) = event_loop.dispatch(None, &mut state) {
+                    let wait = state.core.until_clear(super::now_secs());
+                    if let Err(error) = event_loop.dispatch(wait, &mut state) {
                         break Err(RunError::Failed(error.to_string()));
                     }
                     if state.done {
                         break Err(RunError::Failed("the compositor stopped the clipboard device".into()));
+                    }
+                    if let Err(error) = state.clear_expired() {
+                        break Err(RunError::Failed(error));
                     }
                 };
                 *COMMANDS.lock().unwrap_or_else(|error| error.into_inner()) = None;
@@ -822,16 +865,17 @@ macro_rules! data_control {
                         Command::Serve {
                             hash,
                             formats,
+                            clear_at,
                             reply,
                         } => {
-                            let mimes = self.core.serve(hash, formats);
+                            let mimes = self.core.serve(hash, formats, clear_at);
                             let _ = reply.send(self.publish(mimes));
                         }
                         Command::Loaded { load, result } => {
                             let Load { ticket, hash, reply } = load;
                             self.core.pending.finished(ticket);
-                            let result = result.and_then(|formats| {
-                                match self.core.loaded(ticket, Some(hash), formats) {
+                            let result = result.and_then(|(formats, clear_at)| {
+                                match self.core.loaded(ticket, Some(hash), formats, clear_at) {
                                     Some(mimes) => self.publish(mimes),
                                     None => Err("the clipboard changed before the entry was ready".into()),
                                 }
@@ -862,6 +906,19 @@ macro_rules! data_control {
                 /// Put back the entry whose source app left the clipboard empty.
                 fn restore(&mut self, hash: &str) {
                     self.core.load(hash.to_string(), None);
+                }
+
+                /// Empty the clipboard once the content Raffi serves reached
+                /// the deadline it was set with.
+                fn clear_expired(&mut self) -> Result<(), String> {
+                    if !self.core.take_expired(super::now_secs()) {
+                        return Ok(());
+                    }
+                    self.device.set_selection(None);
+                    if let Some(old) = self.source.take() {
+                        old.destroy();
+                    }
+                    self.conn.flush().map_err(|error| error.to_string())
                 }
 
                 /// Own the selection with the entry now in `core.served`.
@@ -938,7 +995,7 @@ macro_rules! data_control {
                         $source::Event::Cancelled => {
                             if state.source.as_ref() == Some(source) {
                                 state.source = None;
-                                state.core.served = None;
+                                state.core.lost();
                             }
                             source.destroy();
                         }
@@ -1004,6 +1061,8 @@ pub(crate) fn start(limits: Limits, policy: Policy) {
                         pending: Loads::default(),
                         password_manager,
                         served: None,
+                        clear_at: None,
+
                         persist: Persist::default(),
                     })
                 };
@@ -1069,8 +1128,14 @@ fn catch_panic(session: impl FnOnce() -> Result<(), RunError>) -> Result<(), Run
 }
 
 /// Own the selection with `formats`, which the socket server has read and
-/// recorded already. `hash` names the history entry they landed in, if any.
-pub(crate) fn set(hash: Option<String>, formats: Formats) -> Result<(), String> {
+/// recorded already. `hash` names the history entry they landed in, if any;
+/// the clipboard is emptied at the unix time `clear_at` if Raffi still owns
+/// it with them.
+pub(crate) fn set(
+    hash: Option<String>,
+    formats: Formats,
+    clear_at: Option<i64>,
+) -> Result<(), String> {
     for (mime, _) in &formats {
         if let Err(reason) = super::clipboard_store::validate_mime(mime) {
             return Err(format!("cannot offer a format: {reason}"));
@@ -1080,6 +1145,7 @@ pub(crate) fn set(hash: Option<String>, formats: Formats) -> Result<(), String> 
     ask(|reply| Command::Serve {
         hash,
         formats,
+        clear_at,
         reply,
     })
 }
@@ -1278,7 +1344,12 @@ mod tests {
 
     #[test]
     fn test_serving_refuses_a_format_the_protocol_cannot_offer() {
-        let error = set(None, vec![("text/plain\u{0}".to_string(), b"hi".to_vec())]).unwrap_err();
+        let error = set(
+            None,
+            vec![("text/plain\u{0}".to_string(), b"hi".to_vec())],
+            None,
+        )
+        .unwrap_err();
         assert!(error.contains("cannot offer a format"), "{error}");
         assert!(!error.contains('\u{0}'), "{error}");
     }
@@ -1291,6 +1362,8 @@ mod tests {
             pending: Loads::default(),
             password_manager: false,
             served: None,
+            clear_at: None,
+
             persist: Persist::default(),
         }
     }
@@ -1304,9 +1377,11 @@ mod tests {
         let old = requested.recv().unwrap();
         let new = requested.recv().unwrap();
         let text = || vec![("text/plain".to_string(), b"x".to_vec())];
-        assert_eq!(core.loaded(old.ticket, Some(old.hash), text()), None);
+        assert_eq!(core.loaded(old.ticket, Some(old.hash), text(), None), None);
         assert!(core.served.is_none());
-        let mimes = core.loaded(new.ticket, Some(new.hash), text()).unwrap();
+        let mimes = core
+            .loaded(new.ticket, Some(new.hash), text(), None)
+            .unwrap();
         assert!(mimes.contains(&OWN_MIME.to_string()));
         assert_eq!(core.served.as_ref().unwrap().0.as_deref(), Some("new"));
     }
@@ -1320,13 +1395,13 @@ mod tests {
         // An automatic restore is loading when `clipboard set` content arrives.
         core.load("a".into(), None);
         let restore = requested.recv().unwrap();
-        let mimes = core.serve(Some("h".into()), Arc::new(text()));
+        let mimes = core.serve(Some("h".into()), Arc::new(text()), None);
         assert!(mimes.contains(&"text/plain".to_string()));
         assert!(mimes.contains(&OWN_MIME.to_string()));
         assert_eq!(core.served.as_ref().unwrap().0.as_deref(), Some("h"));
         // The load it replaced never reaches the clipboard.
         assert_eq!(
-            core.loaded(restore.ticket, Some(restore.hash), text()),
+            core.loaded(restore.ticket, Some(restore.hash), text(), None),
             None
         );
         assert_eq!(core.served.as_ref().unwrap().0.as_deref(), Some("h"));
@@ -1335,7 +1410,7 @@ mod tests {
         core.load("b".into(), None);
         let later = requested.recv().unwrap();
         assert!(core
-            .loaded(later.ticket, Some(later.hash), text())
+            .loaded(later.ticket, Some(later.hash), text(), None)
             .is_some());
         assert_eq!(core.served.as_ref().unwrap().0.as_deref(), Some("b"));
     }
@@ -1345,13 +1420,99 @@ mod tests {
         let (loads, _requested) = mpsc::channel();
         let mut core = test_core(loads);
         let text = || vec![("text/plain".to_string(), b"x".to_vec())];
-        let offered = core.serve(None, Arc::new(text()));
+        let offered = core.serve(None, Arc::new(text()), None);
         assert!(offered.contains(&OWN_MIME.to_string()));
         assert!(core
             .capture(&mimes(&[OWN_MIME, "text/plain"]), |_, _| {})
             .is_empty());
         // Raffi owns the selection, but there is no entry to serve again.
         assert_eq!(core.persist.cleared(), None);
+    }
+
+    #[test]
+    fn test_expiring_content_is_cleared_and_never_put_back() {
+        let (loads, _requested) = mpsc::channel();
+        let mut core = test_core(loads);
+        let text = || vec![("text/plain".to_string(), b"x".to_vec())];
+        assert_eq!(core.until_clear(100), None, "nothing to clear");
+
+        core.serve(Some("h".into()), Arc::new(text()), Some(130));
+        // Raffi sees its own selection, as recorded content it could restore.
+        core.capture(&mimes(&[OWN_MIME, "text/plain"]), |_, _| {});
+        assert_eq!(core.until_clear(100), Some(Duration::from_secs(30)));
+        assert_eq!(core.until_clear(140), Some(Duration::ZERO), "overdue");
+        assert!(!core.take_expired(129));
+        assert!(core.served.is_some());
+
+        assert!(core.take_expired(130));
+        assert!(core.served.is_none());
+        assert_eq!(core.until_clear(130), None);
+        // Emptying the clipboard does not bring the entry back.
+        assert_eq!(core.persist.cleared(), None);
+        assert!(!core.take_expired(200), "cleared only once");
+
+        // Content that replaced it, or another app taking the selection,
+        // drops the deadline.
+        core.serve(Some("a".into()), Arc::new(text()), Some(300));
+        core.serve(Some("b".into()), Arc::new(text()), None);
+        assert!(!core.take_expired(400));
+        core.serve(Some("c".into()), Arc::new(text()), Some(300));
+        core.lost();
+        assert!(!core.take_expired(400));
+    }
+
+    #[test]
+    fn test_loaded_deadline_on_fresh_core_and_expiry_during_load() {
+        let (loads, requested) = mpsc::channel();
+        let mut core = test_core(loads);
+        let deadline = now_secs() + 60;
+        core.load("h".into(), None);
+        let load = requested.recv().unwrap();
+        assert!(core
+            .loaded(load.ticket, Some(load.hash), vec![], Some(deadline))
+            .is_some());
+        assert_eq!(core.clear_at, Some(deadline));
+        core.load("expired".into(), None);
+        let load = requested.recv().unwrap();
+        assert!(core
+            .loaded(load.ticket, Some(load.hash), vec![], Some(now_secs()))
+            .is_none());
+        assert_eq!(core.clear_at, Some(deadline));
+    }
+
+    #[test]
+    fn test_expiring_content_served_again_keeps_its_deadline() {
+        let (loads, requested) = mpsc::channel();
+        let mut core = test_core(loads);
+        let text = || vec![("text/plain".to_string(), b"x".to_vec())];
+        let deadline = now_secs() + 60;
+
+        core.serve(Some("h".into()), Arc::new(text()), Some(deadline));
+        core.serve(Some("other".into()), Arc::new(text()), None);
+        // Put back after a clear, or picked again in the browser.
+        core.load("h".into(), None);
+        let load = requested.recv().unwrap();
+        assert!(core
+            .loaded(load.ticket, Some(load.hash), text(), Some(deadline))
+            .is_some());
+        assert_eq!(core.clear_at, Some(deadline));
+        assert!(core.take_expired(deadline));
+
+        // Once cleared, or set again without a deadline, it has none.
+        core.load("h".into(), None);
+        let load = requested.recv().unwrap();
+        assert!(core
+            .loaded(load.ticket, Some(load.hash), text(), None)
+            .is_some());
+        assert_eq!(core.clear_at, None);
+        core.serve(Some("k".into()), Arc::new(text()), Some(deadline));
+        core.serve(Some("k".into()), Arc::new(text()), None);
+        core.load("k".into(), None);
+        let load = requested.recv().unwrap();
+        assert!(core
+            .loaded(load.ticket, Some(load.hash), text(), None)
+            .is_some());
+        assert_eq!(core.clear_at, None);
     }
 
     #[test]
@@ -1366,7 +1527,9 @@ mod tests {
         assert!(core
             .capture(&mimes(&[OWN_MIME, "text/plain"]), |_, _| {})
             .is_empty());
-        assert!(core.loaded(load.ticket, Some(load.hash), text()).is_some());
+        assert!(core
+            .loaded(load.ticket, Some(load.hash), text(), None)
+            .is_some());
 
         // A copy from another app does.
         core.load("b".into(), None);
@@ -1374,7 +1537,10 @@ mod tests {
         assert!(core
             .capture(&mimes(&["application/x-unknown"]), |_, _| {})
             .is_empty());
-        assert_eq!(core.loaded(load.ticket, Some(load.hash), text()), None);
+        assert_eq!(
+            core.loaded(load.ticket, Some(load.hash), text(), None),
+            None
+        );
         assert_eq!(core.served.as_ref().unwrap().0.as_deref(), Some("a"));
     }
 
@@ -1390,7 +1556,7 @@ mod tests {
         core.load("a".into(), None);
         let b = requested.recv().unwrap();
         assert!(requested.try_recv().is_err(), "the restore of A is dropped");
-        assert!(core.loaded(b.ticket, Some(b.hash), text()).is_some());
+        assert!(core.loaded(b.ticket, Some(b.hash), text(), None).is_some());
         assert_eq!(core.served.as_ref().unwrap().0.as_deref(), Some("b"));
         drop(answer);
 
@@ -1402,10 +1568,10 @@ mod tests {
         core.load("c".into(), Some(reply));
         let c = requested.recv().unwrap();
         assert_eq!(
-            core.loaded(restore.ticket, Some(restore.hash), text()),
+            core.loaded(restore.ticket, Some(restore.hash), text(), None),
             None
         );
-        assert!(core.loaded(c.ticket, Some(c.hash), text()).is_some());
+        assert!(core.loaded(c.ticket, Some(c.hash), text(), None).is_some());
         assert_eq!(core.served.as_ref().unwrap().0.as_deref(), Some("c"));
     }
 
@@ -1424,8 +1590,8 @@ mod tests {
             .is_empty());
         core.load("c".into(), None);
         let c = requested.recv().expect("the restore of C is queued");
-        assert_eq!(core.loaded(b.ticket, Some(b.hash), text()), None);
-        assert!(core.loaded(c.ticket, Some(c.hash), text()).is_some());
+        assert_eq!(core.loaded(b.ticket, Some(b.hash), text(), None), None);
+        assert!(core.loaded(c.ticket, Some(c.hash), text(), None).is_some());
         assert_eq!(core.served.as_ref().unwrap().0.as_deref(), Some("c"));
     }
 

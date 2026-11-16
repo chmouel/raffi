@@ -1590,14 +1590,20 @@ fn copy(run: &mut Run, refs: &[String]) -> Result<Output, Error> {
 /// Put new content on the clipboard, recording it in the history the way a
 /// copy from another app would be.
 fn set(run: &mut Run, args: &ClipboardSetArgs, input: &mut dyn Read) -> Result<Output, Error> {
+    let expires_in = args.expire.as_deref().map(expire_secs).transpose()?;
     let mime = canonical_mime(args.mime.as_deref().unwrap_or(DEFAULT_MIME))?;
     let source = source_app(args.source.as_deref(), &crate::desktop_entry_dirs())?;
     let data = content(&mime, args, run.io, &run.settings.limits, input)?;
     check_content(&mime, &data, &run.settings.limits)?;
     match &run.clips {
         Clips::Raffi(_) => {
-            let outcome =
-                super::cache::clipboard_set(&[(mime, data)], args.temporary, args.secret, source)?;
+            let outcome = super::cache::clipboard_set(
+                &[(mime, data)],
+                args.temporary,
+                args.secret,
+                expires_in,
+                source,
+            )?;
             let recorded = outcome.id.is_some();
             set_output(
                 outcome.id.as_deref(),
@@ -1607,6 +1613,21 @@ fn set(run: &mut Run, args: &ClipboardSetArgs, input: &mut dyn Read) -> Result<O
             )
         }
         Clips::CopyQ(copyq) => set_copyq(copyq, &mime, &data, args, source),
+    }
+}
+
+/// The seconds `--expire` keeps the content for, refusing a lifetime the
+/// history cannot turn into a deadline.
+fn expire_secs(value: &str) -> Result<i64, Error> {
+    let Some(secs) = duration_secs(value.trim()) else {
+        return Err(Error::usage(format!(
+            "--expire: `{}` is not a duration (30s, 15m, 2h, 3d)",
+            sanitize(value.trim(), Sanitize::Spaces)
+        )));
+    };
+    match crate::temporary_timeout_problem(secs as u64) {
+        Some(problem) => Err(Error::usage(format!("--expire: {problem}"))),
+        None => Ok(secs),
     }
 }
 
@@ -1648,10 +1669,14 @@ fn set_copyq(
     args: &ClipboardSetArgs,
     source: Option<String>,
 ) -> Result<Output, Error> {
-    if args.temporary {
+    if args.temporary || args.expire.is_some() {
         return Err(Error::new(
             Code::Unsupported,
-            "--temporary is not supported by the copyq backend",
+            if args.temporary {
+                "--temporary is not supported by the copyq backend"
+            } else {
+                "--expire is not supported by the copyq backend"
+            },
         ));
     }
     if args.secret {
@@ -3572,6 +3597,30 @@ mod tests {
             secret.contains("not supported by the copyq backend"),
             "{secret}"
         );
+        let expire = copyq_run(ClipboardSetArgs {
+            expire: Some("30s".into()),
+            ..set_args(&["hello"], None)
+        });
+        assert!(
+            expire.contains("--expire is not supported by the copyq backend"),
+            "{expire}"
+        );
+    }
+
+    #[test]
+    fn test_set_expire_takes_a_positive_duration() {
+        assert_eq!(expire_secs("30s").unwrap(), 30);
+        assert_eq!(expire_secs(" 2m ").unwrap(), 120);
+        assert_eq!(expire_secs("1d").unwrap(), 86_400);
+        for invalid in ["30", "soon", "-5s", "1.5m", ""] {
+            let error = expire_secs(invalid).unwrap_err();
+            assert!(error.usage, "{invalid}");
+            assert!(error.message.contains("not a duration"), "{invalid}");
+        }
+        let zero = expire_secs("0s").unwrap_err().message;
+        assert!(zero.contains("greater than zero"), "{zero}");
+        let huge = expire_secs(&format!("{}s", i64::MAX)).unwrap_err().message;
+        assert!(huge.contains("overflows the expiry time"), "{huge}");
     }
 
     #[test]

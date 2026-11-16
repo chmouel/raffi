@@ -414,7 +414,7 @@ note on stderr, `raffi clipboard: output truncated to N of M bytes`. Under
 Put one entry back on the clipboard with all of its formats. With the `raffi`
 backend, `raffi --cache-daemon` has to be running.
 
-**`set [--mime TYPE] [--source APP] [--temporary] [--secret] [--json] [TEXT...]`**
+**`set [--mime TYPE] [--source APP] [--temporary] [--expire DURATION] [--secret] [--json] [TEXT...]`**
 
 Put new content on the clipboard and record it in the history, the way a copy
 from another application would be. `TEXT` words are joined by single spaces;
@@ -436,16 +436,18 @@ the row its icon (`Icon=`) and the name the preview pane shows (`Name=`, or
 its `Name[xx]` for your message locale), matched by ID or by
 `StartupWMClass`, and the JSON row reports that name as
 `source_name`. `--temporary` records a temporary entry
-whatever the patterns say, `--secret` adds the
+whatever the patterns say, `--expire DURATION` (`30s`, `15m`, `2h`, `3d`)
+records it for that long instead of `temporary_timeout` and empties the
+clipboard at the deadline if it still holds the content, `--secret` adds the
 `x-kde-passwordManagerHint: secret` marker and leaves the content to
-`temporary_password_manager`, and `--json` prints `{"id": ..., "recorded":
+`temporary_password_manager` (or records it for the `--expire` duration), and `--json` prints `{"id": ..., "recorded":
 ..., "expires_at": ..., "expires_at_iso": ...}` instead of the entry id, with
 the deadline as unix seconds and as RFC 3339. Content `exclude_patterns`
 hides goes on the clipboard but is not recorded, and nothing is printed then.
 With the `raffi` backend `raffi --cache-daemon` has to be running, and a
 service from an older Raffi has to be restarted first, which `set` reports as
 `daemon_outdated`. CopyQ stores the content in its own history but hands out
-no id, and rejects `--temporary`, `--secret` and `--source`.
+no id, and rejects `--temporary`, `--expire`, `--secret` and `--source`.
 
 **`delete REF...`**
 

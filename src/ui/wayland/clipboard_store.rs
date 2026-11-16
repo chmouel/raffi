@@ -44,7 +44,7 @@ const IMAGE_HEADER_BYTES: usize = 64 * 1024;
 /// concurrent connections cannot hand out the same one.
 const NEXT_SEQ: &str = "(SELECT COALESCE(MAX(seq), 0) + 1 FROM items)";
 const BUSY_TIMEOUT: Duration = Duration::from_secs(2);
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 /// SQLite virtual machine steps between two checks of a listing's cancel
 /// flag.
 const CANCEL_CHECK_STEPS: i32 = 4096;
@@ -272,6 +272,7 @@ fn migrate(conn: &Connection) -> Result<(), String> {
              source TEXT,
              size INTEGER NOT NULL,
              expires_at INTEGER,
+             clear_at INTEGER,
              search TEXT NOT NULL DEFAULT ''
          );
          CREATE TABLE IF NOT EXISTS formats (
@@ -284,6 +285,10 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     .map_err(db_error)?;
     if !has_column(&tx, "items", "expires_at")? {
         tx.execute_batch("ALTER TABLE items ADD COLUMN expires_at INTEGER")
+            .map_err(db_error)?;
+    }
+    if !has_column(&tx, "items", "clear_at")? {
+        tx.execute_batch("ALTER TABLE items ADD COLUMN clear_at INTEGER")
             .map_err(db_error)?;
     }
     if !has_column(&tx, "items", "search")? {
@@ -469,20 +474,33 @@ impl Store {
         policy: &Policy,
         now: i64,
     ) -> Result<String, Skipped> {
-        self.record(capture, limits, policy, now, false)
+        self.record(capture, limits, policy, now, None)
     }
 
-    /// Like `insert_filtered`, but keeps the entry temporary even when no
-    /// temporary pattern matches: `raffi clipboard set --temporary` asked for
-    /// it. Exclusion patterns and password-manager rules still win.
+    /// Like `insert_filtered`, but keeps the entry temporary for `lifetime`
+    /// seconds even when no temporary pattern matches: `raffi clipboard set
+    /// --temporary` or `--expire` asked for it. Exclusion patterns and
+    /// password-manager rules still win.
     pub(crate) fn insert_temporary(
         &mut self,
         capture: Capture,
+        lifetime: i64,
         limits: &Limits,
         policy: &Policy,
         now: i64,
     ) -> Result<String, Skipped> {
-        self.record(capture, limits, policy, now, true)
+        self.record(capture, limits, policy, now, Some((lifetime, false)))
+    }
+
+    pub(crate) fn insert_expiring(
+        &mut self,
+        capture: Capture,
+        lifetime: i64,
+        limits: &Limits,
+        policy: &Policy,
+        now: i64,
+    ) -> Result<String, Skipped> {
+        self.record(capture, limits, policy, now, Some((lifetime, true)))
     }
 
     fn record(
@@ -491,7 +509,7 @@ impl Store {
         limits: &Limits,
         policy: &Policy,
         now: i64,
-        force_temporary: bool,
+        lifetime: Option<(i64, bool)>,
     ) -> Result<String, Skipped> {
         let password_marked = capture.password_marked;
         let mut formats = capture.formats;
@@ -558,12 +576,13 @@ impl Store {
             capture.copied_at,
             policy.temporary_timeout,
         )?;
-        let expires_at = deadline.or_else(|| {
-            force_temporary.then(|| capture.copied_at.saturating_add(policy.temporary_timeout))
-        });
+        let expires_at = lifetime
+            .map(|(lifetime, _)| capture.copied_at.saturating_add(lifetime))
+            .or(deadline);
         if expires_at.is_some_and(|deadline| deadline <= now) {
             return Err(Skipped::Expired);
         }
+        let clear_at = lifetime.filter(|(_, clear)| *clear).and(expires_at);
         let size: usize = formats.iter().map(|(_, data)| data.len()).sum();
         let source = capture
             .source
@@ -581,7 +600,7 @@ impl Store {
                 .execute(
                     &format!(
                         "UPDATE items SET seq = {NEXT_SEQ}, copied_at = ?1, expires_at = ?2,
-                             source = COALESCE(?3, source), formats = ?4, size = ?5
+                             source = COALESCE(?3, source), formats = ?4, size = ?5, clear_at = ?7
                          WHERE hash = ?6"
                     ),
                     params![
@@ -590,7 +609,8 @@ impl Store {
                         source,
                         mimes.join("\n"),
                         size as i64,
-                        hash
+                        hash,
+                        clear_at
                     ],
                 )
                 .map_err(db_error)?;
@@ -617,8 +637,8 @@ impl Store {
                 tx.execute(
                     &format!(
                         "INSERT INTO items (hash, seq, kind, formats, text, text_len, trim_len,
-                             is_url, copied_at, source, size, expires_at, search)
-                         VALUES (?1, {NEXT_SEQ}, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
+                             is_url, copied_at, source, size, expires_at, search, clear_at)
+                         VALUES (?1, {NEXT_SEQ}, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)"
                     ),
                     params![
                         hash,
@@ -633,6 +653,7 @@ impl Store {
                         size as i64,
                         expires_at,
                         searchable(&text),
+                        clear_at,
                     ],
                 )
                 .map_err(db_error)?;
@@ -997,6 +1018,24 @@ impl Store {
             .collect::<Result<Vec<_>, _>>()
             .map_err(db_error)?;
         Ok(formats)
+    }
+
+    pub(crate) fn selection(
+        &self,
+        hash: &str,
+        now: i64,
+    ) -> Result<(super::clipboard_watch::Formats, Option<i64>), String> {
+        let tx = self.conn.unchecked_transaction().map_err(db_error)?;
+        let formats = self.formats(hash, now)?;
+        let clear_at = tx
+            .query_row(
+                "SELECT clear_at FROM items WHERE hash = ?1",
+                [hash],
+                |row| row.get(0),
+            )
+            .map_err(db_error)?;
+        tx.commit().map_err(db_error)?;
+        Ok((formats, clear_at))
     }
 
     /// Pixel size of the image format an entry holds, read from the start
@@ -1511,6 +1550,38 @@ mod tests {
             )
             .unwrap();
         bytes
+    }
+
+    #[test]
+    fn test_explicit_clearing_deadline_survives_reopen_and_external_recopy() {
+        let (mut store, dir) = temp_store("clear-deadline");
+        let hash = store
+            .insert_expiring(text("hello", NOW), 60, &LIMITS, &Policy::default(), NOW)
+            .unwrap();
+        drop(store);
+        let mut store = Store::open(&dir.join("clipboard.db")).unwrap();
+        let (formats, clear_at) = store.selection(&hash, NOW + 1).unwrap();
+        assert_eq!(formats, text("hello", NOW).formats);
+        assert_eq!(clear_at, Some(NOW + 60));
+        assert!(store.selection(&hash, NOW + 60).is_err());
+        let copied = store
+            .insert_filtered(text("hello", NOW + 2), &LIMITS, &Policy::default(), NOW + 2)
+            .unwrap();
+        assert_eq!(copied, hash);
+        assert_eq!(store.selection(&hash, NOW + 60).unwrap().1, None);
+        assert_eq!(store.deadline(&hash).unwrap(), None);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn test_temporary_history_does_not_clear_the_clipboard() {
+        let (mut store, dir) = temp_store("history-deadline");
+        let hash = store
+            .insert_temporary(text("hello", NOW), 60, &LIMITS, &Policy::default(), NOW)
+            .unwrap();
+        assert_eq!(store.selection(&hash, NOW).unwrap().1, None);
+        assert_eq!(store.deadline(&hash).unwrap(), Some(NOW + 60));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

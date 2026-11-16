@@ -26,7 +26,7 @@ type HintSpan<'a> = iced::widget::text::Span<'a, (), iced::Font>;
 /// The emoji that precedes the footer hint whose key is `key`.
 fn hint_icon(key: &str) -> Option<&'static str> {
     Some(match key {
-        "→" => "⚡",
+        ACTIONS_KEY => "⚡",
         "Ctrl+/" => "🔎",
         "Ctrl+Tab" => "🔀",
         "Alt+P" => "🕘",
@@ -36,6 +36,9 @@ fn hint_icon(key: &str) -> Option<&'static str> {
         _ => return None,
     })
 }
+
+/// The key drawn for opening the actions of the selected result.
+pub(super) const ACTIONS_KEY: &str = "➜";
 
 /// Text between the hints of the footer.
 const HINT_SEP: &str = "  ·  ";
@@ -54,7 +57,7 @@ fn hint_drop_rank(key: &str) -> u8 {
         "Ctrl+Tab" => 4,
         "Ctrl+D" => 5,
         "Ctrl+Enter" => 6,
-        "→" | "Ctrl+/" => KEEP_RANK,
+        ACTIONS_KEY | "Ctrl+/" => KEEP_RANK,
         _ => u8::MAX,
     }
 }
@@ -2826,6 +2829,7 @@ impl LauncherApp {
                 special_item_idx += 1;
             }
 
+            let now = super::clipboard_store::now_secs();
             for item in &state.items {
                 let is_selected = self.selected_index == special_item_idx;
                 let (title, subtitle): (std::borrow::Cow<'_, str>, std::borrow::Cow<'_, str>) =
@@ -2848,7 +2852,15 @@ impl LauncherApp {
                 if let Some(icon) = icon {
                     item_row = item_row.push(icon);
                 }
-                let item_row = item_row.push(text_col.width(Length::Fill));
+                let mut item_row = item_row.push(text_col.width(Length::Fill));
+                if let Some((label, urgent)) = item.expiry_label(now) {
+                    let color = if urgent {
+                        iced::Color::from_rgb8(230, 150, 55)
+                    } else {
+                        t.text_muted
+                    };
+                    item_row = item_row.push(text(label).size(fs.subtitle).color(color));
+                }
                 items_column = items_column.push(
                     self.selectable(
                         button(item_row)
@@ -3466,7 +3478,7 @@ impl LauncherApp {
             hint_spans.insert(0, span(" Actions").size(fs.hint).color(t.text_muted));
             hint_spans.insert(
                 0,
-                span("→")
+                span(ACTIONS_KEY)
                     .size(fs.hint)
                     .font(iced::Font {
                         weight: iced::font::Weight::Bold,

@@ -239,6 +239,18 @@ impl ClipItem {
     }
 
     /// Whether the entry reached its deadline at `now` (unix seconds).
+    pub(crate) fn expiry_label(&self, now: i64) -> Option<(String, bool)> {
+        let seconds = self.expires_at?.saturating_sub(now).max(0);
+        let remaining = if seconds < 60 {
+            format!("{seconds}s")
+        } else if seconds < 3600 {
+            format!("{}m {:02}s", seconds / 60, seconds % 60)
+        } else {
+            format!("{}h {:02}m", seconds / 3600, seconds % 3600 / 60)
+        };
+        Some((format!("expires in {remaining}"), seconds <= 10))
+    }
+
     pub(crate) fn expired_at(&self, now: i64) -> bool {
         self.expires_at.is_some_and(|deadline| deadline <= now)
     }

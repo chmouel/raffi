@@ -4208,6 +4208,33 @@ fn test_clipboard_selection_follows_item_across_refresh() {
     assert_eq!(app.selected_index, 2, "still on item b");
 }
 
+#[test]
+fn test_clipboard_expiry_countdown_and_warning() {
+    let item = clip_expiring(0, "temporary", "hello", 160);
+    assert_eq!(
+        item.expiry_label(100),
+        Some(("expires in 1m 00s".into(), false))
+    );
+    assert_eq!(
+        item.expiry_label(149),
+        Some(("expires in 11s".into(), false))
+    );
+    assert_eq!(
+        item.expiry_label(150),
+        Some(("expires in 10s".into(), true))
+    );
+    assert_eq!(item.expiry_label(159), Some(("expires in 1s".into(), true)));
+    assert_eq!(item.expiry_label(160), Some(("expires in 0s".into(), true)));
+    assert_eq!(
+        super::clipboard::ClipItem {
+            expires_at: None,
+            ..item
+        }
+        .expiry_label(100),
+        None
+    );
+}
+
 fn clip_expiring(row: usize, id: &str, text: &str, expires_at: i64) -> super::clipboard::ClipItem {
     super::clipboard::ClipItem {
         expires_at: Some(expires_at),
@@ -14021,7 +14048,7 @@ fn footer_fixture() -> Vec<iced::widget::text::Span<'static, (), iced::Font>> {
     use iced::widget::span;
     let sep = || span("  ·  ");
     vec![
-        span("→"),
+        span(super::view::ACTIONS_KEY),
         span(" Actions"),
         sep(),
         span("Ctrl+/"),
@@ -14058,7 +14085,7 @@ fn test_footer_hints_degrade_in_steps_as_the_window_narrows() {
     let size = 13.0;
 
     let wide = footer_text(&fit_hints(footer_fixture(), 4000.0, size, true, None));
-    assert!(wide.contains("⚡ →") && wide.contains("🗑️ Ctrl+D") && wide.contains("👁️ Ctrl+P"));
+    assert!(wide.contains("⚡ ➜") && wide.contains("🗑️ Ctrl+D") && wide.contains("👁️ Ctrl+P"));
     assert!(wide.contains("Enter: copy"));
 
     // At the narrowest width that still fits every hint, the icons are what
@@ -14097,7 +14124,10 @@ fn test_footer_hints_degrade_in_steps_as_the_window_narrows() {
         "{tiny}"
     );
     assert!(!tiny.contains("delete") && !tiny.contains("refresh") && !tiny.contains("All"));
-    assert!(tiny.contains("→") && tiny.contains("Actions"), "{tiny}");
+    assert!(
+        tiny.contains(super::view::ACTIONS_KEY) && tiny.contains("Actions"),
+        "{tiny}"
+    );
     assert!(!tiny.starts_with("  ·"), "{tiny}");
 }
 

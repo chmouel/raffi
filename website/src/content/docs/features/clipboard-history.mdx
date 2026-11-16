@@ -11,7 +11,7 @@ Raffi browses the clipboard history kept by [CopyQ](https://hluk.github.io/CopyQ
 or records one itself with the [Raffi backend](#raffi-backend). You get a
 keyboard-driven list with search, previews, and copy or paste of any past item.
 
-<Image src={clipboardScreenshot} alt="Clipboard history with a demo release checklist selected and its multiline text in the preview pane" width={800} />
+<Image src={clipboardScreenshot} alt="Clipboard history with a release checklist preview and live expiry countdowns, including an amber warning" width={800} />
 
 <Aside type="note">
 The clipboard browser turns itself on when its backend is running as Raffi
@@ -54,6 +54,10 @@ keyword as the initial query:
 ```sh
 raffi -i "clip "
 ```
+
+Temporary entries show a live countdown on the right of their row. It updates
+every second while the clipboard browser is open and turns amber during the
+final ten seconds. Entries disappear when their deadline passes.
 
 ## Browsing and searching
 
@@ -300,6 +304,7 @@ raffi clipboard set --source pi "text an agent wrote"
 raffi clipboard set --mime image/png < shot.png
 some-tool | raffi clipboard set --temporary   # leaves the history after temporary_timeout
 pass show site | raffi clipboard set --secret   # skipped by other clipboard managers
+pass show site | head -n1 | raffi clipboard set --secret --expire 30s   # gone after 30 seconds
 ```
 
 A secret belongs on the input, never in the arguments: everything on a command
@@ -313,6 +318,15 @@ temporary entry whatever `temporary_patterns` says. `--secret` adds the
 `x-kde-passwordManagerHint: secret` marker, so other clipboard managers skip the
 content; Raffi records it only when `temporary_password_manager` is on, as a
 temporary entry.
+
+`--expire DURATION` (`30s`, `15m`, `2h`, `3d`) gives the content its own
+lifetime, set on the command line only. The entry is recorded as a temporary one
+that leaves the history after that duration instead of `temporary_timeout`, and
+the clipboard is emptied at the same moment if it still holds that content.
+Anything copied in the meantime stays where it is. A `--secret` with `--expire`
+is recorded for that duration even when `temporary_password_manager` is off, so
+you can pick it again from the browser until it expires, including after a daemon restart; `exclude_patterns`
+still keep it out of the history, and the clipboard is still emptied on time.
 
 `--source APP` records the app the content came from, which becomes the row's
 `source` and `source_name`. A plain name is a free label, kept as written, as
@@ -344,7 +358,7 @@ recorded, and `set` prints nothing then. `--json` reports one object:
 `{"id": ..., "recorded": ..., "expires_at": ..., "expires_at_iso": ...}`. CopyQ
 keeps the content in its own history but does not tell Raffi the id it gave it,
 so `set` prints nothing with that backend, and it rejects `--temporary`,
-`--secret` and `--source`.
+`--expire`, `--secret` and `--source`.
 
 `delete` resolves every id it was given before removing anything, so `raffi
 clipboard delete 3fa9c1d2e0 a81be0c44f` removes those two and not whatever
@@ -431,7 +445,8 @@ unsure whether an entry is text or a large image.
 `set` takes the text from its arguments or, when there are none, from standard
 input; it never waits on a terminal. It needs `raffi --cache-daemon` at a recent
 protocol to keep serving the selection, which is what `recorder_not_running` and
-`daemon_outdated` report. Neither `--temporary` nor `--secret` works with CopyQ.
+`daemon_outdated` report. None of `--temporary`, `--expire` and `--secret`
+works with CopyQ.
 
 A few recipes:
 
@@ -451,6 +466,9 @@ raffi clipboard list 'sk-live' --json | jq -r .id | xargs -r raffi clipboard del
 
 # Hand a password to the clipboard without leaving it in the history
 pass show site | head -n1 | raffi clipboard set --secret --temporary
+
+# A one-time code that leaves the history and the clipboard after a minute
+otp-tool | raffi clipboard set --secret --expire 1m
 ```
 
 ## Raffi backend

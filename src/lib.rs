@@ -794,7 +794,7 @@ pub(crate) const DEFAULT_TEMPORARY_TIMEOUT: u64 = 60;
 /// Why `value` cannot be used as `temporary_timeout`. The recorder stores
 /// absolute expiry times, so `now + value` must fit in an `i64`.
 #[cfg(feature = "wayland")]
-fn temporary_timeout_problem(value: u64) -> Option<String> {
+pub(crate) fn temporary_timeout_problem(value: u64) -> Option<String> {
     if value == 0 {
         return Some("must be greater than zero".to_string());
     }
@@ -2507,6 +2507,12 @@ pub struct ClipboardSetArgs {
     pub temporary: bool,
     #[options(help = "mark the content as a password-manager secret", no_short)]
     pub secret: bool,
+    #[options(
+        help = "clear the entry and the clipboard after DURATION (30s, 15m, 2h, 3d)",
+        no_short,
+        meta = "DURATION"
+    )]
+    pub expire: Option<String>,
     #[options(
         help = "app to record as the source of the copy, a name or a NAME.desktop ID",
         no_short,
@@ -6924,6 +6930,7 @@ launchers:
         assert_eq!(set.mime, None);
         assert!(!set.temporary);
         assert!(!set.secret);
+        assert_eq!(set.expire, None);
         assert_eq!(set.source, None);
         assert!(!set.json);
         assert!(set.text.is_empty(), "no content reads the input");
@@ -6935,6 +6942,8 @@ launchers:
             "image/png",
             "--temporary",
             "--secret",
+            "--expire",
+            "30s",
             "--source",
             "pi",
             "--json",
@@ -6951,6 +6960,7 @@ launchers:
         assert_eq!(set.mime.as_deref(), Some("image/png"));
         assert!(set.temporary);
         assert!(set.secret);
+        assert_eq!(set.expire.as_deref(), Some("30s"));
         assert_eq!(set.source.as_deref(), Some("pi"));
         assert!(set.json);
         assert_eq!(set.text, ["one", "two"]);
