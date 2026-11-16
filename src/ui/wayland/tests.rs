@@ -14016,3 +14016,141 @@ fn test_action_menu_entries_have_glyphs_unless_icons_are_off() {
     assert!(save.shortcut.is_empty());
     assert!(setup(true).iter().all(|entry| entry.glyph.is_none()));
 }
+
+fn footer_fixture() -> Vec<iced::widget::text::Span<'static, (), iced::Font>> {
+    use iced::widget::span;
+    let sep = || span("  ·  ");
+    vec![
+        span("→"),
+        span(" Actions"),
+        sep(),
+        span("Ctrl+/"),
+        span(" keywords"),
+        sep(),
+        span("Ctrl+Tab"),
+        span(" All"),
+        sep(),
+        span("Alt+P"),
+        span("/"),
+        span("N"),
+        span(" history"),
+        sep(),
+        span("Ctrl+R"),
+        span(" refresh"),
+        sep(),
+        span("Ctrl+D"),
+        span(" delete"),
+        sep(),
+        span("Enter: copy"),
+        sep(),
+        span("Ctrl+P"),
+        span(" preview"),
+    ]
+}
+
+fn footer_text(spans: &[iced::widget::text::Span<'static, (), iced::Font>]) -> String {
+    spans.iter().map(|s| s.text.as_ref()).collect()
+}
+
+#[test]
+fn test_footer_hints_degrade_in_steps_as_the_window_narrows() {
+    use super::view::fit_hints;
+    let size = 13.0;
+
+    let wide = footer_text(&fit_hints(footer_fixture(), 4000.0, size, true, None));
+    assert!(wide.contains("⚡ →") && wide.contains("🗑️ Ctrl+D") && wide.contains("👁️ Ctrl+P"));
+    assert!(wide.contains("Enter: copy"));
+
+    // At the narrowest width that still fits every hint, the icons are what
+    // goes first.
+    let all_fit = (1..2000)
+        .map(|step| step as f32 * 2.0)
+        .find(|width| {
+            footer_text(&fit_hints(footer_fixture(), *width, size, false, None)).contains("preview")
+        })
+        .expect("some width fits every hint");
+    let tight = footer_text(&fit_hints(footer_fixture(), all_fit, size, true, None));
+    assert!(!tight.contains('⚡') && tight.contains("preview") && tight.contains("history"));
+    let with_icons = footer_text(&fit_hints(
+        footer_fixture(),
+        all_fit + 400.0,
+        size,
+        true,
+        None,
+    ));
+    assert!(with_icons.contains('⚡') && with_icons.contains("preview"));
+
+    // Narrower still: the least important hints go first.
+    let narrow = footer_text(&fit_hints(footer_fixture(), 330.0, size, true, None));
+    assert!(!narrow.contains("preview"), "{narrow}");
+    assert!(!narrow.contains("history"), "{narrow}");
+    assert!(
+        narrow.contains("Actions") && narrow.contains("keywords"),
+        "{narrow}"
+    );
+    assert!(narrow.contains("Enter: copy"), "{narrow}");
+
+    // Very narrow: only the hints that are never dropped and the help key stay.
+    let tiny = footer_text(&fit_hints(footer_fixture(), 1.0, size, true, None));
+    assert!(
+        tiny.contains("Enter: copy") && tiny.contains("Ctrl+/"),
+        "{tiny}"
+    );
+    assert!(!tiny.contains("delete") && !tiny.contains("refresh") && !tiny.contains("All"));
+    assert!(tiny.contains("→") && tiny.contains("Actions"), "{tiny}");
+    assert!(!tiny.starts_with("  ·"), "{tiny}");
+}
+
+#[test]
+fn test_footer_hints_keep_unknown_messages_whatever_the_width() {
+    use super::view::fit_hints;
+    use iced::widget::span;
+    let spans = vec![
+        span("database is locked"),
+        span("  ·  "),
+        span("Ctrl+P"),
+        span(" preview"),
+    ];
+    let out = footer_text(&fit_hints(spans, 1.0, 13.0, false, None));
+    assert_eq!(out, "database is locked");
+}
+
+#[test]
+fn test_footer_keys_are_drawn_as_keycaps_and_labels_are_not() {
+    use super::view::{fit_hints, KeyCap};
+    use iced::widget::span;
+    let accent = iced::Color::from_rgb(0.8, 0.6, 1.0);
+    let spans = vec![
+        span("Ctrl+D").color(accent),
+        span(" delete").color(iced::Color::WHITE),
+        span("  ·  "),
+        span("Alt+P").color(accent),
+        span("/").color(iced::Color::WHITE),
+        span("N").color(accent),
+        span(" history").color(iced::Color::WHITE),
+    ];
+    let out = fit_hints(spans, 4000.0, 13.0, false, Some(KeyCap::new(accent)));
+    let keys: Vec<_> = out
+        .iter()
+        .filter(|hint| hint.highlight.is_some())
+        .map(|hint| hint.text.trim_matches('\u{2009}').to_string())
+        .collect();
+    assert_eq!(keys, ["Ctrl+D", "Alt+P", "N"]);
+    // A thin space after each key keeps the label off its edge.
+    assert_eq!(out.iter().filter(|hint| hint.text == "\u{2009}").count(), 3);
+    let label = out.iter().find(|hint| hint.text == " delete").unwrap();
+    assert!(label.highlight.is_none());
+    let sep = out.iter().find(|hint| hint.text == "  ·  ").unwrap();
+    assert!(sep.highlight.is_none());
+
+    // Without a keycap style the keys stay plain text.
+    let plain = fit_hints(
+        vec![span("Ctrl+D").color(accent), span(" delete")],
+        4000.0,
+        13.0,
+        false,
+        None,
+    );
+    assert!(plain.iter().all(|hint| hint.highlight.is_none()));
+    assert_eq!(footer_text(&plain), "Ctrl+D delete");
+}

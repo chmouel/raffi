@@ -23,6 +23,180 @@ use super::types::ScriptFilterItem;
 
 type HintSpan<'a> = iced::widget::text::Span<'a, (), iced::Font>;
 
+/// The emoji that precedes the footer hint whose key is `key`.
+fn hint_icon(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "→" => "⚡",
+        "Ctrl+/" => "🔎",
+        "Ctrl+Tab" => "🔀",
+        "Alt+P" => "🕘",
+        "Ctrl+R" => "🔄",
+        "Ctrl+D" => "🗑️",
+        "Ctrl+P" => "👁️",
+        _ => return None,
+    })
+}
+
+/// Text between the hints of the footer.
+const HINT_SEP: &str = "  ·  ";
+
+/// Rank from which a footer hint is never given up.
+const KEEP_RANK: u8 = 9;
+
+/// How soon a footer hint is given up when the window is narrow: lower goes
+/// first. The way to the actions and to the key list, and hints that are not
+/// listed, such as errors and warnings, are kept.
+fn hint_drop_rank(key: &str) -> u8 {
+    match key {
+        "Ctrl+P" => 1,
+        "Alt+P" | "Ctrl+H" | "Ctrl+S" | "Ctrl+Alt+Y" => 2,
+        "Ctrl+R" | "F5" | "Ctrl+B" | "Ctrl+Y" | "Ctrl+U" | "Ctrl+O" => 3,
+        "Ctrl+Tab" => 4,
+        "Ctrl+D" => 5,
+        "Ctrl+Enter" => 6,
+        "→" | "Ctrl+/" => KEEP_RANK,
+        _ => u8::MAX,
+    }
+}
+
+/// Rough width of `text` set at `size`; emoji and symbols count wider.
+fn text_width(text: &str, size: f32) -> f32 {
+    text.chars()
+        .map(|c| if c.is_ascii() { 0.52 } else { 1.25 } * size)
+        .sum()
+}
+
+/// Colours of the keyboard key look of the footer's keys.
+#[derive(Clone, Copy)]
+pub(super) struct KeyCap {
+    /// The colour the footer draws keys in; spans of it become keys.
+    pub accent: iced::Color,
+    pub background: iced::Color,
+    pub border: iced::Color,
+}
+
+impl KeyCap {
+    pub(super) fn new(accent: iced::Color) -> Self {
+        Self {
+            accent,
+            background: iced::Color { a: 0.14, ..accent },
+            border: iced::Color { a: 0.4, ..accent },
+        }
+    }
+
+    fn is_key(&self, hint: &HintSpan<'_>) -> bool {
+        hint.color == Some(self.accent) && !hint.text.starts_with(' ')
+    }
+
+    /// `hint` drawn as a key: thin spaces keep the text off the cap's edge.
+    fn style<'a>(&self, hint: HintSpan<'a>) -> HintSpan<'a> {
+        let text = format!("\u{2009}{}\u{2009}", hint.text);
+        let mut hint = hint
+            .padding([1.0, 2.0])
+            .background(self.background)
+            .border(iced::Border {
+                color: self.border,
+                width: 1.0,
+                radius: 4.0.into(),
+            });
+        hint.text = text.into();
+        hint
+    }
+}
+
+/// The footer hints of `spans` made to fit `width`. They are shortened in
+/// steps: the icons go first (kept only when `icons` is set), then the hints
+/// of the lowest `hint_drop_rank` one by one. Keys are drawn as `keycap` keys.
+pub(super) fn fit_hints<'a>(
+    spans: Vec<HintSpan<'a>>,
+    width: f32,
+    size: f32,
+    icons: bool,
+    keycap: Option<KeyCap>,
+) -> Vec<HintSpan<'a>> {
+    let mut sep = None;
+    let mut groups: Vec<Vec<HintSpan<'a>>> = vec![Vec::new()];
+    for hint in spans {
+        if hint.text == HINT_SEP {
+            sep.get_or_insert(hint);
+            groups.push(Vec::new());
+        } else if let Some(group) = groups.last_mut() {
+            group.push(hint);
+        }
+    }
+    groups.retain(|group| !group.is_empty());
+    let sep = sep.unwrap_or_else(|| span(HINT_SEP).size(size));
+    let sep_width = text_width(HINT_SEP, size);
+    let icon_of = |group: &[HintSpan<'a>]| group.first().and_then(|hint| hint_icon(&hint.text));
+    let rank_of = |group: &[HintSpan<'a>]| {
+        group
+            .first()
+            .map_or(u8::MAX, |hint| hint_drop_rank(&hint.text))
+    };
+    let group_width = |group: &[HintSpan<'a>], icons: bool| {
+        let icon = if icons && icon_of(group).is_some() {
+            text_width("🔎 ", size)
+        } else {
+            0.0
+        };
+        icon + group
+            .iter()
+            .map(|hint| {
+                let cap = keycap.is_some_and(|cap| cap.is_key(hint));
+                text_width(&hint.text, hint.size.map_or(size, |pixels| pixels.0))
+                    + if cap { 0.7 * size } else { 0.0 }
+            })
+            .sum::<f32>()
+    };
+    let total = |groups: &[Vec<HintSpan<'a>>], icons: bool| {
+        groups
+            .iter()
+            .map(|group| group_width(group, icons))
+            .sum::<f32>()
+            + sep_width * groups.len().saturating_sub(1) as f32
+    };
+
+    let mut icons = icons;
+    while total(&groups, icons) > width {
+        if icons {
+            icons = false;
+            continue;
+        }
+        let droppable = groups
+            .iter()
+            .enumerate()
+            .filter(|(_, group)| rank_of(group) < KEEP_RANK)
+            .min_by_key(|(index, group)| (rank_of(group), std::cmp::Reverse(*index)))
+            .map(|(index, _)| index);
+        match droppable {
+            Some(index) => {
+                groups.remove(index);
+            }
+            None => break,
+        }
+    }
+
+    let mut out = Vec::new();
+    for (index, group) in groups.into_iter().enumerate() {
+        if index > 0 {
+            out.push(sep.clone());
+        }
+        if let Some(icon) = icons.then(|| icon_of(&group)).flatten() {
+            out.push(span(format!("{icon} ")).size(size));
+        }
+        for hint in group {
+            match keycap {
+                Some(cap) if cap.is_key(&hint) => {
+                    out.push(cap.style(hint));
+                    out.push(span("\u{2009}").size(size));
+                }
+                _ => out.push(hint),
+            }
+        }
+    }
+    out
+}
+
 /// Horizontal shift of one tree-view indentation level.
 const INDENT_STEP: f32 = 24.0;
 /// Highest indentation level rendered; deeper levels keep this shift.
@@ -3281,7 +3455,7 @@ impl LauncherApp {
             }
         }
 
-        let sep = span("  ·  ").size(fs.hint).color(t.border);
+        let sep = span(HINT_SEP).size(fs.hint).color(t.border);
         let mut hint_spans: Vec<HintSpan<'_>> = vec![
             span("Ctrl+/").size(fs.hint).color(t.accent),
             span(" keywords").size(fs.hint).color(t.text_muted),
@@ -3289,7 +3463,17 @@ impl LauncherApp {
 
         if !self.selected_actions().is_empty() {
             hint_spans.insert(0, sep.clone());
-            hint_spans.insert(0, span("→ Actions").size(fs.hint).color(t.accent));
+            hint_spans.insert(0, span(" Actions").size(fs.hint).color(t.text_muted));
+            hint_spans.insert(
+                0,
+                span("→")
+                    .size(fs.hint)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..iced::Font::DEFAULT
+                    })
+                    .color(t.accent),
+            );
         }
         if let Some(action) = self.empty_search_enter_hint() {
             hint_spans.insert(0, sep.clone());
@@ -3476,6 +3660,14 @@ impl LauncherApp {
         }
         hint_spans.push(span("Ctrl+P").size(fs.hint).color(t.accent));
         hint_spans.push(span(" preview").size(fs.hint).color(t.text_muted));
+
+        hint_spans = fit_hints(
+            hint_spans,
+            (self.view.window_size.width - 40.0).max(200.0),
+            fs.hint,
+            self.clipboard.active && !self.no_icons,
+            Some(KeyCap::new(t.accent)),
+        );
 
         if self.file_browser.dragging {
             hint_spans.clear();

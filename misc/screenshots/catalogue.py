@@ -154,6 +154,7 @@ SHOTS = [
     Shot("media-controls", "media "),
     Shot("bluetooth", "bt ", down()),
     Shot("clipboard-history", "clip "),
+    Shot("arrow-tmp", "~/Documents/preview.py", width=900),
     Shot("password-store", "pass "),
     Shot("bitwarden", "bw "),
     Shot("slack-people", "slack ", ("ctrl+p",), height=720,
