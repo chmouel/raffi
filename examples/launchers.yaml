@@ -4,26 +4,21 @@
 # Launcher entries, keyed by name. Put this file next to raffi.yaml
 # (~/.config/raffi/launchers.yaml). It is used when raffi.yaml has no
 # `launchers:` section of its own.
-
-# jumpapp is a custom tool i use when launching programs to run-or-raise or go to the previous windows
-# find it here https://gitlab.com/chmouel/chmouzies/-/blob/main/graphical/sway-jumpapp
-wally:
-  args: ["-X", "wally"]
-  binary: jumpapp
-  description: "Wally"
-  icon: wally
-  ifexist: wally
-
-thunar:
-  args: ["~/Downloads/"]
-  binary: thunar
-  description: "Thunar"
-  # icon is optional here; Raffi will try to infer a system icon and then
-  # fall back to a generic one if nothing matches.
+#
+# With addons.apps.enabled: true in raffi.yaml, installed .desktop applications
+# are listed automatically, so plain GUI apps usually need no entry here.
+# Raffi's native UI also includes built-in addons for clipboard history (`clip `),
+# passwords and Bitwarden (`pass `, `bw `), calculator expressions, emoji (`emoji `),
+# audio (`audio `), system power actions (`sys `), and file browsing (`~/`).
+# See https://chmouel.github.io/raffi/ for addon docs; if you use `ui_type: fuzzel`,
+# you can still add external tools as launchers here.
+#
+# Use `ifexist`, `ifenvset`, `ifenveq`, or `ifcompositor` to keep a shared
+# multi-machine config clean without showing entries whose tools are absent.
 
 # Enter focuses Thunderbird when it is already open, Ctrl+Enter starts a new
 # one (Hyprland, niri, sway). window_class defaults to the binary name, which
-# is enough here; set it when the launcher has args or a script.
+# is enough for a plain binary without args.
 thunderbird:
   binary: thunderbird
   description: "Thunderbird"
@@ -31,29 +26,28 @@ thunderbird:
   ifexist: thunderbird
   raise: true
 
-rbw-pass:
-  args:
-    [
-      "--selector wofi --clipboarder wl-copy --action copy-password --typer xdotool",
-    ]
-  binary: rofi-rbw
-  description: "Password Manager"
-  icon: password-manager
-  ifenvset: WAYLAND_DISPLAY
+# Arguments or a script give `raise` no class to infer, so set `window_class`
+# explicitly. `desktop` links this launcher to the installed .desktop file so
+# `addons.apps` does not list Chromium a second time while keeping its actions.
+chromium-work:
+  binary: chromium
+  args: ["--profile-directory=Work"]
+  description: "Chromium (Work)"
+  icon: chromium
+  ifexist: chromium
+  raise: true
+  window_class: Chromium
+  desktop: chromium.desktop
 
-rbw-pass-user:
-  args: ["--selector wofi --clipboarder wl-copy --action copy-username"]
-  binary: rofi-rbw
-  description: "Password Manager user"
-  icon: passwords-app
-  ifenvset: WAYLAND_DISPLAY
-
-cliphistory:
-  args: ["pick", "-t", "wofi"]
-  binary: "clipman"
-  description: "Clipboard history"
-  icon: accessories-clipboard
-  ifcompositor: sway
+# jumpapp is a helper for compositors/WMs without built-in raise support:
+# https://gitlab.com/chmouel/chmouzies/-/blob/main/graphical/sway-jumpapp
+wally:
+  args: ["-X", "wally"]
+  binary: jumpapp
+  description: "Wally"
+  icon: wally
+  ifexist: wally
+  window_class: wally
 
 evolution-mail:
   args: ["-t", "Evolution", "-X", "evolution"]
@@ -61,6 +55,7 @@ evolution-mail:
   description: "Evolution Mail"
   icon: evolution-mail
   ifexist: evolution
+  window_class: evolution
 
 signal:
   args: ["-X", "signal", "signal-desktop"]
@@ -68,24 +63,22 @@ signal:
   description: "Signal"
   icon: signal-desktop
   ifexist: signal-desktop
+  window_class: signal
 
 firefox:
   args: ["-X", "firefox"]
   binary: jumpapp
   description: "Firefox"
   icon: firefox
-
-chrome:
-  args: ["-X", "-c", "Chromium", "chromium"]
-  binary: jumpapp
-  description: "Chromium"
-  icon: chromium
+  window_class: firefox
+  desktop: firefox.desktop
 
 ipython:
   binary: kitty-ctrl
   args: ["jump", "-t IPython", "ipython3"]
   description: "Ipython"
   icon: ipython
+  window_class: kitty
 
 # env sets variables for this launcher only; values expand ~/ and ${VAR}.
 ipython-startup:
@@ -93,6 +86,7 @@ ipython-startup:
   args: ["ipython3"]
   description: "Ipython with startup file"
   icon: ipython
+  window_class: kitty
   env:
     PYTHONSTARTUP: "~/.config/python/startup.py"
 
@@ -101,40 +95,28 @@ ssh-kodi:
   args: ["jump", "-t", "Kodi", "ssh", "kodi"]
   description: "Kodi"
   icon: kodi
+  window_class: kitty
 
 ssh-pi:
   binary: kitty-ctrl
   args: ["jump", "-t", "PI", "ssh", "pi"]
   description: "PI"
   icon: raspberry
+  window_class: kitty
 
 ssh-bootstrap:
   binary: kitty-ctrl
   args: ["jump", "-t", "Bootstrap", "ssh", "bootstrap"]
   description: "Bootstrap SSH"
   icon: bootstrap
-
-google-meet:
-  binary: jumpapp
-  args:
-    [
-      "-t",
-      "^(Google Meet$|Meet$|Meet -)",
-      "-i",
-      "google-chrome",
-      "/opt/google/chrome/google-chrome",
-      "--profile-directory=Default",
-      "--app-id=kjgfgldnnfoeklkmfkjfagphfepbbdan",
-    ]
-  description: "Google Meet"
-  icon: "google-meet"
-  disabled: true
+  window_class: kitty
 
 golang:
   binary: jumpapp
   args: ["-c", "jetbrains-goland", "goland"]
   description: "Goland"
   icon: /opt/goland/bin/goland.svg
+  window_class: jetbrains-goland
   show_preview: true # show the command and usage stats in the preview pane for this entry
 
 add-org-note:
@@ -143,40 +125,27 @@ add-org-note:
   icon: writenote
 
 # An alias types its text into the search box when picked. With a keyword,
-# typing "linoux torvalds" searches like "mp linus/linux torvalds"
-# ("mp" being a script filter keyword) while the box shows what you typed.
-linoux:
-  description: "Linus Pull Requests"
+# typing "ghraffi release" searches like "gh chmouel/raffi release"
+# ("gh" is configured under addons.web_searches in examples/raffi.yaml)
+# while the box keeps showing what you typed.
+ghraffi:
+  description: "Raffi on GitHub"
   icon: github
-  alias: "mp linus/linux"
-  keyword: linoux
-
-calculate:
-  args:
-    [
-      "-modi",
-      "calc:qalc +u8",
-      "-show",
-      "calc",
-      "-theme",
-      "mounch",
-      "-theme-str",
-      "* { width: 640; height: 400;}",
-    ]
-  binary: rofi
-  description: "Calculate"
-  icon: calc
+  alias: "gh chmouel/raffi"
+  keyword: ghraffi
 
 center-window:
   binary: wmctrl-resize-and-center
   description: "Center window"
   icon: wmsnap
+  ifenveq: [XDG_SESSION_TYPE, x11]
 
 jump-to-org-file:
   args: [jumpto]
   binary: add-org-task
   description: "Jump to org file"
   icon: notes-app
+  raise: false
 
 keyboard-setting:
   args: [keyboard]
@@ -184,13 +153,7 @@ keyboard-setting:
   description: "Keyboard setting"
   icon: preferences-desktop-keyboard-shortcuts
   ifenveq: [DESKTOP_SESSION, GNOME]
-
-red-hat-mail:
-  args: ["chromium", "Red Hat Mail", "https://mail.google.com/a/redhat.com"]
-  binary: xdo-focus-a-tab
-  description: "Red Hat GMail"
-  icon: gmail
-  ifenveq: [XDG_SESSION_TYPE, x11]
+  window_class: gnome-control-center
 
 snap-window-around:
   args: [rotate]
@@ -198,6 +161,7 @@ snap-window-around:
   description: "Snap window around"
   icon: wmaround
   ifenveq: [XDG_SESSION_TYPE, x11]
+  raise: false
 
 ssh:
   args: ["-show", "ssh", "-theme", "mounch"]
@@ -205,58 +169,7 @@ ssh:
   description: "SSH"
   icon: ssh
   ifenveq: [XDG_SESSION_TYPE, x11]
-
-suspend:
-  args: [suspend]
-  binary: systemctl
-  description: "Suspend/Sleep or Hibernate"
-  icon: system-suspend-hibernate
-
-reboot:
-  args: [--reboot]
-  binary: gnome-session-quit
-  description: "Reboot"
-  icon: gnome-session-reboot
-  ifenveq: [DESKTOP_SESSION, GNOME]
-
-reboot-systemctl:
-  args: [reboot]
-  binary: systemctl
-  description: "Reboot / Restart"
-  icon: gnome-session-reboot
-  ifenvset: SWAYSOCK
-
-gnome-shutdown:
-  args: [--power-off]
-  binary: gnome-session-quit
-  description: "Shutdown / Poweroff"
-  icon: gnome-shutdown
-  ifenveq: [DESKTOP_SESSION, GNOME]
-
-shutdown:
-  binary: poweroff
-  description: "Shutdown / Poweroff"
-  icon: gnome-shutdown
-  ifenvset: SWAYSOCK
-
-timezones:
-  args: [batz]
-  binary: gtk-launch
-  description: "Batz timezone converter"
-  icon: batman
-
-passgen:
-  args: ["jump", "-t", "GeneratePassword", "genpasswd"]
-  binary: kitty-ctrl
-  description: "Password Generator"
-  icon: password
-
-emoji-picker:
-  args: [copy]
-  binary: splatmoji
-  description: "Emoji Picker"
-  icon: emoji
-  ifexist: splatmoji
+  raise: false
 
 bpytop:
   binary: kitty-ctrl
@@ -264,6 +177,7 @@ bpytop:
   description: "BpyTOP"
   icon: bashtop
   ifexist: bpytop
+  window_class: kitty
 
 show-tv:
   binary: playr
@@ -277,6 +191,7 @@ show-tv-groups:
   icon: tv
   description: "Play TV choose groups"
   ifexist: playr
+  raise: false
 
 gnome-activity:
   binary: gnome-show-activity
@@ -289,17 +204,17 @@ spotify:
   binary: jumpapp
   description: "Spotify"
   icon: spotify
+  ifexist: spotify
+  window_class: Spotify
 
 vscode:
   args: ["-X", "-c", "Visual Studio Code", "code"]
   binary: jumpapp
   description: "VSCode"
   icon: visual-studio-code
-
-pavucontrol:
-  binary: pavucontrol
-  description: "PAVucontrol Pulseaudio"
-  icon: gnome-audio
+  ifexist: code
+  window_class: code
+  desktop: code.desktop
 
 start-kind:
   binary: kitty-ctrl
@@ -307,6 +222,7 @@ start-kind:
   description: "Start Kind"
   icon: kind-started
   ifexist: kind
+  window_class: kitty
 
 stop-kind:
   binary: kitty-ctrl
@@ -314,6 +230,7 @@ stop-kind:
   description: "Stop Kind"
   icon: kind-stopped
   ifexist: kind
+  window_class: kitty
 
 windows:
   binary: systemctl
@@ -321,11 +238,7 @@ windows:
   description: Reboot to windows
   icon: windows
   ifenvset: SWAYSOCK
-
-fixbt:
-  binary: fixbt
-  description: Fix Bluetooth
-  icon: bluetooth
+  raise: false
 
 screenshot-clipboard:
   description: Screenshot to clipboard
@@ -333,6 +246,7 @@ screenshot-clipboard:
   binary: sway-screenshot
   icon: screenshoticon
   ifenvset: SWAYSOCK
+  raise: false
 
 screenshot-file:
   description: Screenshot to file
@@ -340,6 +254,7 @@ screenshot-file:
   binary: sway-screenshot
   icon: screenshoticon
   ifenvset: SWAYSOCK
+  raise: false
 
 screenshot-window-clipboard:
   description: Screenshot window to clipboard
@@ -347,6 +262,7 @@ screenshot-window-clipboard:
   binary: sway-screenshot
   icon: screenshoticon
   ifenvset: SWAYSOCK
+  raise: false
 
 screenshot-window-file:
   description: Screenshot window to file
@@ -354,6 +270,7 @@ screenshot-window-file:
   binary: sway-screenshot
   icon: screenshoticon
   ifenvset: SWAYSOCK
+  raise: false
 
 screenshot-movie-selection:
   description: Screencast movie selection
@@ -361,13 +278,15 @@ screenshot-movie-selection:
   binary: sway-screenshot
   icon: movierecord
   ifenvset: SWAYSOCK
+  raise: false
 
 screenshot-movie-screen:
-  description: Screecast movie screen
+  description: Screencast movie screen
   args: [movie-screen]
   binary: sway-screenshot
   icon: movierecord
   ifenvset: SWAYSOCK
+  raise: false
 
 screenshot-stop-recording:
   description: Screencast stop recording
@@ -375,3 +294,4 @@ screenshot-stop-recording:
   binary: sway-screenshot
   icon: stoprecording
   ifenvset: SWAYSOCK
+  raise: false

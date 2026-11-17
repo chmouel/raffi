@@ -9734,6 +9734,58 @@ launchers:
         let _ = fs::remove_dir_all(dir);
     }
 
+    struct AlwaysPresentBinaryChecker;
+
+    impl BinaryChecker for AlwaysPresentBinaryChecker {
+        fn exists(&self, _binary: &str) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn test_example_launchers_file_has_no_lints() {
+        let mut config: Config =
+            serde_yaml::from_str(include_str!("../examples/raffi.yaml")).unwrap();
+        config.addons.apps.enabled = true;
+        config.general.raise_running = Some(true);
+
+        let launchers: serde_yaml::Mapping =
+            serde_yaml::from_str(include_str!("../examples/launchers.yaml")).unwrap();
+        let addons = LintAddons::resolve(&config.addons, true, || vec![vec!["copyq".to_string()]]);
+        let app = |id: &str, description: &str, binary: &str| RaffiConfig {
+            description: Some(description.to_string()),
+            binary: Some(binary.to_string()),
+            desktop_id: Some(id.to_string()),
+            ..Default::default()
+        };
+        let apps = vec![
+            app("chromium.desktop", "Chromium", "chromium"),
+            app("firefox.desktop", "Firefox", "firefox"),
+            app("code.desktop", "Visual Studio Code", "code"),
+            app("thunderbird.desktop", "Thunderbird", "thunderbird"),
+        ];
+        let ids: HashSet<String> = [
+            "chromium.desktop",
+            "firefox.desktop",
+            "code.desktop",
+            "thunderbird.desktop",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+
+        let lints = launcher_lints(
+            &launchers,
+            &AlwaysPresentBinaryChecker,
+            &addons,
+            true,
+            true,
+            &apps,
+            &ids,
+        );
+        assert_eq!(lints, Vec::new(), "{lints:?}");
+    }
+
     fn run_lints(text: &str, binaries: &[&str]) -> Vec<ConfigLint> {
         run_lints_with(text, binaries, true, Vec::new())
     }
