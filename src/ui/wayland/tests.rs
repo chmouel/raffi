@@ -13159,6 +13159,44 @@ fn action_menu_preserves_search_filters_and_restores_focus() {
 }
 
 #[test]
+fn action_menu_lists_in_the_preview_pane_and_keeps_the_results() {
+    let mut app = test_app(AddonsConfig::default());
+    app.view.show_preview = true;
+    let _ = app.update(Message::SearchChanged("pass ".into()));
+    let items = ["web/github", "web/gitlab"]
+        .map(|entry| {
+            super::pass::command_item(&format!("pass:entry:{entry}"), entry, "", "dialog-password")
+        })
+        .to_vec();
+    let generation = app.vault.generation;
+    let _ = app.update(Message::VaultDone(
+        generation,
+        vault_report(super::vault::Outcome::Loaded(items)),
+    ));
+    select_identity(&mut app, "pass:entry:web/gitlab");
+    let index = app.selected_index;
+    assert!(app.resolve_selected_preview().is_some());
+    let _ = app.update(Message::OpenActions);
+    let count = app.action_menu.as_ref().unwrap().filtered().len();
+    assert!(count > 1);
+
+    let _ = app.update(Message::MoveDown);
+    let _ = app.update(Message::ItemClicked(0));
+    assert_eq!(app.action_menu.as_ref().unwrap().selected, 1);
+    assert_eq!(app.selected_index, index, "the results stay put");
+    assert!(app.resolve_selected_preview().is_some());
+
+    let _ = app.update(Message::SearchChanged("x".into()));
+    let _ = app.update(Message::ChipMove(true));
+    assert!(app.action_menu.is_some(), "Left moves through the filter");
+    let _ = app.update(Message::SearchChanged(String::new()));
+    assert!(app.update(Message::ChipMove(true)).units() > 0);
+    assert!(app.action_menu.is_none(), "Left goes back to the results");
+    assert_eq!(app.selected_index, index);
+    assert_eq!(app.search_query, "pass ");
+}
+
+#[test]
 fn action_menu_keeps_system_confirmation_and_rejects_changed_target() {
     let mut app = test_app(AddonsConfig::default());
     open_system(&mut app, "sys reboot");

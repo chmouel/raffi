@@ -1202,6 +1202,87 @@ fn render_chat_feed<'a>(entries: Vec<ChatEntry>, ps: &PreviewStyle) -> Element<'
     feed.into()
 }
 
+/// The rounded, padded background shared by the preview pane contents.
+fn preview_frame<'a>(
+    content: impl Into<Element<'a, Message>>,
+    bg: iced::Color,
+) -> Element<'a, Message> {
+    container(content)
+        .padding(iced::Padding {
+            top: 8.0,
+            right: PREVIEW_PANE_RIGHT_PADDING,
+            bottom: 8.0,
+            left: PREVIEW_PANE_LEFT_PADDING,
+        })
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(bg)),
+            border: iced::Border {
+                radius: 10.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .into()
+}
+
+/// The icon, title, subtitle and badge row at the top of the preview pane.
+fn preview_header<'a>(
+    ps: &PreviewStyle,
+    icon: Option<PreviewIcon>,
+    title: String,
+    subtitle: Option<String>,
+    badge: Option<String>,
+) -> Row<'a, Message> {
+    let mut header_row = Row::new()
+        .spacing(14)
+        .align_y(iced::Alignment::Center)
+        .width(Length::Fill);
+
+    if let Some(icon) = icon {
+        match icon {
+            PreviewIcon::File(path) => {
+                if let Some(el) = icon_element(Path::new(&path), ps.icon) {
+                    header_row = header_row.push(el);
+                }
+            }
+            PreviewIcon::Glyph(glyph) => {
+                header_row = header_row.push(
+                    text(glyph)
+                        .size(ps.icon * 0.8)
+                        .width(Length::Fixed(ps.icon)),
+                );
+            }
+        }
+    }
+
+    let mut title_col = Column::new().spacing(2).width(Length::Fill);
+    if !title.is_empty() {
+        title_col = title_col.push(text(title).size(ps.title).color(ps.text_main).font(ps.font));
+    }
+    if let Some(sub) = subtitle {
+        title_col = title_col.push(text(sub).size(ps.small).color(ps.text_muted).font(ps.font));
+    }
+    header_row = header_row.push(title_col);
+
+    if let Some(badge) = badge {
+        let accent = ps.accent;
+        let badge_pill = container(text(badge).size(ps.small).color(accent).font(ps.font))
+            .padding([4.0, 10.0])
+            .style(move |_theme| container::Style {
+                background: Some(iced::Background::Color(iced::Color { a: 0.14, ..accent })),
+                border: iced::Border {
+                    radius: 6.0.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+        header_row = header_row.push(badge_pill);
+    }
+    header_row
+}
+
 impl LauncherApp {
     /// Wrap the shared window chrome around an already built item list.
     pub(super) fn shell<'a>(
@@ -1342,6 +1423,11 @@ impl LauncherApp {
                 ..Default::default()
             });
 
+        let hint_spans = if self.action_menu.is_some() {
+            self.action_menu_hints()
+        } else {
+            hint_spans
+        };
         let hint_row = container(rich_text(hint_spans))
             .padding(iced::Padding {
                 top: 4.0,
@@ -1384,7 +1470,11 @@ impl LauncherApp {
                     ..Default::default()
                 });
 
-            let right_pane = container(self.render_preview_pane(preview_data))
+            let pane = match &self.action_menu {
+                Some(menu) => self.render_action_pane(menu, preview_data),
+                None => self.render_preview_pane(preview_data),
+            };
+            let right_pane = container(pane)
                 .padding(iced::Padding {
                     top: fs.scroll_top_padding,
                     right: 0.0,
@@ -1766,6 +1856,18 @@ impl LauncherApp {
         items_column
     }
 
+    fn action_menu_hints(&self) -> Vec<HintSpan<'_>> {
+        let t = self.view.theme;
+        let fs = self.view.font_sizes;
+        vec![
+            span("Enter").size(fs.hint).color(t.accent),
+            span(" run action").size(fs.hint).color(t.text_muted),
+            span("  ·  ").size(fs.hint).color(t.border),
+            span("Esc/←").size(fs.hint).color(t.accent),
+            span(" back to results").size(fs.hint).color(t.text_muted),
+        ]
+    }
+
     fn help_hint_spans(&self) -> Vec<HintSpan<'_>> {
         let t = self.view.theme;
         let fs = self.view.font_sizes;
@@ -1861,57 +1963,7 @@ impl LauncherApp {
         );
         let viewport_height = self.preview_viewport_height();
 
-        // Header: optional icon + title/subtitle + optional badge
-        let mut header_row = Row::new()
-            .spacing(14)
-            .align_y(iced::Alignment::Center)
-            .width(Length::Fill);
-
-        if let Some(icon) = data.icon {
-            match icon {
-                PreviewIcon::File(path) => {
-                    if let Some(el) = icon_element(Path::new(&path), ps.icon) {
-                        header_row = header_row.push(el);
-                    }
-                }
-                PreviewIcon::Glyph(glyph) => {
-                    header_row = header_row.push(
-                        text(glyph)
-                            .size(ps.icon * 0.8)
-                            .width(Length::Fixed(ps.icon)),
-                    );
-                }
-            }
-        }
-
-        let mut title_col = Column::new().spacing(2).width(Length::Fill);
-        if !data.title.is_empty() {
-            title_col = title_col.push(
-                text(data.title)
-                    .size(ps.title)
-                    .color(ps.text_main)
-                    .font(ps.font),
-            );
-        }
-        if let Some(sub) = data.subtitle {
-            title_col = title_col.push(text(sub).size(ps.small).color(ps.text_muted).font(ps.font));
-        }
-        header_row = header_row.push(title_col);
-
-        if let Some(badge) = data.badge {
-            let accent = ps.accent;
-            let badge_pill = container(text(badge).size(ps.small).color(accent).font(ps.font))
-                .padding([4.0, 10.0])
-                .style(move |_theme| container::Style {
-                    background: Some(iced::Background::Color(iced::Color { a: 0.14, ..accent })),
-                    border: iced::Border {
-                        radius: 6.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                });
-            header_row = header_row.push(badge_pill);
-        }
+        let header_row = preview_header(&ps, data.icon, data.title, data.subtitle, data.badge);
 
         if image_first {
             match data.bodies.first() {
@@ -2178,25 +2230,114 @@ impl LauncherApp {
         .width(Length::Fill)
         .height(Length::Fill);
 
-        let pane_bg = ps.bg;
-        container(scroll)
-            .padding(iced::Padding {
-                top: 8.0,
-                right: PREVIEW_PANE_RIGHT_PADDING,
-                bottom: 8.0,
-                left: PREVIEW_PANE_LEFT_PADDING,
-            })
+        preview_frame(scroll, ps.bg)
+    }
+
+    /// The actions for the selected result, listed in the preview pane under
+    /// the result's header while the action menu is open.
+    fn render_action_pane<'a>(
+        &'a self,
+        menu: &'a super::action_menu::ActionMenu,
+        data: PreviewData,
+    ) -> Element<'a, Message> {
+        let t = self.view.theme;
+        let fs = self.view.font_sizes;
+        let ps = self.view.preview_style.clone();
+        let border = ps.border;
+
+        let mut col = Column::new()
+            .spacing(14)
             .width(Length::Fill)
-            .height(Length::Fill)
-            .style(move |_theme| container::Style {
-                background: Some(iced::Background::Color(pane_bg)),
-                border: iced::Border {
-                    radius: 10.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            })
-            .into()
+            .push(preview_header(
+                &ps,
+                data.icon,
+                data.title,
+                data.subtitle,
+                data.badge,
+            ))
+            .push(
+                container(Space::new())
+                    .width(Length::Fill)
+                    .height(Length::Fixed(1.0))
+                    .style(move |_theme| container::Style {
+                        background: Some(iced::Background::Color(iced::Color { a: 0.3, ..border })),
+                        ..Default::default()
+                    }),
+            )
+            .push(
+                text("Actions")
+                    .size(ps.small)
+                    .color(ps.accent)
+                    .font(ps.font),
+            );
+
+        let filtered = menu.filtered();
+        let mut rows = Column::new().spacing(ITEM_SPACING).width(Length::Fill);
+        if filtered.is_empty() {
+            rows = rows.push(
+                text("No matching actions. Clear the filter to see all actions.")
+                    .size(ps.text)
+                    .color(ps.text_muted)
+                    .font(ps.font),
+            );
+        }
+        for (row, index) in filtered.into_iter().enumerate() {
+            let entry = &menu.entries[index];
+            let selected = row == menu.selected;
+            let mut line = Row::new().spacing(12).align_y(iced::Alignment::Center);
+            if let Some(glyph) = entry.glyph {
+                line = line.push(
+                    text(glyph)
+                        .size(ps.text)
+                        .width(Length::Fixed(ps.text + 8.0))
+                        .align_x(iced::alignment::Horizontal::Center),
+                );
+            }
+            line = line.push(
+                text(&entry.label)
+                    .size(ps.text)
+                    .font(ps.font)
+                    .width(Length::Fill)
+                    .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
+            );
+            if !entry.shortcut.is_empty() {
+                line = line.push(
+                    text(&entry.shortcut)
+                        .size(ps.small)
+                        .color(t.text_muted)
+                        .font(ps.font),
+                );
+            }
+            let action = button(line)
+                .on_press(Message::ActionSelected(index))
+                .padding(fs.item_padding)
+                .width(Length::Fill)
+                .style(item_button_style(t, selected, ps.text_main));
+            rows = rows.push(if selected {
+                Element::from(
+                    container(action)
+                        .id(self.view.action_row_id.clone())
+                        .width(Length::Fill),
+                )
+            } else {
+                action.into()
+            });
+        }
+        col = col.push(rows);
+
+        let scroll = scrollable(col.padding(iced::Padding {
+            top: 0.0,
+            right: PREVIEW_CONTENT_RIGHT_PADDING,
+            bottom: 0.0,
+            left: 0.0,
+        }))
+        .id(self.view.preview_scrollable_id.clone())
+        .direction(slim_scrollbar())
+        .style(scrollable_style(t))
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+        preview_frame(scroll, ps.bg)
     }
 
     /// Bare text with a centred summary line, no title, badge, box or metadata.
@@ -2457,7 +2598,13 @@ impl LauncherApp {
         let t = self.view.theme;
         let fs = self.view.font_sizes;
 
-        if let Some(menu) = &self.action_menu {
+        // With the preview pane shown, the actions take it over and the
+        // results stay on the left; without it they fill the window.
+        if let Some(menu) = self
+            .action_menu
+            .as_ref()
+            .filter(|_| self.resolve_selected_preview().is_none())
+        {
             let mut items = Column::new().spacing(ITEM_SPACING).push(
                 text(format!("Actions for {}", menu.title))
                     .size(fs.subtitle)
@@ -2498,13 +2645,7 @@ impl LauncherApp {
                     )),
                 );
             }
-            return self.shell(
-                "Search actions...",
-                vec![span("Enter: Run action · Esc: Back to results")
-                    .size(fs.hint)
-                    .color(t.text_main)],
-                items,
-            );
+            return self.shell("Search actions...", self.action_menu_hints(), items);
         }
 
         if self.view.help_active {

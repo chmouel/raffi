@@ -3927,25 +3927,12 @@ impl LauncherApp {
     /// height (wrapped titles, headings), so the row is measured rather than
     /// placed by its index.
     pub(super) fn snap_to_selection(&self) -> Task<Message> {
-        let total = self.total_items();
-        let relative = if total > 1 {
-            self.selected_index as f32 / (total - 1) as f32
-        } else {
-            0.0
-        };
-        // The first and last rows go to the ends, so chips and headings
-        // above the first row stay in view.
-        let edge =
-            (self.selected_index == 0 || self.selected_index + 1 >= total).then_some(relative);
-        iced::advanced::widget::operate::<()>(RevealSelection {
-            scrollable: self.view.scrollable_id.clone(),
-            row: self.view.selected_row_id.clone(),
-            relative,
-            edge,
-            viewport: None,
-            row_bounds: None,
-        })
-        .discard()
+        reveal_row(
+            self.view.scrollable_id.clone(),
+            self.view.selected_row_id.clone(),
+            self.selected_index,
+            self.total_items(),
+        )
     }
 
     /// Scrolls back to a selection reset by a new list. The list keeps its
@@ -6189,6 +6176,33 @@ impl LauncherApp {
 
 /// Measures the selected row and the list viewport, then scrolls the list
 /// only if the row is not fully visible.
+/// Scrolls `scrollable` so the row tagged `row`, at `index` of `total`, is
+/// visible.
+pub(super) fn reveal_row(
+    scrollable: super::state::ScrollableId,
+    row: super::state::ContainerId,
+    index: usize,
+    total: usize,
+) -> Task<Message> {
+    let relative = if total > 1 {
+        index as f32 / (total - 1) as f32
+    } else {
+        0.0
+    };
+    // The first and last rows go to the ends, so chips and headings
+    // above the first row stay in view.
+    let edge = (index == 0 || index + 1 >= total).then_some(relative);
+    iced::advanced::widget::operate::<()>(RevealSelection {
+        scrollable,
+        row,
+        relative,
+        edge,
+        viewport: None,
+        row_bounds: None,
+    })
+    .discard()
+}
+
 struct RevealSelection {
     scrollable: super::state::ScrollableId,
     row: super::state::ContainerId,

@@ -41,9 +41,15 @@ your config turns on. Typing narrows the list.
 ## Actions for a result
 
 Press **Right** with the search cursor at the end to see the selected result's
-available actions and shortcuts. Type to filter the actions, use Up/Down to
-choose one, and press Enter to run it. Escape returns to your original search
-and selection. Actions that require confirmation still ask before running.
+available actions and shortcuts. They replace the preview pane on the right,
+under the result's title, while the results list stays on the left with the
+result still highlighted. With the preview hidden (Ctrl+P), the actions fill
+the window instead.
+
+Type to filter the actions, use Up/Down to choose one, and press Enter or click
+it to run it. Escape, or Left once the filter is empty, returns to your
+original search and selection. Actions that require confirmation still ask
+before running.
 
 Right keeps moving the cursor when you are editing the middle of a query or
 have text selected. On the addon chips row it keeps selecting the next chip.
@@ -55,7 +61,7 @@ icons first, then the least important hints such as the preview and history
 keys. `➜ Actions`, `Ctrl+/` and any error or warning stay, and Ctrl+/ lists
 every shortcut.
 
-<Image src={actionMenuScreenshot} alt="Actions for a file, with opening, file manager and copy path options" width={800} />
+<Image src={actionMenuScreenshot} alt="Actions for a file listed in the preview pane, with copy path, open and file manager options, while the result stays selected on the left" width={800} />
 
 ## Switching views with Ctrl+Tab
 

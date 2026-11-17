@@ -251,6 +251,7 @@ impl LauncherApp {
             .map(|preview| preview.title)
             .unwrap_or_default();
         self.main_view.selection_deliberate = true;
+        self.view.preview_scrollable_id = super::state::ScrollableId::unique();
         self.action_menu = Some(ActionMenu {
             title,
             query: String::new(),
@@ -264,6 +265,7 @@ impl LauncherApp {
 
     pub(super) fn close_action_menu(&mut self) -> Task<Message> {
         self.action_menu = None;
+        self.view.preview_scrollable_id = super::state::ScrollableId::unique();
         focus(self.view.search_input_id.clone())
             .chain(move_cursor_to_end(self.view.search_input_id.clone()))
     }
@@ -272,6 +274,7 @@ impl LauncherApp {
         let Some(menu) = self.action_menu.take() else {
             return Task::none();
         };
+        self.view.preview_scrollable_id = super::state::ScrollableId::unique();
         if self.action_target().as_ref() != Some(&menu.target) {
             return self.close_action_menu();
         }
@@ -292,6 +295,7 @@ impl LauncherApp {
             Message::SearchChanged(query) => {
                 menu.query.clone_from(query);
                 menu.selected = 0;
+                self.view.preview_scrollable_id = super::state::ScrollableId::unique();
             }
             Message::MoveUp | Message::MoveDown => {
                 let count = menu.filtered().len();
@@ -301,7 +305,18 @@ impl LauncherApp {
                     } else {
                         (menu.selected + 1) % count
                     };
+                    return Some(super::app::reveal_row(
+                        self.view.preview_scrollable_id.clone(),
+                        self.view.action_row_id.clone(),
+                        menu.selected,
+                        count,
+                    ));
                 }
+            }
+            // Left goes back to the results once there is no filter text
+            // for it to move through.
+            Message::ChipMove(true) if menu.query.is_empty() || self.view.vim.is_normal() => {
+                return Some(self.close_action_menu());
             }
             Message::Submit => {
                 if let Some(index) = menu.filtered().get(menu.selected).copied() {

@@ -596,6 +596,8 @@ pub(super) struct ViewState {
     pub items_container_id: ContainerId,
     /// Set on the selected list row only, so its bounds can be measured.
     pub selected_row_id: ContainerId,
+    /// Set on the selected row of the action menu shown in the preview pane.
+    pub action_row_id: ContainerId,
     /// The item list is scrolled away from its top. It keeps its offset
     /// across `refresh_ids`, so a reset selection must scroll back to it.
     pub list_scrolled: bool,
@@ -632,6 +634,7 @@ impl ViewState {
             preview_scrollable_id: ScrollableId::unique(),
             items_container_id: ContainerId::unique(),
             selected_row_id: ContainerId::unique(),
+            action_row_id: ContainerId::unique(),
             list_scrolled: false,
             generation: 0,
             current_modifiers: iced::keyboard::Modifiers::empty(),
@@ -662,6 +665,7 @@ impl ViewState {
         self.preview_scrollable_id = ScrollableId::unique();
         self.items_container_id = ContainerId::unique();
         self.selected_row_id = ContainerId::unique();
+        self.action_row_id = ContainerId::unique();
         self.generation = self.generation.wrapping_add(1);
     }
 }
