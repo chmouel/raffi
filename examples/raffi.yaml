@@ -137,7 +137,7 @@ addons:
       # Commands with side effects should check RAFFI_PREVIEW or turn this off.
       # dynamic_preview: false # turn it off for this filter (default: true)
       # cache_seconds: 300     # Optional stale-while-revalidate cache; unset keeps side-effecting scripts uncached
-      # warm_queries: [""]     # Queries the cache daemon warms periodically, in every view
+      # warm_queries: [""]     # Queries the server warms periodically, in every view
       # A script can also print "views" next to "items": Ctrl+Tab then switches
       # between them and passes the picked one in RAFFI_VIEW.
     # action/secondary_action accept two special keywords:
@@ -228,7 +228,7 @@ addons:
     #   action: "xdg-open {value}"
     #   secondary_action: "copy"
     #   cache_seconds: 300          # Show cached rows at once, refresh stale ones in the background
-    #   warm_queries: [""]           # Queries the cache daemon warms while Raffi is closed, in every view
+    #   warm_queries: [""]           # Queries the server warms while Raffi is closed, in every view
     #   warm_interval_seconds: 300   # Defaults to cache_seconds
     # One keyword per repository, the typed text only filters:
     # - name: "Raffi Pull Requests"
@@ -365,7 +365,7 @@ addons:
   # Ctrl+D deletes the selected entry from the history.
   # Previews show the copy time when CopyQ stores it (its "Show Copy Time"
   # command). action and secondary_action accept copy or hypr_paste.
-  # backend: raffi records the history in `raffi --cache-daemon` instead of
+  # backend: raffi records the history in `raffi --server` instead of
   # CopyQ, with copy times and source apps built in. The default, auto, uses
   # that history when the server records it, else CopyQ; the server records
   # under auto unless CopyQ is already running when it starts.
@@ -576,7 +576,7 @@ addons:
   #   message_order: newest_first                 # newest_first | oldest_first
   #   unread_conversations: ["#ops", "@alice"]    # for xoxp- tokens
   #   cache_minutes: 60                           # 0 asks Slack every time
-  #   warm_interval_minutes: 60                   # Cache daemon refresh interval (default: cache_minutes)
+  #   warm_interval_minutes: 60                   # Server refresh interval (default: cache_minutes)
 
   # Unit conversion. Type "10 km to mi", "70f to c" or
   # "5 GB in MB" without any keyword. Enter copies the number, Ctrl+Enter

@@ -1,7 +1,7 @@
-//! F5 and Ctrl+Shift+F5: refresh through the optional cache service.
+//! F5 and Ctrl+Shift+F5: refresh through the optional server.
 //!
-//! Raffi asks a running `raffi --cache-daemon` to re-fetch a source, waits
-//! for it, then reloads the view from the snapshot the service wrote.
+//! Raffi asks a running `raffi --server` to re-fetch a source, waits
+//! for it, then reloads the view from the snapshot the server wrote.
 
 use std::sync::Arc;
 
@@ -16,11 +16,11 @@ use super::types::Message;
 
 #[derive(Debug, Default)]
 pub(super) struct ServerState {
-    /// The running cache service, if the startup probe found one.
+    /// The running server, if the startup probe found one.
     pub info: Option<ServerInfo>,
-    /// The service was started with other addon settings than this Raffi.
+    /// The server was started with other addon settings than this Raffi.
     pub config_differs: bool,
-    /// The refresh waiting for the service.
+    /// The refresh waiting for the server.
     pub pending: Option<Pending>,
     pub token: u64,
     /// Outcome of the last refresh, until the query changes.
@@ -28,7 +28,7 @@ pub(super) struct ServerState {
 }
 
 impl ServerState {
-    /// Whether F5 can be used: a service speaking the waited protocol.
+    /// Whether F5 can be used: a server speaking the waited protocol.
     pub fn ready(&self) -> bool {
         self.info
             .as_ref()
@@ -49,7 +49,7 @@ pub(super) struct Pending {
     target: Option<Target>,
 }
 
-/// The view a refresh reloads once the service is done, with what tells
+/// The view a refresh reloads once the server is done, with what tells
 /// whether it is still shown. Lists are told apart by their session and
 /// view, not their load generation: filtering rebuilds the rows meanwhile.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,7 +69,7 @@ enum Target {
     },
 }
 
-/// A view whose rows the cache service can re-fetch.
+/// A view whose rows the server can re-fetch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Backed {
     Slack,
@@ -84,7 +84,7 @@ pub(super) enum Tone {
     Error,
 }
 
-/// One footer hint about the cache service: an optional key, then a label.
+/// One footer hint about the server: an optional key, then a label.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ServerHint {
     pub key: Option<&'static str>,
@@ -113,7 +113,7 @@ impl LauncherApp {
         Task::none()
     }
 
-    /// The shown view F5 can refresh through the cache service.
+    /// The shown view F5 can refresh through the server.
     pub(super) fn server_backed_view(&self) -> Option<Backed> {
         if self.view.help_active || self.vault.prompt.is_some() || self.clipboard.active {
             return None;
@@ -154,7 +154,7 @@ impl LauncherApp {
         self.server.ready() && self.server_backed_view().is_some()
     }
 
-    /// Footer hints about the cache service. Ctrl+Shift+F5 is left out on
+    /// Footer hints about the server. Ctrl+Shift+F5 is left out on
     /// purpose; the help lists it.
     pub(super) fn server_hints(&self) -> Vec<ServerHint> {
         let mut hints = Vec::new();
@@ -217,7 +217,7 @@ impl LauncherApp {
     }
 
     /// F5 refreshes the shown view, Ctrl+Shift+F5 (`all`) every source the
-    /// service knows, both through the service.
+    /// server knows, both through the server.
     pub(super) fn handle_server_refresh(&mut self, all: bool) -> Task<Message> {
         if !self.server.ready() || self.server.pending.is_some() {
             return Task::none();
@@ -361,7 +361,7 @@ impl LauncherApp {
         }
     }
 
-    /// Show the rows the service just cached for the Slack view.
+    /// Show the rows the server just cached for the Slack view.
     fn reload_slack_snapshot(&mut self, generation: u64) -> Task<Message> {
         super::slack_api::reload_directory();
         let config = &self.addons.slack;
@@ -383,7 +383,7 @@ impl LauncherApp {
         Task::batch([loaded, self.ensure_slack_preview()])
     }
 
-    /// Read the active browser view from the snapshot the service wrote.
+    /// Read the active browser view from the snapshot the server wrote.
     fn reload_browser_history_snapshot(&mut self) -> Task<Message> {
         let Some(group) = self.browser_history.active_group().cloned() else {
             return Task::none();

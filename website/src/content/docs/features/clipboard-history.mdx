@@ -14,7 +14,7 @@ Raffi can record the history itself or use [CopyQ](https://hluk.github.io/CopyQ/
 
 ## Setup
 
-Start `raffi --cache-daemon` to let Raffi record your clipboard. Alternatively,
+Start `raffi --server` to let Raffi record your clipboard. Alternatively,
 install and run CopyQ. Raffi enables the clipboard browser when its backend is
 running at startup.
 
@@ -35,13 +35,13 @@ addons:
 
 ## Choosing a backend
 
-`backend: auto` uses Raffi's history when its daemon is recording, and CopyQ
-otherwise. The daemon records under `auto` unless CopyQ is already running when
-it starts. If CopyQ starts later, Raffi continues recording until the daemon
+`backend: auto` uses Raffi's history when its server is recording, and CopyQ
+otherwise. The server records under `auto` unless CopyQ is already running when
+it starts. If CopyQ starts later, Raffi continues recording until the server
 restarts.
 
 Set `backend: raffi` or `backend: copyq` to choose one explicitly. Restart the
-daemon after changing this setting. If the history is unavailable, start the
+server after changing this setting. If the history is unavailable, start the
 backend and press **Ctrl+R**.
 
 ## Browsing and searching
@@ -65,7 +65,7 @@ and resets when you reopen the browser.
 
 With the Raffi backend, [Tesseract](https://github.com/tesseract-ocr/tesseract)
 can make text in screenshots and other images searchable. Install Tesseract and
-its language data, enable OCR, and restart `raffi --cache-daemon`:
+its language data, enable OCR, and restart `raffi --server`:
 
 ```yaml
 addons:
@@ -85,7 +85,7 @@ the clipboard.
 
 <Image src={clipboardOcrScreenshot} alt="Searching an image by its recognized text" width={800} />
 
-OCR is off by default and works with the Raffi backend. The daemon must be
+OCR is off by default and works with the Raffi backend. The server must be
 running to process the queue. Temporary entries and password-manager copies
 are skipped. OCR text is kept with the image and removed when the image is
 deleted. Exclusion and temporary patterns do not inspect text inside images.
@@ -158,10 +158,10 @@ error codes.
 
 ## Raffi backend
 
-Start the daemon to record clipboard history without CopyQ:
+Start the server to record clipboard history without CopyQ:
 
 ```sh
-raffi --cache-daemon
+raffi --server
 ```
 
 ```yaml
@@ -180,7 +180,7 @@ password entries. It does not import CopyQ history or record the primary
 selection.
 
 The history is stored in `~/.local/share/raffi/clipboard.db`, or under
-`$XDG_DATA_HOME`. Restart the daemon after changing the backend, limits or
+`$XDG_DATA_HOME`. Restart the server after changing the backend, limits or
 capture settings. If you use the supplied systemd service with a custom
 `$XDG_DATA_HOME`, update its writable paths accordingly.
 
@@ -253,7 +253,7 @@ apply. These options require the Raffi backend.
 
 ## Configuration
 
-Settings go under `addons.clipboard`. Restart the daemon after changing capture
+Settings go under `addons.clipboard`. Restart the server after changing capture
 settings.
 
 | Setting | Default | Purpose |
@@ -276,15 +276,15 @@ settings.
 | `close_on_action` | follows `general.close_on_action` | Close after copying |
 
 Exclusion patterns hide existing entries without deleting them. CopyQ continues
-to record them; the Raffi backend skips new matches. Restart the daemon after
+to record them; the Raffi backend skips new matches. Restart the server after
 changing the patterns.
 
 ## Troubleshooting
 
-- **No clipboard history service is running:** start `raffi --cache-daemon` or
+- **No clipboard history server is running:** start `raffi --server` or
   CopyQ, then press **Ctrl+R**.
 - **CopyQ is not installed or running:** install or start CopyQ, then refresh.
-- **Raffi clipboard service is not running:** start the daemon, then refresh.
+- **Raffi clipboard server is not running:** start `raffi --server`, then refresh.
   If its log reports missing data-control support, the compositor cannot provide
   clipboard history to Raffi.
 - **Clipboard history kept changing:** press **Ctrl+R** to retry.

@@ -651,7 +651,7 @@
           "default": null
         },
         "enabled": {
-          "description": "Unset turns it on when the backend is running at startup (a CopyQ\nprocess, or `raffi --cache-daemon` for the `raffi` backend);\n`true` or `false` overrides the detection.",
+          "description": "Unset turns it on when the backend is running at startup (a CopyQ\nprocess, or `raffi --server` for the `raffi` backend);\n`true` or `false` overrides the detection.",
           "type": [
             "boolean",
             "null"
@@ -751,7 +751,7 @@
       "description": "Clipboard manager that stores the history browsed by the clipboard addon",
       "oneOf": [
         {
-          "description": "Raffi's own history when `raffi --cache-daemon` records it, else\nCopyQ when it runs. The cache service records unless CopyQ is\nrunning when it starts.",
+          "description": "Raffi's own history when `raffi --server` records it, else\nCopyQ when it runs. The server records unless CopyQ is\nrunning when it starts.",
           "type": "string",
           "const": "auto"
         },
@@ -761,7 +761,7 @@
           "const": "copyq"
         },
         {
-          "description": "Raffi's own history, recorded by `raffi --cache-daemon`",
+          "description": "Raffi's own history, recorded by `raffi --server`",
           "type": "string",
           "const": "raffi"
         }
@@ -1979,7 +1979,7 @@
           "minimum": 0
         },
         "warm_queries": {
-          "description": "Queries the cache daemon warms periodically, such as `[\"\", \"review\"]`.",
+          "description": "Queries the server warms periodically, such as `[\"\", \"review\"]`.",
           "type": "array",
           "default": [],
           "items": {
@@ -2064,7 +2064,7 @@
           }
         },
         "warm_interval_minutes": {
-          "description": "Minutes between cache-daemon warming runs for the Slack views\n(default: `cache_minutes` when it is above 0).",
+          "description": "Minutes between server warming runs for the Slack views\n(default: `cache_minutes` when it is above 0).",
           "type": [
             "integer",
             "null"

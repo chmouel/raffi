@@ -28,7 +28,7 @@ when a browser has several, its pages are grouped by profile.
 | Ctrl+Enter     | Copy the link                               |
 | Ctrl+Tab       | Switch between browsers                     |
 | Ctrl+R         | Read browser history again                  |
-| F5             | Have `raffi --cache-daemon` read it again   |
+| F5             | Have `raffi --server` read it again   |
 
 <Aside type="note">
 Browser history is only available in native mode. Raffi only reads history:
@@ -169,7 +169,7 @@ How long a parsed snapshot stays reusable. Raffi fingerprints each browser
 database and its `-wal` and `-shm` companions, so it reparses as soon as the
 browser writes a visit, even before the timer expires. The snapshot lives in
 `$XDG_CACHE_HOME/raffi/browser-history/`; `raffi --refresh-cache` removes it.
-With `raffi --cache-daemon`, the snapshot is also warmed while Raffi is
+With `raffi --server`, the snapshot is also warmed while Raffi is
 closed.
 
 **`addons.browser_history.open_with`** `string | list of strings` (default: source browser)

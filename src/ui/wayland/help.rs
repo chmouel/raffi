@@ -473,12 +473,12 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             shortcut(
                 "F5",
                 "Server refresh",
-                "With raffi --cache-daemon: re-fetches Slack, browser history or a cached Script Filter",
+                "With raffi --server: re-fetches Slack, browser history or a cached Script Filter",
             ),
             shortcut(
                 "Ctrl+Shift+F5",
                 "Server refresh all",
-                "With raffi --cache-daemon: re-fetches every source the service caches",
+                "With raffi --server: re-fetches every source the server caches",
             ),
         ]);
     }

@@ -458,7 +458,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for TreeGuides<'_> {
     }
 }
 
-/// F5 refreshes the view through the cache service, Ctrl+Shift+F5 every
+/// F5 refreshes the view through the server, Ctrl+Shift+F5 every
 /// source it knows.
 pub(super) fn server_refresh_message(modifiers: iced::keyboard::Modifiers) -> Option<Message> {
     use iced::keyboard::Modifiers;

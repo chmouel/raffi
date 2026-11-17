@@ -119,7 +119,7 @@ class Session:
         return process
 
     def clipboard_ocr(self, config, env):
-        daemon = self.helper([str(self.binary), "-c", str(config), "--cache-daemon"],
+        daemon = self.helper([str(self.binary), "-c", str(config), "--server"],
                              env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         database = self.home / ".local/share/raffi/clipboard.db"
         deadline = time.monotonic() + 15

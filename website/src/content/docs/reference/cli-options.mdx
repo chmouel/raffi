@@ -265,7 +265,7 @@ Set the default shell interpreter for script entries.
 
 Refresh every local cache.
 
-  Raffi caches icon locations from system directories to speed up subsequent launches. Use this flag to force regeneration of the cache, for example after installing new icon themes. It also removes the private script-filter and browser-history snapshots, the Slack cache and the startup file list, and tells a running cache service to drop its state.
+  Raffi caches icon locations from system directories to speed up subsequent launches. Use this flag to force regeneration of the cache, for example after installing new icon themes. It also removes the private script-filter and browser-history snapshots, the Slack cache and the startup file list, and tells a running server to drop its state.
 
   ```bash
   raffi -r
@@ -274,46 +274,49 @@ Refresh every local cache.
   Caches live under `$XDG_CACHE_HOME/raffi/` (defaults to `~/.cache/raffi/`).
 
 
-**`--cache-daemon`** `boolean` (default: `false`)
+**`--server`** `boolean` (default: `false`)
 
-Run the optional background cache service in the foreground. It warms the
+Run the optional background server in the foreground. It warms the
 script filters, Slack views and browser history you opted into, records the
 clipboard for the [`raffi` clipboard backend](../../features/clipboard-history/#raffi-backend)
 (under the default `auto` backend, only when CopyQ is not running as it starts),
 and serves requests over `$XDG_RUNTIME_DIR/raffi/cache.sock`. Raffi never starts it
 behind your back: run it from a terminal or a user service such as
-`misc/systemd/raffi-cache.service`.
+`misc/systemd/raffi-server.service`.
 
   ```bash
-  raffi --cache-daemon
+  raffi --server
   ```
 
-  Without the service, Raffi still reads and writes the same private
+  `--cache-daemon` is accepted as an alias, so service units written before
+the rename keep working.
+
+  Without the server, Raffi still reads and writes the same private
   snapshots directly, so cached rows still show immediately; only the
   periodic warming while Raffi is closed is lost.
 
-  The service also keeps Raffi's own startup files in memory. Each time the
+  The server also keeps Raffi's own startup files in memory. Each time the
   window opens, Raffi notes the files it needed to start (the binary, the
   graphics libraries, fonts, config and caches) in
-  `~/.cache/raffi/hot-files.json`. Every few minutes the service reads them
+  `~/.cache/raffi/hot-files.json`. Every few minutes the server reads them
   back, so the kernel does not evict them, and a launch after a long idle
   stays as fast as a warm one. When the files are already cached, a pass
   costs a few tens of milliseconds.
 
-  When Raffi opens and finds the service running, the footer shows
+  When Raffi opens and finds the server running, the footer shows
   `server`. On a Slack view, browser history or a Script Filter with
   `cache_seconds`, it shows `F5 server refresh` instead: F5 asks the
-  service to fetch that source again, waits for it, and reloads the list
+  server to fetch that source again, waits for it, and reloads the list
   from the new snapshot. Ctrl+Shift+F5 does the same for every source the
-  service caches, from any view, and has no footer hint.
+  server caches, from any view, and has no footer hint.
 
-  The footer warns `server config differs, restart it` when the service
+  The footer warns `server config differs, restart it` when the server
   was started with a different addons configuration, and
   `server outdated, restart it` when it comes from an older Raffi. F5 is
-  disabled in the second case. If the service stops while Raffi is open,
+  disabled in the second case. If the server stops while Raffi is open,
   F5 shows `server not reachable`.
 
-  The service prints a line to its output each time F5 or Ctrl+Shift+F5
+  The server prints a line to its output each time F5 or Ctrl+Shift+F5
   asks for a refresh, then another with how long it took or why it failed:
 
   ```text
@@ -373,7 +376,7 @@ metadata includes OCR status, text, language and any error.
 
 **`copy REF`**
 
-Copy an entry with its formats. The Raffi backend needs `raffi --cache-daemon`
+Copy an entry with its formats. The Raffi backend needs `raffi --server`
 running.
 
 **`set [--mime TYPE] [--source APP] [--temporary] [--expire DURATION] [--secret] [--json] [TEXT...]`**
@@ -389,7 +392,7 @@ clipboard managers. Exclusion patterns still apply. These options and `--source`
 require the Raffi backend; CopyQ does not return the recorded ID.
 
 `--json` reports the ID, whether the entry was recorded, and its expiry. The
-Raffi backend needs the cache daemon running for `set`.
+Raffi backend needs the server running for `set`.
 
 **`delete REF...`**
 
@@ -408,7 +411,7 @@ while the recorder is stopped.
 The commands exit with 0 on success, 1 on an error and 2 for usage errors.
 With `--json`, errors are JSON objects on standard error with `error`
 and `code` fields. Codes include `not_found`, `ambiguous_ref`, `invalid_ref`,
-`index_not_allowed`, `no_backend`, `recorder_not_running`, `daemon_outdated`,
+`index_not_allowed`, `no_backend`, `recorder_not_running`, `server_outdated`,
 `unsupported`, `too_large`, `no_history`, `io`, `invalid_argument` and `other`.
 
 ## Examples

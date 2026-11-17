@@ -3383,7 +3383,7 @@ struct CachedPreview {
     /// Message order the bodies were built in.
     #[serde(default)]
     newest_first: bool,
-    /// Row identity, so the cache daemon can refresh this preview later.
+    /// Row identity, so the server can refresh this preview later.
     #[serde(default)]
     identity: Option<String>,
 }
@@ -3534,7 +3534,7 @@ fn message_users(list: &[Value]) -> Vec<String> {
     ids
 }
 
-/// Refresh the most recently viewed cached previews, bounded so a daemon run
+/// Refresh the most recently viewed cached previews, bounded so a server run
 /// does not hammer the Slack API. Blocking.
 pub(super) fn warm_cached_previews(
     config: &crate::SlackAddonConfig,

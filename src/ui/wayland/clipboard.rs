@@ -340,21 +340,21 @@ struct SelectReply {
 }
 
 /// Shown when `backend: auto` finds no clipboard manager running.
-pub(crate) const NO_BACKEND: &str = "No clipboard history service is running: start \
-     `raffi --cache-daemon` or CopyQ, or set addons.clipboard.backend";
+pub(crate) const NO_BACKEND: &str = "No clipboard history server is running: start \
+     `raffi --server` or CopyQ, or set addons.clipboard.backend";
 
 /// The clipboard manager holding the history, from `addons.clipboard.backend`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum History {
     CopyQ(CopyQ),
-    /// History recorded by `raffi --cache-daemon`: read from its database,
-    /// put back on the clipboard through the service.
+    /// History recorded by `raffi --server`: read from its database,
+    /// put back on the clipboard through the server.
     Raffi,
     /// Whichever of the two runs, looked up on first use.
     Auto,
 }
 
-/// The backend `auto` stands for: Raffi's own history when the cache service
+/// The backend `auto` stands for: Raffi's own history when the server
 /// records it, else CopyQ when it runs.
 fn pick_backend(
     raffi_recording: impl FnOnce() -> bool,
@@ -369,7 +369,7 @@ fn pick_backend(
     }
 }
 
-/// `pick_backend` against the running services, kept for the rest of the
+/// `pick_backend` against the running servers, kept for the rest of the
 /// process once found so the ids listed by one backend are never sent to
 /// the other. Never looks outside the process in tests.
 fn detect_backend() -> Result<History, String> {
@@ -414,7 +414,7 @@ impl History {
                     }
                     if crate::ui::is_tty(libc::STDERR_FILENO) {
                         eprintln!(
-                            "raffi: no clipboard service is running, reading the history \
+                            "raffi: no clipboard server is running, reading the history \
                              Raffi recorded"
                         );
                     }

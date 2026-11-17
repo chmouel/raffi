@@ -863,7 +863,7 @@ pub(super) struct LauncherApp {
     pub command_list: super::command_list::CommandListState,
     pub vault: super::vault::VaultState,
     pub slack: super::slack_mode::SlackState,
-    /// The optional cache service and F5 refreshes through it.
+    /// The optional server and F5 refreshes through it.
     pub server: super::server_refresh::ServerState,
     pub bookmarks: super::bookmarks::BookmarksState,
     pub browser_history: super::browser_history::BrowserHistoryState,

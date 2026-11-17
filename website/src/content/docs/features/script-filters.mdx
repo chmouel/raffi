@@ -66,12 +66,12 @@ addons:
 ```
 
 `warm_queries` are run periodically by
-[`raffi --cache-daemon`](../../reference/cli-options/#cache-management),
+[`raffi --server`](../../reference/cli-options/#cache-management),
 in every [view](#views) the script offers, so these queries are already
 fresh when Raffi opens. `warm_interval_seconds`
 defaults to `cache_seconds`. Pressing Ctrl+R runs the script again with
 `RAFFI_REFRESH=1` in its environment, which the bundled GitHub script uses to
-bypass the `gh` CLI cache and fetch live state. When the cache service is
+bypass the `gh` CLI cache and fetch live state. When the server is
 running, F5 asks it to do the same refresh and Raffi reads the new snapshot
 it writes.
 
@@ -702,7 +702,7 @@ runs get them too. Switching back to the view it opened on runs the command
 without `RAFFI_VIEW` again, and each time you enter the filter it starts
 there.
 
-Every view is cached under its own key, and the cache service warms each
+Every view is cached under its own key, and the server warms each
 `warm_queries` entry in every view. A script that prints no `views` works as
 before, and Raffi versions without views ignore the extra fields.
 

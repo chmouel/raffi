@@ -698,12 +698,12 @@ pub(crate) enum Message {
     ClipboardToggleOcrText,
     /// Copy the recognized text of the selected image.
     ClipboardCopyOcrText,
-    /// The startup probe of the cache service answered, or not.
+    /// The startup probe of the server answered, or not.
     CacheServerStatus(Option<super::cache::ServerInfo>),
     /// F5, or Ctrl+Shift+F5 to refresh every source: refresh through the
-    /// cache service.
+    /// server.
     ServerRefresh(bool),
-    /// The cache service finished the refresh with this token.
+    /// The server finished the refresh with this token.
     ServerRefreshDone(u64, std::result::Result<(), super::cache::CallError>),
     /// Browser history read again after a server refresh: list session, group key.
     ServerHistoryReloaded(

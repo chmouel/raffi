@@ -615,7 +615,7 @@ pub struct ScriptFilterConfig {
     /// scripts never run from or through the cache.
     #[serde(default)]
     pub cache_seconds: Option<u64>,
-    /// Queries the cache daemon warms periodically, such as `["", "review"]`.
+    /// Queries the server warms periodically, such as `["", "review"]`.
     #[serde(default)]
     pub warm_queries: Vec<String>,
     /// Seconds between background warming runs for `warm_queries` (default:
@@ -710,14 +710,14 @@ pub struct TextSnippetSourceConfig {
 #[derive(Deserialize, JsonSchema, Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ClipboardBackend {
-    /// Raffi's own history when `raffi --cache-daemon` records it, else
-    /// CopyQ when it runs. The cache service records unless CopyQ is
+    /// Raffi's own history when `raffi --server` records it, else
+    /// CopyQ when it runs. The server records unless CopyQ is
     /// running when it starts.
     #[default]
     Auto,
     /// CopyQ, through its command line scripting API
     Copyq,
-    /// Raffi's own history, recorded by `raffi --cache-daemon`
+    /// Raffi's own history, recorded by `raffi --server`
     Raffi,
 }
 
@@ -737,7 +737,7 @@ pub enum ClipboardAction {
 #[schemars(deny_unknown_fields)]
 pub struct ClipboardAddonConfig {
     /// Unset turns it on when the backend is running at startup (a CopyQ
-    /// process, or `raffi --cache-daemon` for the `raffi` backend);
+    /// process, or `raffi --server` for the `raffi` backend);
     /// `true` or `false` overrides the detection.
     #[serde(default)]
     pub enabled: Option<bool>,
@@ -1851,7 +1851,7 @@ pub struct SlackAddonConfig {
     /// fresh ones load.
     #[serde(default)]
     pub cache_minutes: Option<u64>,
-    /// Minutes between cache-daemon warming runs for the Slack views
+    /// Minutes between server warming runs for the Slack views
     /// (default: `cache_minutes` when it is above 0).
     #[serde(default)]
     pub warm_interval_minutes: Option<u64>,
@@ -1875,7 +1875,7 @@ impl SlackAddonConfig {
             .unwrap_or(std::time::Duration::from_secs(60 * 60))
     }
 
-    /// Interval between cache-daemon warming runs, if the addon is enabled.
+    /// Interval between server warming runs, if the addon is enabled.
     /// Unset follows `cache_minutes`, whose own default is 60 minutes.
     pub fn warm_interval(&self) -> Option<std::time::Duration> {
         let minutes = self
@@ -2531,12 +2531,22 @@ pub struct Args {
         no_short
     )]
     pub force: bool,
-    #[options(help = "run the background cache service in the foreground", no_short)]
+    #[options(help = "run the raffi server in the foreground", no_short)]
+    pub server: bool,
+    #[options(help = "alias for --server, kept for existing service units", no_short)]
     pub cache_daemon: bool,
     #[options(help = "start with vim keybindings in normal mode", no_short)]
     pub vim_mode: bool,
     #[options(command)]
     pub command: Option<Subcommand>,
+}
+
+impl Args {
+    /// Whether to run the server: `--server`, with `--cache-daemon` kept
+    /// as an alias so existing service units keep working.
+    pub fn wants_server(&self) -> bool {
+        self.server || self.cache_daemon
+    }
 }
 
 /// Subcommand to run instead of opening the launcher.
@@ -5918,8 +5928,8 @@ pub fn run(args: Args) -> Result<()> {
     }
 
     #[cfg(not(feature = "wayland"))]
-    if args.cache_daemon {
-        anyhow::bail!("--cache-daemon requires the native UI build (the wayland feature)");
+    if args.wants_server() {
+        anyhow::bail!("--server requires the native UI build (the wayland feature)");
     }
 
     if args.version {
@@ -6013,8 +6023,8 @@ pub fn run(args: Args) -> Result<()> {
     }
 
     #[cfg(feature = "wayland")]
-    if args.cache_daemon {
-        return ui::run_cache_daemon(load_config(&args, configfile)?);
+    if args.wants_server() {
+        return ui::run_server(load_config(&args, configfile)?);
     }
 
     let session = load_session(&args, configfile)?;
@@ -6678,6 +6688,7 @@ launchers:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            server: false,
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
@@ -6765,6 +6776,7 @@ launchers:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            server: false,
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
@@ -6918,6 +6930,7 @@ launchers:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            server: false,
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
@@ -7078,6 +7091,7 @@ launchers:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            server: false,
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
@@ -7182,6 +7196,7 @@ launchers:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            server: false,
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
@@ -7387,6 +7402,7 @@ launchers:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            server: false,
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
@@ -7433,6 +7449,7 @@ launchers:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            server: false,
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
@@ -7515,6 +7532,7 @@ launchers:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            server: false,
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
@@ -7563,6 +7581,7 @@ launchers:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            server: false,
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
@@ -7607,6 +7626,7 @@ launchers:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            server: false,
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
@@ -7905,6 +7925,7 @@ launchers:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            server: false,
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
@@ -7978,6 +7999,7 @@ launchers:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            server: false,
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
@@ -8063,6 +8085,7 @@ launchers:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            server: false,
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
@@ -8111,6 +8134,7 @@ launchers:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            server: false,
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
@@ -8163,6 +8187,7 @@ launchers:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            server: false,
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
@@ -8211,6 +8236,7 @@ launchers:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            server: false,
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
@@ -8262,6 +8288,7 @@ launchers:
                 uninstall_browser_host: false,
                 force: false,
                 keep_open: false,
+                server: false,
                 cache_daemon: false,
                 options: Vec::new(),
                 vim_mode: false,
@@ -8704,6 +8731,7 @@ shell:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            server: false,
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
@@ -8758,6 +8786,7 @@ shell:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            server: false,
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
@@ -8811,6 +8840,7 @@ shell:
             uninstall_browser_host: false,
             force: false,
             keep_open: false,
+            server: false,
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,

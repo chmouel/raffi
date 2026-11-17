@@ -1,9 +1,9 @@
 //! Clipboard history recorded by Raffi itself, for the `raffi` clipboard
 //! backend.
 //!
-//! `raffi --cache-daemon` watches the clipboard (see `clipboard_watch`) and
+//! `raffi --server` watches the clipboard (see `clipboard_watch`) and
 //! writes every new selection here. The UI lists, previews and deletes
-//! entries straight from the database and asks the daemon to put one back on
+//! entries straight from the database and asks the server to put one back on
 //! the clipboard, since only a running process can own the selection.
 //!
 //! Each entry keeps the formats it was copied with as raw bytes, so pasting
@@ -237,7 +237,7 @@ fn db_error(error: rusqlite::Error) -> String {
 /// deadline and are kept as they are. Version 3 added `items.search`, filled
 /// in for the existing rows.
 ///
-/// The daemon's threads open the database at the same time, so the checks
+/// The server's threads open the database at the same time, so the checks
 /// and changes run in one write transaction: whoever comes second waits and
 /// then finds the schema current.
 /// Switch to WAL mode. SQLite reports BUSY for the switch of a database that

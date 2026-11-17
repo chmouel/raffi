@@ -214,13 +214,17 @@ fn is_copyq(args: &[String]) -> bool {
     matches!(parse_cmdline(args), Some(Backend::CopyQ))
 }
 
-fn is_raffi_daemon(args: &[String]) -> bool {
+/// Whether the command line starts the cache server: `--server`, or the older
+/// `--cache-daemon` an existing service unit still passes.
+fn is_raffi_server(args: &[String]) -> bool {
     args.first().map(|arg| basename(arg)) == Some("raffi")
-        && args.iter().any(|arg| arg == "--cache-daemon")
+        && args
+            .iter()
+            .any(|arg| arg == "--server" || arg == "--cache-daemon")
 }
 
 /// Turn the clipboard addon on when its setting is unset and its backend is
-/// running: CopyQ, `raffi --cache-daemon` for the `raffi` backend, either of
+/// running: CopyQ, `raffi --server` for the `raffi` backend, either of
 /// them for `auto`.
 pub(crate) fn resolve_clipboard_addon(
     config: &mut crate::ClipboardAddonConfig,
@@ -229,17 +233,17 @@ pub(crate) fn resolve_clipboard_addon(
     if config.enabled.is_none() {
         let running = |args: &Vec<String>| match config.backend {
             crate::ClipboardBackend::Copyq => is_copyq(args),
-            crate::ClipboardBackend::Raffi => is_raffi_daemon(args),
-            crate::ClipboardBackend::Auto => is_copyq(args) || is_raffi_daemon(args),
+            crate::ClipboardBackend::Raffi => is_raffi_server(args),
+            crate::ClipboardBackend::Auto => is_copyq(args) || is_raffi_server(args),
         };
         config.enabled = Some(cmdlines().iter().any(running));
     }
 }
 
-/// Whether `raffi --cache-daemon` records the clipboard: always for the
+/// Whether `raffi --server` records the clipboard: always for the
 /// `raffi` backend, for `auto` only when CopyQ is not already running, so
 /// two managers do not both keep a history.
-pub(super) fn daemon_records(
+pub(super) fn server_records(
     backend: crate::ClipboardBackend,
     cmdlines: impl FnOnce() -> Vec<Vec<String>>,
 ) -> bool {
@@ -534,9 +538,11 @@ mod tests {
             resolve_clipboard_addon(&mut config, || running);
             config.enabled
         };
+        assert_eq!(raffi(vec![cmd("/usr/bin/raffi --server")]), Some(true));
         assert_eq!(
             raffi(vec![cmd("/usr/bin/raffi --cache-daemon")]),
-            Some(true)
+            Some(true),
+            "the older flag still starts the same server"
         );
         assert_eq!(raffi(vec![cmd("copyq"), cmd("raffi")]), Some(false));
 
@@ -547,7 +553,7 @@ mod tests {
             config.enabled
         };
         assert_eq!(auto(vec![cmd("copyq")]), Some(true));
-        assert_eq!(auto(vec![cmd("raffi --cache-daemon")]), Some(true));
+        assert_eq!(auto(vec![cmd("raffi --server")]), Some(true));
         assert_eq!(
             auto(vec![cmd("wl-paste --watch cliphist store")]),
             Some(false)
@@ -555,14 +561,14 @@ mod tests {
     }
 
     #[test]
-    fn test_the_cache_daemon_records_unless_copyq_runs_under_auto() {
+    fn test_the_server_records_unless_copyq_runs_under_auto() {
         use crate::ClipboardBackend::{Auto, Copyq, Raffi};
         let copyq = || vec![cmd("copyq --start-server")];
         let nothing = Vec::new;
-        assert!(daemon_records(Raffi, copyq));
-        assert!(!daemon_records(Copyq, nothing));
-        assert!(daemon_records(Auto, nothing));
-        assert!(!daemon_records(Auto, copyq));
+        assert!(server_records(Raffi, copyq));
+        assert!(!server_records(Copyq, nothing));
+        assert!(server_records(Auto, nothing));
+        assert!(!server_records(Auto, copyq));
         assert!(copyq_running(copyq));
         assert!(!copyq_running(nothing));
     }

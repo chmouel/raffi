@@ -109,13 +109,13 @@ pub(crate) enum Code {
     InvalidRef,
     /// The command only takes ids, not the position of a listing.
     IndexNotAllowed,
-    /// No clipboard history service is running.
+    /// No clipboard history server is running.
     NoBackend,
-    /// The backend needs `raffi --cache-daemon`, which is not answering.
+    /// The backend needs `raffi --server`, which is not answering.
     RecorderNotRunning,
-    /// The running service is from an older Raffi and cannot set the
+    /// The running server is from an older Raffi and cannot set the
     /// clipboard.
-    DaemonOutdated,
+    ServerOutdated,
     /// The backend does not do this, or refuses in this situation.
     Unsupported,
     /// The content is larger than the limit of its type.
@@ -139,7 +139,7 @@ impl Code {
             Self::IndexNotAllowed => "index_not_allowed",
             Self::NoBackend => "no_backend",
             Self::RecorderNotRunning => "recorder_not_running",
-            Self::DaemonOutdated => "daemon_outdated",
+            Self::ServerOutdated => "server_outdated",
             Self::Unsupported => "unsupported",
             Self::TooLarge => "too_large",
             Self::NoHistory => "no_history",
@@ -230,12 +230,12 @@ impl From<String> for Error {
     }
 }
 
-/// A failed `clipboard set` keeps the code the service gave it.
+/// A failed `clipboard set` keeps the code the server gave it.
 impl From<super::cache::SetFailure> for Error {
     fn from(failure: super::cache::SetFailure) -> Self {
         use super::cache::{ErrorCode, SetFailure};
         let code = match &failure {
-            SetFailure::DaemonOutdated(_) => Code::DaemonOutdated,
+            SetFailure::ServerOutdated(_) => Code::ServerOutdated,
             SetFailure::NotRunning => Code::RecorderNotRunning,
             SetFailure::Failed(Some(ErrorCode::TooLarge), _) => Code::TooLarge,
             SetFailure::Failed(Some(ErrorCode::InvalidArgument), _) => Code::InvalidArgument,
@@ -1990,7 +1990,7 @@ fn confirm(prompt: &str, io: Io) -> Result<(), Error> {
 }
 
 fn status(run: &mut Run, args: &ClipboardStatusArgs) -> Result<Output, Error> {
-    // Only a running cache service speaks the daemon protocol, so only the
+    // Only a running server speaks the server protocol, so only the
     // raffi backend can report a revision.
     let (recorder, protocol) = match &run.clips {
         Clips::Raffi(_) => match super::cache::clipboard_report() {
@@ -2060,9 +2060,9 @@ struct Status {
     backend: &'static str,
     /// The `addons.clipboard.backend` setting that chose it.
     configured: &'static str,
-    /// Whether a service records the clipboard for that backend.
+    /// Whether a server records the clipboard for that backend.
     recorder: bool,
-    /// Revision of the daemon protocol, when a cache service answers it.
+    /// Revision of the server protocol, when a server answers it.
     protocol: Option<u32>,
     /// Path of the raffi database, absent for CopyQ.
     database: Option<String>,
@@ -2094,13 +2094,13 @@ impl From<clipboard_store::Limits> for LimitsReport {
 }
 
 fn status_text(status: &Status) -> String {
-    let service = if status.backend == "raffi" {
-        "raffi --cache-daemon"
+    let server = if status.backend == "raffi" {
+        "raffi --server"
     } else {
         "copyq"
     };
     let recorder = if status.recorder {
-        format!("running ({service})")
+        format!("running ({server})")
     } else {
         "not running".to_string()
     };
@@ -3438,7 +3438,7 @@ mod tests {
         let lines: Vec<&str> = text.lines().collect();
         assert!(lines[0].starts_with("Backend     raffi (auto)"), "{text}");
         assert!(
-            lines[1].starts_with("Recorder    running (raffi --cache-daemon)"),
+            lines[1].starts_with("Recorder    running (raffi --server)"),
             "{text}"
         );
         assert!(
@@ -3641,13 +3641,13 @@ mod tests {
 
     #[test]
     fn test_set_needs_the_clipboard_service() {
-        let (store, dir) = temp_store("set-service");
+        let (store, dir) = temp_store("set-server");
         let settings = settings(3, Vec::new());
         let mut run = run(store, &settings);
         let error = set(&mut run, &set_args(&["hello"], None), &mut &b""[..])
             .unwrap_err()
             .message;
-        assert!(error.contains("raffi --cache-daemon"), "{error}");
+        assert!(error.contains("raffi --server"), "{error}");
         drop(run);
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -3933,7 +3933,7 @@ mod tests {
                 Code::IndexNotAllowed,
                 Code::NoBackend,
                 Code::RecorderNotRunning,
-                Code::DaemonOutdated,
+                Code::ServerOutdated,
                 Code::Unsupported,
                 Code::TooLarge,
                 Code::NoHistory,
@@ -3951,7 +3951,7 @@ mod tests {
                 "index_not_allowed",
                 "no_backend",
                 "recorder_not_running",
-                "daemon_outdated",
+                "server_outdated",
                 "unsupported",
                 "too_large",
                 "no_history",
@@ -3966,7 +3966,7 @@ mod tests {
     fn test_a_failed_service_call_keeps_the_code_it_gave() {
         use super::super::cache::{ErrorCode, SetFailure};
         let cases = [
-            (SetFailure::DaemonOutdated(3), Code::DaemonOutdated),
+            (SetFailure::ServerOutdated(3), Code::ServerOutdated),
             (SetFailure::NotRunning, Code::RecorderNotRunning),
             (
                 SetFailure::Failed(Some(ErrorCode::TooLarge), "too large: x".into()),
@@ -3999,9 +3999,9 @@ mod tests {
         for (failure, expected) in cases {
             assert_eq!(Error::from(failure).code, expected);
         }
-        // The message an older service gives still explains itself.
-        let outdated = Error::from(SetFailure::DaemonOutdated(3));
-        assert!(outdated.message.contains("restart `raffi --cache-daemon`"));
+        // The message an older server gives still explains itself.
+        let outdated = Error::from(SetFailure::ServerOutdated(3));
+        assert!(outdated.message.contains("restart `raffi --server`"));
         assert!(
             outdated.message.contains("protocol 3"),
             "{}",

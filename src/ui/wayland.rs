@@ -395,12 +395,12 @@ fn run_wayland_ui(
     launch.finish()
 }
 
-/// Run the optional background cache service.
-pub(crate) fn run_cache_daemon(config: crate::ParsedConfig) -> Result<()> {
-    self::cache::run(config)
+/// Run the optional background server.
+pub(crate) fn run_server(config: crate::ParsedConfig) -> Result<()> {
+    self::cache::run_server(config)
 }
 
-/// Clear every wayland-side disk cache and ask a running daemon to clear its state.
+/// Clear every wayland-side disk cache and ask a running server to clear its state.
 pub(crate) fn clear_wayland_caches() {
     clear_slack_cache();
     self::cache::notify_clear();

@@ -1,7 +1,7 @@
-//! Private snapshot caches and the optional background cache service.
+//! Private snapshot caches and the optional background server.
 //!
 //! Snapshots are versioned JSON files under `$XDG_CACHE_HOME/raffi`, written
-//! atomically with private permissions. The service speaks newline-delimited
+//! atomically with private permissions. The server speaks newline-delimited
 //! JSON over a Unix socket; when it is absent the UI reads and writes the same
 //! files directly.
 
@@ -29,15 +29,15 @@ const SNAPSHOT_VERSION: u32 = 1;
 const MAX_STALE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const LIST_KEEP: usize = 200;
 const PREVIEW_KEEP: usize = 200;
-const DAEMON_CLIENT_TIMEOUT: Duration = Duration::from_millis(100);
+const SERVER_CLIENT_TIMEOUT: Duration = Duration::from_millis(100);
 const PROBE_TIMEOUT: Duration = Duration::from_millis(500);
 /// Waited refreshes run Slack and script filters, which can be slow.
 const WAIT_TIMEOUT: Duration = Duration::from_secs(120);
 const CLIPBOARD_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const CLIPBOARD_NOT_RUNNING: &str =
-    "Raffi clipboard service is not running: start `raffi --cache-daemon`";
+    "Raffi clipboard server is not running: start `raffi --server`";
 const WARM_TICK: Duration = Duration::from_secs(30);
-/// Protocol revision reported by `Status`; daemons from before it existed
+/// Protocol revision reported by `Status`; servers from before it existed
 /// report 0 and ignore `wait`. Revision 2 adds `clipboard_select`, revision
 /// 3 the `clipboard` status flag, revision 4 `clipboard_set`, revision 5 its
 /// `expires_in`.
@@ -45,9 +45,9 @@ pub(crate) const PROTOCOL: u32 = 5;
 /// Upper bound on the formats one `clipboard set` request may carry.
 const MAX_SET_FORMATS: usize = 32;
 /// Largest single format a request may carry, whatever the configured image
-/// limit: the service has to bound the line it reads before decoding it.
+/// limit: the server has to bound the line it reads before decoding it.
 const MAX_SET_FORMAT_BYTES: u64 = 64 * 1024 * 1024;
-/// Longest request line the service reads: one format at
+/// Longest request line the server reads: one format at
 /// [`MAX_SET_FORMAT_BYTES`], base64-encoded, with the MIME names and the JSON
 /// framing of [`MAX_SET_FORMATS`] formats around it.
 const MAX_REQUEST_LINE: usize =
@@ -97,7 +97,7 @@ pub(crate) struct SourceStatus {
     pub error: Option<String>,
 }
 
-/// Requests accepted by the cache service.
+/// Requests accepted by the server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum Request {
@@ -139,7 +139,7 @@ pub(crate) enum Request {
         id: String,
     },
     /// Put new content on the clipboard, recording it first when the policy
-    /// allows. The command exits, so the service has to own the selection.
+    /// allows. The command exits, so the server has to own the selection.
     ClipboardSet {
         formats: Vec<SetFormat>,
         /// Record the entry as a temporary one.
@@ -167,7 +167,7 @@ pub(crate) struct SetFormat {
     pub data: String,
 }
 
-/// Replies sent by the cache service.
+/// Replies sent by the server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum Response {
@@ -178,7 +178,7 @@ pub(crate) enum Response {
         sources: Vec<SourceStatus>,
         #[serde(default)]
         protocol: u32,
-        /// The service records the clipboard history.
+        /// The server records the clipboard history.
         #[serde(default)]
         clipboard: bool,
     },
@@ -216,7 +216,7 @@ pub(crate) enum ErrorCode {
     TooLarge,
     /// The request, or a MIME type in it, does not make sense.
     InvalidArgument,
-    /// The service does not record the clipboard.
+    /// The server does not record the clipboard.
     NotRecording,
     /// The entry left the history.
     NotFound,
@@ -264,14 +264,14 @@ impl Failure {
     }
 }
 
-pub(crate) struct DaemonState {
+pub(crate) struct ServerState {
     pub config_digest: String,
     pub addons: AddonsConfig,
     status: Mutex<HashMap<String, SourceStatus>>,
     inflight: Mutex<HashSet<String>>,
 }
 
-impl DaemonState {
+impl ServerState {
     pub fn new(addons: AddonsConfig) -> Self {
         Self {
             config_digest: addons_digest(&addons),
@@ -355,8 +355,8 @@ pub(crate) fn config_digest<T: Serialize>(value: &T) -> String {
         .unwrap_or_else(|_| stable_hash("unserializable"))
 }
 
-/// Digest of the addon settings the cache service acts on, so the UI can
-/// tell when a running service was started with another configuration.
+/// Digest of the addon settings the server acts on, so the UI can
+/// tell when a running server was started with another configuration.
 pub(crate) fn addons_digest(addons: &AddonsConfig) -> String {
     let script_filters = config_digest(&addons.script_filters);
     let browser_history = config_digest(&addons.browser_history);
@@ -597,22 +597,22 @@ pub(crate) fn clear_snapshots() {
     }
 }
 
-/// Ask a running daemon to clear its state and snapshots. Best effort.
+/// Ask a running server to clear its state and snapshots. Best effort.
 pub(crate) fn notify_clear() {
-    let _ = try_request(&Request::Clear, DAEMON_CLIENT_TIMEOUT);
+    let _ = try_request(&Request::Clear, SERVER_CLIENT_TIMEOUT);
 }
 
-/// Best-effort request to a daemon; a missing or slow daemon is ignored.
+/// Best-effort request to a server; a missing or slow server is ignored.
 pub(crate) fn try_request(request: &Request, timeout: Duration) -> Option<Response> {
     call(request, timeout).ok()
 }
 
-/// Why a request to the cache service got no usable answer.
+/// Why a request to the server got no usable answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CallError {
-    /// No service listens on the socket.
+    /// No server listens on the socket.
     Unreachable,
-    /// The service failed the request, or did not answer in time.
+    /// The server failed the request, or did not answer in time.
     Failed(String),
 }
 
@@ -637,14 +637,14 @@ fn call(request: &Request, timeout: Duration) -> Result<Response, CallError> {
     serde_json::from_str(&reply).map_err(|error| CallError::Failed(error.to_string()))
 }
 
-/// What the UI needs to know about a running cache service.
+/// What the UI needs to know about a running server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ServerInfo {
     pub protocol: u32,
     pub config_digest: String,
 }
 
-/// Ask whether a cache service is running. Blocking: run it off the UI thread.
+/// Ask whether a server is running. Blocking: run it off the UI thread.
 pub(crate) fn probe() -> Option<ServerInfo> {
     match try_request(&Request::Status, PROBE_TIMEOUT)? {
         Response::Status {
@@ -659,7 +659,7 @@ pub(crate) fn probe() -> Option<ServerInfo> {
     }
 }
 
-/// Ask the cache service to put the `raffi` backend clipboard entry `id`
+/// Ask the server to put the `raffi` backend clipboard entry `id`
 /// back on the clipboard. Blocking: run it off the UI thread.
 pub(crate) fn clipboard_select(id: &str) -> Result<(), String> {
     match call(
@@ -673,13 +673,13 @@ pub(crate) fn clipboard_select(id: &str) -> Result<(), String> {
     }
 }
 
-/// Whether a running cache service records the clipboard history.
+/// Whether a running server records the clipboard history.
 /// Blocking: run it off the UI thread.
 pub(crate) fn clipboard_recording() -> bool {
     clipboard_report().is_some_and(|(recording, _)| recording)
 }
 
-/// Whether a running cache service records the clipboard history, and the
+/// Whether a running server records the clipboard history, and the
 /// protocol revision it speaks. Blocking: run it off the UI thread.
 pub(crate) fn clipboard_report() -> Option<(bool, u32)> {
     match try_request(&Request::Status, PROBE_TIMEOUT)? {
@@ -705,21 +705,21 @@ pub(crate) struct SetOutcome {
 /// code a script branches on instead of reading the message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SetFailure {
-    /// The service speaks an older protocol and cannot set the clipboard.
-    DaemonOutdated(u32),
-    /// No service listens on the socket.
+    /// The server speaks an older protocol and cannot set the clipboard.
+    ServerOutdated(u32),
+    /// No server listens on the socket.
     NotRunning,
-    /// The service, or the socket, failed: its code when it gave one.
+    /// The server, or the socket, failed: its code when it gave one.
     Failed(Option<ErrorCode>, String),
 }
 
 impl std::fmt::Display for SetFailure {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::DaemonOutdated(protocol) => write!(
+            Self::ServerOutdated(protocol) => write!(
                 formatter,
-                "the running Raffi service is from an older Raffi and cannot set the \
-                 clipboard; restart `raffi --cache-daemon` (it speaks protocol \
+                "the running Raffi server is from an older Raffi and cannot set the \
+                 clipboard; restart `raffi --server` (it speaks protocol \
                  {protocol}, this raffi {PROTOCOL})"
             ),
             Self::NotRunning => formatter.write_str(CLIPBOARD_NOT_RUNNING),
@@ -728,7 +728,7 @@ impl std::fmt::Display for SetFailure {
     }
 }
 
-/// Ask the cache service to put `formats` on the clipboard. The service
+/// Ask the server to put `formats` on the clipboard. The server
 /// records them in the history first when its policy allows, and owns the
 /// selection afterwards, since this process exits. Blocking: run it off the
 /// UI thread.
@@ -741,7 +741,7 @@ pub(crate) fn clipboard_set(
 ) -> Result<SetOutcome, SetFailure> {
     match probe() {
         Some(info) if info.protocol < PROTOCOL => {
-            return Err(SetFailure::DaemonOutdated(info.protocol))
+            return Err(SetFailure::ServerOutdated(info.protocol))
         }
         Some(_) => {}
         None => return Err(SetFailure::NotRunning),
@@ -791,7 +791,7 @@ fn decode_formats(formats: &[SetFormat]) -> Result<Vec<(String, Vec<u8>)>, Strin
         .collect()
 }
 
-/// Whether a cache service listens on the socket.
+/// Whether a server listens on the socket.
 pub(crate) fn listening() -> bool {
     cache_socket_path().is_ok_and(|path| UnixStream::connect(path).is_ok())
 }
@@ -834,7 +834,7 @@ pub(crate) fn script_filter_refresh_request(
 
 /// Handle one request. Public within the crate so protocol tests can drive it
 /// over a temporary listener.
-pub(crate) fn handle_request(state: &Arc<DaemonState>, request: Request) -> Response {
+pub(crate) fn handle_request(state: &Arc<ServerState>, request: Request) -> Response {
     match request {
         Request::Status => Response::Status {
             pid: std::process::id(),
@@ -1006,7 +1006,7 @@ pub(crate) fn handle_request(state: &Arc<DaemonState>, request: Request) -> Resp
 /// Put the content of a `clipboard set` on the clipboard, recording it in the
 /// history first when the policy allows, and report the entry it landed in.
 fn serve_set(
-    state: &Arc<DaemonState>,
+    state: &Arc<ServerState>,
     formats: &[SetFormat],
     temporary: bool,
     secret: bool,
@@ -1015,7 +1015,7 @@ fn serve_set(
 ) -> Result<(Option<String>, Option<i64>), Failure> {
     let config = &state.addons.clipboard;
     let limits = super::clipboard_store::Limits::from_config(config);
-    // The request is checked before the service says whether it records at
+    // The request is checked before the server says whether it records at
     // all: a malformed request is refused whatever the state of the server.
     check_set_request(formats, &limits)?;
     if let Some(secs) = expires_in {
@@ -1056,7 +1056,7 @@ fn serve_set(
 }
 
 /// Check the framing of a `clipboard set` request, and the size of its
-/// encoded content, before any of it is decoded: the service must not
+/// encoded content, before any of it is decoded: the server must not
 /// allocate what it is about to refuse.
 fn check_set_request(
     formats: &[SetFormat],
@@ -1070,7 +1070,7 @@ fn check_set_request(
             ErrorCode::TooLarge,
             format!(
                 "the request holds {} formats, more than the {MAX_SET_FORMATS} \
-                 the service reads",
+                 the server reads",
                 formats.len()
             ),
         ));
@@ -1082,7 +1082,7 @@ fn check_set_request(
                 ErrorCode::InvalidArgument,
                 format!(
                     "a MIME type of {} bytes, more than the {MAX_MIME_BYTES} the \
-                     service reads",
+                     server reads",
                     format.mime.len()
                 ),
             ));
@@ -1127,7 +1127,7 @@ fn too_large(mime: &str, bytes: u64, limit: u64) -> Failure {
 }
 
 /// The size a format of `mime` may reach: what the store records, capped so
-/// that a request can never carry more than the service reads.
+/// that a request can never carry more than the server reads.
 fn format_limit(mime: &str, limits: &super::clipboard_store::Limits) -> u64 {
     if mime.starts_with("image/") {
         limits.max_image_size.min(MAX_SET_FORMAT_BYTES)
@@ -1276,7 +1276,7 @@ fn preview_target_from_key(key: &str, ttl: Duration) -> Option<SnapshotTarget> {
 /// What one connection carried.
 enum Incoming {
     Request(Request),
-    /// A line the service read but cannot serve.
+    /// A line the server read but cannot serve.
     Refused(Failure),
     /// Nothing to answer: the peer closed the connection.
     Closed,
@@ -1293,7 +1293,7 @@ fn read_request(stream: &mut UnixStream, limit: usize) -> Incoming {
     if line.len() > limit {
         return Incoming::Refused(Failure::new(
             ErrorCode::TooLarge,
-            format!("the request is longer than the {limit} bytes the service reads"),
+            format!("the request is longer than the {limit} bytes the server reads"),
         ));
     }
     match serde_json::from_slice(&line) {
@@ -1304,7 +1304,7 @@ fn read_request(stream: &mut UnixStream, limit: usize) -> Incoming {
     }
 }
 
-fn serve_connection(state: Arc<DaemonState>, mut stream: UnixStream) {
+fn serve_connection(state: Arc<ServerState>, mut stream: UnixStream) {
     let reply = match read_request(&mut stream, MAX_REQUEST_LINE) {
         Incoming::Request(request) => handle_request(&state, request),
         Incoming::Refused(failure) => failure.into(),
@@ -1317,7 +1317,7 @@ fn serve_connection(state: Arc<DaemonState>, mut stream: UnixStream) {
 }
 
 /// Serve requests on `listener` until the process exits.
-pub(crate) fn serve(listener: UnixListener, state: Arc<DaemonState>) -> Result<()> {
+pub(crate) fn serve(listener: UnixListener, state: Arc<ServerState>) -> Result<()> {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
@@ -1330,19 +1330,19 @@ pub(crate) fn serve(listener: UnixListener, state: Arc<DaemonState>) -> Result<(
     Ok(())
 }
 
-/// Run the cache service in the foreground.
-pub(crate) fn run(config: ParsedConfig) -> Result<()> {
+/// Run the server in the foreground.
+pub(crate) fn run_server(config: ParsedConfig) -> Result<()> {
     let socket = cache_socket_path()?;
     let _ = fs::remove_file(&socket);
     let listener =
         UnixListener::bind(&socket).with_context(|| format!("cannot bind {}", socket.display()))?;
     let _ = fs::set_permissions(&socket, fs::Permissions::from_mode(0o600));
-    let state = Arc::new(DaemonState::new(config.addons));
-    eprintln!("raffi: cache service listening on {}", socket.display());
+    let state = Arc::new(ServerState::new(config.addons));
+    eprintln!("raffi: server listening on {}", socket.display());
     super::hot_files::keep_warm();
     let clipboard = &state.addons.clipboard;
     if clipboard.enabled != Some(false)
-        && super::clipboard_history::daemon_records(
+        && super::clipboard_history::server_records(
             clipboard.backend,
             super::clipboard_history::running_cmdlines,
         )
@@ -1374,7 +1374,7 @@ pub(crate) fn run(config: ParsedConfig) -> Result<()> {
 }
 
 /// Start periodic warming for every source that opted in.
-fn warm_loop(state: Arc<DaemonState>) {
+fn warm_loop(state: Arc<ServerState>) {
     std::thread::spawn(move || {
         let mut last: HashMap<String, u64> = HashMap::new();
         loop {
@@ -1418,7 +1418,7 @@ fn due(last: &HashMap<String, u64>, source: &str, now: u64, interval: u64) -> bo
 }
 
 fn warm_script_filter(
-    state: &Arc<DaemonState>,
+    state: &Arc<ServerState>,
     index: usize,
     config: &ScriptFilterConfig,
 ) -> Result<(), String> {
@@ -1473,7 +1473,7 @@ fn warm_script_filter_view(
     )
 }
 
-fn warm_named(state: &Arc<DaemonState>, source: &str) -> Result<(), String> {
+fn warm_named(state: &Arc<ServerState>, source: &str) -> Result<(), String> {
     match source {
         "slack" => warm_slack(state),
         "slack:home" | "slack:unread" | "slack:threads" | "slack:activity" => {
@@ -1505,7 +1505,7 @@ fn warm_named(state: &Arc<DaemonState>, source: &str) -> Result<(), String> {
 }
 
 /// Warm every enabled source at once, as the periodic loop would.
-fn warm_all(state: &Arc<DaemonState>) -> Result<(), String> {
+fn warm_all(state: &Arc<ServerState>) -> Result<(), String> {
     let addons = &state.addons;
     let errors: Vec<String> = std::thread::scope(|scope| {
         let mut jobs = Vec::new();
@@ -1535,7 +1535,7 @@ fn warm_all(state: &Arc<DaemonState>) -> Result<(), String> {
     }
 }
 
-fn warm_slack(state: &Arc<DaemonState>) -> Result<(), String> {
+fn warm_slack(state: &Arc<ServerState>) -> Result<(), String> {
     let config = state.addons.slack.clone();
     super::slack_api::set_cache_fresh(config.cache_fresh());
     let mut error = None;
@@ -1557,7 +1557,7 @@ fn warm_slack(state: &Arc<DaemonState>) -> Result<(), String> {
 }
 
 /// Re-fetch one Slack view, for F5 on that view.
-fn warm_slack_view(state: &Arc<DaemonState>, view: &str) -> Result<(), String> {
+fn warm_slack_view(state: &Arc<ServerState>, view: &str) -> Result<(), String> {
     let config = state.addons.slack.clone();
     super::slack_api::set_cache_fresh(config.cache_fresh());
     let result = match view {
@@ -1571,7 +1571,7 @@ fn warm_slack_view(state: &Arc<DaemonState>, view: &str) -> Result<(), String> {
     result
 }
 
-fn warm_browser_history(state: &Arc<DaemonState>) -> Result<(), String> {
+fn warm_browser_history(state: &Arc<ServerState>) -> Result<(), String> {
     let result = super::browser_history::warm(&state.addons.browser_history);
     state.set_status("browser_history", result.as_ref().err().cloned());
     result
@@ -1631,7 +1631,7 @@ mod tests {
         assert_ne!(after, addons_digest(&addons));
 
         // The recorder applies the temporary settings at startup too, so a
-        // change to them makes a running service stale.
+        // change to them makes a running server stale.
         let mut tempo = AddonsConfig::default();
         let plain = addons_digest(&tempo);
         tempo.clipboard.temporary_patterns = vec!["^OTP:".into()];
@@ -1676,11 +1676,11 @@ mod tests {
     }
 
     #[test]
-    fn daemon_protocol_over_temporary_socket() {
+    fn server_protocol_over_temporary_socket() {
         let dir = tempdir("ipc");
         let socket = dir.join("cache.sock");
         let listener = UnixListener::bind(&socket).unwrap();
-        let state = Arc::new(DaemonState::new(AddonsConfig::default()));
+        let state = Arc::new(ServerState::new(AddonsConfig::default()));
         let server_state = state.clone();
         let server = std::thread::spawn(move || {
             if let Ok((mut stream, _)) = listener.accept() {
@@ -1773,7 +1773,7 @@ mod tests {
             warm_queries: vec!["".into(), "x".into()],
             ..Default::default()
         };
-        let state = Arc::new(DaemonState::new(quiet_addons()));
+        let state = Arc::new(ServerState::new(quiet_addons()));
         warm_script_filter(&state, 0, &config).unwrap();
         assert_eq!(
             fs::read_to_string(&log)
@@ -1806,7 +1806,7 @@ mod tests {
 
     #[test]
     fn waited_refreshes_reply_with_their_outcome() {
-        let state = Arc::new(DaemonState::new(quiet_addons()));
+        let state = Arc::new(ServerState::new(quiet_addons()));
         let unknown = Request::RefreshSource {
             source: "nope".into(),
             wait: true,
@@ -1961,7 +1961,7 @@ mod tests {
 
     /// Sends `requests`, one connection each, and returns the replies.
     fn serve_over_socket(requests: &[Request]) -> Vec<Response> {
-        let state = Arc::new(DaemonState::new(quiet_addons()));
+        let state = Arc::new(ServerState::new(quiet_addons()));
         let mut replies = Vec::new();
         for request in requests {
             let (mut client, server) = socket_pair();
@@ -2101,8 +2101,8 @@ mod tests {
 
     #[test]
     fn a_refused_set_does_not_stop_the_service() {
-        // Both requests are refused before the daemon records anything, and
-        // the service answers the next one as if nothing happened.
+        // Both requests are refused before the server records anything, and
+        // the server answers the next one as if nothing happened.
         let oversized: Vec<SetFormat> = (0..MAX_SET_FORMATS + 1)
             .map(|_| SetFormat {
                 mime: "text/plain".into(),
@@ -2156,7 +2156,7 @@ mod tests {
 
     #[test]
     fn a_malformed_request_gets_an_answer_instead_of_a_closed_connection() {
-        let state = Arc::new(DaemonState::new(quiet_addons()));
+        let state = Arc::new(ServerState::new(quiet_addons()));
         let (mut client, server) = socket_pair();
         client.write_all(b"{\"type\":\"clipboard_set\"}\n").unwrap();
         let server = std::thread::spawn(move || serve_connection(state, server));

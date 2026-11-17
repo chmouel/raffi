@@ -1,17 +1,17 @@
 //! Clipboard recorder for the `raffi` clipboard backend, run inside
-//! `raffi --cache-daemon`.
+//! `raffi --server`.
 //!
-//! The daemon binds the compositor's data-control protocol
+//! The server binds the compositor's data-control protocol
 //! (`ext-data-control-v1`, else `wlr-data-control-unstable-v1`), which lets a
 //! clipboard manager see every new selection without having focus. For each
 //! one it reads the formats worth keeping and hands them to a recorder thread
 //! that stores them in the history database (see `clipboard_store`), with
 //! the copy time and the app that had focus.
 //!
-//! The daemon also owns the selection when the UI puts a history entry back
+//! The server also owns the selection when the UI puts a history entry back
 //! on the clipboard, so the entry stays pasteable after Raffi closes. Its
 //! own selections carry `OWN_MIME`, which keeps them out of the history.
-//! When the app that owned the clipboard exits, the daemon puts the entry
+//! When the app that owned the clipboard exits, the server puts the entry
 //! recorded from it back, so the copy survives the app.
 
 use std::io;
@@ -1100,7 +1100,7 @@ pub(crate) fn start(limits: Limits, policy: Policy, ocr_enabled: bool) {
 }
 
 /// Set once this process records the clipboard, as reported to the UI by
-/// the cache service's status.
+/// the server's status.
 static RECORDING: AtomicBool = AtomicBool::new(false);
 
 /// Whether this process records the clipboard history.

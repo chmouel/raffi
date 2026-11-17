@@ -40,7 +40,7 @@ addons:
 
 `cache_seconds` shows the last result for a query immediately and refreshes
 it in the background. `warm_queries` are warmed periodically by
-`raffi --cache-daemon`, in every view, so those queries are already fresh
+`raffi --server`, in every view, so those queries are already fresh
 when Raffi opens.
 Set `warm_interval_seconds` to change the warming period (default:
 `cache_seconds`). Without `cache_seconds` nothing is cached.
@@ -123,7 +123,7 @@ These environment variables can also be set in the entry's `env`:
 | `API_HOST` | `github.com` | GitHub host, for GitHub Enterprise |
 | `CACHE_PULLS` | `10m` | How long `gh` caches the pull request list |
 
-Raffi sets `RAFFI_REFRESH=1` when you press Ctrl+R or when the cache daemon
+Raffi sets `RAFFI_REFRESH=1` when you press Ctrl+R or when the server
 refreshes a filter. The script then skips `gh api --cache` so it reads live
 GitHub state instead of the `gh` CLI's own cache.
 

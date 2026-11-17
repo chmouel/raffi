@@ -4,7 +4,7 @@
 //! Vulkan and Mesa libraries, and the headers of every system font, which
 //! iced scans before it lays out any text. Once the window is up, the UI
 //! records the pages it touched in its mapped files and the small files it
-//! read. The cache service re-reads them and replays the font scan on a
+//! read. The server re-reads them and replays the font scan on a
 //! timer, so the kernel keeps them cached between launches.
 
 use std::collections::{BTreeMap, HashSet};

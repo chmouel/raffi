@@ -1143,7 +1143,7 @@ pub(super) fn cached_directory() -> Option<Arc<Directory>> {
     Some(directory)
 }
 
-/// Re-read the directory another process, such as the cache service, wrote.
+/// Re-read the directory another process, such as the server, wrote.
 /// The one in memory is kept when the file cannot be read.
 pub(super) fn reload_directory() {
     let Some(directory) = directory_path().and_then(|path| read_directory_from(&path, now_secs()))

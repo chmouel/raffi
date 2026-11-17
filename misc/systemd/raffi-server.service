@@ -1,12 +1,12 @@
 [Unit]
-Description=Raffi background cache service
+Description=Raffi background server
 Documentation=https://github.com/chmouel/raffi
 PartOf=graphical-session.target
 After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/raffi --cache-daemon
+ExecStart=%h/.local/bin/raffi --server
 Restart=on-failure
 RestartSec=5
 # The service only needs the user's runtime and cache directories, plus the
