@@ -4775,6 +4775,329 @@ fn test_clipboard_previews_are_bound_to_session_and_item() {
 }
 
 #[test]
+fn test_clipboard_ocr_actions_show_and_copy_the_recognized_text() {
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip ");
+    let mut shot = clip(0, "img", "");
+    shot.kind = super::clipboard::ItemKind::Image;
+    let mut bare = clip(1, "bare", "");
+    bare.kind = super::clipboard::ItemKind::Image;
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page(
+            "img",
+            3,
+            3,
+            vec![shot, bare, clip(2, "txt", "hello")],
+        )),
+    ));
+    let session = app.clipboard.session;
+    let labels = |app: &LauncherApp| -> Vec<String> {
+        app.selected_actions()
+            .into_iter()
+            .map(|action| action.label)
+            .collect()
+    };
+    assert!(
+        !labels(&app)
+            .iter()
+            .any(|label| label.contains("recognized")),
+        "no OCR actions before the preview is loaded"
+    );
+
+    let image_preview = |text: &str| {
+        let mut preview = clip_text_preview(text);
+        preview.kind = super::clipboard::ItemKind::Image;
+        preview.image = Some(Ok(super::clipboard::PreviewImage {
+            handle: iced::widget::image::Handle::from_bytes(vec![0u8; 4]),
+            mime: "image/png".into(),
+            width: 2,
+            height: 1,
+        }));
+        preview
+    };
+    app.clipboard.preview_inflight = Some("img".into());
+    let _ = app.update(Message::ClipboardPreview(
+        session,
+        "img".into(),
+        Ok(image_preview("deployment failed")),
+    ));
+    let actions = labels(&app);
+    assert!(actions.contains(&"Show recognized text".to_string()));
+    assert!(actions.contains(&"Copy recognized text".to_string()));
+    // The toggle glyph follows the view it switches to.
+    app.no_icons = false;
+    let glyphs = |app: &LauncherApp| -> Vec<(String, Option<&'static str>)> {
+        app.selected_actions()
+            .into_iter()
+            .map(|action| (action.label, action.glyph))
+            .collect()
+    };
+    assert!(glyphs(&app).contains(&("Show recognized text".to_string(), Some("🔤"))));
+
+    let _ = app.update(Message::ClipboardToggleOcrText);
+    let preview = app.resolve_selected_preview().unwrap();
+    assert!(!preview
+        .bodies
+        .iter()
+        .any(|body| matches!(body, PreviewBody::ImageData { .. })));
+    assert!(matches!(
+        preview.bodies.first(),
+        Some(PreviewBody::Plain { content, .. }) if content == "deployment failed"
+    ));
+    assert!(labels(&app).contains(&"Show image".to_string()));
+    let _ = app.update(Message::ClipboardToggleOcrText);
+    assert!(matches!(
+        app.resolve_selected_preview().unwrap().bodies.first(),
+        Some(PreviewBody::ImageData { .. })
+    ));
+
+    let _ = app.update(Message::ClipboardToggleOcrText);
+    assert!(glyphs(&app).contains(&("Show image".to_string(), Some("🖼️"))));
+    let text_only_id = app.view.preview_scrollable_id.clone();
+    let task = app.update(Message::Cancel);
+    assert!(task.units() > 0, "Escape re-focuses the search input");
+    assert!(app.clipboard.active, "Escape keeps raffi open");
+    assert!(app.clipboard.ocr_text_only.is_none());
+    assert_ne!(app.view.preview_scrollable_id, text_only_id);
+    assert!(matches!(
+        app.resolve_selected_preview().unwrap().bodies.first(),
+        Some(PreviewBody::ImageData { .. })
+    ));
+    assert!(labels(&app).contains(&"Show recognized text".to_string()));
+
+    let _ = app.update(Message::ClipboardToggleOcrText);
+    let _ = app.update(Message::MoveDown);
+    app.clipboard.preview_inflight = Some("bare".into());
+    let _ = app.update(Message::ClipboardPreview(
+        session,
+        "bare".into(),
+        Ok(image_preview("")),
+    ));
+    // The text view of another item is not the one on screen, so Escape keeps
+    // its usual meaning and leaves the text-only state alone.
+    let preview_id = app.view.preview_scrollable_id.clone();
+    let task = app.update(Message::Cancel);
+    assert!(task.units() > 0, "Escape still leaves raffi");
+    assert_eq!(app.clipboard.ocr_text_only.as_deref(), Some("img"));
+    assert_eq!(app.view.preview_scrollable_id, preview_id);
+    assert!(
+        !labels(&app)
+            .iter()
+            .any(|label| label.contains("recognized")),
+        "an image without recognized text has no OCR actions"
+    );
+    assert!(matches!(
+        app.resolve_selected_preview().unwrap().bodies.first(),
+        Some(PreviewBody::ImageData { .. })
+    ));
+    let _ = app.update(Message::ClipboardCopyOcrText);
+    assert!(!app.clipboard.pending);
+
+    let _ = app.update(Message::MoveUp);
+    let _ = app.update(Message::ClipboardCopyOcrText);
+    assert!(app.clipboard.pending, "the copy runs as a clipboard action");
+}
+
+#[test]
+fn test_clipboard_ocr_text_view_escape_with_hidden_preview() {
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip ");
+    let mut shot = clip(0, "img", "");
+    shot.kind = super::clipboard::ItemKind::Image;
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page("img", 1, 1, vec![shot])),
+    ));
+    let session = app.clipboard.session;
+    let mut preview = clip_text_preview("deployment failed");
+    preview.kind = super::clipboard::ItemKind::Image;
+    preview.image = Some(Ok(super::clipboard::PreviewImage {
+        handle: iced::widget::image::Handle::from_bytes(vec![0u8; 4]),
+        mime: "image/png".into(),
+        width: 2,
+        height: 1,
+    }));
+    app.clipboard.preview_inflight = Some("img".into());
+    let _ = app.update(Message::ClipboardPreview(
+        session,
+        "img".into(),
+        Ok(preview),
+    ));
+    let _ = app.update(Message::ClipboardToggleOcrText);
+    assert!(app.clipboard_ocr_text_only("img"));
+    assert!(matches!(
+        app.resolve_selected_preview().unwrap().bodies.first(),
+        Some(PreviewBody::Plain { content, .. }) if content == "deployment failed"
+    ));
+
+    // Ctrl+P hides the pane, which keeps the text-only state for later.
+    let _ = app.update(Message::TogglePreview);
+    assert!(!app.view.show_preview);
+    let hidden_id = app.view.preview_scrollable_id.clone();
+    let task = app.update(Message::Cancel);
+    assert!(task.units() > 0, "Escape still leaves raffi");
+    assert!(
+        app.clipboard_ocr_text_only("img"),
+        "Escape left the hidden text view alone"
+    );
+    assert_eq!(app.view.preview_scrollable_id, hidden_id);
+
+    let _ = app.update(Message::TogglePreview);
+    assert!(app.view.show_preview);
+    assert!(matches!(
+        app.resolve_selected_preview().unwrap().bodies.first(),
+        Some(PreviewBody::Plain { content, .. }) if content == "deployment failed"
+    ));
+
+    // With the pane back, Escape returns to the image and keeps typing alive.
+    let text_only_id = app.view.preview_scrollable_id.clone();
+    let task = app.update(Message::Cancel);
+    assert!(task.units() > 0, "Escape re-focuses the search input");
+    assert!(app.clipboard.active, "Escape keeps raffi open");
+    assert!(app.clipboard.ocr_text_only.is_none());
+    assert_ne!(app.view.preview_scrollable_id, text_only_id);
+    assert!(matches!(
+        app.resolve_selected_preview().unwrap().bodies.first(),
+        Some(PreviewBody::ImageData { .. })
+    ));
+}
+
+#[test]
+fn test_clipboard_ocr_copy_job_copies_the_whole_recognized_text() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("raffi-clip-ocr-copy-{unique}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("clipboard.db");
+    let out = dir.join("copied");
+    // Longer than the preview keeps, so only the history holds all of it.
+    let full = "traffic light ".repeat(700);
+    let (hash, preview) = {
+        let mut store = super::clipboard_store::Store::open(&db).unwrap();
+        store.enable_ocr(true);
+        let capture = super::clipboard_store::Capture {
+            formats: vec![
+                ("image/png".into(), test_png(4, 2)),
+                ("text/plain".into(), b"Original".to_vec()),
+            ],
+            copied_at: 1_000,
+            source: None,
+            password_marked: false,
+        };
+        let limits = super::clipboard_store::Limits {
+            max_items: 10,
+            max_size: 1 << 30,
+            max_image_size: 1 << 20,
+        };
+        let hash = store.insert(capture, &limits, 1_000).unwrap();
+        let job = store.next_ocr_job().unwrap().unwrap();
+        store.finish_ocr(job.id, "eng", Ok(full.clone())).unwrap();
+        let preview = store.preview(&hash, 1_000).unwrap();
+        assert!(preview.text_truncated);
+        assert!(preview.text.len() < full.len());
+        (hash, preview)
+    };
+
+    let mut app = test_app(clipboard_addons());
+    app.clipboard_db = Some(db.clone());
+    app.copier = Some(vec![
+        "sh".into(),
+        "-c".into(),
+        format!("cat > {}", out.display()),
+    ]);
+    let generation = open_clipboard(&mut app, "clip ");
+    let mut shot = clip(0, &hash, "");
+    shot.kind = super::clipboard::ItemKind::Image;
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page(&hash, 1, 1, vec![shot])),
+    ));
+    let session = app.clipboard.session;
+    app.clipboard.preview_inflight = Some(hash.clone());
+    let _ = app.update(Message::ClipboardPreview(
+        session,
+        hash.clone(),
+        Ok(preview),
+    ));
+    let reference = app.clipboard.items[0].reference(&app.clipboard.tab);
+
+    let task = app.update(Message::ClipboardCopyOcrText);
+    assert!(app.clipboard.pending);
+    assert!(task.units() > 0, "the copy runs off the executor");
+    app.ocr_copy_job(reference.clone())().unwrap();
+    assert_eq!(std::fs::read(&out).unwrap(), full.as_bytes());
+    let task = app.update(Message::ClipboardActionDone(session, Ok(None)));
+    assert!(task.units() > 0, "the copy closes raffi");
+    assert!(!app.clipboard.pending);
+    assert!(app.clipboard.error.is_none());
+
+    app.copier = failing_copier();
+    let _ = app.update(Message::ClipboardCopyOcrText);
+    assert!(app.clipboard.pending);
+    let error = app.ocr_copy_job(reference)().unwrap_err();
+    assert!(error.contains("exit 1"), "{error}");
+    let task = app.update(Message::ClipboardActionDone(session, Err(error.clone())));
+    assert_eq!(task.units(), 0);
+    assert!(!app.clipboard.pending);
+    assert_eq!(app.clipboard.error.as_deref(), Some(error.as_str()));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn test_clipboard_ocr_text_footer_marks_the_truncated_text() {
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip ");
+    let mut shot = clip(0, "img", "");
+    shot.kind = super::clipboard::ItemKind::Image;
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page("img", 1, 1, vec![shot])),
+    ));
+    let session = app.clipboard.session;
+    let show = |app: &mut LauncherApp, truncated: bool| {
+        let mut preview = clip_text_preview("deployment failed");
+        preview.kind = super::clipboard::ItemKind::Image;
+        preview.text_truncated = truncated;
+        preview.image = Some(Ok(super::clipboard::PreviewImage {
+            handle: iced::widget::image::Handle::from_bytes(vec![0u8; 4]),
+            mime: "image/png".into(),
+            width: 2,
+            height: 1,
+        }));
+        app.clipboard.preview_inflight = Some("img".into());
+        let _ = app.update(Message::ClipboardPreview(
+            session,
+            "img".into(),
+            Ok(preview),
+        ));
+        app.clipboard.ocr_text_only = None;
+        let _ = app.update(Message::ClipboardToggleOcrText);
+        let body = app.resolve_selected_preview().unwrap().bodies.remove(0);
+        let PreviewBody::Plain { footer, .. } = body else {
+            panic!("the recognized text replaces the image");
+        };
+        footer.unwrap()
+    };
+    assert_eq!(show(&mut app, false), "2 words; 17 chars");
+    assert_eq!(show(&mut app, true), "2 words; 17 chars shown");
+}
+
+/// A PNG of `width` × `height` pixels, as the history records images.
+fn test_png(width: u32, height: u32) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    image::RgbaImage::new(width, height)
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
+    bytes
+}
+
+#[test]
 fn test_clipboard_ocr_refresh_discards_inflight_preview() {
     let mut app = test_app(clipboard_addons());
     let generation = open_clipboard(&mut app, "clip query");

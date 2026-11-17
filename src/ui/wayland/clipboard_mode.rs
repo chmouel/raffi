@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use iced::futures::channel::mpsc::{unbounded, UnboundedReceiver};
+use iced::widget::operation::focus;
 use iced::Task;
 
 use super::clipboard::{ClipItem, History, Page};
@@ -14,6 +15,9 @@ const MAX_SCAN_RESTARTS: u32 = 3;
 const PREVIEW_CACHE_SIZE: usize = 8;
 /// How often the open browser drops entries whose deadline passed.
 const EXPIRY_TICK: Duration = Duration::from_secs(1);
+
+/// Blocking read of the complete recognized text of an image.
+type OcrTextReader = Box<dyn Fn(&super::clipboard::ItemRef) -> Result<String, String> + Send>;
 
 /// Report every [`EXPIRY_TICK`] while the subscription is kept, so the list
 /// can drop the entries that reached their deadline.
@@ -524,6 +528,98 @@ impl LauncherApp {
         self.clipboard.pending = true;
         self.clipboard.error = None;
         task
+    }
+
+    /// Id of the selected image when its loaded preview has recognized text.
+    pub(super) fn selected_clipboard_ocr_id(&self) -> Option<&str> {
+        let item = self
+            .selected_clipboard_item()
+            .and_then(|index| self.clipboard.items.get(index))?;
+        let preview = self.clipboard.preview(&item.id)?.as_ref().ok()?;
+        (item.kind == super::clipboard::ItemKind::Image
+            && preview.kind == super::clipboard::ItemKind::Image
+            && !preview.text.is_empty())
+        .then_some(item.id.as_str())
+    }
+
+    /// Whether the preview of `id` shows only its recognized text.
+    pub(super) fn clipboard_ocr_text_only(&self, id: &str) -> bool {
+        self.clipboard.ocr_text_only.as_deref() == Some(id)
+    }
+
+    pub(super) fn handle_clipboard_toggle_ocr_text(&mut self) -> Task<Message> {
+        let Some(id) = self.selected_clipboard_ocr_id().map(str::to_string) else {
+            return Task::none();
+        };
+        self.clipboard.ocr_text_only = (!self.clipboard_ocr_text_only(&id)).then_some(id);
+        self.view.preview_scrollable_id = super::state::ScrollableId::unique();
+        Task::none()
+    }
+
+    /// Whether the preview of the selected item shows only its recognized
+    /// text, and so hides the image. A hidden pane shows no text view.
+    fn clipboard_ocr_text_view_visible(&self) -> Option<&str> {
+        if !self.view.show_preview {
+            return None;
+        }
+        let id = self.clipboard.ocr_text_only.as_deref()?;
+        (self.selected_clipboard_ocr_id() == Some(id)).then_some(id)
+    }
+
+    /// Escape from the recognized text back to the image. Returns `None` when
+    /// the text view is not on screen, so Escape keeps its usual meaning.
+    pub(super) fn leave_clipboard_ocr_text(&mut self) -> Option<Task<Message>> {
+        self.clipboard_ocr_text_view_visible()?;
+        self.clipboard.ocr_text_only = None;
+        self.view.preview_scrollable_id = super::state::ScrollableId::unique();
+        if self.view.vim.is_normal() {
+            return Some(Task::none());
+        }
+        // Escape also unfocuses the text input, which would swallow typing.
+        Some(focus(self.view.search_input_id.clone()))
+    }
+
+    /// Reads the complete recognized text of an image, blocking.
+    fn ocr_text_reader(&self) -> OcrTextReader {
+        #[cfg(test)]
+        if let Some(path) = self.clipboard_db.clone() {
+            return Box::new(move |reference| {
+                super::clipboard_store::Store::open_existing_at(&path)?
+                    .ok_or_else(|| "no clipboard history".to_string())?
+                    .ocr_text(&reference.id, super::clipboard_store::now_secs())
+            });
+        }
+        let history = History::new(self.addons.clipboard.backend);
+        Box::new(move |reference| history.ocr_text(reference))
+    }
+
+    /// The blocking read of the complete recognized text followed by its
+    /// checked copy, read again from the history since the preview keeps only
+    /// a bounded part of it.
+    pub(super) fn ocr_copy_job(&self, reference: super::clipboard::ItemRef) -> super::app::TextJob {
+        let read = self.ocr_text_reader();
+        let copy = self.text_copier();
+        Box::new(move || copy(&read(&reference)?))
+    }
+
+    pub(super) fn handle_clipboard_copy_ocr_text(&mut self) -> Task<Message> {
+        if !self.clipboard.active || self.clipboard.pending {
+            return Task::none();
+        }
+        let Some(id) = self.selected_clipboard_ocr_id() else {
+            return Task::none();
+        };
+        let Some(item) = self.clipboard.items.iter().find(|item| item.id == id) else {
+            return Task::none();
+        };
+        let reference = item.reference(&self.clipboard.tab);
+        let session = self.clipboard.session;
+        let job = self.ocr_copy_job(reference);
+        self.clipboard.pending = true;
+        self.clipboard.error = None;
+        Task::perform(super::app::off_thread_copy(job), move |result| {
+            Message::ClipboardActionDone(session, result.map(|()| None))
+        })
     }
 
     pub(super) fn handle_clipboard_action_done(

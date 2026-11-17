@@ -503,6 +503,16 @@ impl History {
             Self::Auto => Err(NO_BACKEND.to_string()),
         }
     }
+
+    /// Complete recognized text of the image `item`.
+    pub(crate) fn ocr_text(&self, item: &ItemRef) -> Result<String, String> {
+        match self.resolved()? {
+            Self::CopyQ(_) => Err("OCR is unavailable for this backend".into()),
+            Self::Raffi => super::clipboard_store::Store::open_default()?
+                .ocr_text(&item.id, super::clipboard_store::now_secs()),
+            Self::Auto => Err(NO_BACKEND.to_string()),
+        }
+    }
 }
 
 /// A history resolved to the one backend it stands for, kept for the whole
@@ -1180,6 +1190,19 @@ mod tests {
         );
         assert_eq!(std::fs::read(&stdin).unwrap(), b"\x89PNG");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_ocr_text_is_unavailable_from_copyq() {
+        let reference = ItemRef {
+            tab: "&clipboard".into(),
+            id: "hash".into(),
+            row: 0,
+        };
+        assert_eq!(
+            History::CopyQ(CopyQ::default()).ocr_text(&reference),
+            Err("OCR is unavailable for this backend".to_string())
+        );
     }
 
     #[test]

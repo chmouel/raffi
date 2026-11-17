@@ -694,6 +694,10 @@ pub(crate) enum Message {
     /// A one-second tick while the browser lists entries with a deadline.
     ClipboardTick,
     ClipboardOcrRevision(u64, std::result::Result<i64, String>),
+    /// Switch the selected image preview between the image and its text.
+    ClipboardToggleOcrText,
+    /// Copy the recognized text of the selected image.
+    ClipboardCopyOcrText,
     /// The startup probe of the cache service answered, or not.
     CacheServerStatus(Option<super::cache::ServerInfo>),
     /// F5, or Ctrl+Shift+F5 to refresh every source: refresh through the

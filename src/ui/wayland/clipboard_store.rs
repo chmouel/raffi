@@ -1053,6 +1053,24 @@ impl Store {
         Ok(text)
     }
 
+    /// Complete recognized text of the live image `hash`.
+    pub(crate) fn ocr_text(&self, hash: &str, now: i64) -> Result<String, String> {
+        self.conn
+            .query_row(
+                &format!("SELECT 1 FROM items WHERE hash = ?2 AND {ALIVE}"),
+                params![now, hash],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(db_error)?
+            .ok_or_else(|| GONE.to_string())?;
+        self.ocr_info(hash)?
+            .filter(|info| info.status == "done")
+            .map(|info| info.text)
+            .filter(|text| !text.is_empty())
+            .ok_or_else(|| "No recognized text for this image".to_string())
+    }
+
     pub(crate) fn preview(&self, hash: &str, now: i64) -> Result<ClipPreview, String> {
         let (id, kind, text, text_len): (i64, String, String, i64) = self
             .conn
@@ -1700,9 +1718,11 @@ mod tests {
         drop(store);
         let mut store = Store::open(&dir.join("clipboard.db")).unwrap();
         assert_eq!(store.next_ocr_job().unwrap().unwrap().id, job.id);
+        assert!(store.ocr_text(&hash, NOW).is_err(), "still pending");
         assert!(store
             .finish_ocr(job.id, "eng", Ok("Crème dashboard".into()))
             .unwrap());
+        assert_eq!(store.ocr_text(&hash, NOW).unwrap(), "Crème dashboard");
         assert_eq!(
             store
                 .list("ORIGINAL crème", "image", 0, &[], NOW)

@@ -38,6 +38,10 @@ fn action_glyph(label: &str, message: &Message) -> &'static str {
     match message {
         Message::DeleteSelected => "🗑️",
         Message::SaveClipboardSnippet(_) => "💾",
+        Message::ClipboardToggleOcrText => match label {
+            "Show recognized text" => "🔤",
+            _ => "🖼️",
+        },
         Message::VaultShortcut(EntryAction::Copy(Field::Otp)) => "🔢",
         Message::VaultShortcut(_) => "👤",
         Message::FileBrowserOpenSelected => "📂",
@@ -209,8 +213,34 @@ impl LauncherApp {
                 })
             })
             .collect();
+        entries.extend(self.clipboard_ocr_entries());
         entries.extend(self.clipboard_snippet_entries());
         entries
+    }
+
+    /// Show and copy actions for the recognized text of a selected image.
+    fn clipboard_ocr_entries(&self) -> Vec<ActionEntry> {
+        let Some(id) = self.selected_clipboard_ocr_id() else {
+            return Vec::new();
+        };
+        let show = if self.clipboard_ocr_text_only(id) {
+            "Show image"
+        } else {
+            "Show recognized text"
+        };
+        [
+            (show, Message::ClipboardToggleOcrText),
+            ("Copy recognized text", Message::ClipboardCopyOcrText),
+        ]
+        .into_iter()
+        .map(|(label, message)| ActionEntry {
+            label: label.to_string(),
+            shortcut: String::new(),
+            glyph: (!self.no_icons).then(|| action_glyph(label, &message)),
+            message,
+            modifiers: Modifiers::empty(),
+        })
+        .collect()
     }
 
     /// One save action per directory or markdown source, for a selected text entry of the

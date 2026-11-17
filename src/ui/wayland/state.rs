@@ -418,6 +418,8 @@ pub(super) struct ClipboardState {
     pub preview_stale: bool,
     pub ocr_revision: Option<i64>,
     pub ocr_revision_inflight: bool,
+    /// Image item whose preview shows only its recognized text.
+    pub ocr_text_only: Option<String>,
     /// An action is running; further activations are ignored.
     pub pending: bool,
 }
@@ -842,6 +844,9 @@ pub(super) struct LauncherApp {
     /// Clipboard command replacing the real copier in tests.
     #[cfg(test)]
     pub copier: Option<Vec<String>>,
+    /// Clipboard history database replacing the real one in tests.
+    #[cfg(test)]
+    pub clipboard_db: Option<std::path::PathBuf>,
     /// Reports whether a program is installed; replaced in tests.
     pub program_exists: fn(&str) -> bool,
     /// Detects the compositor Raffi runs in; replaced in tests.

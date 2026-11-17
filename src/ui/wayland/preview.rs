@@ -1827,16 +1827,21 @@ impl LauncherApp {
                 truncated: false,
             }),
             Some(Ok(preview)) => {
+                let text_only = preview.kind == ItemKind::Image
+                    && !preview.text.is_empty()
+                    && self.clipboard_ocr_text_only(&item.id);
                 match &preview.image {
                     Some(Ok(image)) => {
                         let dimensions = format!("{} × {} px", image.width, image.height);
-                        bodies.push(PreviewBody::ImageData {
-                            handle: image.handle.clone(),
-                            footer: Some(match &copied {
-                                Some(time) => format!("{dimensions} · copied {time}"),
-                                None => dimensions.clone(),
-                            }),
-                        });
+                        if !text_only {
+                            bodies.push(PreviewBody::ImageData {
+                                handle: image.handle.clone(),
+                                footer: Some(match &copied {
+                                    Some(time) => format!("{dimensions} · copied {time}"),
+                                    None => dimensions.clone(),
+                                }),
+                            });
+                        }
                         metadata.push(("Dimensions".to_string(), dimensions));
                     }
                     Some(Err(error)) => bodies.push(PreviewBody::Prose {
@@ -1860,6 +1865,19 @@ impl LauncherApp {
                         heading: Some("Files".to_string()),
                         content,
                         truncated: false,
+                    });
+                } else if text_only {
+                    let mut footer = text_summary(&preview.text, None);
+                    if preview.text_truncated {
+                        footer.push_str(" shown");
+                    }
+                    if let Some(time) = &copied {
+                        footer.push_str(" · copied ");
+                        footer.push_str(time);
+                    }
+                    bodies.push(PreviewBody::Plain {
+                        content: preview.text.clone(),
+                        footer: Some(footer),
                     });
                 } else if preview.kind == ItemKind::Image && !preview.text.is_empty() {
                     bodies.push(PreviewBody::Text {

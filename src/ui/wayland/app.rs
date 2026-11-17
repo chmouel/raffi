@@ -73,6 +73,12 @@ use crate::{
 };
 use std::time::Duration;
 
+/// Blocking checked copy of a text to the clipboard.
+pub(super) type TextCopier = Box<dyn FnOnce(&str) -> Result<(), String> + Send>;
+
+/// Blocking job producing the result of a copy action.
+pub(super) type TextJob = Box<dyn FnOnce() -> Result<(), String> + Send>;
+
 #[derive(Clone, PartialEq, Eq)]
 pub(super) enum QueryMode {
     FileBrowser {
@@ -107,22 +113,27 @@ pub(super) enum QueryMode {
     Standard,
 }
 
+/// Run a blocking copy on a worker thread and await it, since iced's future
+/// workers must not block.
+pub(super) async fn off_thread_copy(
+    copy: impl FnOnce() -> Result<(), String> + Send + 'static,
+) -> Result<(), String> {
+    let (sender, receiver) = iced::futures::channel::oneshot::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(copy());
+    });
+    receiver
+        .await
+        .unwrap_or_else(|_| Err("copy worker stopped unexpectedly".into()))
+}
+
 fn checked_clipboard_copy_task(
     path: String,
     copy: impl FnOnce() -> Result<(), String> + Send + 'static,
 ) -> Task<Message> {
-    Task::perform(
-        async move {
-            let (sender, receiver) = iced::futures::channel::oneshot::channel();
-            std::thread::spawn(move || {
-                let _ = sender.send(copy());
-            });
-            receiver
-                .await
-                .unwrap_or_else(|_| Err("copy worker stopped unexpectedly".into()))
-        },
-        move |result| Message::FileBrowserCopyCompleted(path, result),
-    )
+    Task::perform(off_thread_copy(copy), move |result| {
+        Message::FileBrowserCopyCompleted(path, result)
+    })
 }
 
 /// Debug output keeps the payload of sensitive modes out of logs.
@@ -1175,6 +1186,8 @@ impl LauncherApp {
                 inline_copy_error: None,
                 #[cfg(test)]
                 copier: None,
+                #[cfg(test)]
+                clipboard_db: None,
                 program_exists: crate::find_binary,
                 compositor: super::windows::Compositor::current,
                 terminal_tab: crate::terminal::find_tab_target,
@@ -1640,6 +1653,9 @@ impl LauncherApp {
                     }
                     return Task::none();
                 }
+                if let Some(task) = self.leave_clipboard_ocr_text() {
+                    return task;
+                }
                 self.exit()
             }
             Message::PromptChanged(value) => {
@@ -1901,6 +1917,8 @@ impl LauncherApp {
             Message::ClipboardOcrRevision(session, result) => {
                 self.handle_clipboard_ocr_revision(session, result)
             }
+            Message::ClipboardToggleOcrText => self.handle_clipboard_toggle_ocr_text(),
+            Message::ClipboardCopyOcrText => self.handle_clipboard_copy_ocr_text(),
             Message::CacheServerStatus(info) => self.handle_cache_server_status(info),
             Message::ServerRefresh(all) => self.handle_server_refresh(all),
             Message::ServerRefreshDone(token, result) => {
@@ -4200,27 +4218,24 @@ impl LauncherApp {
         self.in_flight.begin(INLINE_COPY, "");
         self.inline_copy_error = None;
         let generation = self.inline_generation;
-        Task::perform(
-            async move {
-                let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                std::thread::spawn(move || {
-                    let _ = sender.send(copy());
-                });
-                receiver
-                    .await
-                    .unwrap_or_else(|_| Err("copy worker stopped unexpectedly".into()))
-            },
-            move |result| Message::InlineCopied(generation, result),
-        )
+        Task::perform(off_thread_copy(copy), move |result| {
+            Message::InlineCopied(generation, result)
+        })
     }
 
     /// The blocking checked copy of `value`.
     pub(super) fn copy_job(&self, value: String) -> Box<dyn FnOnce() -> Result<(), String> + Send> {
+        let copy = self.text_copier();
+        Box::new(move || copy(&value))
+    }
+
+    /// The blocking checked copy of a text only known once a task has run.
+    pub(super) fn text_copier(&self) -> TextCopier {
         #[cfg(test)]
         if let Some(argv) = self.copier.clone() {
-            return Box::new(move || super::actions::copy_text_with(&argv, &value));
+            return Box::new(move |text| super::actions::copy_text_with(&argv, text));
         }
-        Box::new(move || copy_text_checked(&value))
+        Box::new(copy_text_checked)
     }
 
     /// A query or mode change makes any running inline copy stale.
