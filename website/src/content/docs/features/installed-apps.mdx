@@ -20,8 +20,11 @@ addons:
 
 Apps come after your launchers and are searched, sorted by use and shown
 with their icons like any launcher. An app is left out when one of your
-launchers has the same name or runs the same command, so a launcher you
-wrote for Firefox wins over the Firefox desktop entry.
+launchers has the same name, runs the same command, or names its desktop file
+ID in [`desktop`](../../configuration/entries/#configuration-fields) (for
+example `desktop: com.obsproject.Studio.desktop`), so a launcher you wrote for
+an app wins over its desktop entry even when the label or wrapper command
+differs. Desktop actions remain listed as their own rows.
 
 Desktop actions are listed as their own rows, titled with the app name
 first, such as "Firefox: New Private Window" or "Kitty: New Window". Set

@@ -7,7 +7,7 @@ description: Add your own commands and scripts to Raffi's list
 
 Custom entries are optional. Raffi already lists your installed applications and its addons; an entry adds something it can't find by itself, such as an app opened with particular arguments, a command, or an inline script. Entries live in `~/.config/raffi/launchers.yaml`, where each top-level key is an entry. They can also go under a `launchers:` key in `raffi.yaml`, see [Configuration Files](../overview/#configuration-files).
 
-Once you have entries, installed apps are only listed next to them when [`addons.apps.enabled`](../../features/installed-apps/) is `true`. Apps that an entry already covers are left out.
+Once you have entries, installed apps are only listed next to them when [`addons.apps.enabled`](../../features/installed-apps/) is `true`. Apps that an entry already covers by name, command, or `desktop` are left out.
 
 ## Entry Structure
 
@@ -108,6 +108,13 @@ Raising needs a window class to match: either a plain `binary` with no `args` (m
 The window class (Hyprland, Xwayland apps) or app ID (niri, sway) that `raise` looks for. Case does not matter, and `slack` also matches `com.slack.Slack`. Without it, only a plain `binary` with no `args` can raise, by the binary's file name. Set it for launchers that run a script or pass arguments. An empty value matches nothing, so `raise` does nothing there and `--check-config` warns.
 
   To find the value, look at the `class` field of `hyprctl clients`, the `app_id` in `niri msg windows`, or the `app_id` in `swaymsg -t get_tree`.
+
+
+**`desktop`** `string` (optional)
+
+Desktop file ID of the installed application this entry stands for, such as `com.obsproject.Studio.desktop` or `kde-org.kde.kate.desktop` (the path relative to the `applications` folder with `/` replaced by `-`, keeping `.desktop`).
+
+  When [`addons.apps.enabled`](../../features/installed-apps/) is `true`, Raffi already hides an installed app that has the exact same `description` or command as a launcher. Set `desktop` when your launcher uses a different label or a wrapper command (for example `"OBS"` vs `"OBS Studio"`), so the application row is not listed twice while its desktop actions stay available. `raffi --check-config` suggests candidate IDs when it sees a likely duplicate and warns when a configured `desktop` ID matches no desktop file on this machine.
 
 
 **`alias`** `string`

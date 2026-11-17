@@ -448,6 +448,11 @@ Word that stands for the alias while typing: `linoux torvalds` searches like `mp
 ```
 
 
+**`desktop`** `string`
+
+Desktop file ID of the installed application this launcher stands for (such as `com.obsproject.Studio.desktop`), so `addons.apps` does not list the application a second time when the launcher uses a different description or a wrapper command. Supports `~/` and `${VAR}` expansion.
+
+
 ### Conditional Display
 
 Entries can be conditionally shown based on environment variables or file existence. An entry can have several conditions, and all of them must pass.
@@ -559,7 +564,7 @@ Once both files are valid it also prints advisory warnings for the launcher entr
 warning: launchers.yaml:5: /copyq/binary: 'copyq' is already driven by the builtin clipboard addon (keyword 'clip')
 ```
 
-They point at a `binary` or `ifexist` that is not installed on this machine, an `ifexist` that hides the entry here, an entry an enabled builtin addon already covers, a `keyword` that collides with an addon, script filter, web search or snippet keyword, a launcher keyword used by two launchers, and disabled entries. A missing `binary` is only reported for unguarded entries: one with `ifexist`, `ifenvset`, `ifenvnotset`, `ifenveq` or `ifcompositor` is assumed to be meant for another machine. The addon warnings need the native UI, which is what runs the addons: a configuration that selects `ui_type: fuzzel` gets none of them, because Fuzzel ignores the addon section. The clipboard addon counts as enabled when `enabled` says so, or, when it is unset, when its backend is already running. `~/` and `${VAR}` are expanded first, and a file only has to exist to count as installed, so the executable bit is not tested. These warnings never make the command fail.
+They point at a `binary` or `ifexist` that is not installed on this machine, an `ifexist` that hides the entry here, an entry an enabled builtin addon already covers, a `keyword` that collides with an addon, script filter, web search or snippet keyword, a launcher keyword used by two launchers, a launcher that asks to raise without a usable window class, an installed app also listed by `addons.apps` (suggesting candidate `desktop` IDs), a `desktop` value with no matching application row on this machine, and disabled entries. A missing `binary` is only reported for unguarded entries: one with `ifexist`, `ifenvset`, `ifenvnotset`, `ifenveq` or `ifcompositor` is assumed to be meant for another machine. The addon warnings need the native UI, which is what runs the addons: a configuration that selects `ui_type: fuzzel` gets none of them, because Fuzzel ignores the addon section. The clipboard addon counts as enabled when `enabled` says so, or, when it is unset, when its backend is already running. `~/` and `${VAR}` are expanded first, and a file only has to exist to count as installed, so the executable bit is not tested. These warnings never make the command fail.
 
 The startup warnings and `--check-config` need the `config-validation` Cargo feature, which is enabled by default. Minimal `--no-default-features` builds skip them, though the schema file is still written for your editor.
 

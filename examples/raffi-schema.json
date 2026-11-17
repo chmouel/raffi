@@ -1737,6 +1737,14 @@
             "null"
           ]
         },
+        "desktop": {
+          "description": "Desktop file ID of the installed application this launcher stands for,\nso the apps addon does not list it twice (default: none).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
         "disabled": {
           "type": [
             "boolean",

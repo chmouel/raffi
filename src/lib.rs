@@ -61,6 +61,15 @@ pub struct RaffiConfig {
     /// Environment variables set for the binary or script, added to Raffi's
     /// own environment. Values expand `~/` and `${VAR}`.
     pub env: Option<std::collections::BTreeMap<String, String>>,
+    /// Desktop file ID of the installed application this launcher stands for,
+    /// so the apps addon does not list it twice (default: none).
+    #[schemars(length(min = 1))]
+    pub desktop: Option<String>,
+    /// Canonical desktop file ID when this row comes from a `.desktop` file;
+    /// `<id>:action-<action-id>` for desktop action rows.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub desktop_id: Option<String>,
 }
 
 /// A single value, or a list of them.
@@ -3848,6 +3857,7 @@ struct LintAddons {
     /// Addon, script filter, web search and snippet keywords, with their owner.
     keywords: Vec<(String, String)>,
     calculator: bool,
+    apps_enabled: bool,
 }
 
 impl LintAddons {
@@ -3861,6 +3871,7 @@ impl LintAddons {
                 binaries: Vec::new(),
                 keywords: Vec::new(),
                 calculator: false,
+                apps_enabled: addons.apps.enabled,
             };
         }
         let clipboard = clipboard_enabled(&addons.clipboard, running);
@@ -3874,6 +3885,7 @@ impl LintAddons {
             binaries,
             keywords: addon_keywords(addons, clipboard),
             calculator: addons.calculator.enabled,
+            apps_enabled: addons.apps.enabled,
         }
     }
 }
@@ -3883,15 +3895,127 @@ fn launcher_pointer(key: &str) -> String {
     format!("/launchers/{}", key.replace('~', "~0").replace('/', "~1"))
 }
 
+/// Generic words stripped during advisory desktop candidate discovery.
+const GENERIC_APP_TOKENS: &[&str] = &[
+    "terminal",
+    "browser",
+    "editor",
+    "client",
+    "studio",
+    "app",
+    "application",
+    "desktop",
+    "work",
+    "mail",
+];
+
+fn normalized_app_tokens(text: &str) -> HashSet<String> {
+    text.to_lowercase()
+        .replace(['(', ')', '[', ']', '{', '}', '.', '_', '-'], " ")
+        .split_whitespace()
+        .filter(|token| !GENERIC_APP_TOKENS.contains(token))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Up to three candidate desktop IDs for a launcher that does not already get
+/// deduplicated by name or command, used only for the advisory L8 lint.
+fn desktop_candidates(launcher: &RaffiConfig, apps: &[RaffiConfig]) -> Vec<String> {
+    let mut exact = Vec::new();
+    let mut token_hits = Vec::new();
+    let mut arg_hits = Vec::new();
+    let launcher_tokens = launcher
+        .description
+        .as_deref()
+        .map(normalized_app_tokens)
+        .unwrap_or_default();
+
+    for app in apps {
+        let Some(id) = app.desktop_id.as_deref() else {
+            continue;
+        };
+        if id.contains(":action-") {
+            continue;
+        }
+        let same_name = matches!(
+            (&launcher.description, &app.description),
+            (Some(left), Some(right)) if left.trim().eq_ignore_ascii_case(right.trim())
+        );
+        let same_command = launcher.binary.is_some()
+            && launcher.binary == app.binary
+            && launcher.args.as_deref().unwrap_or_default()
+                == app.args.as_deref().unwrap_or_default();
+        if same_command {
+            continue;
+        }
+        if same_name {
+            if !exact.iter().any(|known| known == id) {
+                exact.push(id.to_string());
+            }
+            continue;
+        }
+        if !launcher_tokens.is_empty() {
+            let app_tokens = app
+                .description
+                .as_deref()
+                .map(normalized_app_tokens)
+                .unwrap_or_default();
+            let (shorter, longer) = if launcher_tokens.len() <= app_tokens.len() {
+                (&launcher_tokens, &app_tokens)
+            } else {
+                (&app_tokens, &launcher_tokens)
+            };
+            if !shorter.is_empty() && shorter.is_subset(longer) {
+                if !token_hits.iter().any(|known| known == id) {
+                    token_hits.push(id.to_string());
+                }
+                continue;
+            }
+        }
+        if let Some(app_bin) = app
+            .binary
+            .as_deref()
+            .and_then(|bin| Path::new(bin).file_name())
+            .and_then(|name| name.to_str())
+        {
+            let matched = launcher
+                .args
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .filter(|arg| !arg.starts_with('-'))
+                .filter_map(|arg| Path::new(arg).file_name().and_then(|name| name.to_str()))
+                .any(|arg_base| arg_base.eq_ignore_ascii_case(app_bin));
+            if matched && !arg_hits.iter().any(|known| known == id) {
+                arg_hits.push(id.to_string());
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    for id in exact.into_iter().chain(token_hits).chain(arg_hits) {
+        if !out.contains(&id) {
+            out.push(id);
+            if out.len() == 3 {
+                break;
+            }
+        }
+    }
+    out
+}
+
 /// Advisory lints for the launcher entries of a config: entries that cannot
 /// work on this machine, that a builtin addon already covers, that reuse a
-/// keyword, that ask to raise without a class, or that are disabled.
+/// keyword, that ask to raise without a class, that are disabled, or whose
+/// desktop association is missing or unmatched.
 fn launcher_lints(
     launchers: &serde_yaml::Mapping,
     binaries: &impl BinaryChecker,
     addons: &LintAddons,
     raise_running: bool,
     native_ui: bool,
+    apps: &[RaffiConfig],
+    desktop_ids: &HashSet<String>,
 ) -> Vec<ConfigLint> {
     let mut entries = Vec::new();
     for (key, value) in launchers {
@@ -3904,6 +4028,7 @@ fn launcher_lints(
         };
         entry.binary = entry.binary.map(|value| expand_config_value(&value));
         entry.ifexist = entry.ifexist.map(|value| expand_config_value(&value));
+        entry.desktop = entry.desktop.map(|value| expand_config_value(&value));
         entry.args = entry.args.map(|args| {
             args.into_iter()
                 .map(|arg| expand_config_value(&arg))
@@ -3922,6 +4047,29 @@ fn launcher_lints(
             continue;
         }
         let path = launcher_pointer(key);
+        if let Some(desktop) = &entry.desktop {
+            if !desktop_ids.contains(desktop) {
+                lints.push(ConfigLint::new(
+                    &format!("{path}/desktop"),
+                    format!("'{desktop}' has no matching application row on this machine"),
+                ));
+            }
+        } else if addons.apps_enabled && entry.alias.is_none() {
+            let candidates = desktop_candidates(entry, apps);
+            if !candidates.is_empty() {
+                let ids = candidates
+                    .iter()
+                    .map(|id| format!("'{id}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                lints.push(ConfigLint::new(
+                    &path,
+                    format!(
+                        "installed app {ids} is also listed by the apps addon; set desktop to hide it"
+                    ),
+                ));
+            }
+        }
         if let Some(keyword) = &entry.keyword {
             if let Some((_, first)) = seen_keywords.iter().find(|(known, _)| known == keyword) {
                 lints.push(ConfigLint::new(
@@ -4077,12 +4225,26 @@ fn check_config_lints(
     let native_ui = native_addons_available(args, &config.general);
     let addons = LintAddons::resolve(&config.addons, native_ui, clipboard_running);
     let raise_running = config.general.raise_running.unwrap_or(false);
+    let apps_enabled = config.addons.apps.enabled;
+    let has_desktop = launchers.values().any(|value| {
+        value
+            .as_mapping()
+            .is_some_and(|map| map.contains_key(Value::String("desktop".to_string())))
+    });
+    let (apps, desktop_ids) = if apps_enabled || has_desktop {
+        let scan = DesktopScan::from_addons(&config.addons);
+        detect_desktop_entries_and_ids(&scan, &DefaultBinaryChecker)
+    } else {
+        (Vec::new(), HashSet::new())
+    };
     let mut lints = launcher_lints(
         &launchers,
         &DefaultBinaryChecker,
         &addons,
         raise_running,
         native_ui,
+        &apps,
+        &desktop_ids,
     );
     locate_config_lints(&mut lints, &text, v0);
     if relative {
@@ -4126,6 +4288,7 @@ fn process_config(config: Config, args: &Args) -> Result<ParsedConfig> {
             mc.binary = mc.binary.map(|s| expand_config_value(&s));
             mc.icon = mc.icon.map(|s| expand_config_value(&s));
             mc.ifexist = mc.ifexist.map(|s| expand_config_value(&s));
+            mc.desktop = mc.desktop.map(|s| expand_config_value(&s));
             mc.args = mc
                 .args
                 .map(|v| v.into_iter().map(|s| expand_config_value(&s)).collect());
@@ -4574,6 +4737,7 @@ fn parse_desktop_groups(contents: &str) -> Vec<(String, HashMap<String, String>)
 /// actions when the scan lists them.
 fn parse_desktop_entry_file(
     path: &Path,
+    desktop_id: &str,
     scan: &DesktopScan,
     binary_checker: &impl BinaryChecker,
 ) -> Vec<RaffiConfig> {
@@ -4638,6 +4802,7 @@ fn parse_desktop_entry_file(
             .map(|config| RaffiConfig {
                 raise: classes.is_empty().then_some(false),
                 window_class: (!classes.is_empty()).then_some(OneOrMany::Many(classes)),
+                desktop_id: Some(desktop_id.to_string()),
                 ..config
             }),
     );
@@ -4658,6 +4823,7 @@ fn parse_desktop_entry_file(
                 )
                 .map(|config| RaffiConfig {
                     raise: Some(false),
+                    desktop_id: Some(format!("{desktop_id}:action-{id}")),
                     ..config
                 }),
             );
@@ -4666,11 +4832,11 @@ fn parse_desktop_entry_file(
     entries
 }
 
-fn detect_desktop_entries_from_dirs(
+fn detect_desktop_entries_and_ids_from_dirs(
     dirs: &[PathBuf],
     scan: &DesktopScan,
     binary_checker: &impl BinaryChecker,
-) -> Vec<RaffiConfig> {
+) -> (Vec<RaffiConfig>, HashSet<String>) {
     let mut seen = HashSet::new();
     let mut ids = HashSet::new();
     let mut entries = Vec::new();
@@ -4701,11 +4867,11 @@ fn detect_desktop_entries_from_dirs(
                 .unwrap_or(entry.path())
                 .to_string_lossy()
                 .replace('/', "-");
-            if !ids.insert(id) {
+            if !ids.insert(id.clone()) {
                 continue;
             }
 
-            for config in parse_desktop_entry_file(entry.path(), scan, binary_checker) {
+            for config in parse_desktop_entry_file(entry.path(), &id, scan, binary_checker) {
                 let key = format!(
                     "{}\u{1f}{}\u{1f}{}",
                     config.description.as_deref().unwrap_or_default(),
@@ -4725,7 +4891,22 @@ fn detect_desktop_entries_from_dirs(
             .unwrap_or_default()
             .cmp(right.description.as_deref().unwrap_or_default())
     });
-    entries
+    (entries, ids)
+}
+
+fn detect_desktop_entries_from_dirs(
+    dirs: &[PathBuf],
+    scan: &DesktopScan,
+    binary_checker: &impl BinaryChecker,
+) -> Vec<RaffiConfig> {
+    detect_desktop_entries_and_ids_from_dirs(dirs, scan, binary_checker).0
+}
+
+fn detect_desktop_entries_and_ids(
+    scan: &DesktopScan,
+    binary_checker: &impl BinaryChecker,
+) -> (Vec<RaffiConfig>, HashSet<String>) {
+    detect_desktop_entries_and_ids_from_dirs(&desktop_entry_dirs(), scan, binary_checker)
 }
 
 fn detect_desktop_entries(
@@ -4736,11 +4917,16 @@ fn detect_desktop_entries(
 }
 
 /// Add the installed applications after the launchers, leaving out those
-/// named like a launcher or running the same command.
+/// associated with a launcher (`desktop`), named like a launcher, or running
+/// the same command.
 fn merge_apps(entries: &mut Vec<RaffiConfig>, apps: Vec<RaffiConfig>) {
     let launchers = entries.len();
     for app in apps {
         let duplicate = entries[..launchers].iter().any(|launcher| {
+            let same_desktop = matches!(
+                (&launcher.desktop, &app.desktop_id),
+                (Some(left), Some(right)) if left == right
+            );
             let same_name = matches!(
                 (&launcher.description, &app.description),
                 (Some(left), Some(right)) if left.eq_ignore_ascii_case(right)
@@ -4749,7 +4935,7 @@ fn merge_apps(entries: &mut Vec<RaffiConfig>, apps: Vec<RaffiConfig>) {
                 && launcher.binary == app.binary
                 && launcher.args.as_deref().unwrap_or_default()
                     == app.args.as_deref().unwrap_or_default();
-            same_name || same_command
+            same_desktop || same_name || same_command
         });
         if !duplicate {
             entries.push(app);
@@ -6577,6 +6763,8 @@ launchers:
             raise: None,
             window_class: None,
             env: None,
+            desktop: None,
+            desktop_id: None,
         };
         let args = Args {
             help: false,
@@ -8836,6 +9024,132 @@ Terminal=true
     }
 
     #[test]
+    fn test_merge_apps_explicit_desktop_and_canonical_ids() {
+        let dir = temp_test_dir("desktop-canonical-ids");
+        let user_dir = dir.join("user/applications");
+        let sys_dir = dir.join("system/applications");
+        fs::create_dir_all(user_dir.join("foo")).unwrap();
+        fs::create_dir_all(sys_dir.join("foo")).unwrap();
+        fs::create_dir_all(sys_dir.join("bar")).unwrap();
+
+        fs::write(
+            sys_dir.join("com.obsproject.Studio.desktop"),
+            "[Desktop Entry]\nType=Application\nName=OBS Studio\nExec=obs\nActions=start;alt;\n\
+             \n[Desktop Action start]\nName=Quick Run\nExec=obs --startrecording\n\
+             \n[Desktop Action alt]\nName=Quick Run\nExec=obs --startreplaybuffer\n",
+        )
+        .unwrap();
+        fs::write(
+            sys_dir.join("foo/editor.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Foo Editor\nExec=foo-edit\n",
+        )
+        .unwrap();
+        fs::write(
+            sys_dir.join("bar/editor.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Bar Editor\nExec=bar-edit\n",
+        )
+        .unwrap();
+        fs::write(
+            sys_dir.join("hidden-by-user.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Hidden By User\nExec=obs\n",
+        )
+        .unwrap();
+        fs::write(
+            user_dir.join("hidden-by-user.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Hidden By User\nExec=obs\nNoDisplay=true\n",
+        )
+        .unwrap();
+
+        let checker = MockBinaryChecker {
+            binaries: vec![
+                "obs".to_string(),
+                "foo-edit".to_string(),
+                "bar-edit".to_string(),
+            ],
+        };
+        let scan = DesktopScan {
+            actions: true,
+            terminal: None,
+            desktops: Vec::new(),
+        };
+        let (apps, ids) =
+            detect_desktop_entries_and_ids_from_dirs(&[user_dir, sys_dir], &scan, &checker);
+
+        assert!(ids.contains("com.obsproject.Studio.desktop"));
+        assert!(ids.contains("foo-editor.desktop"));
+        assert!(ids.contains("bar-editor.desktop"));
+        assert!(ids.contains("hidden-by-user.desktop"));
+
+        let action_ids: Vec<_> = apps
+            .iter()
+            .filter_map(|app| app.desktop_id.as_deref())
+            .filter(|id| id.contains(":action-"))
+            .collect();
+        assert_eq!(
+            action_ids,
+            [
+                "com.obsproject.Studio.desktop:action-start",
+                "com.obsproject.Studio.desktop:action-alt",
+            ]
+        );
+
+        // Without `desktop:`, merge result is preserved.
+        let mut plain = vec![RaffiConfig {
+            binary: Some("wm-jumpapp".to_string()),
+            args: Some(vec!["-X".to_string(), "obs".to_string()]),
+            description: Some("OBS".to_string()),
+            ..Default::default()
+        }];
+        merge_apps(&mut plain, apps.clone());
+        assert_eq!(
+            descriptions(&plain),
+            [
+                "OBS",
+                "Bar Editor",
+                "Foo Editor",
+                "OBS Studio",
+                "OBS Studio: Quick Run",
+                "OBS Studio: Quick Run",
+            ]
+        );
+
+        // With `desktop:`, only the matching application row is hidden; actions and
+        // nested stems with the same filename survive.
+        let mut with_desktop = vec![
+            RaffiConfig {
+                binary: Some("wm-jumpapp".to_string()),
+                args: Some(vec!["-X".to_string(), "obs".to_string()]),
+                description: Some("OBS".to_string()),
+                desktop: Some("com.obsproject.Studio.desktop".to_string()),
+                ..Default::default()
+            },
+            RaffiConfig {
+                binary: Some("foo-edit".to_string()),
+                description: Some("Custom Foo".to_string()),
+                desktop: Some("foo-editor.desktop".to_string()),
+                ..Default::default()
+            },
+        ];
+        merge_apps(&mut with_desktop, apps);
+        assert_eq!(
+            descriptions(&with_desktop),
+            [
+                "OBS",
+                "Custom Foo",
+                "Bar Editor",
+                "OBS Studio: Quick Run",
+                "OBS Studio: Quick Run",
+            ]
+        );
+
+        let parsed: RaffiConfig = serde_yaml::from_str("binary: obs\ndescription: OBS\n").unwrap();
+        assert_eq!(parsed.desktop, None);
+        assert_eq!(parsed.desktop_id, None);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn test_desktop_entry_icon_map_from_dirs_uses_real_exec_binary() {
         let dir = temp_test_dir("desktop-icon-map");
         let apps_dir = dir.join("applications");
@@ -9430,17 +9744,31 @@ launchers:
         addons_available: bool,
         running: Vec<Vec<String>>,
     ) -> Vec<ConfigLint> {
+        run_lints_with_apps(text, binaries, addons_available, running, &[], &[])
+    }
+
+    fn run_lints_with_apps(
+        text: &str,
+        binaries: &[&str],
+        addons_available: bool,
+        running: Vec<Vec<String>>,
+        apps: &[RaffiConfig],
+        desktop_ids: &[&str],
+    ) -> Vec<ConfigLint> {
         let config: Config = serde_yaml::from_str(text).unwrap();
         let checker = MockBinaryChecker {
             binaries: binaries.iter().map(|name| name.to_string()).collect(),
         };
         let addons = LintAddons::resolve(&config.addons, addons_available, || running);
+        let ids: HashSet<String> = desktop_ids.iter().map(|id| id.to_string()).collect();
         launcher_lints(
             &config.launchers,
             &checker,
             &addons,
             config.general.raise_running.unwrap_or(false),
             addons_available,
+            apps,
+            &ids,
         )
     }
 
@@ -9800,6 +10128,130 @@ launchers:
     }
 
     #[test]
+    fn test_launcher_lints_desktop_candidates_and_unmatched_id() {
+        let app = |id: &str, description: &str, binary: &str| RaffiConfig {
+            description: Some(description.to_string()),
+            binary: Some(binary.to_string()),
+            desktop_id: Some(id.to_string()),
+            ..Default::default()
+        };
+        let apps = vec![
+            app("com.obsproject.Studio.desktop", "OBS Studio", "obs"),
+            app("brave-browser.desktop", "Brave", "brave"),
+            app("kitty.desktop", "kitty", "kitty"),
+            app("com.mitchellh.ghostty.desktop", "Ghostty", "ghostty"),
+            app("chatgpt.desktop", "ChatGPT", "chatgpt"),
+            RaffiConfig {
+                description: Some("OBS Studio: Start Recording".to_string()),
+                binary: Some("obs".to_string()),
+                args: Some(vec!["--startrecording".to_string()]),
+                desktop_id: Some("com.obsproject.Studio.desktop:action-start".to_string()),
+                ..Default::default()
+            },
+        ];
+        let ids = [
+            "com.obsproject.Studio.desktop",
+            "brave-browser.desktop",
+            "kitty.desktop",
+            "com.mitchellh.ghostty.desktop",
+            "chatgpt.desktop",
+            "hidden-installed.desktop",
+        ];
+
+        let text = r#"
+version: 1
+addons:
+  apps:
+    enabled: true
+launchers:
+  obs:
+    binary: wm-jumpapp
+    args: [-X, obs]
+    description: OBS
+    window_class: com.obsproject.Studio
+  brave:
+    binary: wm-jumpapp
+    args: [-X, brave]
+    description: Brave Browser
+    window_class: brave-browser
+  kitty:
+    binary: /usr/bin/kitty
+    description: Kitty Terminal
+  ghostty:
+    binary: wm-jumpapp
+    args: [-X, ghostty]
+    description: Ghostty Terminal
+    window_class: com.mitchellh.ghostty
+  chatgpt:
+    binary: wm-jumpapp
+    args: [-X, chatgpt]
+    description: ChatGPT Work
+    window_class: chatgpt
+  associated:
+    binary: wm-jumpapp
+    args: [-X, obs]
+    description: OBS Associated
+    desktop: com.obsproject.Studio.desktop
+    window_class: com.obsproject.Studio
+  hidden_ok:
+    binary: wm-jumpapp
+    args: [-X, obs]
+    description: Hidden Installed
+    desktop: hidden-installed.desktop
+    window_class: com.obsproject.Studio
+  bad_id:
+    binary: wm-jumpapp
+    args: [-X, obs]
+    description: Bad Desktop
+    desktop: missing.desktop
+    window_class: com.obsproject.Studio
+"#;
+        let lints = run_lints_with_apps(
+            text,
+            &["wm-jumpapp", "/usr/bin/kitty"],
+            true,
+            Vec::new(),
+            &apps,
+            &ids,
+        );
+        let found: Vec<(&str, &str)> = lints
+            .iter()
+            .map(|lint| (lint.path.as_str(), lint.message.as_str()))
+            .collect();
+        assert_eq!(found.len(), 6, "{found:?}");
+        assert_eq!(found[0].0, "/launchers/obs");
+        assert!(
+            found[0].1.contains("'com.obsproject.Studio.desktop'"),
+            "{}",
+            found[0].1
+        );
+        assert_eq!(found[1].0, "/launchers/brave");
+        assert!(
+            found[1].1.contains("'brave-browser.desktop'"),
+            "{}",
+            found[1].1
+        );
+        assert_eq!(found[2].0, "/launchers/kitty");
+        assert!(found[2].1.contains("'kitty.desktop'"), "{}", found[2].1);
+        assert_eq!(found[3].0, "/launchers/ghostty");
+        assert!(
+            found[3].1.contains("'com.mitchellh.ghostty.desktop'"),
+            "{}",
+            found[3].1
+        );
+        assert_eq!(found[4].0, "/launchers/chatgpt");
+        assert!(found[4].1.contains("'chatgpt.desktop'"), "{}", found[4].1);
+        assert_eq!(found[5].0, "/launchers/bad_id/desktop");
+        assert!(
+            found[5]
+                .1
+                .contains("'missing.desktop' has no matching application row on this machine"),
+            "{}",
+            found[5].1
+        );
+    }
+
+    #[test]
     fn test_launcher_lints_clean_config() {
         let lints = run_lints(
             r#"
@@ -9876,6 +10328,8 @@ launchers:
             &addons,
             config.general.raise_running.unwrap_or(false),
             native_addons_available(&Args::default(), &config.general),
+            &[],
+            &HashSet::new(),
         );
         assert_eq!(lints, Vec::new(), "{lints:?}");
     }
