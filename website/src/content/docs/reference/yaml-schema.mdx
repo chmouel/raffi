@@ -553,6 +553,14 @@ raffi: config warning: /home/user/.config/raffi/launchers.yaml:12: /firefox: Add
 
 To check a config explicitly, for example in a script or after editing, run `raffi --check-config`. It checks `raffi.yaml` and `launchers.yaml`, prints all problems and exits with a non-zero status if any were found.
 
+Once both files are valid it also prints advisory warnings for the launcher entries, one per line, prefixed with `warning: `:
+
+```
+warning: launchers.yaml:5: /copyq/binary: 'copyq' is already driven by the builtin clipboard addon (keyword 'clip')
+```
+
+They point at a `binary` or `ifexist` that is not installed on this machine, an `ifexist` that hides the entry here, an entry an enabled builtin addon already covers, a `keyword` that collides with an addon, script filter, web search or snippet keyword, a launcher keyword used by two launchers, and disabled entries. A missing `binary` is only reported for unguarded entries: one with `ifexist`, `ifenvset`, `ifenvnotset`, `ifenveq` or `ifcompositor` is assumed to be meant for another machine. The addon warnings need the native UI, which is what runs the addons: a configuration that selects `ui_type: fuzzel` gets none of them, because Fuzzel ignores the addon section. The clipboard addon counts as enabled when `enabled` says so, or, when it is unset, when its backend is already running. `~/` and `${VAR}` are expanded first, and a file only has to exist to count as installed, so the executable bit is not tested. These warnings never make the command fail.
+
 The startup warnings and `--check-config` need the `config-validation` Cargo feature, which is enabled by default. Minimal `--no-default-features` builds skip them, though the schema file is still written for your editor.
 
 ## Path Expansion

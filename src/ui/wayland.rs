@@ -79,6 +79,9 @@ use super::{UISettings, UI};
 use crate::{AddonsConfig, RaffiConfig};
 
 pub(crate) use self::clipboard_cli::run_clipboard_cli;
+pub(crate) use self::clipboard_history::{
+    resolve_clipboard_addon, running_cmdlines as clipboard_running_cmdlines,
+};
 pub(crate) use self::slack_api::clear_cache as clear_slack_cache;
 use self::state::{LauncherApp, SharedSelection};
 use self::theme::ThemeColors;

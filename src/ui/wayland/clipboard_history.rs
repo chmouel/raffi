@@ -222,7 +222,7 @@ fn is_raffi_daemon(args: &[String]) -> bool {
 /// Turn the clipboard addon on when its setting is unset and its backend is
 /// running: CopyQ, `raffi --cache-daemon` for the `raffi` backend, either of
 /// them for `auto`.
-pub(super) fn resolve_clipboard_addon(
+pub(crate) fn resolve_clipboard_addon(
     config: &mut crate::ClipboardAddonConfig,
     cmdlines: impl FnOnce() -> Vec<Vec<String>>,
 ) {
@@ -256,7 +256,7 @@ pub(super) fn copyq_running(cmdlines: impl FnOnce() -> Vec<Vec<String>>) -> bool
 }
 
 /// Command lines of the current user's processes.
-pub(super) fn running_cmdlines() -> Vec<Vec<String>> {
+pub(crate) fn running_cmdlines() -> Vec<Vec<String>> {
     let Ok(uid) = fs::metadata("/proc/self").map(|meta| meta.uid()) else {
         return Vec::new();
     };

@@ -18,6 +18,8 @@ use self::wayland::WaylandUI;
 pub(crate) use self::wayland::THUMBNAIL_DIR_NAME;
 #[cfg(feature = "wayland")]
 pub(crate) use self::wayland::{clear_wayland_caches, run_cache_daemon, run_clipboard_cli};
+#[cfg(feature = "wayland")]
+pub(crate) use self::wayland::{clipboard_running_cmdlines, resolve_clipboard_addon};
 
 /// Font and padding sizes derived from the base font_size.
 /// All sizes scale proportionally from the base.

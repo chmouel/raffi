@@ -2914,6 +2914,33 @@ impl std::fmt::Display for ConfigProblem {
     }
 }
 
+/// An advisory finding from `--check-config`, printed as a warning and never
+/// counted as a problem.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ConfigLint {
+    /// JSON pointer to the offending value, `/` for the document root.
+    pub path: String,
+    pub message: String,
+    /// 1-based line in the config file, when it could be located.
+    pub line: Option<usize>,
+}
+
+impl ConfigLint {
+    fn new(path: &str, message: impl Into<String>) -> Self {
+        Self {
+            path: path.to_string(),
+            message: message.into(),
+            line: None,
+        }
+    }
+}
+
+impl std::fmt::Display for ConfigLint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.path, self.message)
+    }
+}
+
 /// Validate a v1-shaped config against the generated JSON Schema.
 /// Returns one problem per schema violation; empty means valid.
 #[cfg(feature = "config-validation")]
@@ -3063,8 +3090,17 @@ fn find_yaml_line(text: &str, pointer: &str) -> Option<usize> {
     found
 }
 
-/// Fill in `line` for each problem by locating its path in the YAML `text`.
+/// 1-based line of `pointer` in `text`.
 /// `v0` means `text` uses the old flat format, where launchers sit at the top level.
+fn config_pointer_line(pointer: &str, text: &str, v0: bool) -> Option<usize> {
+    let pointer = match pointer.strip_prefix("/launchers") {
+        Some(rest) if v0 && (rest.is_empty() || rest.starts_with('/')) => rest.to_string(),
+        _ => pointer.to_string(),
+    };
+    find_yaml_line(text, &pointer)
+}
+
+/// Fill in `line` for each problem by locating its path in the YAML `text`.
 fn locate_config_problems(problems: &mut [ConfigProblem], text: &str, v0: bool) {
     for problem in problems {
         let mut pointer = problem.path.clone();
@@ -3075,14 +3111,14 @@ fn locate_config_problems(problems: &mut [ConfigProblem], text: &str, v0: bool) 
                 key.replace('~', "~0").replace('/', "~1")
             );
         }
-        if v0 {
-            if let Some(rest) = pointer.strip_prefix("/launchers") {
-                if rest.is_empty() || rest.starts_with('/') {
-                    pointer = rest.to_string();
-                }
-            }
-        }
-        problem.line = find_yaml_line(text, &pointer);
+        problem.line = config_pointer_line(&pointer, text, v0);
+    }
+}
+
+/// Fill in `line` for each lint by locating its path in the YAML `text`.
+fn locate_config_lints(lints: &mut [ConfigLint], text: &str, v0: bool) {
+    for lint in lints {
+        lint.line = config_pointer_line(&lint.path, text, v0);
     }
 }
 
@@ -3091,6 +3127,14 @@ fn format_config_problem(source: &str, problem: &ConfigProblem) -> String {
     match problem.line {
         Some(line) => format!("{source}:{line}: {problem}"),
         None => format!("{source}: {problem}"),
+    }
+}
+
+/// Format a lint the same way as a problem, prefixed with `warning: `.
+fn format_config_lint(source: &str, lint: &ConfigLint) -> String {
+    match lint.line {
+        Some(line) => format!("warning: {source}:{line}: {lint}"),
+        None => format!("warning: {source}: {lint}"),
     }
 }
 
@@ -3598,6 +3642,442 @@ pub fn check_launchers_file(path: &Path) -> Result<Vec<ConfigProblem>> {
         }
     }
     Ok(problems)
+}
+
+/// Binaries a builtin addon already drives, with the addon that owns them.
+const BUILTIN_BINARIES: &[(&str, &str)] = &[
+    ("copyq", "clipboard"),
+    ("wofi-emoji", "emoji"),
+    ("pavucontrol", "audio"),
+    ("pactl", "audio"),
+    ("wpctl", "audio"),
+    ("gopass", "pass"),
+    ("rbw", "bitwarden"),
+    ("rofi-rbw", "bitwarden"),
+    ("playerctl", "media"),
+];
+
+/// Keyword of `addon` when it is enabled, or `None` when it is disabled or has none.
+fn addon_keyword(addons: &AddonsConfig, clipboard_enabled: bool, addon: &str) -> Option<String> {
+    let keyword = match addon {
+        "clipboard" if clipboard_enabled => addons.clipboard.trigger(),
+        "emoji" if addons.emoji.enabled => addons.emoji.trigger.as_deref().unwrap_or("emoji"),
+        "audio" if addons.audio.enabled => addons.audio.trigger(),
+        "media" if addons.media.enabled => addons.media.trigger(),
+        "pass" if addons.pass.enabled => addons.pass.trigger(),
+        "bitwarden" if addons.bitwarden.enabled => addons.bitwarden.trigger(),
+        _ => return None,
+    };
+    Some(keyword.to_string())
+}
+
+/// Keyword of every enabled addon, script filter, web search and snippet
+/// source, with a description of its owner.
+fn addon_keywords(addons: &AddonsConfig, clipboard_enabled: bool) -> Vec<(String, String)> {
+    let mut keywords: Vec<(String, String)> = Vec::new();
+    let mut add = |enabled: bool, keyword: &str, owner: &str| {
+        if enabled && !keyword.is_empty() {
+            keywords.push((keyword.to_string(), owner.to_string()));
+        }
+    };
+    add(
+        addons.system.enabled,
+        addons.system.trigger(),
+        "the system addon trigger",
+    );
+    add(
+        addons.windows.enabled,
+        addons.windows.trigger(),
+        "the windows addon trigger",
+    );
+    add(
+        addons.browser_tabs.enabled,
+        addons.browser_tabs.trigger(),
+        "the browser tabs addon trigger",
+    );
+    add(
+        addons.bookmarks.enabled,
+        addons.bookmarks.trigger(),
+        "the bookmarks addon trigger",
+    );
+    add(
+        addons.browser_history.enabled,
+        addons.browser_history.trigger(),
+        "the browser history addon trigger",
+    );
+    add(
+        addons.media.enabled,
+        addons.media.trigger(),
+        "the media addon trigger",
+    );
+    add(
+        addons.audio.enabled,
+        addons.audio.trigger(),
+        "the audio addon trigger",
+    );
+    add(
+        addons.terminal.enabled,
+        addons.terminal.trigger(),
+        "the terminal addon trigger",
+    );
+    add(
+        addons.kill.enabled,
+        addons.kill.trigger(),
+        "the kill addon trigger",
+    );
+    add(
+        addons.bluetooth.enabled,
+        addons.bluetooth.trigger(),
+        "the bluetooth addon trigger",
+    );
+    add(
+        addons.pass.enabled,
+        addons.pass.trigger(),
+        "the pass addon trigger",
+    );
+    add(
+        addons.bitwarden.enabled,
+        addons.bitwarden.trigger(),
+        "the bitwarden addon trigger",
+    );
+    add(
+        addons.slack.enabled,
+        addons.slack.trigger(),
+        "the slack addon trigger",
+    );
+    add(
+        addons.devtools.enabled,
+        addons.devtools.trigger(),
+        "the devtools addon trigger",
+    );
+    add(
+        addons.emoji.enabled,
+        addons.emoji.trigger.as_deref().unwrap_or("emoji"),
+        "the emoji addon trigger",
+    );
+    add(
+        clipboard_enabled,
+        addons.clipboard.trigger(),
+        "the clipboard addon trigger",
+    );
+    for filter in &addons.script_filters {
+        add(
+            true,
+            &filter.keyword,
+            &format!("the keyword of script filter '{}'", filter.name),
+        );
+    }
+    for search in &addons.web_searches {
+        add(
+            true,
+            &search.keyword,
+            &format!("the keyword of web search '{}'", search.name),
+        );
+    }
+    for source in &addons.text_snippets {
+        add(
+            true,
+            &source.keyword,
+            &format!("the keyword of text snippet source '{}'", source.name),
+        );
+    }
+    keywords
+}
+
+/// Whether `args` select rofi's calculator mode, as in `-modi calc`.
+fn args_with_calc_modi(args: &[String]) -> bool {
+    args.windows(2)
+        .any(|pair| pair[0] == "-modi" && pair[1].split(',').any(|mode| mode.contains("calc")))
+}
+
+/// Whether the addons can run at all: Fuzzel ignores their configuration, so
+/// only a native frontend gives them keywords and builtin commands.
+#[cfg(feature = "wayland")]
+fn native_addons_available(args: &Args, general: &GeneralConfig) -> bool {
+    match args.ui_type.as_ref().or(general.ui_type.as_ref()) {
+        Some(requested) => requested
+            .parse::<UIType>()
+            .is_ok_and(|ui| ui == UIType::Native),
+        // `default_ui_type()` picks the native UI whenever it is built in.
+        None => default_ui_type(false, false).is_ok_and(|ui| ui == UIType::Native),
+    }
+}
+
+#[cfg(not(feature = "wayland"))]
+fn native_addons_available(_args: &Args, _general: &GeneralConfig) -> bool {
+    false
+}
+
+/// Whether the clipboard addon runs, resolving an unset `enabled` from whether
+/// its backend is running, the way the native UI does.
+fn clipboard_enabled(
+    config: &ClipboardAddonConfig,
+    running: impl FnOnce() -> Vec<Vec<String>>,
+) -> bool {
+    #[cfg(feature = "wayland")]
+    {
+        let mut resolved = config.clone();
+        ui::resolve_clipboard_addon(&mut resolved, running);
+        resolved.is_enabled()
+    }
+    #[cfg(not(feature = "wayland"))]
+    {
+        let _ = running;
+        config.is_enabled()
+    }
+}
+
+/// Command lines of the processes the native UI inspects to decide whether the
+/// clipboard backend is running.
+#[cfg(feature = "wayland")]
+fn clipboard_running() -> Vec<Vec<String>> {
+    ui::clipboard_running_cmdlines()
+}
+
+#[cfg(not(feature = "wayland"))]
+fn clipboard_running() -> Vec<Vec<String>> {
+    Vec::new()
+}
+
+/// What the addons cover, as the lint sees it. Empty when the addons cannot
+/// run, so a Fuzzel-only configuration is never told that an addon replaced an
+/// entry.
+struct LintAddons {
+    /// Builtin binaries, with the addon that drives them and its keyword.
+    binaries: Vec<(&'static str, &'static str, String)>,
+    /// Addon, script filter, web search and snippet keywords, with their owner.
+    keywords: Vec<(String, String)>,
+    calculator: bool,
+}
+
+impl LintAddons {
+    fn resolve(
+        addons: &AddonsConfig,
+        available: bool,
+        running: impl FnOnce() -> Vec<Vec<String>>,
+    ) -> Self {
+        if !available {
+            return Self {
+                binaries: Vec::new(),
+                keywords: Vec::new(),
+                calculator: false,
+            };
+        }
+        let clipboard = clipboard_enabled(&addons.clipboard, running);
+        let binaries = BUILTIN_BINARIES
+            .iter()
+            .filter_map(|(binary, addon)| {
+                addon_keyword(addons, clipboard, addon).map(|keyword| (*binary, *addon, keyword))
+            })
+            .collect();
+        Self {
+            binaries,
+            keywords: addon_keywords(addons, clipboard),
+            calculator: addons.calculator.enabled,
+        }
+    }
+}
+
+/// A launcher's JSON pointer, with the name escaped as a pointer segment.
+fn launcher_pointer(key: &str) -> String {
+    format!("/launchers/{}", key.replace('~', "~0").replace('/', "~1"))
+}
+
+/// Advisory lints for the launcher entries of a config: entries that cannot
+/// work on this machine, that a builtin addon already covers, that reuse a
+/// keyword, or that are disabled.
+fn launcher_lints(
+    launchers: &serde_yaml::Mapping,
+    binaries: &impl BinaryChecker,
+    addons: &LintAddons,
+) -> Vec<ConfigLint> {
+    let mut entries = Vec::new();
+    for (key, value) in launchers {
+        let Some(key) = key.as_str() else {
+            continue;
+        };
+        // Entries that do not parse are reported by the schema check.
+        let Ok(mut entry) = serde_yaml::from_value::<RaffiConfig>(value.clone()) else {
+            continue;
+        };
+        entry.binary = entry.binary.map(|value| expand_config_value(&value));
+        entry.ifexist = entry.ifexist.map(|value| expand_config_value(&value));
+        entry.args = entry.args.map(|args| {
+            args.into_iter()
+                .map(|arg| expand_config_value(&arg))
+                .collect()
+        });
+        entries.push((key, entry));
+    }
+
+    let mut lints = Vec::new();
+    let mut seen_keywords: Vec<(&str, &str)> = Vec::new();
+    let mut disabled = 0;
+
+    for (key, entry) in &entries {
+        if entry.disabled.unwrap_or(false) {
+            disabled += 1;
+            continue;
+        }
+        let path = launcher_pointer(key);
+        if let Some(keyword) = &entry.keyword {
+            if let Some((_, first)) = seen_keywords.iter().find(|(known, _)| known == keyword) {
+                lints.push(ConfigLint::new(
+                    &format!("{path}/keyword"),
+                    format!(
+                        "launcher keyword '{keyword}' is already used by launcher '{first}', keeping the first"
+                    ),
+                ));
+            } else {
+                seen_keywords.push((keyword, key));
+                if let Some((_, owner)) = addons.keywords.iter().find(|(known, _)| known == keyword)
+                {
+                    lints.push(ConfigLint::new(
+                        &format!("{path}/keyword"),
+                        format!(
+                            "keyword '{keyword}' is also {owner}; the launcher keyword still wins the suggestion list"
+                        ),
+                    ));
+                }
+            }
+        }
+        if let Some(exist) = &entry.ifexist {
+            if !binaries.exists(exist) {
+                lints.push(ConfigLint::new(
+                    &format!("{path}/ifexist"),
+                    format!("'{exist}' is not found on this machine, so this entry is hidden"),
+                ));
+            }
+        }
+        let Some(binary) = &entry.binary else {
+            continue;
+        };
+        // Any guard can keep the entry for another machine, so only unguarded
+        // entries warn about a missing binary.
+        let guarded = entry.ifexist.is_some()
+            || entry.ifenvset.is_some()
+            || entry.ifenvnotset.is_some()
+            || entry.ifenveq.is_some()
+            || entry.ifcompositor.is_some();
+        // `BinaryChecker` reports existence, not the executable bit.
+        if !guarded && !binaries.exists(binary) {
+            lints.push(ConfigLint::new(
+                &format!("{path}/binary"),
+                format!("'{binary}' is not found on this machine"),
+            ));
+        }
+        let basename = Path::new(binary)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(binary);
+        if let Some((_, addon, keyword)) = addons
+            .binaries
+            .iter()
+            .find(|(name, _, _)| name == &basename)
+        {
+            lints.push(ConfigLint::new(
+                &format!("{path}/binary"),
+                format!(
+                    "'{binary}' is already driven by the builtin {addon} addon (keyword '{keyword}')"
+                ),
+            ));
+        } else if basename == "rofi"
+            && addons.calculator
+            && args_with_calc_modi(entry.args.as_deref().unwrap_or_default())
+        {
+            lints.push(ConfigLint::new(
+                &format!("{path}/args"),
+                "'rofi -modi calc' is already handled by the builtin calculator addon",
+            ));
+        }
+    }
+
+    if disabled > 0 {
+        lints.push(ConfigLint::new(
+            "/launchers",
+            format!(
+                "{disabled} launcher {} disabled and never shown",
+                if disabled == 1 {
+                    "entry is"
+                } else {
+                    "entries are"
+                }
+            ),
+        ));
+    }
+    lints
+}
+
+/// Lint the launchers `--check-config` would load, read-only: the inline
+/// `launchers:` section, or the `launchers.yaml` next to the config when the
+/// inline section is empty. A file that does not parse yields no lints; its
+/// problems are reported separately.
+fn check_config_lints(
+    args: &Args,
+    configfile: &str,
+    config_exists: bool,
+) -> Vec<(String, Vec<ConfigLint>)> {
+    let launchers_path = launchers_file_for(configfile);
+    let mut config = Config::default();
+    let mut config_contents = String::new();
+    let mut config_v0 = false;
+    if config_exists {
+        let Ok(contents) = fs::read_to_string(configfile) else {
+            return Vec::new();
+        };
+        let Ok(mut raw) = serde_yaml::from_str::<Value>(&contents) else {
+            return Vec::new();
+        };
+        config_v0 = migrate_config_v0_in_memory(&mut raw);
+        migrate_main_view_in_memory(&mut raw);
+        let Ok(parsed) = serde_yaml::from_value::<Config>(raw) else {
+            return Vec::new();
+        };
+        config = parsed;
+        config_contents = contents;
+    }
+
+    let (launchers, source, text, v0, relative) = if !config.launchers.is_empty() {
+        (
+            config.launchers.clone(),
+            configfile.to_string(),
+            config_contents,
+            config_v0,
+            false,
+        )
+    } else if launchers_path.exists() {
+        let Ok((contents, wrapped)) = parse_launchers_file(&launchers_path) else {
+            return Vec::new();
+        };
+        let Ok(parsed) = serde_yaml::from_value::<Config>(wrapped) else {
+            return Vec::new();
+        };
+        (
+            parsed.launchers,
+            launchers_path.display().to_string(),
+            contents,
+            true,
+            true,
+        )
+    } else {
+        return Vec::new();
+    };
+
+    let addons = LintAddons::resolve(
+        &config.addons,
+        native_addons_available(args, &config.general),
+        clipboard_running,
+    );
+    let mut lints = launcher_lints(&launchers, &DefaultBinaryChecker, &addons);
+    locate_config_lints(&mut lints, &text, v0);
+    if relative {
+        for lint in &mut lints {
+            if let Some(rest) = lint.path.strip_prefix("/launchers") {
+                lint.path = if rest.is_empty() { "/" } else { rest }.to_string();
+            }
+        }
+    }
+    vec![(source, lints)]
 }
 
 /// Read config from a reader, accepting both v0 (flat) and v1 (launchers) formats.
@@ -5147,6 +5627,11 @@ pub fn run(args: Args) -> Result<()> {
         }
         if count > 0 {
             anyhow::bail!("{count} problem(s) found");
+        }
+        for (source, lints) in check_config_lints(&args, configfile, config_exists) {
+            for lint in &lints {
+                eprintln!("{}", format_config_lint(&source, lint));
+            }
         }
         return Ok(());
     }
@@ -8897,6 +9382,472 @@ launchers:
         assert_eq!(problems.len(), 1, "{problems:?}");
         assert_eq!(problems[0].path, "/ff/ifexist");
         assert_eq!(problems[0].line, Some(3));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    fn run_lints(text: &str, binaries: &[&str]) -> Vec<ConfigLint> {
+        run_lints_with(text, binaries, true, Vec::new())
+    }
+
+    fn run_lints_with(
+        text: &str,
+        binaries: &[&str],
+        addons_available: bool,
+        running: Vec<Vec<String>>,
+    ) -> Vec<ConfigLint> {
+        let config: Config = serde_yaml::from_str(text).unwrap();
+        let checker = MockBinaryChecker {
+            binaries: binaries.iter().map(|name| name.to_string()).collect(),
+        };
+        let addons = LintAddons::resolve(&config.addons, addons_available, || running);
+        launcher_lints(&config.launchers, &checker, &addons)
+    }
+
+    /// Arguments that select Fuzzel, so the addon lints and the clipboard
+    /// process scan cannot depend on the machine running the test.
+    fn fuzzel_args() -> Args {
+        Args {
+            ui_type: Some("fuzzel".into()),
+            ..Args::default()
+        }
+    }
+
+    #[test]
+    fn test_launcher_lints_missing_binary_and_guards() {
+        let lints = run_lints(
+            r#"
+version: 1
+launchers:
+  gone:
+    binary: missing-tool
+  guarded:
+    binary: missing-tool
+    ifenvset: SOME_VAR
+  off:
+    binary: missing-tool
+    disabled: true
+  present:
+    binary: here
+"#,
+            &["here"],
+        );
+        assert_eq!(lints.len(), 2, "{lints:?}");
+        assert_eq!(lints[0].path, "/launchers/gone/binary");
+        assert!(
+            lints[0].message.contains("'missing-tool'")
+                && lints[0].message.contains("not found on this machine"),
+            "{}",
+            lints[0].message
+        );
+        assert_eq!(lints[1].path, "/launchers");
+        assert!(lints[1].message.contains('1'), "{}", lints[1].message);
+        assert!(
+            lints[1].message.contains("disabled"),
+            "{}",
+            lints[1].message
+        );
+    }
+
+    #[test]
+    fn test_launcher_lints_ifexist_hides_entry() {
+        let lints = run_lints(
+            r#"
+version: 1
+launchers:
+  here:
+    binary: sh
+    ifexist: sh
+  elsewhere:
+    binary: sh
+    ifexist: only-elsewhere
+"#,
+            &["sh"],
+        );
+        assert_eq!(lints.len(), 1, "{lints:?}");
+        assert_eq!(lints[0].path, "/launchers/elsewhere/ifexist");
+        assert!(lints[0].message.contains("hidden"), "{}", lints[0].message);
+    }
+
+    #[test]
+    fn test_launcher_lints_expands_paths() {
+        let expanded = expand_config_value("~/bin/nope");
+        let lints = run_lints(
+            "version: 1\nlaunchers:\n  tilde:\n    binary: ~/bin/nope\n",
+            &[expanded.as_str()],
+        );
+        assert_eq!(lints, Vec::new(), "{lints:?}");
+
+        let lints = run_lints(
+            "version: 1\nlaunchers:\n  tilde:\n    binary: ~/bin/nope\n",
+            &["~/bin/nope"],
+        );
+        assert_eq!(lints.len(), 1, "{lints:?}");
+        assert_eq!(
+            lints[0].message,
+            format!("'{expanded}' is not found on this machine")
+        );
+    }
+
+    #[test]
+    fn test_launcher_lints_builtin_overlap() {
+        let lints = run_lints(
+            r#"
+version: 1
+addons:
+  clipboard:
+    enabled: true
+launchers:
+  clip:
+    binary: copyq
+  emoji:
+    binary: /usr/bin/wofi-emoji
+  vol:
+    binary: pactl
+  calc:
+    binary: rofi
+    args: [-modi, calc]
+  other:
+    binary: rofi
+"#,
+            &["copyq", "/usr/bin/wofi-emoji", "pactl", "rofi"],
+        );
+        let found: Vec<(&str, &str)> = lints
+            .iter()
+            .map(|lint| (lint.path.as_str(), lint.message.as_str()))
+            .collect();
+        assert_eq!(found.len(), 4, "{found:?}");
+        assert_eq!(found[0].0, "/launchers/clip/binary");
+        assert!(found[0].1.contains("clipboard addon"), "{}", found[0].1);
+        assert!(found[0].1.contains("'clip'"), "{}", found[0].1);
+        assert_eq!(found[1].0, "/launchers/emoji/binary");
+        assert!(found[1].1.contains("emoji addon"), "{}", found[1].1);
+        assert_eq!(found[2].0, "/launchers/vol/binary");
+        assert!(found[2].1.contains("audio addon"), "{}", found[2].1);
+        assert_eq!(found[3].0, "/launchers/calc/args");
+        assert!(found[3].1.contains("calculator addon"), "{}", found[3].1);
+    }
+
+    #[test]
+    fn test_launcher_lints_builtin_overlap_needs_enabled_addon() {
+        let lints = run_lints(
+            r#"
+version: 1
+addons:
+  clipboard:
+    enabled: false
+launchers:
+  clip:
+    binary: copyq
+"#,
+            &["copyq"],
+        );
+        assert_eq!(lints, Vec::new(), "{lints:?}");
+    }
+
+    #[test]
+    fn test_launcher_lints_keyword_collisions() {
+        let lints = run_lints(
+            r#"
+version: 1
+addons:
+  script_filters:
+    - name: Timezones
+      command: echo
+      keyword: tz
+launchers:
+  zone:
+    alias: tz
+    keyword: tz
+  first:
+    alias: gg thing
+    keyword: gg
+  second:
+    alias: gg other
+    keyword: gg
+"#,
+            &[],
+        );
+        let found: Vec<(&str, &str)> = lints
+            .iter()
+            .map(|lint| (lint.path.as_str(), lint.message.as_str()))
+            .collect();
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert_eq!(found[0].0, "/launchers/zone/keyword");
+        assert!(
+            found[0].1.contains("script filter 'Timezones'"),
+            "{}",
+            found[0].1
+        );
+        assert_eq!(found[1].0, "/launchers/second/keyword");
+        assert!(
+            found[1].1.contains("already used by launcher 'first'"),
+            "{}",
+            found[1].1
+        );
+    }
+
+    #[test]
+    fn test_launcher_lints_clean_config() {
+        let lints = run_lints(
+            r#"
+version: 1
+launchers:
+  shell:
+    binary: sh
+    description: Shell
+  site:
+    alias: "ws raffi"
+    keyword: raffi
+    description: Search raffi
+"#,
+            &["sh"],
+        );
+        assert_eq!(lints, Vec::new(), "{lints:?}");
+    }
+
+    #[test]
+    fn test_launcher_lints_skip_addons_without_native_ui() {
+        let text = r#"
+version: 1
+addons:
+  clipboard:
+    enabled: true
+launchers:
+  emo:
+    binary: wofi-emoji
+  clip:
+    binary: copyq
+  calc:
+    binary: rofi
+    args: [-modi, calc]
+  key:
+    alias: clip thing
+    keyword: clip
+"#;
+        let binaries = ["wofi-emoji", "copyq", "rofi"];
+        let lints = run_lints_with(text, &binaries, false, Vec::new());
+        assert_eq!(lints, Vec::new(), "{lints:?}");
+
+        let lints = run_lints_with(text, &binaries, true, Vec::new());
+        assert_eq!(lints.len(), 4, "{lints:?}");
+    }
+
+    #[test]
+    fn test_launcher_lints_respect_configured_fuzzel() {
+        let text = r#"
+version: 1
+general:
+  ui_type: fuzzel
+addons:
+  clipboard:
+    enabled: true
+launchers:
+  emo:
+    binary: wofi-emoji
+  key:
+    alias: clip thing
+    keyword: clip
+"#;
+        let config: Config = serde_yaml::from_str(text).unwrap();
+        let checker = MockBinaryChecker {
+            binaries: vec!["wofi-emoji".to_string()],
+        };
+        let addons = LintAddons::resolve(
+            &config.addons,
+            native_addons_available(&Args::default(), &config.general),
+            Vec::new,
+        );
+        let lints = launcher_lints(&config.launchers, &checker, &addons);
+        assert_eq!(lints, Vec::new(), "{lints:?}");
+    }
+
+    #[test]
+    fn test_native_addons_follow_frontend_selection() {
+        let general = GeneralConfig::default();
+        let native = cfg!(feature = "wayland");
+
+        assert_eq!(native_addons_available(&Args::default(), &general), native);
+        assert!(!native_addons_available(
+            &Args {
+                ui_type: Some("fuzzel".into()),
+                ..Args::default()
+            },
+            &general
+        ));
+        assert_eq!(
+            native_addons_available(
+                &Args {
+                    ui_type: Some("native".into()),
+                    ..Args::default()
+                },
+                &general
+            ),
+            native
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "wayland")]
+    fn test_launcher_lints_clipboard_auto_enabled() {
+        let text = r#"
+version: 1
+launchers:
+  clip:
+    binary: copyq
+  key:
+    alias: clip thing
+    keyword: clip
+"#;
+        let running = || vec![vec!["copyq".to_string()]];
+        let lints = run_lints_with(text, &["copyq"], true, running());
+        assert_eq!(lints.len(), 2, "{lints:?}");
+        assert!(lints[0].message.contains("clipboard addon"), "{lints:?}");
+        assert_eq!(lints[1].path, "/launchers/key/keyword");
+        assert!(lints[1].message.contains("'clip'"), "{lints:?}");
+
+        let lints = run_lints_with(text, &["copyq"], true, Vec::new());
+        assert_eq!(lints, Vec::new(), "{lints:?}");
+    }
+
+    #[test]
+    #[cfg(feature = "wayland")]
+    fn test_launcher_lints_clipboard_custom_trigger_and_disabled() {
+        let text = r#"
+version: 1
+addons:
+  clipboard:
+    trigger: cb
+launchers:
+  clip:
+    binary: copyq
+  key:
+    alias: cb thing
+    keyword: cb
+"#;
+        let lints = run_lints_with(text, &["copyq"], true, vec![vec!["copyq".to_string()]]);
+        assert_eq!(lints.len(), 2, "{lints:?}");
+        assert!(lints[0].message.contains("'cb'"), "{lints:?}");
+        assert!(lints[1].message.contains("'cb'"), "{lints:?}");
+
+        let text = text.replace(
+            "  clipboard:\n    trigger: cb",
+            "  clipboard:\n    trigger: cb\n    enabled: false",
+        );
+        let lints = run_lints_with(&text, &["copyq"], true, vec![vec!["copyq".to_string()]]);
+        assert_eq!(lints, Vec::new(), "{lints:?}");
+    }
+
+    #[test]
+    fn test_launcher_lints_escape_pointer_segments() {
+        let lints = run_lints(
+            r#"
+version: 1
+launchers:
+  my/app:
+    binary: missing-tool
+  a~b:
+    binary: missing-tool
+"#,
+            &[],
+        );
+        assert_eq!(lints.len(), 2, "{lints:?}");
+        assert_eq!(lints[0].path, "/launchers/my~1app/binary");
+        assert_eq!(lints[1].path, "/launchers/a~0b/binary");
+    }
+
+    #[test]
+    #[cfg(feature = "config-validation")]
+    fn test_check_config_lints_launchers_file() {
+        let dir = temp_test_dir("check-config-lints-file");
+        let configfile = dir.join("raffi.yaml");
+        let missing = dir.join("missing-tool");
+        let also_missing = dir.join("missing-other");
+        fs::write(&configfile, "version: 1\n").unwrap();
+        fs::write(
+            dir.join("launchers.yaml"),
+            format!(
+                "my/app:\n  binary: {}\na~b:\n  binary: {}\n",
+                missing.display(),
+                also_missing.display()
+            ),
+        )
+        .unwrap();
+
+        let report = check_config_lints(&fuzzel_args(), configfile.to_str().unwrap(), true);
+
+        assert_eq!(report.len(), 1, "{report:?}");
+        let (source, lints) = &report[0];
+        assert!(source.ends_with("launchers.yaml"), "{source}");
+        assert_eq!(lints.len(), 2, "{lints:?}");
+        assert_eq!(lints[0].path, "/my~1app/binary");
+        assert_eq!(lints[0].line, Some(2));
+        assert_eq!(lints[1].path, "/a~0b/binary");
+        assert_eq!(lints[1].line, Some(4));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    #[cfg(feature = "config-validation")]
+    fn test_check_config_lints_inline_launchers() {
+        let dir = temp_test_dir("check-config-lints-inline");
+        let configfile = dir.join("raffi.yaml");
+        let missing = dir.join("missing-tool");
+        let also_missing = dir.join("missing-other");
+        fs::write(
+            &configfile,
+            format!(
+                "version: 1\nlaunchers:\n  my/app:\n    binary: {}\n  a~b:\n    binary: {}\n",
+                missing.display(),
+                also_missing.display()
+            ),
+        )
+        .unwrap();
+        fs::write(dir.join("launchers.yaml"), "inline:\n  binary: sh\n").unwrap();
+
+        let report = check_config_lints(&fuzzel_args(), configfile.to_str().unwrap(), true);
+
+        assert_eq!(report.len(), 1, "{report:?}");
+        let (source, lints) = &report[0];
+        assert!(source.ends_with("raffi.yaml"), "{source}");
+        assert_eq!(lints.len(), 2, "{lints:?}");
+        assert_eq!(lints[0].path, "/launchers/my~1app/binary");
+        assert_eq!(lints[0].line, Some(4));
+        assert_eq!(lints[1].path, "/launchers/a~0b/binary");
+        assert_eq!(lints[1].line, Some(6));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    #[cfg(feature = "config-validation")]
+    fn test_check_config_warnings_do_not_change_exit_status() {
+        let dir = temp_test_dir("check-config-warnings");
+        let configfile = dir.join("raffi.yaml");
+        let args = || Args {
+            configfile: Some(configfile.to_string_lossy().into_owned()),
+            check_config: true,
+            ..Args::default()
+        };
+
+        fs::write(
+            &configfile,
+            "version: 1\nlaunchers:\n  gone:\n    binary: missing-tool\n  off:\n    binary: sh\n    disabled: true\n",
+        )
+        .unwrap();
+        assert!(run(args()).is_ok());
+
+        fs::write(
+            &configfile,
+            "version: 1\nlaunchers:\n  ff:\n    binnary: firefox\n",
+        )
+        .unwrap();
+        assert!(run(args()).is_err());
+
+        fs::write(
+            &configfile,
+            "version: 1\nlaunchers:\n  ff:\n    binary: [firefox]\n",
+        )
+        .unwrap();
+        assert!(run(args()).is_err());
         let _ = fs::remove_dir_all(dir);
     }
 

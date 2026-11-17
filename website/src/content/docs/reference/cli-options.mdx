@@ -68,6 +68,8 @@ Validate the configuration file and `launchers.yaml` next to it against the JSON
 
   Every problem is printed with the file name, line number and path of the offending key, for example `launchers.yaml:12: /firefox: Additional properties are not allowed ('binnary' was unexpected)`. The exit code is non-zero when problems are found. Old v0 (flat) configs are checked as if migrated, but the file is left untouched and line numbers refer to the original file.
 
+  When nothing is wrong, Raffi also prints advisory warnings for the launcher entries, prefixed with `warning: `, for example `warning: launchers.yaml:5: /copyq/binary: 'copyq' is already driven by the builtin clipboard addon (keyword 'clip')`. They flag a `binary` or `ifexist` that is not installed on this machine, an entry an enabled builtin addon already covers, a `keyword` that collides with an addon or script filter keyword, a launcher keyword used twice, and disabled entries. Warnings about addons only apply when the native UI runs them, so a `ui_type: fuzzel` configuration does not get them. These warnings never change the exit code, so `--check-config` stays usable in a pre-commit hook.
+
   Requires the `config-validation` Cargo feature, which is enabled by default. Builds made with `--no-default-features` report that validation is unavailable.
 
   ```bash
