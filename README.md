@@ -92,7 +92,7 @@ Most addons start with a keyword followed by a space. Others answer as soon as y
 
 Clipboard history is worth turning on: the clipboard manager Alfred gives you
 on macOS, in the same search box as everything else. It searches the text
-inside screenshots, expires one-time codes, ignores password managers, and
+inside screenshots, expires one-time codes, ignores password managers, show an icon from which app the paste come from and
 saves any text entry as a [snippet](https://chmouel.github.io/raffi/features/text-snippets/#saving-from-the-clipboard).
 
 ### Desktop control:
