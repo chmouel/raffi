@@ -2,7 +2,7 @@
 
 # Raffi
 
-Raffi is a keyboard-driven search box for your Wayland desktop. From one place you can open apps, browse files, switch windows, paste from your clipboard history, fill in passwords, do sums, convert currencies and a lot more. It is written in Rust, starts fast, and needs a daemon and database only for its built-in clipboard history.
+Raffi is a keyboard-driven search box for your Wayland desktop. From one place you can open apps, browse files, switch windows, paste from your clipboard history, fill in passwords, do sums, convert currencies and a lot more. It is written in Rust, starts fast, and needs a server and database only for its built-in clipboard history.
 
 It works as soon as it is installed. A YAML file lets you pick a theme, choose which addons are on, add web searches and snippets, and add commands or scripts of your own.
 
@@ -86,9 +86,14 @@ Most addons start with a keyword followed by a space. Others answer as soon as y
 
 - [File browser](https://chmouel.github.io/raffi/features/file-browser/): start with `/` or `~/`, with previews of PDFs, images, videos and source code
 - Emoji and Nerd Font icons: `emoji `
-- [Clipboard history](https://chmouel.github.io/raffi/features/clipboard-history/) from CopyQ or Raffi itself: `clip `, or `raffi clipboard` from a script
+- [Clipboard history](https://chmouel.github.io/raffi/features/clipboard-history/): `clip `, or `raffi clipboard` from a script
 - [Text snippets](https://chmouel.github.io/raffi/features/text-snippets/), [web searches](https://chmouel.github.io/raffi/features/web-search/) and [script filters](https://chmouel.github.io/raffi/features/script-filters/), each under a keyword you choose
 - [Installed apps](https://chmouel.github.io/raffi/features/installed-apps/), with their actions such as opening a private window
+
+Clipboard history is worth turning on: the clipboard manager Alfred gives you
+on macOS, in the same search box as everything else. It searches the text
+inside screenshots, expires one-time codes, ignores password managers, and
+saves any text entry as a [snippet](https://chmouel.github.io/raffi/features/text-snippets/#saving-from-the-clipboard).
 
 ### Desktop control:
 

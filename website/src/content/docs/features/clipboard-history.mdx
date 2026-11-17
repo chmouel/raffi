@@ -1,14 +1,20 @@
 ---
 title: Clipboard History
-description: Search, preview and paste your clipboard history with Raffi or CopyQ
+description: Search, preview and paste your clipboard history
 ---
 
 import { Image } from 'astro:assets';
 import clipboardScreenshot from '../../../assets/screenshots/clipboard-history.png';
 import clipboardOcrScreenshot from '../../../assets/screenshots/clipboard-ocr.png';
 
-Search your clipboard history, preview entries, and copy or paste them again.
-Raffi can record the history itself or use [CopyQ](https://hluk.github.io/CopyQ/).
+Clipboard history is the addon worth turning on first: the clipboard manager
+Alfred gives you on macOS, in the search box you already have open.
+
+You see a full preview before pasting, and pasting puts back the original
+formats. Turn on OCR and the words inside a screenshot become searchable too.
+One-time codes expire on their own, password-manager copies are ignored, and
+any text entry can be saved as a
+[snippet](../text-snippets/#saving-from-the-clipboard).
 
 <Image src={clipboardScreenshot} alt="Clipboard history with a release checklist preview and expiry countdowns" width={800} />
 
@@ -63,9 +69,14 @@ and resets when you reopen the browser.
 
 ### Search text in images
 
-With the Raffi backend, [Tesseract](https://github.com/tesseract-ocr/tesseract)
-can make text in screenshots and other images searchable. Install Tesseract and
-its language data, enable OCR, and restart `raffi --server`:
+With [Tesseract](https://github.com/tesseract-ocr/tesseract) installed, Raffi
+reads the text in each copied image once, in the background, and stores it with
+the entry. From then on, words in a screenshot match the same way words in a
+text copy do, and search stays instant as you type because recognition already
+happened when the image was copied.
+
+Install Tesseract and its language data, enable OCR, and restart
+`raffi --server`:
 
 ```yaml
 addons:
@@ -76,12 +87,13 @@ addons:
       languages: [eng] # use [eng, fra] if both languages are installed
 ```
 
-New images are indexed in the background. Search for their text in the browser
-or with `raffi clipboard list`. Press **Ctrl+J** in an image preview to scroll
-to the recognized text, or press Right at the end of the search field and choose
-**Show recognized text** to replace the image with its text. **Escape** brings
-the image back. **Copy recognized text** in the same menu puts the full text on
-the clipboard.
+New images join that queue as they are copied. Search for their text in the
+browser or with `raffi clipboard list`. Press **Ctrl+J** in an image preview to
+scroll to the recognized text, so you can see why an image matched and copy the
+part you need. Press Right at the end of the search field and choose **Show
+recognized text** to replace the image with its text; **Escape** brings the
+image back. **Copy recognized text** in the same menu puts the full text on the
+clipboard.
 
 <Image src={clipboardOcrScreenshot} alt="Searching an image by its recognized text" width={800} />
 
@@ -158,7 +170,7 @@ error codes.
 
 ## Raffi backend
 
-Start the server to record clipboard history without CopyQ:
+Start the server to record clipboard history:
 
 ```sh
 raffi --server
