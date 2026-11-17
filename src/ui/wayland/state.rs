@@ -607,7 +607,6 @@ pub(super) struct ViewState {
     pub font_sizes: crate::ui::FontSizes,
     pub help_active: bool,
     pub show_preview: bool,
-    pub show_launcher_preview: bool,
     /// Set when Ctrl+P hid the pane, so entries with `show_preview: true`
     /// stop overriding a hidden pane too.
     pub preview_hidden_by_user: bool,
@@ -649,7 +648,6 @@ impl ViewState {
             font_sizes,
             help_active: false,
             show_preview: true,
-            show_launcher_preview: false,
             preview_hidden_by_user: false,
             default_script_shell: "bash".to_string(),
             launch_via: None,

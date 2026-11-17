@@ -171,7 +171,7 @@
           ]
         },
         "show_preview": {
-          "description": "Show the right-hand preview pane when this launcher entry is selected (default: false).",
+          "description": "Preview this launcher entry in the right-hand pane. Unset previews it\nwhenever the pane shows; `false` never previews it; `true` previews it\neven when `general.show_preview` is `false`.",
           "type": [
             "boolean",
             "null"

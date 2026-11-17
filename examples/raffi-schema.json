@@ -1287,7 +1287,7 @@
           "$ref": "#/$defs/Renderer"
         },
         "show_preview": {
-          "description": "Show the Alfred-style right-hand preview pane.\nUnset shows previews for addons (snippets, file browser, script filters, etc.)\nbut not for standard launcher entries unless the entry sets `show_preview: true`.\n`true` previews launcher entries too; `false` hides the pane everywhere except\nentries with their own `show_preview: true`. Can also be toggled at runtime with Ctrl+P.",
+          "description": "Show the Alfred-style right-hand preview pane (default: true). On the\nmain page it stays open, empty when the selected row has nothing to\npreview. `false` hides it everywhere except entries with their own\n`show_preview: true`. Can also be toggled at runtime with Ctrl+P.",
           "type": [
             "boolean",
             "null"
@@ -1826,7 +1826,7 @@
           ]
         },
         "show_preview": {
-          "description": "Show the right-hand preview pane when this launcher entry is selected (default: false).",
+          "description": "Preview this launcher entry in the right-hand pane. Unset previews it\nwhenever the pane shows; `false` never previews it; `true` previews it\neven when `general.show_preview` is `false`.",
           "type": [
             "boolean",
             "null"

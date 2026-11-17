@@ -86,9 +86,9 @@ Inline script content. When present, the entry executes this script instead of l
 When `true`, hides the entry from the launcher.
 
 
-**`show_preview`** `boolean` (default: `false`)
+**`show_preview`** `boolean` (default: unset)
 
-When `true`, Raffi shows the right-hand preview pane for this entry (full command or script, conditions, launch stats) even when `general.show_preview` is unset or `false`. Set to `false` to never preview it.
+The preview pane shows this entry's full command or script, conditions and launch stats. Set it to `false` to never preview the entry, or to `true` to preview it even when `general.show_preview` is `false`.
 
 
 **`close_on_action`** `boolean` (default: `general.close_on_action`, else `true`)

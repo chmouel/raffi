@@ -70,9 +70,9 @@ Disable icon loading globally.
 ```
 
 
-**`general.show_preview`** `boolean` (default: unset)
+**`general.show_preview`** `boolean` (default: `true`)
 
-Unset previews addon results only; `true` also previews apps and custom entries; `false` hides the pane everywhere except entries that set their own `show_preview: true`. Toggle at runtime with `Ctrl+P`.
+Shows the preview pane for apps, custom entries and addon results, and keeps it open on the main page. `false` hides the pane everywhere except entries that set their own `show_preview: true`. Toggle at runtime with `Ctrl+P`.
 
   ```yaml
   general:
@@ -402,9 +402,9 @@ Hide this entry from the list.
 ```
 
 
-**`show_preview`** `boolean` (default: `false`)
+**`show_preview`** `boolean` (default: unset)
 
-Show the right-hand preview pane for this entry, regardless of `general.show_preview`.
+`false` never previews this entry; `true` previews it even when `general.show_preview` is `false`.
 
   ```yaml title="launchers.yaml"
   deploy:

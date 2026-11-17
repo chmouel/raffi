@@ -73,11 +73,11 @@ How Raffi draws its window. Valid options:
   An `ICED_BACKEND` environment variable (`tiny-skia` or `wgpu`) takes precedence. See [Startup performance](#startup-performance).
 
 
-**`show_preview`** `boolean` (default: unset, automatic for addons)
+**`show_preview`** `boolean` (default: `true`)
 
 Controls the Alfred-style right-hand preview and details pane.
 
-  When unset, addon results (text snippets, file browser, script filters, emoji, calculator, currency, web searches) show a preview, and apps and custom entries only show one when the entry itself sets `show_preview: true`. Set it to `true` to preview apps and entries too. Set it to `false` to start with the pane hidden everywhere, addons included; entries with their own `show_preview: true` still preview. Press **Ctrl+P** to toggle the pane at runtime; when nothing is shown, the first press turns previews on for everything.
+  Apps, custom entries and addon results all preview. On the main page the pane stays open while you move through the list; a row with nothing to preview, such as an entry with `show_preview: false`, leaves it empty instead of closing it. Set it to `false` to start with the pane hidden everywhere; entries with their own `show_preview: true` still preview. Press **Ctrl+P** to toggle the pane at runtime.
 
 **`close_on_action`** `boolean` (default: `true`)
 

@@ -35,7 +35,9 @@ pub struct RaffiConfig {
     pub ifexist: Option<String>,
     pub disabled: Option<bool>,
     pub script: Option<String>,
-    /// Show the right-hand preview pane when this launcher entry is selected (default: false).
+    /// Preview this launcher entry in the right-hand pane. Unset previews it
+    /// whenever the pane shows; `false` never previews it; `true` previews it
+    /// even when `general.show_preview` is `false`.
     pub show_preview: Option<bool>,
     /// Route this launcher to an internal command: picking it types this text
     /// for you, such as `mp linus/linux` (an addon keyword
@@ -2214,11 +2216,10 @@ pub struct GeneralConfig {
     /// instead of Ctrl+V). Added to the built-in list; matched case-insensitively.
     #[serde(default)]
     pub terminal_classes: Vec<String>,
-    /// Show the Alfred-style right-hand preview pane.
-    /// Unset shows previews for addons (snippets, file browser, script filters, etc.)
-    /// but not for standard launcher entries unless the entry sets `show_preview: true`.
-    /// `true` previews launcher entries too; `false` hides the pane everywhere except
-    /// entries with their own `show_preview: true`. Can also be toggled at runtime with Ctrl+P.
+    /// Show the Alfred-style right-hand preview pane (default: true). On the
+    /// main page it stays open, empty when the selected row has nothing to
+    /// preview. `false` hides it everywhere except entries with their own
+    /// `show_preview: true`. Can also be toggled at runtime with Ctrl+P.
     #[serde(default)]
     pub show_preview: Option<bool>,
     /// Show a tip about a keyword in the empty search box, such as

@@ -25,9 +25,9 @@ version: 1
 #   window_width: 800        # Initial window width in px (default: 800)
 #   window_height: 600       # Initial window height in px (default: 600)
 #   padding: 20              # Outer window padding in pixels (default: 20, scales with font_size)
-#   show_preview: true       # Right-hand preview pane. Addons (snippets, files, script filters...)
-#                            # preview automatically; plain launchers only when this is true or the
-#                            # launcher sets show_preview: true. Toggle at runtime with Ctrl+P.
+#   show_preview: true       # Right-hand preview pane (default: true). It stays open on the main
+#                            # page; false hides it except for launchers that set show_preview: true.
+#                            # Toggle at runtime with Ctrl+P.
 #   close_on_action: true    # Close Raffi after running an entry or addon action (default: true;
 #                            # media, audio, bluetooth, and kill default to false). Individual launchers
 #                            # and addons can override this with their own close_on_action setting, or

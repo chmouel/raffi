@@ -1441,10 +1441,10 @@ impl LauncherApp {
             })
             .height(Length::Fill);
 
-        let body_area: Element<'a, Message> = if let Some(preview_data) = self
+        let preview = self
             .resolve_selected_preview()
-            .filter(|_| self.onboarding.setup.is_none())
-        {
+            .filter(|_| self.onboarding.setup.is_none());
+        let body_area: Element<'a, Message> = if preview.is_some() || self.keeps_empty_preview() {
             let (left_portion, right_portion) =
                 preview_fill_portions(self.view.preview_style.width_fraction);
             let divider = container(Space::new())
@@ -1458,9 +1458,13 @@ impl LauncherApp {
                     ..Default::default()
                 });
 
-            let pane = match &self.action_menu {
-                Some(menu) => self.render_action_pane(menu, preview_data),
-                None => self.render_preview_pane(preview_data),
+            let pane = match (&self.action_menu, preview) {
+                (Some(menu), Some(data)) => self.render_action_pane(menu, data),
+                (None, Some(data)) => self.render_preview_pane(data),
+                (_, None) => self.preview_frame(
+                    Space::new().width(Length::Fill).height(Length::Fill),
+                    self.view.preview_style.bg,
+                ),
             };
             let right_pane = container(pane)
                 .padding(iced::Padding {
@@ -2454,6 +2458,15 @@ impl LauncherApp {
 
     /// The rounded, padded background shared by the preview pane contents,
     /// with a pinned line pointing at the result's actions.
+    /// The main page keeps the preview pane open on rows with nothing to
+    /// preview, so the list does not jump between widths while moving.
+    pub(super) fn keeps_empty_preview(&self) -> bool {
+        self.main_view.active
+            && self.view.show_preview
+            && !self.view.help_active
+            && self.onboarding.setup.is_none()
+    }
+
     fn preview_frame<'a>(
         &self,
         content: impl Into<Element<'a, Message>>,

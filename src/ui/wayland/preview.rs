@@ -1130,10 +1130,8 @@ impl LauncherApp {
                 }
                 MainRowRef::Launcher(config_idx) => {
                     let config = self.configs.get(config_idx)?;
-                    let enabled = config
-                        .show_preview
-                        .unwrap_or(self.view.show_launcher_preview);
-                    (enabled || actions).then(|| self.build_launcher_preview(config_idx, config))
+                    (config.show_preview != Some(false) || actions)
+                        .then(|| self.build_launcher_preview(config_idx, config))
                 }
             };
         }

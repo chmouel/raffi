@@ -2543,7 +2543,6 @@ fn test_preview_scroll_messages_leave_state_unchanged() {
             result: 2.0,
         },
     ));
-    assert!(!app.view.show_launcher_preview);
     assert!(app.view.show_preview);
 
     // Scrolling with the pane visible must not change any app state.
@@ -2588,14 +2587,7 @@ fn test_window_resize_updates_preview_sizing() {
 fn test_toggle_preview_message() {
     let mut app = test_app(AddonsConfig::default());
     assert!(app.view.show_preview);
-    assert!(!app.view.show_launcher_preview);
 
-    // Nothing is previewed yet, so the first Ctrl+P opts launcher previews in.
-    let _ = app.update(Message::TogglePreview);
-    assert!(app.view.show_preview);
-    assert!(app.view.show_launcher_preview);
-
-    // Once something would show, Ctrl+P hides the pane entirely.
     app.inline_result = Some(super::support::calculator_inline_result(
         &super::types::CalculatorResult {
             expression: "1+1".into(),
@@ -2613,7 +2605,7 @@ fn test_toggle_preview_message() {
 }
 
 #[test]
-fn test_launcher_preview_is_opt_in() {
+fn test_launcher_preview_is_on_unless_the_entry_opts_out() {
     let configs = vec![
         RaffiConfig {
             binary: Some("firefox".into()),
@@ -2623,7 +2615,7 @@ fn test_launcher_preview_is_opt_in() {
         RaffiConfig {
             binary: Some("kitty".into()),
             description: Some("Kitty".into()),
-            show_preview: Some(true),
+            show_preview: Some(false),
             ..Default::default()
         },
     ];
@@ -2641,34 +2633,25 @@ fn test_launcher_preview_is_opt_in() {
         false,
     );
     super::configure_preview_visibility(&mut app.view, None);
-    assert!(app.view.show_preview);
-    assert!(!app.view.show_launcher_preview);
-
-    // Plain launchers show nothing unless explicitly enabled.
-    assert!(app.resolve_selected_preview().is_none());
-
-    // A launcher with `show_preview: true` always previews.
-    app.selected_index = 1;
-    assert_eq!(
-        app.resolve_selected_preview().map(|p| p.title),
-        Some("Kitty".to_string())
-    );
-
-    // Ctrl+P on a hidden launcher preview turns launcher previews on.
+    let _ = app.update(Message::SearchChanged(String::new()));
     app.selected_index = 0;
-    let _ = app.update(Message::TogglePreview);
-    assert!(app.view.show_preview);
-    assert!(app.view.show_launcher_preview);
     assert_eq!(
         app.resolve_selected_preview().map(|p| p.title),
         Some("Firefox".to_string())
     );
 
-    // `general.show_preview: true` enables launcher previews globally.
-    app.view.show_launcher_preview = false;
+    // An entry with `show_preview: false` has no preview, but the main page
+    // keeps the pane open so the list does not change width.
+    app.selected_index = 1;
     assert!(app.resolve_selected_preview().is_none());
-    app.view.show_launcher_preview = true;
-    assert!(app.resolve_selected_preview().is_some());
+    assert!(app.keeps_empty_preview());
+
+    // Ctrl+P hides the pane.
+    let _ = app.update(Message::TogglePreview);
+    assert!(!app.view.show_preview);
+    assert!(!app.keeps_empty_preview());
+    app.selected_index = 0;
+    assert!(app.resolve_selected_preview().is_none());
 }
 
 #[test]
@@ -2727,7 +2710,6 @@ fn test_general_show_preview_false_hides_pane() {
     // Ctrl+P again turns every preview on.
     let _ = app.update(Message::TogglePreview);
     assert!(app.view.show_preview);
-    assert!(app.view.show_launcher_preview);
     app.selected_index = 0;
     assert_eq!(
         app.resolve_selected_preview().map(|p| p.title),
@@ -2889,7 +2871,6 @@ fn test_preview_launcher_binary_and_script() {
         Vec::new(),
         false,
     );
-    app.view.show_launcher_preview = true;
 
     let preview = app
         .resolve_selected_preview()
@@ -11588,7 +11569,6 @@ fn test_launcher_raises_its_open_window_unless_ctrl() {
     app.history.max_items = 0;
     // The lookup task is never run here, so no compositor is reached.
     app.view.raise_via = Some(Compositor::Hyprland);
-    app.view.show_launcher_preview = true;
     let _ = app.update(Message::SearchChanged("Firefox".into()));
     let keys: Vec<(String, String)> = app.resolve_selected_preview().unwrap().metadata;
     assert!(keys.contains(&(
