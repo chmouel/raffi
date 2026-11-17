@@ -460,6 +460,8 @@ pub(crate) struct EmojiEntry {
 pub(crate) enum Message {
     SearchChanged(String),
     OpenActions,
+    /// Right-click on a result row: select it and open its actions.
+    OpenActionsAt(usize),
     OpenOnboarding,
     OpenBindingSetup,
     OpenConfigSetup,

@@ -427,6 +427,11 @@ fn keyboard_shortcut_entries(addons: &AddonsConfig) -> Vec<HelpEntry> {
             "Moves the selection through the results",
         ),
         shortcut(
+            "→",
+            "Show actions",
+            "Lists what the selected result can do in the preview pane; right-click a result does the same",
+        ),
+        shortcut(
             "Ctrl+J",
             "Scroll preview down",
             "Scrolls the right-hand preview pane",

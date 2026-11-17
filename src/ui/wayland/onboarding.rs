@@ -304,7 +304,7 @@ impl LauncherApp {
         let mut tours = Row::new().spacing(4);
         let mut last = Row::new().align_y(iced::Alignment::Center).push(
             container(
-                text("Tab to pick one, Enter to open it")
+                text("Tab to pick one, Enter to open it, → on a result for its actions")
                     .size(fs.hint)
                     .color(t.text_muted),
             )

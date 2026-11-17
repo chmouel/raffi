@@ -659,6 +659,19 @@ fn item_row_style(
 
 const PREVIEW_ROW_SPACING: f32 = 12.0;
 const PREVIEW_DIVIDER_WIDTH: f32 = 1.0;
+/// Room kept on the right of result rows for the actions chevron.
+const ACTION_CHEVRON_GUTTER: f32 = 18.0;
+
+/// Padding of a result row, with room on the right for the actions chevron.
+fn row_padding(fs: crate::ui::FontSizes) -> iced::Padding {
+    iced::Padding {
+        right: fs.item_padding + ACTION_CHEVRON_GUTTER,
+        ..fs.item_padding.into()
+    }
+}
+
+/// Gap between the preview content and the pinned actions hint.
+const PREVIEW_ACTIONS_HINT_SPACING: f32 = 6.0;
 const PREVIEW_PANE_LEFT_PADDING: f32 = 14.0;
 const PREVIEW_PANE_RIGHT_PADDING: f32 = 12.0;
 const PREVIEW_CONTENT_RIGHT_PADDING: f32 = 6.0;
@@ -1202,31 +1215,6 @@ fn render_chat_feed<'a>(entries: Vec<ChatEntry>, ps: &PreviewStyle) -> Element<'
     feed.into()
 }
 
-/// The rounded, padded background shared by the preview pane contents.
-fn preview_frame<'a>(
-    content: impl Into<Element<'a, Message>>,
-    bg: iced::Color,
-) -> Element<'a, Message> {
-    container(content)
-        .padding(iced::Padding {
-            top: 8.0,
-            right: PREVIEW_PANE_RIGHT_PADDING,
-            bottom: 8.0,
-            left: PREVIEW_PANE_LEFT_PADDING,
-        })
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(move |_theme| container::Style {
-            background: Some(iced::Background::Color(bg)),
-            border: iced::Border {
-                radius: 10.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        })
-        .into()
-}
-
 /// The icon, title, subtitle and badge row at the top of the preview pane.
 fn preview_header<'a>(
     ps: &PreviewStyle,
@@ -1698,7 +1686,7 @@ impl LauncherApp {
             .on_press(Message::ItemClicked(display_idx))
             .padding(iced::Padding {
                 left: fs.item_padding + indent,
-                ..fs.item_padding.into()
+                ..row_padding(fs)
             })
             .width(Length::Fill)
             .style(item_button_style(t, is_selected, t.text_main));
@@ -1709,14 +1697,78 @@ impl LauncherApp {
                 fs.item_padding,
                 t,
             ),
-            is_selected,
+            display_idx,
         ))
     }
 
     /// Wraps the selected row in the container `snap_to_selection` measures
     /// to scroll it into view. Containers share their content's widget tree,
     /// so moving the wrapper between rows keeps their state.
+    /// A result row at `index`: right-click opens its actions, and the
+    /// selected row gets the actions chevron and the scroll tag.
     fn selectable<'a>(
+        &self,
+        row: impl Into<Element<'a, Message>>,
+        index: usize,
+    ) -> Element<'a, Message> {
+        let is_selected = index == self.selected_index;
+        let row: Element<'a, Message> = if self.view.help_active {
+            row.into()
+        } else {
+            mouse_area(row)
+                .on_right_press(Message::OpenActionsAt(index))
+                .into()
+        };
+        let row = if is_selected {
+            self.with_action_chevron(row)
+        } else {
+            row
+        };
+        self.tag_selected(row, is_selected)
+    }
+
+    /// Overlays a `›` on the right of the selected row when it has actions,
+    /// highlighted while they are open. Clicking it toggles them.
+    fn with_action_chevron<'a>(&self, row: Element<'a, Message>) -> Element<'a, Message> {
+        let t = self.view.theme;
+        let fs = self.view.font_sizes;
+        let (color, message) = if self.action_menu.is_some() {
+            (t.accent, Message::Cancel)
+        } else if !self.view.help_active && !self.selected_actions().is_empty() {
+            (t.text_muted, Message::OpenActions)
+        } else {
+            return row;
+        };
+        let chevron = button(
+            text("›")
+                .size(fs.item + 6.0)
+                .color(color)
+                .width(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Center),
+        )
+        .on_press(message)
+        .padding(0)
+        .width(Length::Fixed(ACTION_CHEVRON_GUTTER + fs.item_padding / 2.0))
+        .style(|_, _| button::Style::default());
+        // Result rows keep `ACTION_CHEVRON_GUTTER` free on their right, so the
+        // chevron never covers a badge or a time.
+        iced::widget::stack![
+            row,
+            container(chevron)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Right)
+                .align_y(iced::alignment::Vertical::Center)
+                .padding(iced::Padding {
+                    right: fs.item_padding / 2.0,
+                    ..Default::default()
+                }),
+        ]
+        .into()
+    }
+
+    /// Tags the selected row so `snap_to_selection` can measure it.
+    fn tag_selected<'a>(
         &self,
         row: impl Into<Element<'a, Message>>,
         is_selected: bool,
@@ -1850,7 +1902,7 @@ impl LauncherApp {
                 .width(Length::Fill)
                 .style(item_button_style(t, is_selected, t.text_main));
 
-            items_column = items_column.push(self.selectable(item_button, is_selected));
+            items_column = items_column.push(self.selectable(item_button, display_idx));
         }
 
         items_column
@@ -1899,7 +1951,12 @@ impl LauncherApp {
             + 2.0
             + fs.scroll_top_padding
             + 32.0;
-        (self.view.window_size.height - chrome).max(160.0)
+        let hint = if self.preview_action_count() > 0 {
+            self.view.preview_style.small * 1.3 + 4.0 + PREVIEW_ACTIONS_HINT_SPACING
+        } else {
+            0.0
+        };
+        (self.view.window_size.height - chrome - hint).max(160.0)
     }
 
     /// Width of the preview pane content, derived from the live window size
@@ -2230,7 +2287,7 @@ impl LauncherApp {
         .width(Length::Fill)
         .height(Length::Fill);
 
-        preview_frame(scroll, ps.bg)
+        self.preview_frame(scroll, ps.bg)
     }
 
     /// The actions for the selected result, listed in the preview pane under
@@ -2337,7 +2394,7 @@ impl LauncherApp {
         .width(Length::Fill)
         .height(Length::Fill);
 
-        preview_frame(scroll, ps.bg)
+        self.preview_frame(scroll, ps.bg)
     }
 
     /// Bare text with a centred summary line, no title, badge, box or metadata.
@@ -2382,8 +2439,73 @@ impl LauncherApp {
             );
         }
 
-        let pane_bg = ps.bg;
-        container(col)
+        self.preview_frame(col, ps.bg)
+    }
+
+    /// The number of actions the preview pane advertises for the selected
+    /// result, or zero while the menu is open or there are none.
+    fn preview_action_count(&self) -> usize {
+        if self.action_menu.is_some() || self.view.help_active {
+            0
+        } else {
+            self.selected_actions().len()
+        }
+    }
+
+    /// The rounded, padded background shared by the preview pane contents,
+    /// with a pinned line pointing at the result's actions.
+    fn preview_frame<'a>(
+        &self,
+        content: impl Into<Element<'a, Message>>,
+        bg: iced::Color,
+    ) -> Element<'a, Message> {
+        let ps = &self.view.preview_style;
+        let count = self.preview_action_count();
+        let body: Element<'a, Message> = if count == 0 {
+            content.into()
+        } else {
+            let accent = ps.accent;
+            let label = if count == 1 {
+                "1 action".to_string()
+            } else {
+                format!("{count} actions")
+            };
+            let hint = button(
+                Row::new()
+                    .spacing(8)
+                    .align_y(iced::Alignment::Center)
+                    .push(
+                        text(label)
+                            .size(ps.small)
+                            .color(ps.text_muted)
+                            .font(ps.font),
+                    )
+                    .push(text("→").size(ps.small).color(accent).font(ps.font)),
+            )
+            .on_press(Message::OpenActions)
+            .padding([2.0, 6.0])
+            .style(move |_, status| button::Style {
+                background: (status == button::Status::Hovered)
+                    .then(|| iced::Color { a: 0.14, ..accent }.into()),
+                border: iced::Border {
+                    radius: 6.0.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+            Column::new()
+                .spacing(PREVIEW_ACTIONS_HINT_SPACING)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .push(container(content).width(Length::Fill).height(Length::Fill))
+                .push(
+                    container(hint)
+                        .width(Length::Fill)
+                        .align_x(iced::alignment::Horizontal::Right),
+                )
+                .into()
+        };
+        container(body)
             .padding(iced::Padding {
                 top: 8.0,
                 right: PREVIEW_PANE_RIGHT_PADDING,
@@ -2393,7 +2515,7 @@ impl LauncherApp {
             .width(Length::Fill)
             .height(Length::Fill)
             .style(move |_theme| container::Style {
-                background: Some(iced::Background::Color(pane_bg)),
+                background: Some(iced::Background::Color(bg)),
                 border: iced::Border {
                     radius: 10.0.into(),
                     ..Default::default()
@@ -2675,7 +2797,7 @@ impl LauncherApp {
 
         if self.keyword_chips && !self.keyword_suggestions.is_empty() {
             items_column =
-                items_column.push(self.selectable(self.chips_row(), self.selected_index == 0));
+                items_column.push(self.tag_selected(self.chips_row(), self.selected_index == 0));
             special_item_idx += 1;
         }
 
@@ -2720,11 +2842,11 @@ impl LauncherApp {
 
             let item_button = button(item_row)
                 .on_press(Message::ItemClicked(display_idx))
-                .padding(fs.item_padding)
+                .padding(row_padding(fs))
                 .width(Length::Fill)
                 .style(item_button_style(t, is_selected, t.text_main));
 
-            items_column = items_column.push(self.selectable(item_button, is_selected));
+            items_column = items_column.push(self.selectable(item_button, display_idx));
             special_item_idx += 1;
         }
 
@@ -2743,11 +2865,11 @@ impl LauncherApp {
 
             let is_selected = self.selected_index == special_item_idx;
             let loading_button = button(loading_row)
-                .padding(fs.item_padding)
+                .padding(row_padding(fs))
                 .width(Length::Fill)
                 .style(item_button_style(t, is_selected, t.text_muted));
 
-            items_column = items_column.push(self.selectable(loading_button, is_selected));
+            items_column = items_column.push(self.selectable(loading_button, special_item_idx));
             special_item_idx += 1;
         } else if let Some(help_msg) = &self.script_filter.help_message {
             let help_row = Row::new()
@@ -2757,11 +2879,11 @@ impl LauncherApp {
 
             let is_selected = self.selected_index == special_item_idx;
             let help_button = button(help_row)
-                .padding(fs.item_padding)
+                .padding(row_padding(fs))
                 .width(Length::Fill)
                 .style(item_button_style(t, is_selected, t.text_muted));
 
-            items_column = items_column.push(self.selectable(help_button, is_selected));
+            items_column = items_column.push(self.selectable(help_button, special_item_idx));
             special_item_idx += 1;
         } else if let Some(sf_result) = &self.script_filter.results {
             let guides = tree_guide_segments(&sf_result.items);
@@ -2800,14 +2922,14 @@ impl LauncherApp {
                     .on_press(Message::ItemClicked(special_item_idx))
                     .padding(iced::Padding {
                         left: fs.item_padding + indent_left(item.indent),
-                        ..fs.item_padding.into()
+                        ..row_padding(fs)
                     })
                     .width(Length::Fill)
                     .style(item_button_style(t, is_selected, t.text_main));
 
                 items_column = items_column.push(self.selectable(
                     with_tree_guide(item_button, guides, fs.item_padding, t),
-                    is_selected,
+                    special_item_idx,
                 ));
                 special_item_idx += 1;
             }
@@ -2825,11 +2947,11 @@ impl LauncherApp {
 
             let is_selected = self.selected_index == special_item_idx;
             let loading_button = button(loading_row)
-                .padding(fs.item_padding)
+                .padding(row_padding(fs))
                 .width(Length::Fill)
                 .style(item_button_style(t, is_selected, t.text_muted));
 
-            items_column = items_column.push(self.selectable(loading_button, is_selected));
+            items_column = items_column.push(self.selectable(loading_button, special_item_idx));
             special_item_idx += 1;
         } else if self.text_snippets.active {
             if let Some(error) = &self.text_snippets.error {
@@ -2843,7 +2965,7 @@ impl LauncherApp {
                     error_row.push(text("Retry · Ctrl+R").size(fs.subtitle).color(t.accent)),
                 )
                 .on_press(Message::RetryLoad)
-                .padding(fs.item_padding)
+                .padding(row_padding(fs))
                 .width(Length::Fill)
                 .style(move |_theme, _status| button::Style {
                     text_color: t.ansi[1],
@@ -2902,11 +3024,12 @@ impl LauncherApp {
 
                     let item_button = button(item_row)
                         .on_press(Message::ItemClicked(special_item_idx))
-                        .padding(fs.item_padding)
+                        .padding(row_padding(fs))
                         .width(Length::Fill)
                         .style(item_button_style(t, is_selected, t.text_main));
 
-                    items_column = items_column.push(self.selectable(item_button, is_selected));
+                    items_column =
+                        items_column.push(self.selectable(item_button, special_item_idx));
                     special_item_idx += 1;
                 }
             }
@@ -2934,11 +3057,12 @@ impl LauncherApp {
 
                     let item_button = button(item_row)
                         .on_press(Message::ItemClicked(special_item_idx))
-                        .padding(fs.item_padding)
+                        .padding(row_padding(fs))
                         .width(Length::Fill)
                         .style(item_button_style(t, is_selected, t.text_main));
 
-                    items_column = items_column.push(self.selectable(item_button, is_selected));
+                    items_column =
+                        items_column.push(self.selectable(item_button, special_item_idx));
                     special_item_idx += 1;
                 }
             }
@@ -2960,13 +3084,13 @@ impl LauncherApp {
                     );
                 }
                 let mut control = button(status)
-                    .padding(fs.item_padding)
+                    .padding(row_padding(fs))
                     .width(Length::Fill)
                     .style(item_button_style(t, is_selected, t.text_muted));
                 if let Some((_, message)) = recovery {
                     control = control.on_press(message);
                 }
-                items_column = items_column.push(self.selectable(control, is_selected));
+                items_column = items_column.push(self.selectable(control, special_item_idx));
                 special_item_idx += 1;
             }
 
@@ -3006,10 +3130,10 @@ impl LauncherApp {
                     self.selectable(
                         button(item_row)
                             .on_press(Message::ItemClicked(special_item_idx))
-                            .padding(fs.item_padding)
+                            .padding(row_padding(fs))
                             .width(Length::Fill)
                             .style(item_button_style(t, is_selected, t.text_main)),
-                        is_selected,
+                        special_item_idx,
                     ),
                 );
                 special_item_idx += 1;
@@ -3031,13 +3155,13 @@ impl LauncherApp {
                 item = Some(message);
             }
             let mut control = button(status)
-                .padding(fs.item_padding)
+                .padding(row_padding(fs))
                 .width(Length::Fill)
                 .style(item_button_style(t, is_selected, t.text_muted));
             if let Some(message) = item {
                 control = control.on_press(message);
             }
-            items_column = items_column.push(self.selectable(control, is_selected));
+            items_column = items_column.push(self.selectable(control, special_item_idx));
             special_item_idx += 1;
         } else if self.command_list.is_active() {
             // Section headings only while nothing is typed: a filter lists
@@ -3130,7 +3254,7 @@ impl LauncherApp {
                     .on_press(Message::ItemClicked(special_item_idx))
                     .padding(iced::Padding {
                         left: fs.item_padding + indent,
-                        ..fs.item_padding.into()
+                        ..row_padding(fs)
                     })
                     .width(Length::Fill)
                     .style(item_button_style(t, is_selected, t.text_main));
@@ -3144,7 +3268,7 @@ impl LauncherApp {
                 } else {
                     item_button.into()
                 };
-                items_column = items_column.push(self.selectable(row_element, is_selected));
+                items_column = items_column.push(self.selectable(row_element, special_item_idx));
                 special_item_idx += 1;
             }
         }
@@ -3173,13 +3297,13 @@ impl LauncherApp {
                     .push(text(shown).size(fs.subtitle).color(subtitle_color));
                 item_row = item_row.push(text_col.width(Length::Fill));
                 let mut item_button = button(item_row)
-                    .padding(fs.item_padding)
+                    .padding(row_padding(fs))
                     .width(Length::Fill)
                     .style(item_button_style(t, is_selected, t.text_main));
                 if row.copyable {
                     item_button = item_button.on_press(Message::ItemClicked(special_item_idx));
                 }
-                items_column = items_column.push(self.selectable(item_button, is_selected));
+                items_column = items_column.push(self.selectable(item_button, special_item_idx));
                 special_item_idx += 1;
             }
         }
@@ -3193,7 +3317,7 @@ impl LauncherApp {
                 items_column = items_column.push(
                     button(error)
                         .on_press(Message::RetryLoad)
-                        .padding(fs.item_padding)
+                        .padding(row_padding(fs))
                         .width(Length::Fill)
                         .style(item_button_style(t, false, t.text_muted)),
                 );
@@ -3237,7 +3361,7 @@ impl LauncherApp {
                 // drag-and-drop session, and a release on the same row then
                 // activates it like a button click.
                 let item_container = container(item_row)
-                    .padding(fs.item_padding)
+                    .padding(row_padding(fs))
                     .width(Length::Fill)
                     .style(item_row_style(t, is_selected, name_color));
 
@@ -3249,7 +3373,7 @@ impl LauncherApp {
                     .on_release(Message::FileBrowserRowReleased(special_item_idx))
                     .interaction(iced::mouse::Interaction::Pointer);
 
-                items_column = items_column.push(self.selectable(item_area, is_selected));
+                items_column = items_column.push(self.selectable(item_area, special_item_idx));
                 special_item_idx += 1;
             }
         }
@@ -3271,22 +3395,22 @@ impl LauncherApp {
                 ws_row = ws_row.push(text(hint).size(fs.item).color(t.text_muted));
 
                 let ws_button = button(ws_row)
-                    .padding(fs.item_padding)
+                    .padding(row_padding(fs))
                     .width(Length::Fill)
                     .style(item_button_style(t, is_selected, t.text_muted));
 
-                items_column = items_column.push(self.selectable(ws_button, is_selected));
+                items_column = items_column.push(self.selectable(ws_button, special_item_idx));
             } else {
                 let label = format!("Search {} for '{}'", ws.name, ws.query);
                 ws_row = ws_row.push(text(label).size(fs.item).color(t.accent));
 
                 let ws_button = button(ws_row)
                     .on_press(Message::WebSearchSelected)
-                    .padding(fs.item_padding)
+                    .padding(row_padding(fs))
                     .width(Length::Fill)
                     .style(item_button_style(t, is_selected, t.accent));
 
-                items_column = items_column.push(self.selectable(ws_button, is_selected));
+                items_column = items_column.push(self.selectable(ws_button, special_item_idx));
             }
             special_item_idx += 1;
         }
@@ -3303,11 +3427,11 @@ impl LauncherApp {
                 );
 
             let help_button = button(help_row)
-                .padding(fs.item_padding)
+                .padding(row_padding(fs))
                 .width(Length::Fill)
                 .style(item_button_style(t, is_selected, t.text_muted));
 
-            items_column = items_column.push(self.selectable(help_button, is_selected));
+            items_column = items_column.push(self.selectable(help_button, special_item_idx));
             special_item_idx += 1;
         }
 
@@ -3328,11 +3452,11 @@ impl LauncherApp {
                 .push(text(loading_text).size(fs.item).color(t.text_muted));
 
             let loading_button = button(loading_row)
-                .padding(fs.item_padding)
+                .padding(row_padding(fs))
                 .width(Length::Fill)
                 .style(item_button_style(t, is_selected, t.text_muted));
 
-            items_column = items_column.push(self.selectable(loading_button, is_selected));
+            items_column = items_column.push(self.selectable(loading_button, special_item_idx));
             special_item_idx += 1;
         } else if let Some(currency) = &self.currency.result {
             let currency_text = format!(
@@ -3352,11 +3476,11 @@ impl LauncherApp {
 
             let currency_button = button(currency_row)
                 .on_press(Message::CurrencyResultCopied)
-                .padding(fs.item_padding)
+                .padding(row_padding(fs))
                 .width(Length::Fill)
                 .style(item_button_style(t, is_selected, t.accent));
 
-            items_column = items_column.push(self.selectable(currency_button, is_selected));
+            items_column = items_column.push(self.selectable(currency_button, special_item_idx));
             special_item_idx += 1;
         }
 
@@ -3379,11 +3503,11 @@ impl LauncherApp {
                 .push(text(loading_text).size(fs.item).color(t.text_muted));
 
             let loading_button = button(loading_row)
-                .padding(fs.item_padding)
+                .padding(row_padding(fs))
                 .width(Length::Fill)
                 .style(item_button_style(t, is_selected, t.text_muted));
 
-            items_column = items_column.push(self.selectable(loading_button, is_selected));
+            items_column = items_column.push(self.selectable(loading_button, special_item_idx));
             special_item_idx += 1;
         } else if let Some(result) = &self.currency.multi_result {
             for (idx, conversion) in result.conversions.iter().enumerate() {
@@ -3404,11 +3528,12 @@ impl LauncherApp {
 
                 let conversion_button = button(conversion_row)
                     .on_press(Message::MultiCurrencyResultCopied(idx))
-                    .padding(fs.item_padding)
+                    .padding(row_padding(fs))
                     .width(Length::Fill)
                     .style(item_button_style(t, is_selected, t.accent));
 
-                items_column = items_column.push(self.selectable(conversion_button, is_selected));
+                items_column =
+                    items_column.push(self.selectable(conversion_button, special_item_idx));
                 special_item_idx += 1;
             }
         }
@@ -3421,7 +3546,7 @@ impl LauncherApp {
                     .push(text(error.as_str()).size(fs.item).color(t.text_muted));
                 items_column = items_column.push(
                     button(error_row)
-                        .padding(fs.item_padding)
+                        .padding(row_padding(fs))
                         .width(Length::Fill)
                         .style(item_button_style(t, false, t.text_muted)),
                 );
@@ -3463,11 +3588,11 @@ impl LauncherApp {
 
                 let inline_button = button(row)
                     .on_press(Message::InlineSelected(idx))
-                    .padding(fs.item_padding)
+                    .padding(row_padding(fs))
                     .width(Length::Fill)
                     .style(item_button_style(t, is_selected, t.accent));
 
-                items_column = items_column.push(self.selectable(inline_button, is_selected));
+                items_column = items_column.push(self.selectable(inline_button, special_item_idx));
                 special_item_idx += 1;
             }
         }
@@ -3479,7 +3604,7 @@ impl LauncherApp {
                 .push(text(error.as_str()).size(fs.item).color(t.text_muted));
             items_column = items_column.push(
                 button(error_row)
-                    .padding(fs.item_padding)
+                    .padding(row_padding(fs))
                     .width(Length::Fill)
                     .style(move |_theme, _status| button::Style {
                         text_color: t.text_muted,
@@ -3533,10 +3658,10 @@ impl LauncherApp {
                         let selected = self.selected_index == display_idx;
                         let item = button(text(label).size(fs.subtitle).color(t.accent))
                             .on_press(Message::ItemClicked(display_idx))
-                            .padding(fs.item_padding)
+                            .padding(row_padding(fs))
                             .width(Length::Fill)
                             .style(item_button_style(t, selected, t.text_main));
-                        items_column = items_column.push(self.selectable(item, selected));
+                        items_column = items_column.push(self.selectable(item, display_idx));
                         continue;
                     }
                     MainRowRef::Source { source, row } => {
@@ -3567,11 +3692,11 @@ impl LauncherApp {
                 let is_selected = display_idx == self.selected_index;
                 let item_button = button(item_row)
                     .on_press(Message::ItemClicked(display_idx))
-                    .padding(fs.item_padding)
+                    .padding(row_padding(fs))
                     .width(Length::Fill)
                     .style(item_button_style(t, is_selected, t.text_main));
 
-                items_column = items_column.push(self.selectable(item_button, is_selected));
+                items_column = items_column.push(self.selectable(item_button, display_idx));
             }
         }
 
@@ -3600,11 +3725,11 @@ impl LauncherApp {
 
                 let item_button = button(item_row)
                     .on_press(Message::ItemClicked(display_idx))
-                    .padding(fs.item_padding)
+                    .padding(row_padding(fs))
                     .width(Length::Fill)
                     .style(item_button_style(t, is_selected, fb_text_color));
 
-                items_column = items_column.push(self.selectable(item_button, is_selected));
+                items_column = items_column.push(self.selectable(item_button, display_idx));
             }
         }
 

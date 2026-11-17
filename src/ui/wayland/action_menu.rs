@@ -325,6 +325,7 @@ impl LauncherApp {
             }
             Message::ActionSelected(index) => return Some(self.execute_menu_action(*index)),
             Message::Cancel => return Some(self.close_action_menu()),
+            Message::OpenActionsAt(_) => return None,
             message
                 if super::app::is_user_input(message)
                     || matches!(message, Message::ToggleVimMode) => {}

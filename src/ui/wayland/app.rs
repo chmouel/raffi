@@ -495,6 +495,7 @@ pub(super) fn is_user_input(message: &Message) -> bool {
             | Message::WelcomeSelected(_)
             | Message::BackTabComplete
             | Message::OpenActions
+            | Message::OpenActionsAt(_)
             | Message::ClearFilter
             | Message::RetryLoad
             | Message::OpenAddonSetup
@@ -1576,6 +1577,14 @@ impl LauncherApp {
             }
             Message::OpenAddonSetup => self.open_addon_setup(),
             Message::OpenActions => self.open_action_menu(),
+            Message::OpenActionsAt(index) => {
+                if index != self.selected_index {
+                    self.command_list.armed = None;
+                }
+                self.action_menu = None;
+                self.selected_index = index;
+                self.open_action_menu()
+            }
             Message::ActionSelected(index) => self.execute_menu_action(index),
             Message::SearchChanged(query) => self.handle_search_changed(query),
             Message::MoveUp => self.move_selection(-1),

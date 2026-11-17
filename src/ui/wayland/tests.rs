@@ -2225,6 +2225,7 @@ fn test_help_entries_cover_every_enabled_addon_in_routing_order() {
             "uuid/pw",
             "Getting started",
             "↑/↓",
+            "→",
             "Ctrl+J",
             "Ctrl+K",
             "Ctrl+P",
@@ -2314,6 +2315,7 @@ fn test_help_entries_list_keyboard_shortcuts_after_keywords() {
         vec![
             "Getting started",
             "↑/↓",
+            "→",
             "Ctrl+J",
             "Ctrl+K",
             "Ctrl+P",
@@ -2386,7 +2388,7 @@ fn test_help_entries_skip_disabled_addons() {
     assert!(entries
         .iter()
         .all(|entry| entry.section == HelpSection::KeyboardShortcuts || entry.action.is_some()));
-    assert_eq!(entries.len(), 15);
+    assert_eq!(entries.len(), 16);
 }
 
 #[test]
@@ -13194,6 +13196,37 @@ fn action_menu_lists_in_the_preview_pane_and_keeps_the_results() {
     assert!(app.action_menu.is_none(), "Left goes back to the results");
     assert_eq!(app.selected_index, index);
     assert_eq!(app.search_query, "pass ");
+}
+
+#[test]
+fn right_click_selects_a_result_and_opens_its_actions() {
+    let mut app = test_app(AddonsConfig::default());
+    let _ = app.update(Message::SearchChanged("pass ".into()));
+    let items = ["web/github", "web/gitlab"]
+        .map(|entry| {
+            super::pass::command_item(&format!("pass:entry:{entry}"), entry, "", "dialog-password")
+        })
+        .to_vec();
+    let generation = app.vault.generation;
+    let _ = app.update(Message::VaultDone(
+        generation,
+        vault_report(super::vault::Outcome::Loaded(items)),
+    ));
+    select_identity(&mut app, "pass:entry:web/github");
+    let github = app.selected_index;
+    select_identity(&mut app, "pass:entry:web/gitlab");
+    let gitlab = app.selected_index;
+
+    let _ = app.update(Message::OpenActionsAt(github));
+    assert_eq!(app.selected_index, github);
+    assert_eq!(app.action_menu.as_ref().unwrap().title, "web/github");
+    let _ = app.update(Message::OpenActionsAt(gitlab));
+    assert_eq!(app.selected_index, gitlab);
+    assert_eq!(
+        app.action_menu.as_ref().unwrap().title,
+        "web/gitlab",
+        "an open menu follows the right-clicked result"
+    );
 }
 
 #[test]
