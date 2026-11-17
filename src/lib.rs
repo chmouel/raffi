@@ -3885,11 +3885,13 @@ fn launcher_pointer(key: &str) -> String {
 
 /// Advisory lints for the launcher entries of a config: entries that cannot
 /// work on this machine, that a builtin addon already covers, that reuse a
-/// keyword, or that are disabled.
+/// keyword, that ask to raise without a class, or that are disabled.
 fn launcher_lints(
     launchers: &serde_yaml::Mapping,
     binaries: &impl BinaryChecker,
     addons: &LintAddons,
+    raise_running: bool,
+    native_ui: bool,
 ) -> Vec<ConfigLint> {
     let mut entries = Vec::new();
     for (key, value) in launchers {
@@ -3940,6 +3942,15 @@ fn launcher_lints(
                     ));
                 }
             }
+        }
+        // Fuzzel and a build without the native UI raise nothing at all, so
+        // only the native frontend gets told to add a window class.
+        let raise = raise_plan(entry, raise_running);
+        if native_ui && raise.wanted && !raise.alias && raise.classes.is_empty() {
+            lints.push(ConfigLint::new(
+                &format!("{path}/raise"),
+                "raising is enabled but this entry cannot match a window; add window_class",
+            ));
         }
         if let Some(exist) = &entry.ifexist {
             if !binaries.exists(exist) {
@@ -4063,12 +4074,16 @@ fn check_config_lints(
         return Vec::new();
     };
 
-    let addons = LintAddons::resolve(
-        &config.addons,
-        native_addons_available(args, &config.general),
-        clipboard_running,
+    let native_ui = native_addons_available(args, &config.general);
+    let addons = LintAddons::resolve(&config.addons, native_ui, clipboard_running);
+    let raise_running = config.general.raise_running.unwrap_or(false);
+    let mut lints = launcher_lints(
+        &launchers,
+        &DefaultBinaryChecker,
+        &addons,
+        raise_running,
+        native_ui,
     );
-    let mut lints = launcher_lints(&launchers, &DefaultBinaryChecker, &addons);
     locate_config_lints(&mut lints, &text, v0);
     if relative {
         for lint in &mut lints {
@@ -5407,32 +5422,52 @@ fn spawn_and_reap(mut command: Command) -> std::io::Result<()> {
     Ok(())
 }
 
+/// How a launcher's `raise` resolves, for the UI and the `--check-config`
+/// lint to share.
+struct RaisePlan {
+    wanted: bool,
+    alias: bool,
+    /// Empty when this entry can match no window.
+    classes: Vec<String>,
+}
+
+/// Resolve `raise` once so a warning matches what happens at launch. Without
+/// `window_class`, only a plain binary without arguments raises, by its file
+/// name; `args: []` counts as no arguments.
+fn raise_plan(mc: &RaffiConfig, raise_running: bool) -> RaisePlan {
+    let wanted = mc.raise.unwrap_or(raise_running);
+    let alias = mc.alias.is_some();
+    let mut classes = Vec::new();
+    if wanted && !alias {
+        if let Some(window_class) = &mc.window_class {
+            classes = window_class
+                .as_slice()
+                .iter()
+                .filter(|class| !class.trim().is_empty())
+                .cloned()
+                .collect();
+        } else if mc.script.is_none() && !mc.args.as_ref().is_some_and(|args| !args.is_empty()) {
+            classes = mc
+                .binary
+                .as_deref()
+                .and_then(|binary| Path::new(binary).file_name()?.to_str())
+                .filter(|name| !name.is_empty())
+                .map(|name| vec![name.to_string()])
+                .unwrap_or_default();
+        }
+    }
+    RaisePlan {
+        wanted,
+        alias,
+        classes,
+    }
+}
+
 /// The window classes or app IDs of the windows a launcher focuses instead
-/// of starting its program again, none when it always starts it. Without
-/// `window_class`, only a plain binary without arguments raises, by its
-/// file name.
+/// of starting its program again, none when it always starts it.
 #[cfg_attr(not(feature = "wayland"), allow(dead_code))]
 pub(crate) fn raise_classes(mc: &RaffiConfig, raise_running: bool) -> Vec<String> {
-    if !mc.raise.unwrap_or(raise_running) || mc.alias.is_some() {
-        return Vec::new();
-    }
-    if let Some(classes) = &mc.window_class {
-        return classes
-            .as_slice()
-            .iter()
-            .filter(|class| !class.trim().is_empty())
-            .cloned()
-            .collect();
-    }
-    if mc.script.is_some() || mc.args.as_ref().is_some_and(|args| !args.is_empty()) {
-        return Vec::new();
-    }
-    mc.binary
-        .as_deref()
-        .and_then(|binary| Path::new(binary).file_name()?.to_str())
-        .filter(|name| !name.is_empty())
-        .map(|name| vec![name.to_string()])
-        .unwrap_or_default()
+    raise_plan(mc, raise_running).classes
 }
 
 /// The program and arguments a launcher entry runs.
@@ -9400,11 +9435,18 @@ launchers:
             binaries: binaries.iter().map(|name| name.to_string()).collect(),
         };
         let addons = LintAddons::resolve(&config.addons, addons_available, || running);
-        launcher_lints(&config.launchers, &checker, &addons)
+        launcher_lints(
+            &config.launchers,
+            &checker,
+            &addons,
+            config.general.raise_running.unwrap_or(false),
+            addons_available,
+        )
     }
 
     /// Arguments that select Fuzzel, so the addon lints and the clipboard
     /// process scan cannot depend on the machine running the test.
+    #[cfg(feature = "config-validation")]
     fn fuzzel_args() -> Args {
         Args {
             ui_type: Some("fuzzel".into()),
@@ -9587,6 +9629,177 @@ launchers:
     }
 
     #[test]
+    fn test_launcher_lints_raise_cannot_match() {
+        let lints = run_lints(
+            r#"
+version: 1
+launchers:
+  wrapper:
+    binary: wm-jumpapp
+    args: [-X]
+  forced:
+    binary: wm-jumpapp
+    args: [-X]
+    raise: true
+"#,
+            &["wm-jumpapp"],
+        );
+        assert_eq!(lints.len(), 1, "{lints:?}");
+        assert_eq!(lints[0].path, "/launchers/forced/raise");
+        assert!(
+            lints[0].message.contains("cannot match a window")
+                && lints[0].message.contains("window_class"),
+            "{}",
+            lints[0].message
+        );
+
+        // Inherited `general.raise_running`, and every way an entry can end up
+        // with no class to match.
+        let lints = run_lints(
+            r#"
+version: 1
+general:
+  raise_running: true
+launchers:
+  inherited:
+    binary: wm-jumpapp
+    args: [-X, -c, Chromium, chromium]
+  bare:
+    binary: firefox
+  opted-out:
+    binary: wm-jumpapp
+    args: [-X]
+    raise: false
+  empty-args:
+    binary: firefox
+    args: []
+  empty-class:
+    binary: wm-jumpapp
+    args: [-X]
+    window_class: ""
+  blank-class:
+    binary: wm-jumpapp
+    args: [-X]
+    window_class: " "
+  classed:
+    binary: wm-jumpapp
+    args: [-X]
+    window_class: Chromium
+  alias:
+    alias: firefox
+  script:
+    script: exec firefox
+"#,
+            &["wm-jumpapp", "firefox"],
+        );
+        let paths: Vec<&str> = lints.iter().map(|lint| lint.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                "/launchers/inherited/raise",
+                "/launchers/empty-class/raise",
+                "/launchers/blank-class/raise",
+                "/launchers/script/raise",
+            ],
+            "{lints:?}"
+        );
+
+        // The lint says what the UI does: these entries focus no window.
+        let wrapper = RaffiConfig {
+            binary: Some("wm-jumpapp".to_string()),
+            args: Some(vec!["-X".to_string()]),
+            raise: Some(true),
+            ..Default::default()
+        };
+        assert!(raise_classes(&wrapper, false).is_empty());
+        let plan = raise_plan(&wrapper, false);
+        assert!(plan.wanted && !plan.alias && plan.classes.is_empty());
+    }
+
+    #[test]
+    fn test_launcher_lints_raise_needs_native_frontend() {
+        let text = r#"
+version: 1
+general:
+  raise_running: true
+launchers:
+  wrap:
+    binary: wm-jumpapp
+    args: [-c, chromium]
+"#;
+        // Fuzzel, or a build without the native UI, raises nothing at all, so
+        // adding a window class would not help there.
+        assert_eq!(
+            run_lints_with(text, &["wm-jumpapp"], false, Vec::new()),
+            Vec::new()
+        );
+        let lints = run_lints_with(text, &["wm-jumpapp"], true, Vec::new());
+        assert_eq!(lints.len(), 1, "{lints:?}");
+        assert_eq!(lints[0].path, "/launchers/wrap/raise");
+
+        // The gate is the frontend selection, not the addon configuration.
+        let native = GeneralConfig {
+            ui_type: Some("native".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            native_addons_available(&Args::default(), &native),
+            cfg!(feature = "wayland")
+        );
+        let fuzzel = Args {
+            ui_type: Some("fuzzel".to_string()),
+            ..Args::default()
+        };
+        assert!(!native_addons_available(&fuzzel, &native));
+    }
+
+    #[test]
+    fn test_check_config_lints_skip_raise_without_native_ui() {
+        let dir = temp_test_dir("check-config-raise-frontend");
+        let configfile = dir.join("raffi.yaml");
+        fs::write(
+            &configfile,
+            "version: 1\ngeneral:\n  raise_running: true\nlaunchers:\n  wrap:\n    binary: sh\n    args: [\"-c\", \"true\"]\n",
+        )
+        .unwrap();
+        let path = configfile.to_str().unwrap();
+
+        let fuzzel_cli = Args {
+            ui_type: Some("fuzzel".to_string()),
+            ..Args::default()
+        };
+        let report = check_config_lints(&fuzzel_cli, path, true);
+        assert_eq!(report.len(), 1, "{report:?}");
+        assert!(report[0].1.is_empty(), "{:?}", report[0].1);
+
+        fs::write(
+            &configfile,
+            "version: 1\ngeneral:\n  ui_type: fuzzel\n  raise_running: true\nlaunchers:\n  wrap:\n    binary: sh\n    args: [\"-c\", \"true\"]\n",
+        )
+        .unwrap();
+        let report = check_config_lints(&Args::default(), path, true);
+        assert_eq!(report.len(), 1, "{report:?}");
+        assert!(report[0].1.is_empty(), "{:?}", report[0].1);
+
+        // The same entry warns when the native UI is the frontend.
+        fs::write(
+            &configfile,
+            "version: 1\ngeneral:\n  ui_type: native\n  raise_running: true\nlaunchers:\n  wrap:\n    binary: sh\n    args: [\"-c\", \"true\"]\n",
+        )
+        .unwrap();
+        let report = check_config_lints(&Args::default(), path, true);
+        assert_eq!(report.len(), 1, "{report:?}");
+        let lints = &report[0].1;
+        if cfg!(feature = "wayland") {
+            assert_eq!(lints.len(), 1, "{lints:?}");
+            assert_eq!(lints[0].path, "/launchers/wrap/raise");
+        } else {
+            assert!(lints.is_empty(), "{lints:?}");
+        }
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn test_launcher_lints_clean_config() {
         let lints = run_lints(
             r#"
@@ -9657,7 +9870,13 @@ launchers:
             native_addons_available(&Args::default(), &config.general),
             Vec::new,
         );
-        let lints = launcher_lints(&config.launchers, &checker, &addons);
+        let lints = launcher_lints(
+            &config.launchers,
+            &checker,
+            &addons,
+            config.general.raise_running.unwrap_or(false),
+            native_addons_available(&Args::default(), &config.general),
+        );
         assert_eq!(lints, Vec::new(), "{lints:?}");
     }
 

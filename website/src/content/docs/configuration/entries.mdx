@@ -100,10 +100,12 @@ Whether Raffi closes after launching this entry. Set `close_on_action: false` to
 
 When the app already has a window open, **Enter** focuses it instead of starting the app again, and **Ctrl+Enter** starts a new one. Works on Hyprland, niri and sway with Raffi's own window. See [`raise_running`](../general-settings/#configuration-options).
 
+Raising needs a window class to match: either a plain `binary` with no `args` (matched by its file name), or an explicit `window_class`. A launcher that passes arguments or runs a script without `window_class` cannot raise, and `raffi --check-config` warns about it when the native UI is the one running.
+
 
 **`window_class`** `string` or list of strings (default: the binary's file name)
 
-The window class (Hyprland, Xwayland apps) or app ID (niri, sway) that `raise` looks for. Case does not matter, and `slack` also matches `com.slack.Slack`. Without it, only a plain `binary` with no `args` can raise, by the binary's file name. Set it for launchers that run a script or pass arguments.
+The window class (Hyprland, Xwayland apps) or app ID (niri, sway) that `raise` looks for. Case does not matter, and `slack` also matches `com.slack.Slack`. Without it, only a plain `binary` with no `args` can raise, by the binary's file name. Set it for launchers that run a script or pass arguments. An empty value matches nothing, so `raise` does nothing there and `--check-config` warns.
 
   To find the value, look at the `class` field of `hyprctl clients`, the `app_id` in `niri msg windows`, or the `app_id` in `swaymsg -t get_tree`.
 
@@ -268,7 +270,21 @@ slack:
   window_class: Slack
 ```
 
-Set `general.raise_running: true` to do the same for every installed app and plain launcher. Elsewhere, a helper such as `jumpapp` does the job:
+Set `general.raise_running: true` to do the same for every installed app and plain launcher.
+
+Arguments or a script give `raise` nothing to match, so a wrapper needs `window_class`:
+
+```yaml title="launchers.yaml"
+chromium-work:
+  binary: wm-jumpapp
+  args: ["-X", "-c", "Chromium", "chromium", "--profile-directory=Work"]
+  description: "Chromium (Work Profile)"
+  icon: chromium
+  raise: true
+  window_class: Chromium
+```
+
+Elsewhere, a helper such as `jumpapp` does the job:
 
 ```yaml title="launchers.yaml"
 wally:
