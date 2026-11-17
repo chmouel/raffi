@@ -261,6 +261,7 @@ impl LauncherApp {
                 .is_some_and(|id| !listed(id))
             {
                 state.preview_inflight = None;
+                state.preview_stale = false;
             }
         }
         let removed = before - self.clipboard.items.len();
@@ -278,7 +279,47 @@ impl LauncherApp {
         if removed > 0 {
             crate::debug_log!("clipboard: {removed} expired entries left the list");
         }
-        Task::none()
+        if !self.addons.clipboard.ocr.enabled || self.clipboard.ocr_revision_inflight {
+            return Task::none();
+        }
+        let session = self.clipboard.session;
+        let backend = self.addons.clipboard.backend;
+        self.clipboard.ocr_revision_inflight = true;
+        Task::perform(
+            async move {
+                if !matches!(
+                    History::new(backend).resolve()?,
+                    super::clipboard::Backend::Raffi
+                ) {
+                    return Err("OCR is unavailable for this backend".to_string());
+                }
+                super::clipboard_store::Store::open_existing()?
+                    .ok_or("no clipboard history")?
+                    .ocr_revision()
+            },
+            move |result| Message::ClipboardOcrRevision(session, result),
+        )
+    }
+
+    pub(super) fn handle_clipboard_ocr_revision(
+        &mut self,
+        session: u64,
+        result: Result<i64, String>,
+    ) -> Task<Message> {
+        if !self.clipboard.active || session != self.clipboard.session {
+            return Task::none();
+        }
+        self.clipboard.ocr_revision_inflight = false;
+        let Ok(revision) = result else {
+            return Task::none();
+        };
+        if self.clipboard.ocr_revision == Some(revision) {
+            return Task::none();
+        }
+        self.clipboard.ocr_revision = Some(revision);
+        self.clipboard.previews.clear();
+        self.clipboard.preview_stale = self.clipboard.preview_inflight.is_some();
+        self.handle_clipboard_refresh()
     }
 
     /// Display index of the first clipboard row.
@@ -401,8 +442,12 @@ impl LauncherApp {
         if !state.active || session != state.session {
             return Task::none();
         }
-        if state.preview_inflight.as_deref() == Some(id.as_str()) {
-            state.preview_inflight = None;
+        if state.preview_inflight.as_deref() != Some(id.as_str()) {
+            return Task::none();
+        }
+        state.preview_inflight = None;
+        if std::mem::take(&mut state.preview_stale) {
+            return Task::none();
         }
         // A row that expired or was deleted while its preview ran is gone,
         // so the result is dropped instead of cached.
@@ -556,6 +601,7 @@ impl LauncherApp {
                 state.previews.retain(|(cached, _)| *cached != id);
                 if state.preview_inflight.as_deref() == Some(id.as_str()) {
                     state.preview_inflight = None;
+                    state.preview_stale = false;
                 }
                 state.total = state.total.saturating_sub(1);
                 self.clamp_clipboard_selection();

@@ -1,45 +1,31 @@
 ---
 title: Clipboard History
-description: Browse, preview and paste your clipboard history from Raffi, kept by CopyQ or by Raffi itself
+description: Search, preview and paste your clipboard history with Raffi or CopyQ
 ---
 
-import { Aside } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import clipboardScreenshot from '../../../assets/screenshots/clipboard-history.png';
+import clipboardOcrScreenshot from '../../../assets/screenshots/clipboard-ocr.png';
 
-Raffi browses the clipboard history kept by [CopyQ](https://hluk.github.io/CopyQ/),
-or records one itself with the [Raffi backend](#raffi-backend). You get a
-keyboard-driven list with search, previews, and copy or paste of any past item.
+Search your clipboard history, preview entries, and copy or paste them again.
+Raffi can record the history itself or use [CopyQ](https://hluk.github.io/CopyQ/).
 
-<Image src={clipboardScreenshot} alt="Clipboard history with a release checklist preview and live expiry countdowns, including an amber warning" width={800} />
-
-<Aside type="note">
-The clipboard browser turns itself on when its backend is running as Raffi
-starts (CopyQ or `raffi --cache-daemon`), unless you set `enabled` yourself.
-</Aside>
-
-## Choosing a backend
-
-`backend` defaults to `auto`. The first time you open the clipboard browser,
-Raffi uses its own history when `raffi --cache-daemon` is recording it, and
-CopyQ otherwise. If neither is running, the browser says that no clipboard
-history service is running instead of listing anything; start one and press
-**Ctrl+R**.
-
-Under `auto`, `raffi --cache-daemon` records the clipboard unless CopyQ is
-already running when it starts, so the two never keep a history side by side.
-If CopyQ starts later, the server keeps recording and Raffi keeps using its own
-history until the server restarts. Set `backend: copyq` or `backend: raffi` to
-pick one for good.
+<Image src={clipboardScreenshot} alt="Clipboard history with a release checklist preview and expiry countdowns" width={800} />
 
 ## Setup
 
-Install CopyQ and keep it running. Raffi talks to it through the `copyq`
-command, so the binary must be on your `PATH`. Raffi never reads CopyQ's files
-directly and records nothing itself.
+Start `raffi --cache-daemon` to let Raffi record your clipboard. Alternatively,
+install and run CopyQ. Raffi enables the clipboard browser when its backend is
+running at startup.
 
-Raffi then enables the addon on its own. To keep it on even when CopyQ is not
-running yet, or to turn it off, set `enabled`:
+Type `clip `, including the space, to open the history. To open it from a key
+binding:
+
+```sh
+raffi -i "clip "
+```
+
+To enable the browser even when the backend is not yet running:
 
 ```yaml
 addons:
@@ -47,442 +33,131 @@ addons:
     enabled: true
 ```
 
-Type `clip ` (with the trailing space) to open the history. Typing `cl` offers
-the keyword as a suggestion. To open it straight from a key binding, pass the
-keyword as the initial query:
+## Choosing a backend
 
-```sh
-raffi -i "clip "
-```
+`backend: auto` uses Raffi's history when its daemon is recording, and CopyQ
+otherwise. The daemon records under `auto` unless CopyQ is already running when
+it starts. If CopyQ starts later, Raffi continues recording until the daemon
+restarts.
 
-Temporary entries show a live countdown on the right of their row. It updates
-every second while the clipboard browser is open and turns amber during the
-final ten seconds. Entries disappear when their deadline passes.
+Set `backend: raffi` or `backend: copyq` to choose one explicitly. Restart the
+daemon after changing this setting. If the history is unavailable, start the
+backend and press **Ctrl+R**.
 
 ## Browsing and searching
 
-An empty query lists the whole history, newest first, in CopyQ's order. Words
-after the keyword filter it, and every word must appear somewhere in the item's
-text or file names, case-insensitively. Items that start with the exact phrase
-come first, then items containing the phrase, then items containing all the
-words in any order.
+An empty query lists recent entries first. Type words after `clip ` to search
+text and file names; every word must match, regardless of case. Exact phrase
+matches appear first. Search covers the whole entry, including text that does
+not fit in the row.
 
-Raffi reads the history in batches of 400 items, so large histories show
-results right away and the footer reads `scanning N/M` until the scan ends.
-Search covers the full text of every item, not only what fits in the row.
-
-Raffi browses the tab CopyQ uses for the clipboard (its `clipboard_tab`
-setting, or the first tab). If the history changes during a scan, Raffi starts
-the scan over. Press **Ctrl+R** to reload the list at any time.
-
-Text entries shorter than three characters, such as a stray `#` or a single
-letter, are hidden; surrounding spaces and newlines do not count. Change the
-limit with `min_chars`, or set it to `0` to list everything. Images and files
-are always listed.
-
-Row titles stay on one line. A line break inside a multi-line entry shows as a
-return arrow from your Nerd Font, so a pasted block of text is easy to tell
-from a single line. Runs of spaces collapse to one.
-
-## Copy times
-
-The preview pane shows when an item was copied, in the summary line under text
-and images and in the details of other items: "today at 14:32", "yesterday at
-09:10", the weekday for the past week ("Monday at 18:05"), and the weekday and
-date for anything older ("Monday, March 2 at 10:00"). Rows end their details
-line with the shorter form: the hour for today ("Text · 88 characters ·
-14:32"), "Yesterday 14:32", the weekday for the past week ("Mon 14:32"),
-then the date ("Mar 2", or "2025-12-31" across years).
-
-CopyQ does not record copy times by default. Add the "Show Copy Time" command
-from the [CopyQ command examples](https://copyq.readthedocs.io/en/latest/command-examples.html#show-copy-time)
-or from [copyq-commands](https://github.com/hluk/copyq-commands/blob/master/commands/store-copy-time.ini)
-(in CopyQ, press F6 and paste it). Raffi reads the time from either version.
-Items copied before you add the command show no time.
-
-## Source app icons
-
-Each row can show the icon of the app you copied from. CopyQ does not record
-the source app on Wayland, so add this command to CopyQ (press F6 in CopyQ and
-paste it). It works on Hyprland and sway: whenever the clipboard changes, it
-asks the compositor which window has focus and stores that app's ID with the
-item.
-
-```ini
-[Command]
-Name=Store Source App
-Automatic=true
-Icon=
-Command="
-    copyq:
-    const mime = 'application/x-copyq-user-source-app';
-
-    function hyprland() {
-        const result = execute('hyprctl', 'activewindow', '-j');
-        if (!result || result.exit_code !== 0) { return ''; }
-        const window = JSON.parse(str(result.stdout) || '{}');
-        return window.class || window.initialClass || '';
-    }
-
-    function sway() {
-        const result = execute('swaymsg', '-t', 'get_tree');
-        if (!result || result.exit_code !== 0) { return ''; }
-        const stack = [JSON.parse(str(result.stdout))];
-        while (stack.length) {
-            const node = stack.pop();
-            if (node.focused) {
-                return node.app_id || (node.window_properties || {}).class || '';
-            }
-            stack.push(...(node.nodes || []), ...(node.floating_nodes || []));
-        }
-        return '';
-    }
-
-    let app = '';
-    try {
-        if (str(env('HYPRLAND_INSTANCE_SIGNATURE'))) { app = hyprland(); }
-        else if (str(env('SWAYSOCK'))) { app = sway(); }
-    } catch (e) {}
-    if (app) { setData(mime, app); }"
-```
-
-Raffi looks the ID up in your icon theme, as given and then lowercased, and
-leaves the icon out when the theme has none. The command records the window
-that had focus, which is the app you copied from when you press Ctrl+C. A copy
-made in the background, such as by `wl-copy`, a password manager or clipboard
-sync, gets whatever app was in front at the time. Items copied before you add
-the command show no icon.
+Text entries shorter than three characters are hidden by default. Set
+`min_chars: 0` to show them. Images and files are always shown. Press **Ctrl+R**
+to refresh the list.
 
 ## Images and URLs
 
-Press **Ctrl+Tab** to go from all items to images only, then to URLs only, then
-back to all items. **Ctrl+Shift+Tab** goes the other way, and the footer shows
-the current view. [More on Ctrl+Tab](../../reference/keyboard-shortcuts/#switching-views-with-ctrltab).
-A URL is a text item that holds nothing but a link with a scheme, such as
-`https://...`, `file:///...` or `mailto:...`.
+Press **Ctrl+Tab** to cycle between all entries, images and URLs.
+**Ctrl+Shift+Tab** cycles backwards. The view stays selected while you search
+and resets when you reopen the browser.
 
-Your choice holds while you type, and Raffi lists everything again the next
-time you open the browser. Search words still apply to images, though most
-images carry no text to match.
+### Search text in images
+
+With the Raffi backend, [Tesseract](https://github.com/tesseract-ocr/tesseract)
+can make text in screenshots and other images searchable. Install Tesseract and
+its language data, enable OCR, and restart `raffi --cache-daemon`:
+
+```yaml
+addons:
+  clipboard:
+    backend: raffi
+    ocr:
+      enabled: true
+      languages: [eng] # use [eng, fra] if both languages are installed
+```
+
+New images are indexed in the background. Search for their text in the browser
+or with `raffi clipboard list`. Press **Ctrl+J** in an image preview to see the
+recognized text.
+
+<Image src={clipboardOcrScreenshot} alt="Searching an image by its recognized text" width={800} />
+
+OCR is off by default and works with the Raffi backend. The daemon must be
+running to process the queue. Temporary entries and password-manager copies
+are skipped. OCR text is kept with the image and removed when the image is
+deleted. Exclusion and temporary patterns do not inspect text inside images.
+Images over 40 megapixels cannot be indexed. Copy an older image again from
+its original application to index it.
 
 ## Previews
 
-Press **Ctrl+P** to toggle the preview pane. For text, it works like Alfred's
-clipboard viewer: the bare text fills the pane, with no title, box or metadata,
-and a muted `3 words; 33 chars · copied Monday at 10:00` line centred underneath
-(the copy time appears when CopyQ stored one). For everything else it shows:
-
-- text, cut to the first 8 KiB or 100 lines (a cut item reports its full
-  character count only)
-- images, scaled to fit, with a muted `1920 × 1080 px · copied ...` line
-  centred underneath
-- file lists, with missing files marked
-- the formats the item holds and their sizes
-
-Rich text (HTML) items preview as plain text. Raffi never renders HTML or loads
-remote content. Images larger than 32 MiB or 40 megapixels are not previewed,
-though you can still copy them.
-
-Previews stay in memory while the window is open and are never written to
-disk.
+Press **Ctrl+P** to toggle the preview. It shows text, images, file lists and
+available formats. Image previews include recognized text when OCR is enabled.
+Large previews may be shortened; images over 32 MiB or 40 megapixels can still
+be copied but cannot be previewed. Rich text is shown as plain text.
 
 ## Actions
 
-| Key        | Default action | Description                                   |
-|------------|----------------|-----------------------------------------------|
-| Enter      | `copy`         | Put the item back on the clipboard            |
-| Ctrl+Enter | `hypr_paste`   | Copy, then paste into the window you came from |
-| Ctrl+D     |                | Delete the item from the history (CopyQ or `clipboard.db`, with all its formats) |
+| Key | Action |
+| --- | --- |
+| Enter | Copy the entry |
+| Ctrl+Enter | Copy and paste into the previous window on Hyprland |
+| Ctrl+D | Delete the entry from the history |
 
-Change them with `action` and `secondary_action`. Both accept `copy` and
-`hypr_paste`.
+Change Enter and Ctrl+Enter with `action` and `secondary_action`. Both accept
+`copy` or `hypr_paste`; `hypr_paste` requires Hyprland. Copying preserves the
+entry's formats, including images, file lists and HTML.
 
-Copying goes through CopyQ, which publishes every format the item holds, so
-HTML keeps its formatting and images and file lists paste as such. Raffi checks
-that the clipboard holds the item before closing. If the item disappeared from
-the history since the list was loaded, Raffi shows an error and leaves the
-clipboard alone. CopyQ moves a copied item to the top of its history.
-
-`hypr_paste` needs Hyprland, as described in
-[Text Snippets](../text-snippets/#default-actions). Raffi remembers the window
-that had focus when it opened, copies the item, closes, and sends Ctrl+V
-(Ctrl+Shift+V in terminals) once that window has focus again. If that window
-closed, or you are not on Hyprland, Raffi shows an error and does not fall back
-to copying.
-
-Text entries can also be saved as snippets. Press Right with the cursor at the
-end of the search field to open the actions, then choose **Save to snippets**
-for a `directory` or `markdown` source set in
-[Text Snippets](../text-snippets/#saving-from-the-clipboard). The text is saved
-as copied, with any placeholders in it escaped, and password-manager copies are
-refused.
+To save a text entry as a snippet, press Right at the end of the search field
+and choose **Save to snippets**. See [Text Snippets](../text-snippets/#saving-from-the-clipboard).
 
 ## Command line
 
-`raffi clipboard` reads and edits the same history without opening the window,
-for a script, a key binding or a picker. It takes the backend from
-`addons.clipboard.backend` like the browser does, and honours
-`exclude_patterns` the same way.
+Use `raffi clipboard` to browse and manage the same history without opening the
+window:
 
-```bash
-raffi clipboard                 # the same as `raffi clipboard list`
-raffi clipboard list git        # entries containing `git`, newest first
-raffi clipboard list -k image   # images only
-raffi clipboard list --all      # including text shorter than min_chars
-raffi clipboard list --since 2h --offset 10 -n 10   # the second page of the last two hours
+```sh
+raffi clipboard list git          # search the history
+raffi clipboard list -k image     # list images
+raffi clipboard show 1 > out.png  # export entry 1 when it is an image
+raffi clipboard copy 1            # copy an entry
+raffi clipboard set "hello"       # add text to the clipboard
+raffi clipboard set --mime image/png < shot.png
+raffi clipboard status            # check the backend and history
 ```
 
-On a terminal it prints a table: the position, the start of the id, the copy
-time, the kind and the entry, with `⏱ 45s`, `⏱ 3m` or `⏱ 2h` for the time a
-temporary entry has left. An image row reads `PNG image 1920×1080 · 1.2 MB`,
-the pixel size coming from the stored header. When its output is redirected it
-prints one entry per line instead, tab separated: the complete id, the kind,
-the copy time and the preview. That copy time is RFC 3339 with the local UTC
-offset, such as `2026-11-12T12:07:27+01:00`, so a script can sort on it. The
-preview is the entry's one-line title, cut short: use `show` to get the text or
-the picture itself, and `list --json` for the `width` and `height` of an image.
-`cut -f1` gives the id of every entry.
+The position of an entry changes as new items arrive. Scripts can use the IDs
+shown by `list`; `delete` requires an ID. `--json` is available for `list`,
+`show`, `set` and `status`.
 
-`--since` keeps only entries copied at or after a duration back from now
-(`30s`, `15m`, `2h`, `3d`), an RFC 3339 timestamp, or a `YYYY-MM-DD` date, and
-`--offset N` skips the first N entries of the result, before `--limit` cuts it.
-Neither shifts the positions, so a page prints the indexes of the whole
-history. `--since` drops entries without a copy time, which CopyQ records only
-when "Show Copy Time" is installed.
+```sh
+raffi clipboard delete 3fa9c1d2e0
+raffi clipboard clear -k image -y # delete all images
+```
 
-An id stays the same for as long as its entry stays in the history, so it is
-what scripts and key bindings should use. The position at the start of the
-table changes as the history changes: it is shorthand for what you just saw, so
-`raffi clipboard show 2` does what you expect while you look at the list, and
-`delete` insists on an id.
+`clear` also deletes entries hidden by exclusion patterns. It requires
+confirmation, or `-y` in scripts. See the [CLI reference](../../reference/cli-options/#clipboard)
+for filters, output formats and backend limitations.
 
-To pick one entry with [fzf](https://github.com/junegunn/fzf):
+## Scripts and agents
 
-```bash
+For example, select an entry with [fzf](https://github.com/junegunn/fzf):
+
+```sh
 raffi clipboard list | fzf --delimiter '\t' --with-nth 4.. \
     --preview 'raffi clipboard show {1}' | cut -f1 | raffi clipboard copy -
 ```
 
-`{1}` is the first field of the line under the cursor, the id, and `-` tells
-`copy` to read references from its input, one per line, taking the first field
-of each. The same works with `delete`.
-
-`show` writes the entry itself: the text of a text entry, one path per line for
-a copied file list, the picture of an image. An entry that only holds HTML
-prints the text extracted from it, without the markup; `raffi clipboard show
---mime text/html` writes the HTML itself instead. It refuses to write an image
-to a terminal, where the bytes would land in your prompt, so redirect them:
-
-```bash
-raffi clipboard show 1 > out.png        # 1 is an image
-raffi clipboard show --mime text/html 3 # exactly that format of the entry
-raffi clipboard show --formats 3        # what the entry holds, and how big
-raffi clipboard show --max-bytes 4000 3 # the start of it, for a prompt
-```
-
-`--max-bytes N` stops the output at N bytes, for a prompt or an agent that
-should not swallow a long entry. A cut entry still exits 0 and says so on
-stderr: `raffi clipboard: output truncated to 4000 of 8123 bytes`. `--json`
-reports the same as `"truncated": true`, and `text_len` stays the length of the
-whole entry.
-
-`copy` puts the entry back on the clipboard with all of its formats. With the
-`raffi` backend that needs `raffi --cache-daemon` running: only a running
-process can keep serving the selection after the command returns.
-
-`set` goes the other way: it puts content you give it on the clipboard, for a
-script or an agent that has something to hand over. The words are joined by
-single spaces, or the whole input is used when there are none; a terminal is
-never read, so `raffi clipboard set` on its own is an error rather than a
-prompt that waits. The content lands in the history the way a copy from another
-application would, so it is there when you next open the browser, and the id of
-the entry is printed when the history kept it:
-
-```bash
-raffi clipboard set "git status --short"
-raffi clipboard set --source pi "text an agent wrote"
-raffi clipboard set --mime image/png < shot.png
-some-tool | raffi clipboard set --temporary   # leaves the history after temporary_timeout
-pass show site | raffi clipboard set --secret   # skipped by other clipboard managers
-pass show site | head -n1 | raffi clipboard set --secret --expire 30s   # gone after 30 seconds
-```
-
-A secret belongs on the input, never in the arguments: everything on a command
-line is in the process list and in the shell history.
-
-`--mime` says what the content is (`text/plain` when absent); text has to be
-UTF-8, and the recorder's limits apply to the size. Without `--mime`, the usual
-text aliases (`text/plain;charset=utf-8`, `UTF8_STRING`, `STRING`, `TEXT`) are
-offered alongside it, so every client can paste it. `--temporary` records a
-temporary entry whatever `temporary_patterns` says. `--secret` adds the
-`x-kde-passwordManagerHint: secret` marker, so other clipboard managers skip the
-content; Raffi records it only when `temporary_password_manager` is on, as a
-temporary entry.
-
-`--expire DURATION` (`30s`, `15m`, `2h`, `3d`) gives the content its own
-lifetime, set on the command line only. The entry is recorded as a temporary one
-that leaves the history after that duration instead of `temporary_timeout`, and
-the clipboard is emptied at the same moment if it still holds that content.
-Anything copied in the meantime stays where it is. A `--secret` with `--expire`
-is recorded for that duration even when `temporary_password_manager` is off, so
-you can pick it again from the browser until it expires, including after a daemon restart; `exclude_patterns`
-still keep it out of the history, and the clipboard is still emptied on time.
-
-`--source APP` records the app the content came from, which becomes the row's
-`source` and `source_name`. A plain name is a free label, kept as written, as
-in `--source pi`. A name ending in `.desktop` is a desktop entry ID, looked up
-in the XDG application directories; the entry is recorded without that suffix,
-so `--source org.gnome.Nautilus.desktop` stores `org.gnome.Nautilus`, the app_id
-a compositor reports for it. An ID no desktop file names is a usage error
-listing the directories Raffi searched, and a path is refused: put the file in
-`~/.local/share/applications` and pass its ID.
-
-Raffi reads that desktop entry for the row's icon and for the name the preview
-pane shows: the `Icon=` of the entry whose ID or `StartupWMClass` matches the
-source, and its `Name=` (the `Name[xx]` of your message locale when the entry
-has one), which the JSON rows report as `source_name`. A source no entry names
-keeps the icon its name already resolves to and is shown as recorded. To give
-an agent its own icon and name, give it a desktop file:
-
-```ini title="~/.local/share/applications/pi.desktop"
-[Desktop Entry]
-Type=Application
-Name=Pi Agent
-Icon=pi
-Exec=pi
-```
-
-The same file answers both `--source pi.desktop` and, as an ID, a plain
-`--source pi`. Content `exclude_patterns` hides is put on the clipboard but not
-recorded, and `set` prints nothing then. `--json` reports one object:
-`{"id": ..., "recorded": ..., "expires_at": ..., "expires_at_iso": ...}`. CopyQ
-keeps the content in its own history but does not tell Raffi the id it gave it,
-so `set` prints nothing with that backend, and it rejects `--temporary`,
-`--expire`, `--secret` and `--source`.
-
-`delete` resolves every id it was given before removing anything, so `raffi
-clipboard delete 3fa9c1d2e0 a81be0c44f` removes those two and not whatever
-moved into their place. `clear` empties the history, entries hidden by
-`exclude_patterns` included, and asks first:
-
-```bash
-raffi clipboard clear             # asks in a terminal
-raffi clipboard clear -y          # a script has to say so
-raffi clipboard clear -k image -y # only the images
-```
-
-`raffi clipboard status` says which backend is in use, whether a recorder is
-running, where the database is and how much of the limits the history uses. A
-non-zero temporary count is joined to the entry count, as in `Entries 62 (3
-temporary)`. `status --json` splits the backend from the setting behind it
-(`"backend": "raffi"`, `"configured": "auto"`).
-
-Listing, exporting, deleting and clearing all work with the `raffi` backend
-while `raffi --cache-daemon` is stopped, since they read the database directly;
-only `copy` and `set` need the service. `show --mime` and exporting an image
-also need the `raffi` backend, because CopyQ only gives Raffi the text of its
-items, and `clear` is `raffi` only too: use CopyQ's own interface to empty its
-history.
-
-`list --json`, `show --json` and `status --json` print JSON for scripts, and
-`raffi clipboard --help` lists every option. The subcommand does not open the
-window, run launcher discovery or write schema files.
-
-Deleting and clearing remove entries from the history; they do not wipe the
-bytes off the disk. See [Temporary entries](#temporary-entries) for what the
-`raffi` backend does with expired rows.
-
-## Scripts and agents
-
-Scripts, key bindings and agents get JSON output and stable ids from the same
-subcommands. The flags are in the
-[CLI reference](../../reference/cli-options/#clipboard).
-
-`list --json` prints one object per line with `index`, `id`, `kind`, `tier`,
-`formats`, `text_len`, `copied`, `source`, `source_name`, `expires_at`,
-`expires_at_iso`, `width`, `height` and `preview`. Fields that do not apply are
-`null`. The tab-separated output (id, kind, copy time, preview) is fine for
-`cut` and `fzf`, but a preview with a tab or a line break in it is already
-flattened, so do not parse content out of it. `show --json` adds `text` and
-`truncated`; `show --formats --json` prints `{"formats": [{"mime", "bytes"}]}`;
-`set --json` prints `{"id", "recorded", "expires_at", "expires_at_iso"}` with
-`id` null when the history did not keep the content; `status --json` prints
-`backend`, `configured`, `recorder`, `protocol`, `database`, `database_bytes`,
-`entries`, `temporary`, `max_items`, `max_size_bytes` and
-`max_image_size_bytes`.
-
-With `--json`, a failure prints one line on stderr, `{"error": "...", "code":
-"..."}`, and nothing on stdout. The exit code is 0 on success, 1 on an error and
-2 on a value that does not parse (a bad `--since`, for instance). Branch on
-`code`:
-
-| Code | Meaning |
-|------|---------|
-| `not_found` | No entry matches the reference |
-| `ambiguous_ref` | An id prefix matches several entries; use a longer one |
-| `invalid_ref` | The reference is not an index, an id prefix or `-` |
-| `index_not_allowed` | `delete` takes ids, not positions |
-| `no_backend` | Neither CopyQ nor `raffi --cache-daemon` is running |
-| `recorder_not_running` | The `raffi` backend needs `raffi --cache-daemon` for `copy` and `set`, and it is not answering |
-| `daemon_outdated` | The running `raffi --cache-daemon` is too old for `set`; restart it |
-| `unsupported` | The backend cannot do this, such as `clear` or `--temporary` on CopyQ |
-| `too_large` | The content is over the size limit for its type |
-| `no_history` | There is no history to read |
-| `io` | Reading, writing or talking to the backend failed |
-| `invalid_argument` | A value on the command line makes no sense |
-| `other` | Anything else |
-
-Read an id from `list` and use it for everything that changes the history:
-`delete` refuses positions, and `copy` and `show` are safest with an id too. Any
-prefix of six or more characters works if it is unique.
-
-`show --max-bytes N` caps the output so a large entry does not fill a prompt. A
-cut entry still exits 0; `truncated` says it happened and `text_len` still gives
-the full length. `list` has no byte cap, but its `preview` is already one short
-line, so `list --json -n 20` is cheap. Use `show --formats` first when you are
-unsure whether an entry is text or a large image.
-
-`set` takes the text from its arguments or, when there are none, from standard
-input; it never waits on a terminal. It needs `raffi --cache-daemon` at a recent
-protocol to keep serving the selection, which is what `recorder_not_running` and
-`daemon_outdated` report. None of `--temporary`, `--expire` and `--secret`
-works with CopyQ.
-
-A few recipes:
-
-```bash
-# Is the history usable, and by which backend?
-raffi clipboard status --json | jq '{backend, recorder, protocol}'
-
-# The last five things copied in the past ten minutes, as id and preview
-raffi clipboard list --since 10m -n 5 --json | jq -r '[.id, .preview] | @tsv'
-
-# The text of the newest entry, at most 2000 bytes
-id=$(raffi clipboard list -n 1 --json | jq -r .id)
-raffi clipboard show --max-bytes 2000 "$id"
-
-# Search for a token, then delete exactly what matched
-raffi clipboard list 'sk-live' --json | jq -r .id | xargs -r raffi clipboard delete
-
-# Hand a password to the clipboard without leaving it in the history
-pass show site | head -n1 | raffi clipboard set --secret --temporary
-
-# A one-time code that leaves the history and the clipboard after a minute
-otp-tool | raffi clipboard set --secret --expire 1m
-```
+Use `show --max-bytes 4000` to limit output, and `list --json` to get IDs for
+scripts. `-` lets `copy` and `delete` read IDs from standard input. See the
+[CLI reference](../../reference/cli-options/#clipboard) for JSON fields and
+error codes.
 
 ## Raffi backend
 
-With `backend: raffi`, or under `auto` when CopyQ is not running, Raffi records
-the clipboard itself and CopyQ is not needed. Listing and previews read a local
-database, so the history opens faster than through CopyQ, and copy times, source
-app icons and password skipping work without extra commands.
+Start the daemon to record clipboard history without CopyQ:
 
-The recorder runs inside the Raffi server
-([`raffi --cache-daemon`](../../reference/cli-options/#cache-management)), so
-start it and keep it running:
-
-```bash
+```sh
 raffi --cache-daemon
 ```
 
@@ -490,44 +165,25 @@ raffi --cache-daemon
 addons:
   clipboard:
     backend: raffi
-    max_items: 1000       # entries kept
-    max_size_mb: 500      # total size before the oldest entries go
-    max_image_size_mb: 50 # larger images are not recorded
+    max_items: 1000
+    max_size_mb: 500
+    max_image_size_mb: 50
 ```
 
-The server watches the clipboard through the compositor's data-control protocol
-(`ext-data-control-v1`, or `wlr-data-control-unstable-v1` on older compositors),
-which Hyprland, Sway, niri and most wlroots compositors offer. For every copy it
-keeps:
+The Raffi backend records text, images and file lists, along with copy times and
+source apps on Hyprland, Sway and niri. Copying the same content again moves it
+to the top. It skips password-manager copies unless you enable temporary
+password entries. It does not import CopyQ history or record the primary
+selection.
 
-- the text, as plain text, with `text/html` and file lists when the source
-  offers them;
-- one picture, in the best raster format offered (PNG, then JPEG, WebP, GIF,
-  BMP), plus SVG when offered, since browsers offer one picture in many
-  encodings;
-- the copy time, and the app that had focus (Hyprland, Sway and niri).
-
-Copying the same content again moves it to the top. Copies marked
-`x-kde-passwordManagerHint`, as KeePassXC and other password managers do, are
-never recorded unless you [opt in to temporary password
-entries](#password-managers). The primary selection is ignored, and Raffi does
-not import an existing CopyQ history.
-
-When you copy an entry from the list, the server puts it on the clipboard with
-every stored format and keeps serving it, so it can still be pasted after Raffi
-closes. If another app later closes, its last copy stays available too, as with
-any clipboard manager.
-
-The history lives in `~/.local/share/raffi/clipboard.db` (or under
-`$XDG_DATA_HOME`), readable only by you. Restart the server after changing the
-backend or the limits. The shipped `misc/systemd/raffi-cache.service` grants
-write access to `~/.local/share/raffi` only, so update its `ExecStartPre` and
-`ReadWritePaths` lines if you move `$XDG_DATA_HOME`.
+The history is stored in `~/.local/share/raffi/clipboard.db`, or under
+`$XDG_DATA_HOME`. Restart the daemon after changing the backend, limits or
+capture settings. If you use the supplied systemd service with a custom
+`$XDG_DATA_HOME`, update its writable paths accordingly.
 
 ## Temporary entries
 
-Some copies should not stay in the history: a one-time code, a password, a
-token. The `raffi` backend can keep them for a while and then forget them:
+The Raffi backend can keep one-time codes and other matching text briefly:
 
 ```yaml
 addons:
@@ -536,196 +192,99 @@ addons:
     temporary_patterns:
       - '(?i)^verification code:'
       - '(?i)\bOTP\b'
-      - '^sk-[A-Za-z0-9]{20,}$'
-    temporary_timeout: 60          # seconds, default 60
+    temporary_timeout: 60
     temporary_password_manager: true
 ```
 
-An entry matching any of `temporary_patterns` is recorded as usual (listed,
-searchable, previewable, copyable) and then leaves the history once
-`temporary_timeout` seconds have passed since it was copied. The browser drops
-such a row within a second of its deadline, and the server deletes the entry and
-the formats stored for it from the database.
+Matching entries remain searchable and can be copied until they expire. The
+browser shows a countdown. Copying the same content again resets the deadline;
+selecting it in Raffi does not. Changing the timeout does not change existing
+deadlines. Expiry removes the entry from the history, but does not clear the
+clipboard.
 
-`temporary_patterns` take Rust regular expressions, in the same syntax as
-`exclude_patterns`. They are matched against the entry's complete searchable
-text: its plain text, or the text Raffi extracts from `text/html` when the copy
-carries no plain text, plus the file names of a copied file list. The whole text
-is searched, so a match far down a long entry still counts. Matching is
-case-sensitive unless a flag such as `(?i)` is given. `exclude_patterns` always
-wins: an excluded copy is never recorded, temporary or not.
+Patterns use Rust regular expressions and are case-sensitive unless you add a
+flag such as `(?i)`. `exclude_patterns` takes precedence over
+`temporary_patterns`. These settings do not change what CopyQ records.
 
-The deadline is measured from the moment of the copy. Copying the same content
-again from another app resets it, and selecting the entry in the browser does
-not extend it. The deadline is written with the entry, so changing
-`temporary_timeout` later leaves existing entries alone.
-
-Expiry only touches Raffi's history. An entry you re-published from the history
-stays on the clipboard after the entry itself is gone, and a copy another app
-made meanwhile is never disturbed.
-
-Deleted and expired entries are overwritten in `clipboard.db` and its
-write-ahead log rather than left in free space, so their text cannot be read
-back from the file. One exception: while another process is reading the
-database, the log keeps the old pages until SQLite can empty it, and Raffi
-tries again later. The file itself does not shrink either, since SQLite reuses
-the freed space for new copies. This is a cleanup of the history, not a
-forensic erase of your disk.
+Deleting or expiring an entry removes it from history, but does not guarantee a
+forensic erase from disk.
 
 ### Password managers
 
-Password managers mark the secrets they copy with the
-`x-kde-passwordManagerHint` MIME type. KeePassXC does, and so do the helpers of
-rbw, Bitwarden and most other tools. The `raffi` backend detects that marker on
-the clipboard itself: it never reads or unlocks your vault, and no
-password-manager tool is needed.
+Password-manager copies are skipped by default. Set
+`temporary_password_manager: true` to keep marked copies temporarily. They
+still follow `temporary_timeout` and `exclude_patterns`.
 
-Marked copies are skipped by default. With `temporary_password_manager: true`
-they are recorded as temporary entries instead and kept for
-`temporary_timeout`. They are never kept permanently: no `temporary_patterns`
-match makes them permanent, and `exclude_patterns` still wins over the opt-in.
+## Copy times
 
-A marked entry is never put back on the clipboard once the source app clears it.
-When you select one, the server re-advertises the marker together with the
-stored formats, so anything watching the clipboard still treats it as a secret.
+Raffi's backend records copy times automatically. CopyQ needs its
+[Show Copy Time](https://copyq.readthedocs.io/en/latest/command-examples.html#show-copy-time)
+command: open CopyQ's command editor with F6 and add it. Older entries will not
+have a copy time.
 
-The CopyQ backend ignores all three settings: CopyQ keeps its own history, and
-Raffi only hides the entries `exclude_patterns` matches in the browser.
+## Source app icons
 
-Restart `raffi --cache-daemon` after changing any of them, since the recorder
-reads them at startup. `raffi --check-config` reports an invalid regular
-expression, and a `temporary_timeout` of zero or too large to be a deadline,
-with the key and line of the setting.
+Raffi's backend records the focused app on Hyprland, Sway and niri. For CopyQ
+on Hyprland or Sway, open its command editor with F6 and paste the
+<a href={`${import.meta.env.BASE_URL.replace(/\/$/, '')}/copyq/store-source-app.ini`}>source app command</a>.
+Copies made in the background may show the app that was focused at the time.
 
 ## Privacy
 
-Clipboard queries are saved in Raffi's search history and in the last-query
-cache, so Alt+P and `--last-query` can bring them back. Debug logs still show
-`clip <redacted>` in place of the query. Previews are discarded when the window
+Clipboard searches are saved in Raffi's search history and last-query cache.
+Debug logs redact the search text. Previews are discarded when the window
 closes.
+
+To keep secrets off the command line and out of shell history, pass them on
+standard input:
+
+```sh
+pass show site | raffi clipboard set --secret
+pass show site | head -n1 | raffi clipboard set --secret --expire 30s
+```
+
+`--secret` marks the copy for clipboard managers. `--expire` records it
+temporarily and clears the clipboard at the deadline if it still contains that
+copy, even when `temporary_password_manager` is off. Exclusion patterns still
+apply. These options require the Raffi backend.
 
 ## Configuration
 
-**`addons.clipboard.enabled`** `boolean` (default: unset)
+Settings go under `addons.clipboard`. Restart the daemon after changing capture
+settings.
 
-Turns the clipboard browser on or off. When unset, it is on if the backend is
-running as Raffi starts: CopyQ, or `raffi --cache-daemon` for `raffi`.
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `enabled` | automatic | Enable or disable the browser |
+| `trigger` | `clip` | Keyword used to open it |
+| `backend` | `auto` | Choose `auto`, `raffi` or `copyq` |
+| `min_chars` | `3` | Hide shorter text entries; `0` shows all |
+| `exclude_patterns` | `[]` | Hide matching text; the Raffi backend also skips recording it |
+| `temporary_patterns` | `[]` | Keep matching text temporarily with the Raffi backend |
+| `temporary_timeout` | `60` | Temporary entry lifetime in seconds |
+| `temporary_password_manager` | `false` | Record password-manager copies temporarily |
+| `max_items` | `1000` | Maximum entries in Raffi's history |
+| `max_size_mb` | `500` | Total history size before older entries are removed |
+| `max_image_size_mb` | `50` | Largest image Raffi records |
+| `ocr.enabled` | `false` | Recognize text in images with Tesseract |
+| `ocr.languages` | `[eng]` | Installed Tesseract language codes |
+| `action` | `copy` | Enter action: `copy` or `hypr_paste` |
+| `secondary_action` | `hypr_paste` | Ctrl+Enter action |
+| `close_on_action` | follows `general.close_on_action` | Close after copying |
 
-**`addons.clipboard.trigger`** `string` (default: `clip`)
-
-Keyword that opens the history. Type it followed by a space.
-
-**`addons.clipboard.min_chars`** `integer` (default: `3`)
-
-Hide text entries shorter than this many characters, not counting surrounding
-spaces and newlines. `0` lists everything. Images and files are always listed.
-
-**`addons.clipboard.exclude_patterns`** `string[]` (default: `[]`)
-
-Rust regular expressions. An entry whose text matches any of them is never
-recorded by the `raffi` backend and is hidden from the browser for both
-backends. The whole text is searched, not just the visible excerpt, so a match
-far down a long entry still excludes it. Matching is case-sensitive unless a
-flag such as `(?i)` is given. Invalid expressions stop raffi at startup with the
-key and index of the bad entry, and `raffi --check-config` reports them with the
-line of the pattern.
-
-Existing entries are hidden, not deleted. CopyQ keeps recording everything
-itself; raffi only controls what its browser shows. A CopyQ entry whose complete
-text cannot be checked, such as one over 16 MiB, is hidden while patterns are
-set, and the `raffi` backend skips a copy when one of its text formats cannot be
-read. After changing these patterns, restart `raffi --cache-daemon` so the
-recorder picks them up.
-
-**`addons.clipboard.temporary_patterns`** `string[]` (default: `[]`)
-
-`raffi` backend: Rust regular expressions. A copy whose complete searchable text
-matches any of them is recorded as a temporary entry, kept for
-`temporary_timeout` seconds. `exclude_patterns` wins over these, and CopyQ is
-unaffected. See [Temporary entries](#temporary-entries).
-
-**`addons.clipboard.temporary_timeout`** `integer` (default: `60`)
-
-`raffi` backend: seconds a temporary entry stays in the history, counted from
-the copy. Copying the same content again resets it, selecting the entry does
-not. Must be greater than zero.
-
-**`addons.clipboard.temporary_password_manager`** `boolean` (default: `false`)
-
-`raffi` backend: record copies carrying `x-kde-passwordManagerHint` as temporary
-entries instead of skipping them. They are never kept permanently, and
-`exclude_patterns` still wins.
-
-**`addons.clipboard.backend`** `auto | copyq | raffi` (default: `auto`)
-
-Clipboard manager to read from: CopyQ, the history the Raffi server records (see
-[Raffi backend](#raffi-backend)), or `auto` for whichever of the two runs,
-Raffi's own history first (see [Choosing a backend](#choosing-a-backend)).
-Restart `raffi --cache-daemon` after changing it.
-
-**`addons.clipboard.max_items`** `integer` (default: `1000`)
-
-`raffi` backend: entries kept. The oldest ones are dropped beyond it.
-
-**`addons.clipboard.max_size_mb`** `integer` (default: `500`)
-
-`raffi` backend: total size of the history in MB before the oldest entries are
-dropped. The newest entry is always kept.
-
-**`addons.clipboard.max_image_size_mb`** `integer` (default: `50`)
-
-`raffi` backend: images larger than this many MB are not recorded.
-
-**`addons.clipboard.action`** `copy | hypr_paste` (default: `copy`)
-
-What Enter does: `copy` puts the item back on the clipboard with all its
-formats, and `hypr_paste` also pastes it into the window you came from on
-Hyprland.
-
-**`addons.clipboard.secondary_action`** `copy | hypr_paste` (default: `hypr_paste`)
-
-What Ctrl+Enter does. Accepts the same values as `action`. Outside Hyprland a
-`hypr_paste` action shows an error and does not copy.
-
-**`addons.clipboard.close_on_action`** `boolean` (default: `true`)
-
-Close Raffi after copying an item. Leave it unset to follow
-`general.close_on_action`. `hypr_paste` always closes Raffi so it can paste.
-
-```yaml
-addons:
-  clipboard:
-    enabled: true
-    trigger: clip
-    min_chars: 3
-    exclude_patterns:
-      - '^secret:'
-      - '(?i)password\s*='
-    temporary_patterns:
-      - '(?i)^verification code:'
-      - '(?i)\bOTP\b'
-    temporary_timeout: 60
-    temporary_password_manager: false
-    backend: auto
-    action: copy
-    secondary_action: hypr_paste
-```
+Exclusion patterns hide existing entries without deleting them. CopyQ continues
+to record them; the Raffi backend skips new matches. Restart the daemon after
+changing the patterns.
 
 ## Troubleshooting
 
-"No clipboard history service is running" means `backend: auto` found neither a
-`raffi --cache-daemon` recording the clipboard nor CopyQ. Start one of them,
-then press **Ctrl+R**.
-
-"CopyQ is not running" means the `copyq` command could not reach the CopyQ
-server. Start CopyQ, then press **Ctrl+R**.
-
-"CopyQ is not installed" means Raffi could not find the `copyq` command.
-
-"Raffi clipboard service is not running" means the `raffi` backend is set but no
-`raffi --cache-daemon` is running. Start it, then press **Ctrl+R**. If the
-server log says the compositor does not support data-control, your compositor
-cannot share the clipboard with a clipboard manager.
-
-"Clipboard history kept changing" appears when items keep arriving during a
-scan. Press **Ctrl+R** to try again.
+- **No clipboard history service is running:** start `raffi --cache-daemon` or
+  CopyQ, then press **Ctrl+R**.
+- **CopyQ is not installed or running:** install or start CopyQ, then refresh.
+- **Raffi clipboard service is not running:** start the daemon, then refresh.
+  If its log reports missing data-control support, the compositor cannot provide
+  clipboard history to Raffi.
+- **Clipboard history kept changing:** press **Ctrl+R** to retry.
+- **An image is not found by its text:** check `raffi clipboard show --json 1`
+  for its OCR status. Install the configured Tesseract languages, then use
+  the original application to copy the image again.

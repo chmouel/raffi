@@ -761,6 +761,8 @@ pub struct ClipboardAddonConfig {
     /// (default: 50).
     #[serde(default)]
     pub max_image_size_mb: Option<u64>,
+    #[serde(default)]
+    pub ocr: ClipboardOcrConfig,
     /// Action on Enter (default: `copy`).
     #[serde(default = "default_clipboard_action")]
     pub action: ClipboardAction,
@@ -790,6 +792,30 @@ pub struct ClipboardAddonConfig {
     /// them (default: false).
     #[serde(default)]
     pub temporary_password_manager: bool,
+}
+
+#[derive(Deserialize, JsonSchema, Debug, Clone)]
+#[schemars(deny_unknown_fields)]
+pub struct ClipboardOcrConfig {
+    /// Extract text from images in Raffi's clipboard history (default: false).
+    #[serde(default)]
+    pub enabled: bool,
+    /// Tesseract language codes (default: ["eng"]).
+    #[serde(default = "default_ocr_languages")]
+    pub languages: Vec<String>,
+}
+
+fn default_ocr_languages() -> Vec<String> {
+    vec!["eng".to_string()]
+}
+
+impl Default for ClipboardOcrConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            languages: default_ocr_languages(),
+        }
+    }
 }
 
 fn default_clipboard_action() -> ClipboardAction {
@@ -885,6 +911,16 @@ impl ClipboardAddonConfig {
         if let Some(problem) = temporary_timeout_problem(self.temporary_timeout()) {
             problems.push(("/addons/clipboard/temporary_timeout".to_string(), problem));
         }
+        if self.ocr.languages.is_empty()
+            || self.ocr.languages.iter().any(|lang| {
+                lang.is_empty() || !lang.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            })
+        {
+            problems.push((
+                "/addons/clipboard/ocr/languages".to_string(),
+                "provide one or more Tesseract language codes".to_string(),
+            ));
+        }
         problems
     }
 
@@ -920,6 +956,7 @@ impl Default for ClipboardAddonConfig {
             max_items: None,
             max_size_mb: None,
             max_image_size_mb: None,
+            ocr: ClipboardOcrConfig::default(),
             action: default_clipboard_action(),
             secondary_action: default_clipboard_secondary_action(),
             close_on_action: None,
@@ -7715,6 +7752,7 @@ launchers:
         assert_eq!(clear.kind, Some(ClipboardKind::Url));
 
         assert!(Args::parse_args_default::<&str>(&["clipboard", "publish"]).is_err());
+        assert!(Args::parse_args_default::<&str>(&["clipboard", "index", "--all"]).is_err());
         assert!(Args::parse_args_default::<&str>(&["clipboard", "list", "-k", "nope"]).is_err());
         assert!(Args::parse_args_default::<&str>(&["clipboard", "status", "--json"]).is_ok());
     }
@@ -8321,6 +8359,29 @@ shell:
         assert_eq!(config.temporary_timeout(), 60);
         assert_eq!(config.temporary_timeout, None);
         assert!(!config.temporary_password_manager());
+    }
+
+    #[cfg(feature = "wayland")]
+    #[test]
+    fn test_clipboard_ocr_configuration() {
+        let config: ClipboardAddonConfig =
+            serde_yaml::from_str("ocr:\n  enabled: true\n  languages: [eng, fra]\n").unwrap();
+        assert!(config.ocr.enabled);
+        assert_eq!(config.ocr.languages, ["eng", "fra"]);
+        assert!(config.clipboard_problems().is_empty());
+        for languages in [vec![], vec!["eng+fra".into()], vec!["-l".into()]] {
+            let config = ClipboardAddonConfig {
+                ocr: ClipboardOcrConfig {
+                    enabled: true,
+                    languages,
+                },
+                ..Default::default()
+            };
+            assert!(config
+                .clipboard_problems()
+                .iter()
+                .any(|(path, _)| path == "/addons/clipboard/ocr/languages"));
+        }
     }
 
     #[cfg(feature = "wayland")]

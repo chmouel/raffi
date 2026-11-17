@@ -4130,14 +4130,13 @@ impl LauncherApp {
             == Some(super::command_list::CommandListAddon::Windows))
         .then(self.compositor)
         .flatten();
-        // Only temporary entries can leave the listed history on their own,
-        // so the tick runs only while one of them is on screen.
         let expiry = if self.clipboard.active
-            && self
-                .clipboard
-                .items
-                .iter()
-                .any(|item| item.expires_at.is_some())
+            && (self.addons.clipboard.ocr.enabled
+                || self
+                    .clipboard
+                    .items
+                    .iter()
+                    .any(|item| item.expires_at.is_some()))
         {
             iced::Subscription::run_with(true, |_| super::clipboard_mode::expiry_tick())
                 .map(|()| Message::ClipboardTick)

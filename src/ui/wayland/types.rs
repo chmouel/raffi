@@ -693,6 +693,7 @@ pub(crate) enum Message {
     ClipboardRefresh,
     /// A one-second tick while the browser lists entries with a deadline.
     ClipboardTick,
+    ClipboardOcrRevision(u64, std::result::Result<i64, String>),
     /// The startup probe of the cache service answered, or not.
     CacheServerStatus(Option<super::cache::ServerInfo>),
     /// F5, or Ctrl+Shift+F5 to refresh every source: refresh through the

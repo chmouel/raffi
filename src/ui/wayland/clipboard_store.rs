@@ -44,7 +44,7 @@ const IMAGE_HEADER_BYTES: usize = 64 * 1024;
 /// concurrent connections cannot hand out the same one.
 const NEXT_SEQ: &str = "(SELECT COALESCE(MAX(seq), 0) + 1 FROM items)";
 const BUSY_TIMEOUT: Duration = Duration::from_secs(2);
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 /// SQLite virtual machine steps between two checks of a listing's cancel
 /// flag.
 const CANCEL_CHECK_STEPS: i32 = 4096;
@@ -210,8 +210,22 @@ pub(crate) fn kind_predicate(kind: &str) -> Option<&'static str> {
 
 pub(crate) struct Store {
     conn: Connection,
+    ocr_enabled: bool,
     /// The write-ahead log next to the database.
     wal: PathBuf,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub(crate) struct OcrInfo {
+    pub status: String,
+    pub text: String,
+    pub language: String,
+    pub error: String,
+}
+
+pub(crate) struct OcrJob {
+    pub id: i64,
+    pub data: Vec<u8>,
 }
 
 fn db_error(error: rusqlite::Error) -> String {
@@ -280,9 +294,23 @@ fn migrate(conn: &Connection) -> Result<(), String> {
              mime TEXT NOT NULL,
              data BLOB NOT NULL,
              PRIMARY KEY (item_id, mime)
+         );
+         CREATE TABLE IF NOT EXISTS image_ocr (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             item_id INTEGER NOT NULL UNIQUE REFERENCES items (id) ON DELETE CASCADE,
+             status TEXT NOT NULL,
+             text TEXT NOT NULL DEFAULT '',
+             language TEXT NOT NULL DEFAULT '',
+             error TEXT NOT NULL DEFAULT ''
+         );
+         CREATE TABLE IF NOT EXISTS ocr_revision (
+             id INTEGER PRIMARY KEY CHECK (id = 1),
+             revision INTEGER NOT NULL
          );",
     )
     .map_err(db_error)?;
+    tx.execute("INSERT OR IGNORE INTO ocr_revision VALUES (1, 0)", [])
+        .map_err(db_error)?;
     if !has_column(&tx, "items", "expires_at")? {
         tx.execute_batch("ALTER TABLE items ADD COLUMN expires_at INTEGER")
             .map_err(db_error)?;
@@ -447,8 +475,84 @@ impl Store {
         wal.push("-wal");
         Ok(Self {
             conn,
+            ocr_enabled: false,
             wal: PathBuf::from(wal),
         })
+    }
+
+    pub(crate) fn enable_ocr(&mut self, enabled: bool) {
+        self.ocr_enabled = enabled;
+    }
+
+    pub(crate) fn ocr_info(&self, hash: &str) -> Result<Option<OcrInfo>, String> {
+        self.conn.query_row(
+            "SELECT o.status, o.text, o.language, o.error FROM image_ocr o JOIN items i ON i.id = o.item_id WHERE i.hash = ?1",
+            [hash], |row| Ok(OcrInfo { status: row.get(0)?, text: row.get(1)?, language: row.get(2)?, error: row.get(3)? }),
+        ).optional().map_err(db_error)
+    }
+
+    pub(crate) fn ocr_revision(&self) -> Result<i64, String> {
+        self.conn
+            .query_row(
+                "SELECT revision FROM ocr_revision WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(db_error)
+    }
+
+    pub(crate) fn next_ocr_job(&self) -> Result<Option<OcrJob>, String> {
+        self.conn.query_row(
+            "SELECT o.id, f.data FROM image_ocr o JOIN items i ON i.id = o.item_id
+             JOIN formats f ON f.item_id = i.id
+             WHERE o.status = 'pending' AND i.expires_at IS NULL AND f.mime LIKE 'image/%'
+             AND NOT EXISTS (SELECT 1 FROM formats p WHERE p.item_id = i.id AND p.mime = ?1)
+             ORDER BY o.id, CASE f.mime WHEN 'image/png' THEN 0 WHEN 'image/svg+xml' THEN 2 ELSE 1 END LIMIT 1",
+            [PASSWORD_HINT], |row| Ok(OcrJob { id: row.get(0)?, data: row.get(1)? }),
+        ).optional().map_err(db_error)
+    }
+
+    pub(crate) fn finish_ocr(
+        &mut self,
+        job: i64,
+        language: &str,
+        result: Result<String, String>,
+    ) -> Result<bool, String> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(db_error)?;
+        let (status, text, error) = match result {
+            Ok(text) => ("done", text, String::new()),
+            Err(error) => ("failed", String::new(), error),
+        };
+        let changed = tx
+            .execute(
+                "UPDATE image_ocr SET status = ?1, text = ?2, language = ?3, error = ?4
+             WHERE id = ?5 AND status = 'pending' AND EXISTS
+                 (SELECT 1 FROM items i WHERE i.id = image_ocr.item_id AND i.expires_at IS NULL
+                  AND NOT EXISTS (SELECT 1 FROM formats f WHERE f.item_id = i.id AND f.mime = ?6))",
+                params![status, text, language, error, job, PASSWORD_HINT],
+            )
+            .map_err(db_error)?;
+        if changed > 0 {
+            let (id, original): (i64, String) = tx.query_row(
+                "SELECT i.id, i.text FROM items i JOIN image_ocr o ON o.item_id = i.id WHERE o.id = ?1",
+                [job], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).map_err(db_error)?;
+            tx.execute(
+                "UPDATE items SET search = ?1 WHERE id = ?2",
+                params![searchable(&format!("{original}\n{text}")), id],
+            )
+            .map_err(db_error)?;
+            tx.execute(
+                "UPDATE ocr_revision SET revision = revision + 1 WHERE id = 1",
+                [],
+            )
+            .map_err(db_error)?;
+        }
+        tx.commit().map_err(db_error)?;
+        Ok(changed > 0)
     }
 
     /// Record `capture`, or move the identical entry to the top. Returns the
@@ -665,6 +769,24 @@ impl Store {
                     )
                     .map_err(db_error)?;
                 }
+            }
+            if kind == ItemKind::Image && (expires_at.is_some() || password_marked) {
+                let removed = tx.execute("DELETE FROM image_ocr WHERE item_id = (SELECT id FROM items WHERE hash = ?1)", [&hash]).map_err(db_error)?;
+                tx.execute(
+                    "UPDATE items SET search = ?1 WHERE hash = ?2",
+                    params![searchable(&text), hash],
+                )
+                .map_err(db_error)?;
+                if removed > 0 {
+                    tx.execute(
+                        "UPDATE ocr_revision SET revision = revision + 1 WHERE id = 1",
+                        [],
+                    )
+                    .map_err(db_error)?;
+                }
+            } else if kind == ItemKind::Image && self.ocr_enabled {
+                tx.execute("DELETE FROM image_ocr WHERE status = 'failed' AND item_id = (SELECT id FROM items WHERE hash = ?1)", [&hash]).map_err(db_error)?;
+                tx.execute("INSERT OR IGNORE INTO image_ocr (item_id, status) SELECT id, 'pending' FROM items WHERE hash = ?1", [&hash]).map_err(db_error)?;
             }
             tx.commit().map_err(db_error)?;
             self.prune(limits, now)
@@ -986,7 +1108,14 @@ impl Store {
         });
 
         let (text, text_truncated) = match kind {
-            ItemKind::Image => (String::new(), false),
+            ItemKind::Image => {
+                let ocr = self
+                    .ocr_info(hash)?
+                    .filter(|info| info.status == "done")
+                    .map(|info| info.text)
+                    .unwrap_or_default();
+                bounded_text(&ocr, ocr.encode_utf16().count())
+            }
             _ => bounded_text(&text, text_len.max(0) as usize),
         };
         let files = if kind == ItemKind::Files {
@@ -1550,6 +1679,136 @@ mod tests {
             )
             .unwrap();
         bytes
+    }
+
+    #[test]
+    fn ocr_queue_survives_reopen_and_updates_search_and_preview() {
+        let (mut store, dir) = temp_store("ocr-reopen");
+        store.enable_ocr(true);
+        let capture = Capture {
+            formats: vec![
+                ("image/png".into(), png(5, 3)),
+                ("text/plain".into(), b"Original".to_vec()),
+            ],
+            copied_at: NOW,
+            source: None,
+            password_marked: false,
+        };
+        let hash = store.insert(capture.clone(), &LIMITS, NOW).unwrap();
+        let job = store.next_ocr_job().unwrap().unwrap();
+        assert_eq!(job.data, capture.formats[0].1);
+        drop(store);
+        let mut store = Store::open(&dir.join("clipboard.db")).unwrap();
+        assert_eq!(store.next_ocr_job().unwrap().unwrap().id, job.id);
+        assert!(store
+            .finish_ocr(job.id, "eng", Ok("Crème dashboard".into()))
+            .unwrap());
+        assert_eq!(
+            store
+                .list("ORIGINAL crème", "image", 0, &[], NOW)
+                .unwrap()
+                .items[0]
+                .id,
+            hash
+        );
+        assert_eq!(store.preview(&hash, NOW).unwrap().text, "Crème dashboard");
+        assert_eq!(store.formats(&hash, NOW).unwrap(), capture.formats);
+        assert_eq!(store.ocr_info(&hash).unwrap().unwrap().status, "done");
+        store.enable_ocr(true);
+        store.insert(capture, &LIMITS, NOW + 1).unwrap();
+        assert!(store.next_ocr_job().unwrap().is_none());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ocr_recopy_retries_failure_and_removal_discards_stale_results() {
+        let (mut store, dir) = temp_store("ocr-stale");
+        store.enable_ocr(true);
+        let capture = Capture {
+            formats: vec![("image/png".into(), png(4, 3))],
+            copied_at: NOW,
+            source: None,
+            password_marked: false,
+        };
+        let hash = store.insert(capture.clone(), &LIMITS, NOW).unwrap();
+        let job = store.next_ocr_job().unwrap().unwrap();
+        store
+            .finish_ocr(job.id, "eng", Err("Tesseract failed".into()))
+            .unwrap();
+        assert_eq!(store.ocr_info(&hash).unwrap().unwrap().status, "failed");
+        assert!(store.next_ocr_job().unwrap().is_none());
+        store.insert(capture.clone(), &LIMITS, NOW + 1).unwrap();
+        let retry = store.next_ocr_job().unwrap().unwrap();
+        assert!(!store.finish_ocr(job.id, "eng", Ok("old".into())).unwrap());
+        store.delete(&hash).unwrap();
+        let hash2 = store.insert(capture, &LIMITS, NOW + 1).unwrap();
+        assert_eq!(hash, hash2);
+        assert!(!store
+            .finish_ocr(retry.id, "eng", Ok("stale".into()))
+            .unwrap());
+        assert!(store
+            .list("stale", "", 0, &[], NOW)
+            .unwrap()
+            .items
+            .is_empty());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ocr_without_text_finishes_without_retrying() {
+        let (mut store, dir) = temp_store("ocr-empty");
+        store.enable_ocr(true);
+        let hash = store
+            .insert(
+                Capture {
+                    formats: vec![("image/png".into(), png(2, 2))],
+                    copied_at: NOW,
+                    source: None,
+                    password_marked: false,
+                },
+                &LIMITS,
+                NOW,
+            )
+            .unwrap();
+        let job = store.next_ocr_job().unwrap().unwrap();
+        store.finish_ocr(job.id, "eng", Ok(String::new())).unwrap();
+        let info = store.ocr_info(&hash).unwrap().unwrap();
+        assert_eq!(info.status, "done");
+        assert!(info.text.is_empty());
+        assert!(store.next_ocr_job().unwrap().is_none());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ocr_skips_temporary_and_secret_recaptures() {
+        let (mut store, dir) = temp_store("ocr-temporary");
+        store.enable_ocr(true);
+        let capture = Capture {
+            formats: vec![("image/png".into(), png(3, 3))],
+            copied_at: NOW,
+            source: None,
+            password_marked: false,
+        };
+        let hash = store.insert(capture.clone(), &LIMITS, NOW).unwrap();
+        let job = store.next_ocr_job().unwrap().unwrap();
+        store
+            .insert_temporary(capture.clone(), 60, &LIMITS, &Policy::default(), NOW)
+            .unwrap();
+        assert!(!store
+            .finish_ocr(job.id, "eng", Ok("private".into()))
+            .unwrap());
+        assert!(store.ocr_info(&hash).unwrap().is_none());
+        let mut secret = capture;
+        secret.password_marked = true;
+        let policy = Policy {
+            temporary_password_manager: true,
+            ..Policy::default()
+        };
+        store
+            .insert_filtered(secret, &LIMITS, &policy, NOW)
+            .unwrap();
+        assert!(store.next_ocr_job().unwrap().is_none());
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

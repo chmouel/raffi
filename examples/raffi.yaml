@@ -388,6 +388,9 @@ addons:
   #   max_items: 1000         # raffi backend: entries kept
   #   max_size_mb: 500        # raffi backend: total history size
   #   max_image_size_mb: 50   # raffi backend: larger images are skipped
+  #   ocr:
+  #     enabled: false        # recognize text in images with Tesseract
+  #     languages: [eng]      # installed Tesseract language codes
   #   action: copy
   #   secondary_action: hypr_paste
 

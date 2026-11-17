@@ -1898,6 +1898,9 @@ impl LauncherApp {
             }
             Message::ClipboardRefresh => self.handle_refresh(),
             Message::ClipboardTick => self.handle_clipboard_tick(),
+            Message::ClipboardOcrRevision(session, result) => {
+                self.handle_clipboard_ocr_revision(session, result)
+            }
             Message::CacheServerStatus(info) => self.handle_cache_server_status(info),
             Message::ServerRefresh(all) => self.handle_server_refresh(all),
             Message::ServerRefreshDone(token, result) => {

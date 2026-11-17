@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -117,6 +118,35 @@ class Session:
             raise RuntimeError("browser tabs fixture did not start")
         return process
 
+    def clipboard_ocr(self, config, env):
+        daemon = self.helper([str(self.binary), "-c", str(config), "--cache-daemon"],
+                             env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        database = self.home / ".local/share/raffi/clipboard.db"
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            if daemon.poll() is not None:
+                raise RuntimeError("clipboard fixture daemon exited")
+            if database.exists():
+                try:
+                    with sqlite3.connect(database, timeout=1) as conn:
+                        conn.execute("SELECT revision FROM ocr_revision").fetchone()
+                    break
+                except sqlite3.Error:
+                    pass
+            time.sleep(0.1)
+        else:
+            raise RuntimeError("clipboard fixture database did not appear")
+        data = (REPO / "tests/fixtures/clipboard/ocr.png").read_bytes()
+        with sqlite3.connect(database) as conn:
+            conn.execute("""INSERT INTO items
+                (hash, seq, kind, formats, text, text_len, trim_len, is_url, copied_at, size, search)
+                VALUES (?, 1, 'image', 'image/png', '', 0, 0, 0, ?, ?, ?)""",
+                ("a" * 32, int(time.time()), len(data), "raffi ocr search"))
+            conn.execute("INSERT INTO formats (item_id, mime, data) VALUES (last_insert_rowid(), 'image/png', ?)", (data,))
+            conn.execute("INSERT INTO image_ocr (item_id, status, text, language) VALUES ((SELECT id FROM items WHERE hash = ?), 'done', ?, 'eng')",
+                         ("a" * 32, "RAFFI OCR SEARCH"))
+        return daemon
+
     def stop(self):
         for process in [*self.helpers, self.xvfb]:
             if process and process.poll() is None:
@@ -173,6 +203,7 @@ class Session:
             for key, value in config.items():
                 command.extend(["-o", f"{key}={json.dumps(value, ensure_ascii=False)}"])
         env = {key: value for key, value in self.env.items() if key not in shot.unset_env}
+        clipboard = self.clipboard_ocr(path, env) if "clipboard-ocr" in shot.needs else None
         process = subprocess.Popen(command, env=env, stdout=log, stderr=log)
         conn = display.Display(self.display)
         try:
@@ -187,7 +218,7 @@ class Session:
         finally:
             conn.close()
             log.close()
-            for helper in [process, worker, browser]:
+            for helper in [process, worker, browser, clipboard]:
                 if helper and helper.poll() is None:
                     helper.terminate()
                     helper.wait(timeout=5)

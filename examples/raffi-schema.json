@@ -706,6 +706,9 @@
           "default": null,
           "minimum": 0
         },
+        "ocr": {
+          "$ref": "#/$defs/ClipboardOcrConfig"
+        },
         "secondary_action": {
           "description": "Action on Ctrl+Enter (default: `hypr_paste`).",
           "$ref": "#/$defs/ClipboardAction"
@@ -793,6 +796,27 @@
           "const": "none"
         }
       ]
+    },
+    "ClipboardOcrConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Extract text from images in Raffi's clipboard history (default: false).",
+          "type": "boolean",
+          "default": false
+        },
+        "languages": {
+          "description": "Tesseract language codes (default: [\"eng\"]).",
+          "type": "array",
+          "default": [
+            "eng"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "ColorAddonConfig": {
       "description": "Configuration for the inline color converter addon",

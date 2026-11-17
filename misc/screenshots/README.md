@@ -36,7 +36,9 @@ Each run starts with a fresh `/tmp/raffi-screenshots/home`. It writes the demo
 config, files and caches from `fixtures/demo.py` into it. Commands that the
 addons call, such as `pactl`, `niri`, `gh` and `rbw`, are symlinks to
 `fixtures/fake_cli.py`, which prints canned demo data. The browser tabs shots
-talk to a fake socket from `fixtures/browser_host.py`. Raffi runs with a
+talk to a fake socket from `fixtures/browser_host.py`. The OCR shot starts a
+private cache daemon and seeds its clipboard database with a recognized image.
+Raffi runs with a
 scrubbed environment and has no access to your Wayland session, D-Bus,
 tokens or password store.
 

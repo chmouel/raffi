@@ -523,7 +523,7 @@ fn unchecked_text_format<'a>(failed: &'a [String], policy: &Policy) -> Option<&'
 }
 
 /// Read and store each job in turn.
-fn record(jobs: mpsc::Receiver<Job>, limits: Limits, policy: Policy) {
+fn record(jobs: mpsc::Receiver<Job>, limits: Limits, policy: Policy, ocr_enabled: bool) {
     // Retried, so a database briefly locked at startup, by a migration for
     // instance, does not stop recording until the next restart.
     let mut store = loop {
@@ -535,6 +535,7 @@ fn record(jobs: mpsc::Receiver<Job>, limits: Limits, policy: Policy) {
             }
         }
     };
+    store.enable_ocr(ocr_enabled);
     for job in jobs {
         let deadline = Instant::now() + READ_TIMEOUT;
         let mut formats = Vec::new();
@@ -1029,7 +1030,7 @@ data_control!(
 
 /// Start recording the clipboard in the background, reconnecting when the
 /// connection to the compositor is lost.
-pub(crate) fn start(limits: Limits, policy: Policy) {
+pub(crate) fn start(limits: Limits, policy: Policy, ocr_enabled: bool) {
     RECORDING.store(true, Ordering::Relaxed);
     crate::debug_log!(
         "clipboard policy: {} exclusion(s), {} temporary pattern(s), {}s timeout, password manager {}",
@@ -1043,7 +1044,7 @@ pub(crate) fn start(limits: Limits, policy: Policy) {
     let password_manager = policy.temporary_password_manager;
     std::thread::Builder::new()
         .name("raffi-clipboard-record".into())
-        .spawn(move || record(queue, limits, policy))
+        .spawn(move || record(queue, limits, policy, ocr_enabled))
         .ok();
     std::thread::Builder::new()
         .name("raffi-clipboard-load".into())

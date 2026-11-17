@@ -1042,6 +1042,7 @@ fn serve_set(
     let formats = decode_formats(formats).map_err(Failure::invalid)?;
     let mut store = super::clipboard_store::Store::open_default()
         .map_err(|message| Failure::new(ErrorCode::Io, message))?;
+    store.enable_ocr(config.ocr.enabled);
     let now = super::clipboard_store::now_secs();
     let served = record_set(
         &mut store, formats, temporary, secret, expires_in, source, &limits, &policy, now,
@@ -1349,9 +1350,23 @@ pub(crate) fn run(config: ParsedConfig) -> Result<()> {
         let policy =
             super::clipboard_policy::Policy::from_config(clipboard).map_err(anyhow::Error::msg)?;
         super::clipboard_store::start_sweeper();
+        if clipboard.ocr.enabled {
+            if let Some((_, problem)) = clipboard
+                .clipboard_problems()
+                .into_iter()
+                .find(|(key, _)| key == "/addons/clipboard/ocr/languages")
+            {
+                eprintln!(
+                    "raffi: clipboard OCR disabled: addons.clipboard.ocr.languages: {problem}"
+                );
+            } else {
+                super::clipboard_ocr::start(clipboard.ocr.languages.join("+"));
+            }
+        }
         super::clipboard_watch::start(
             super::clipboard_store::Limits::from_config(clipboard),
             policy,
+            clipboard.ocr.enabled,
         );
     }
     warm_loop(state.clone());
@@ -2235,6 +2250,43 @@ mod tests {
         )
         .unwrap();
         assert_eq!(image.expires_at, Some(NOW + policy.temporary_timeout));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn image_set_queues_ocr_and_temporary_set_cancels_it() {
+        let (mut store, dir) = set_store("set-ocr");
+        store.enable_ocr(true);
+        let image = vec![("image/png".to_string(), b"image".to_vec())];
+        let served = record_set(
+            &mut store,
+            image.clone(),
+            false,
+            false,
+            None,
+            None,
+            &LIMITS,
+            &Policy::default(),
+            NOW,
+        )
+        .unwrap();
+        let id = served.id.unwrap();
+        let job = store.next_ocr_job().unwrap().unwrap();
+        assert_eq!(store.ocr_info(&id).unwrap().unwrap().status, "pending");
+        record_set(
+            &mut store,
+            image,
+            true,
+            false,
+            None,
+            None,
+            &LIMITS,
+            &Policy::default(),
+            NOW,
+        )
+        .unwrap();
+        assert!(store.ocr_info(&id).unwrap().is_none());
+        assert!(!store.finish_ocr(job.id, "eng", Ok("stale".into())).unwrap());
         let _ = fs::remove_dir_all(dir);
     }
 

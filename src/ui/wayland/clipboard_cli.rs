@@ -840,6 +840,7 @@ struct Row {
     width: Option<u32>,
     height: Option<u32>,
     preview: String,
+    ocr_status: Option<String>,
 }
 
 fn row(
@@ -863,6 +864,7 @@ fn row(
         width: image.map(|meta| meta.width),
         height: image.map(|meta| meta.height),
         preview: preview_with_image(item, image, Sanitize::Spaces, false),
+        ocr_status: None,
     }
 }
 
@@ -1248,7 +1250,17 @@ fn list(run: &mut Run, args: &ClipboardListArgs) -> Result<Output, Error> {
         .iter()
         .map(|(item, index)| {
             let sources = args.json.then_some(&mut sources);
-            row(item, *index, image_of(item), sources)
+            let mut result = row(item, *index, image_of(item), sources);
+            if args.json && item.kind == ItemKind::Image {
+                if let Clips::Raffi(Some(store)) = &run.clips {
+                    result.ocr_status = store
+                        .ocr_info(&item.id)
+                        .ok()
+                        .flatten()
+                        .map(|info| info.status);
+                }
+            }
+            result
         })
         .collect();
     Ok(Output::text(if args.json {
@@ -1299,7 +1311,22 @@ fn show_raffi(
             _ => exact_text(&formats).map(|bytes| Capped::text(bytes, args.max_bytes)),
         };
         let image = store.image_meta(&item.id, run.clock.secs).ok().flatten();
-        return metadata_line(item, index, text, image.as_ref(), sources);
+        let mut ocr = store.ocr_info(&item.id)?;
+        let mut ocr_truncated = false;
+        if let Some(info) = &mut ocr {
+            let capped = Capped::text(info.text.clone().into_bytes(), args.max_bytes);
+            ocr_truncated = capped.truncated;
+            info.text = String::from_utf8_lossy(&capped.bytes).into_owned();
+        }
+        return metadata_line(
+            item,
+            index,
+            text,
+            image.as_ref(),
+            sources,
+            ocr,
+            ocr_truncated,
+        );
     }
     match item.kind {
         ItemKind::Image => {
@@ -1358,7 +1385,7 @@ fn show_copyq(
                 args.max_bytes,
             )),
         };
-        return metadata_line(item, index, text, None, sources);
+        return metadata_line(item, index, text, None, sources, None, false);
     }
     if item.kind == ItemKind::Image {
         return Err(Error::new(
@@ -1434,6 +1461,8 @@ fn metadata_line(
     text: Option<Capped>,
     image: Option<&ImageMeta>,
     sources: &mut SourceNames,
+    ocr: Option<clipboard_store::OcrInfo>,
+    ocr_truncated: bool,
 ) -> Result<Output, Error> {
     let mut value = serde_json::to_value(row(item, index, image, Some(sources)))
         .map_err(|error| Error::new(Code::Io, format!("cannot format the entry: {error}")))?;
@@ -1443,6 +1472,10 @@ fn metadata_line(
         None => serde_json::Value::Null,
     };
     value["truncated"] = truncated.into();
+    value["ocr_status"] = ocr.as_ref().map(|info| info.status.clone()).into();
+    value["ocr"] =
+        serde_json::to_value(ocr).map_err(|error| Error::new(Code::Io, error.to_string()))?;
+    value["ocr_truncated"] = ocr_truncated.into();
     Ok(Output::text(json_line(&value)?))
 }
 
@@ -2181,6 +2214,56 @@ mod tests {
             clock: Clock::at(NOW),
             io: Io::pipe(),
         }
+    }
+
+    #[test]
+    fn show_ocr_metadata() {
+        let (mut store, dir) = temp_store("ocr-cli");
+        store.enable_ocr(true);
+        let image = include_bytes!("../../../tests/fixtures/clipboard/ocr.png");
+        let id = store
+            .insert(
+                Capture {
+                    formats: vec![("image/png".into(), image.to_vec())],
+                    copied_at: NOW,
+                    source: None,
+                    password_marked: false,
+                },
+                &LIMITS,
+                NOW,
+            )
+            .unwrap();
+        let settings = settings(3, Vec::new());
+        let mut run = run(store, &settings);
+        let Clips::Raffi(Some(store)) = &mut run.clips else {
+            panic!("expected store")
+        };
+        let job = store.next_ocr_job().unwrap().unwrap();
+        store
+            .finish_ocr(job.id, "eng", Ok("recognized text".into()))
+            .unwrap();
+        let args = ClipboardShowArgs {
+            json: true,
+            max_bytes: Some(10),
+            ..Default::default()
+        };
+        let value: serde_json::Value =
+            serde_json::from_slice(&show(&mut run, &args, &[id]).unwrap().stdout).unwrap();
+        assert_eq!(value["ocr_status"], "done");
+        assert_eq!(value["ocr"]["text"], "recognized");
+        assert_eq!(value["ocr_truncated"], true);
+        let result = list(
+            &mut run,
+            &ClipboardListArgs {
+                query: vec!["recognized".into()],
+                json: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let row: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+        assert_eq!(row["ocr_status"], "done");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     fn item(id: &str, kind: ItemKind, excerpt: &str) -> ClipItem {

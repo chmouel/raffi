@@ -4291,6 +4291,7 @@ fn test_clipboard_drops_the_preview_of_an_expired_row() {
         "t".into(),
         Ok(clip_text_preview("code")),
     ));
+    app.clipboard.preview_inflight = Some("p".into());
     let _ = app.update(Message::ClipboardPreview(
         session,
         "p".into(),
@@ -4742,7 +4743,7 @@ fn test_clipboard_previews_are_bound_to_session_and_item() {
                     == Some(format!("3 words; 16 chars · copied {weekday}").as_str())
     ));
 
-    let mut image = clip_text_preview("");
+    let mut image = clip_text_preview("deployment failed");
     image.kind = super::clipboard::ItemKind::Image;
     image.image = Some(Ok(super::clipboard::PreviewImage {
         handle: iced::widget::image::Handle::from_bytes(vec![0u8; 4]),
@@ -4750,6 +4751,7 @@ fn test_clipboard_previews_are_bound_to_session_and_item() {
         width: 2,
         height: 1,
     }));
+    app.clipboard.preview_inflight = Some("b".into());
     let _ = app.update(Message::ClipboardPreview(session, "b".into(), Ok(image)));
     let preview = app.resolve_selected_preview().unwrap();
     assert!(matches!(
@@ -4757,6 +4759,10 @@ fn test_clipboard_previews_are_bound_to_session_and_item() {
         Some(PreviewBody::ImageData { footer, .. })
             if footer.as_deref() == Some(format!("2 × 1 px · copied {weekday}").as_str())
     ));
+    assert!(preview.bodies.iter().any(|body| matches!(body,
+        PreviewBody::Text { heading: Some(heading), content, .. }
+        if heading == "Recognized text" && content == "deployment failed"
+    )));
 
     for index in 0..20 {
         let _ = app.update(Message::ClipboardPreview(
@@ -4766,6 +4772,29 @@ fn test_clipboard_previews_are_bound_to_session_and_item() {
         ));
     }
     assert!(app.clipboard.previews.len() <= 8);
+}
+
+#[test]
+fn test_clipboard_ocr_refresh_discards_inflight_preview() {
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip query");
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page("a", 1, 1, vec![clip(0, "a", "a")])),
+    ));
+    assert_eq!(app.clipboard.preview_inflight.as_deref(), Some("a"));
+    let session = app.clipboard.session;
+    let _ = app.handle_clipboard_ocr_revision(session, Ok(1));
+    assert!(app.clipboard.preview_stale);
+    let _ = app.handle_clipboard_preview(session, "a".into(), Ok(clip_text_preview("old")));
+    assert!(app.clipboard.preview("a").is_none());
+    assert!(!app.clipboard.preview_stale);
+    let _ = app.ensure_clipboard_preview();
+    let _ = app.handle_clipboard_preview(session, "a".into(), Ok(clip_text_preview("new")));
+    assert_eq!(
+        app.clipboard.preview("a").unwrap().as_ref().unwrap().text,
+        "new"
+    );
 }
 
 #[test]

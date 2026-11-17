@@ -415,6 +415,9 @@ pub(super) struct ClipboardState {
     /// while the rows are prepared.
     pub names: std::collections::HashMap<String, String>,
     pub preview_inflight: Option<String>,
+    pub preview_stale: bool,
+    pub ocr_revision: Option<i64>,
+    pub ocr_revision_inflight: bool,
     /// An action is running; further activations are ignored.
     pub pending: bool,
 }

@@ -6,7 +6,7 @@ use std::path::Path;
 use chrono::{DateTime, Local};
 
 use super::browser::read_directory;
-use super::clipboard::ClipItem;
+use super::clipboard::{ClipItem, ItemKind};
 use super::command_list::{CommandItem, CommandListState};
 use super::devtools::DevRow;
 use super::file_preview::FilePreviewOutput;
@@ -1860,6 +1860,12 @@ impl LauncherApp {
                         heading: Some("Files".to_string()),
                         content,
                         truncated: false,
+                    });
+                } else if preview.kind == ItemKind::Image && !preview.text.is_empty() {
+                    bodies.push(PreviewBody::Text {
+                        heading: Some("Recognized text".to_string()),
+                        content: preview.text.clone(),
+                        truncated: preview.text_truncated,
                     });
                 } else if !preview.text.is_empty() {
                     let mut footer = text_summary(
