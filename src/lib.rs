@@ -1004,6 +1004,39 @@ impl SystemCommandsConfig {
     }
 }
 
+/// An extra entry appended to the system commands addon list.
+#[derive(Deserialize, JsonSchema, Debug, Clone, PartialEq, Eq)]
+#[schemars(deny_unknown_fields)]
+pub struct SystemExtraCommand {
+    /// Label shown in the list.
+    pub title: String,
+    /// Command and arguments run directly without a shell.
+    pub argv: Vec<String>,
+    /// System icon name (default: `system-run`).
+    #[serde(default)]
+    pub icon: Option<String>,
+    /// Verb completing "Press Enter again to ..." when confirmation is enabled
+    /// (default: lowercase `title`).
+    #[serde(default)]
+    pub verb: Option<String>,
+    /// Ask for a second Enter before running (default: true).
+    #[serde(default)]
+    pub confirm: Option<bool>,
+    /// Allow keeping Raffi open when `close_on_action` is false (default: false).
+    #[serde(default)]
+    pub keep_open: Option<bool>,
+}
+
+const SYSTEM_BUILTIN_TITLES: &[&str] = &[
+    "Lock",
+    "Display off",
+    "Suspend",
+    "Hibernate",
+    "Log out",
+    "Reboot",
+    "Shut down",
+];
+
 /// Configuration for the system commands addon
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
@@ -1015,6 +1048,9 @@ pub struct SystemAddonConfig {
     pub trigger: Option<String>,
     #[serde(default)]
     pub commands: SystemCommandsConfig,
+    /// Extra entries appended after the built-in system commands.
+    #[serde(default)]
+    pub extra: Vec<SystemExtraCommand>,
     /// Entries left out of the list.
     #[serde(default)]
     pub hide: Vec<SystemCommand>,
@@ -1027,6 +1063,50 @@ impl SystemAddonConfig {
     pub fn trigger(&self) -> &str {
         self.trigger.as_deref().unwrap_or("sys")
     }
+
+    /// Every invalid extra system command as a YAML pointer and message, for
+    /// `--check-config` and config loading.
+    pub fn system_problems(&self) -> Vec<(String, String)> {
+        let mut problems = Vec::new();
+        let mut seen_titles: Vec<String> = Vec::new();
+        for (index, extra) in self.extra.iter().enumerate() {
+            let trimmed_title = extra.title.trim();
+            if trimmed_title.is_empty() {
+                problems.push((
+                    format!("/addons/system/extra/{index}/title"),
+                    "extra system command title must not be empty".to_string(),
+                ));
+            } else if SYSTEM_BUILTIN_TITLES
+                .iter()
+                .any(|builtin| builtin.eq_ignore_ascii_case(trimmed_title))
+            {
+                problems.push((
+                    format!("/addons/system/extra/{index}/title"),
+                    format!(
+                        "extra system command title '{trimmed_title}' duplicates a built-in system command"
+                    ),
+                ));
+            } else if seen_titles
+                .iter()
+                .any(|seen| seen.eq_ignore_ascii_case(trimmed_title))
+            {
+                problems.push((
+                    format!("/addons/system/extra/{index}/title"),
+                    format!("extra system command title '{trimmed_title}' is used more than once"),
+                ));
+            } else {
+                seen_titles.push(trimmed_title.to_string());
+            }
+
+            if extra.argv.is_empty() || extra.argv[0].trim().is_empty() {
+                problems.push((
+                    format!("/addons/system/extra/{index}/argv"),
+                    "extra system command argv must not be empty".to_string(),
+                ));
+            }
+        }
+        problems
+    }
 }
 
 impl Default for SystemAddonConfig {
@@ -1035,6 +1115,7 @@ impl Default for SystemAddonConfig {
             enabled: true,
             trigger: None,
             commands: SystemCommandsConfig::default(),
+            extra: Vec::new(),
             hide: Vec::new(),
             close_on_action: None,
         }
@@ -3194,15 +3275,16 @@ pub fn check_config(filename: &str) -> Result<Vec<ConfigProblem>> {
                 problem.line = e.location().map(|l| l.line());
                 problems.push(problem);
             }
-            #[cfg(feature = "wayland")]
             Ok(config) => {
+                #[cfg(feature = "wayland")]
                 for (path, message) in config.addons.clipboard.clipboard_problems() {
+                    problems.push(ConfigProblem::new(&path, message));
+                }
+                for (path, message) in config.addons.system.system_problems() {
                     problems.push(ConfigProblem::new(&path, message));
                 }
                 locate_config_problems(&mut problems, &contents, v0);
             }
-            #[cfg(not(feature = "wayland"))]
-            Ok(_) => {}
         }
     }
     Ok(problems)
@@ -4320,6 +4402,16 @@ fn process_config(config: Config, args: &Args) -> Result<ParsedConfig> {
             .clipboard
             .temporary_timeout_secs()
             .map_err(anyhow::Error::msg)?;
+    }
+    if let Some((path, message)) = addons.system.system_problems().into_iter().next() {
+        anyhow::bail!("{path}: {message}");
+    }
+    for extra in &mut addons.system.extra {
+        extra
+            .argv
+            .iter_mut()
+            .for_each(|arg| *arg = expand_config_value(arg));
+        extra.icon = extra.icon.as_ref().map(|icon| expand_config_value(icon));
     }
     let fb = &mut addons.file_browser;
     fb.action = fb.action.as_ref().map(|s| expand_config_value(s));
@@ -10573,6 +10665,55 @@ launchers:
         )
         .unwrap();
         assert!(run(args()).is_err());
+
+        fs::write(
+            &configfile,
+            "version: 1\naddons:\n  system:\n    extra:\n      - title: Suspend\n        argv: []\n",
+        )
+        .unwrap();
+        assert!(run(args()).is_err());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    #[cfg(feature = "config-validation")]
+    fn test_check_config_reports_system_extra_problems() {
+        let dir = temp_test_dir("check-config-system-extra");
+        let path = dir.join("raffi.yaml");
+        fs::write(
+            &path,
+            r#"version: 1
+addons:
+  system:
+    extra:
+      - title: "  "
+        argv: []
+      - title: Suspend
+        argv: [systemctl, suspend-then-hibernate]
+      - title: Deep Sleep
+        argv: [" ", arg]
+      - title: deep sleep
+        argv: [systemctl, hybrid-sleep]
+"#,
+        )
+        .unwrap();
+
+        let problems = check_config(path.to_str().unwrap()).unwrap();
+        let found: Vec<(&str, Option<usize>)> = problems
+            .iter()
+            .map(|problem| (problem.path.as_str(), problem.line))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("/addons/system/extra/0/title", Some(5)),
+                ("/addons/system/extra/0/argv", Some(6)),
+                ("/addons/system/extra/1/title", Some(7)),
+                ("/addons/system/extra/2/argv", Some(10)),
+                ("/addons/system/extra/3/title", Some(11)),
+            ],
+            "{problems:?}"
+        );
         let _ = fs::remove_dir_all(dir);
     }
 

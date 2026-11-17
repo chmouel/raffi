@@ -204,6 +204,14 @@ addons:
     trigger: "bt"
     close_on_action: false
 
+  system:
+    enabled: true
+    trigger: "sys"
+    extra:
+      - title: Suspend then hibernate
+        argv: [systemctl, suspend-then-hibernate]
+        icon: system-suspend-hibernate
+
   file_browser:
     enabled: true
     show_hidden: false

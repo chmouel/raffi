@@ -2121,6 +2121,13 @@
           "type": "boolean",
           "default": true
         },
+        "extra": {
+          "description": "Extra entries appended after the built-in system commands.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SystemExtraCommand"
+          }
+        },
         "hide": {
           "description": "Entries left out of the list.",
           "type": "array",
@@ -2235,6 +2242,60 @@
         }
       },
       "additionalProperties": false
+    },
+    "SystemExtraCommand": {
+      "description": "An extra entry appended to the system commands addon list.",
+      "type": "object",
+      "properties": {
+        "argv": {
+          "description": "Command and arguments run directly without a shell.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confirm": {
+          "description": "Ask for a second Enter before running (default: true).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "icon": {
+          "description": "System icon name (default: `system-run`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "keep_open": {
+          "description": "Allow keeping Raffi open when `close_on_action` is false (default: false).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "title": {
+          "description": "Label shown in the list.",
+          "type": "string"
+        },
+        "verb": {
+          "description": "Verb completing \"Press Enter again to ...\" when confirmation is enabled\n(default: lowercase `title`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "argv"
+      ]
     },
     "TerminalAddonConfig": {
       "description": "Configuration for the run in terminal addon",

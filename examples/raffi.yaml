@@ -403,6 +403,10 @@ addons:
   #   trigger: sys
   #   commands:
   #     lock: [hyprlock]
+  #   extra:
+  #     - title: Suspend then hibernate
+  #       argv: [systemctl, suspend-then-hibernate]
+  #       icon: system-suspend-hibernate
   #   hide: [hibernate]
 
   # Window switcher (Hyprland, niri or sway). Type "win " to

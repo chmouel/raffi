@@ -5686,7 +5686,10 @@ fn test_system_commands_overrides_and_hide() {
     addons.system.hide = vec![crate::SystemCommand::Hibernate];
 
     let entries = system_entries(&addons.system, Some(Compositor::Hyprland), None, |_| true);
-    let ids: Vec<crate::SystemCommand> = entries.iter().map(|entry| entry.id).collect();
+    let ids: Vec<crate::SystemCommand> = entries
+        .iter()
+        .filter_map(|entry| entry.id.as_builtin())
+        .collect();
     use crate::SystemCommand::*;
     assert_eq!(ids, vec![Lock, DisplayOff, Logout, Reboot, Shutdown]);
     let logout = entries.iter().find(|entry| entry.id == Logout).unwrap();
@@ -5930,6 +5933,80 @@ fn test_system_logout_without_session_is_not_actionable() {
         .find(|entry| entry.id == crate::SystemCommand::Logout)
         .unwrap();
     assert!(logout.missing.is_none());
+}
+
+#[test]
+fn test_system_extra_commands_rendering_identities_and_options() {
+    let config = crate::SystemAddonConfig {
+        hide: vec![crate::SystemCommand::Hibernate],
+        extra: vec![
+            crate::SystemExtraCommand {
+                title: "Suspend then hibernate".to_string(),
+                argv: vec![
+                    "systemctl".to_string(),
+                    "suspend-then-hibernate".to_string(),
+                ],
+                icon: Some("system-suspend-hibernate".to_string()),
+                verb: None,
+                confirm: None,
+                keep_open: None,
+            },
+            crate::SystemExtraCommand {
+                title: "Suspend / then hibernate!".to_string(),
+                argv: vec!["missing-power-helper".to_string()],
+                icon: None,
+                verb: Some("enter deep sleep".to_string()),
+                confirm: Some(false),
+                keep_open: Some(true),
+            },
+        ],
+        ..Default::default()
+    };
+
+    let entries = system_entries(&config, None, Some("1"), |program| {
+        program != "missing-power-helper"
+    });
+    let builtin_identities: Vec<String> = entries
+        .iter()
+        .filter(|entry| entry.id.as_builtin().is_some())
+        .map(|entry| entry.to_item_with(false).identity)
+        .collect();
+    assert_eq!(
+        builtin_identities,
+        ["lock", "suspend", "logout", "reboot", "shutdown"]
+    );
+
+    let first_extra = &entries[entries.len() - 2];
+    let second_extra = &entries[entries.len() - 1];
+    assert_eq!(first_extra.title, "Suspend then hibernate");
+    assert_eq!(first_extra.icon, "system-suspend-hibernate");
+    assert_eq!(first_extra.verb, "suspend then hibernate");
+    assert!(first_extra.needs_confirmation());
+    assert!(first_extra.missing.is_none());
+    let first_item = first_extra.to_item_with(true);
+    assert_eq!(first_item.identity, "extra:0-suspend-then-hibernate");
+    assert_eq!(
+        first_item.primary.as_ref().unwrap().confirm.as_deref(),
+        Some("suspend then hibernate")
+    );
+    assert!(!first_item.primary.as_ref().unwrap().keep_open);
+
+    assert_eq!(second_extra.icon, "system-run");
+    assert_eq!(second_extra.verb, "enter deep sleep");
+    assert!(!second_extra.needs_confirmation());
+    assert_eq!(
+        second_extra.missing.as_deref(),
+        Some("missing-power-helper")
+    );
+    let second_item = second_extra.to_item_with(true);
+    assert_eq!(second_item.identity, "extra:1-suspend-then-hibernate");
+    assert_ne!(first_item.identity, second_item.identity);
+    assert!(second_item.primary.as_ref().unwrap().confirm.is_none());
+    assert!(second_item.primary.as_ref().unwrap().keep_open);
+    assert_eq!(
+        second_item.unavailable.as_deref(),
+        Some("missing-power-helper not found")
+    );
 }
 
 const WINDOW_CLIENTS: &str = r#"[

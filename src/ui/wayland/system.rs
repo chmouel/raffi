@@ -1,25 +1,60 @@
+use std::borrow::Cow;
+
 use super::actions::DeferredAction;
 use super::command_list::{CommandAction, CommandItem};
 use super::hyprland::HyprAction;
 use super::windows::Compositor;
 use crate::{SystemAddonConfig, SystemCommand};
 
+/// Identity of a row in the system commands list: one of the seven built-in
+/// commands, or a user-configured `addons.system.extra` entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum SystemEntryId {
+    Builtin(SystemCommand),
+    Extra(String),
+}
+
+impl SystemEntryId {
+    #[cfg(test)]
+    pub fn as_builtin(&self) -> Option<SystemCommand> {
+        match self {
+            Self::Builtin(id) => Some(*id),
+            Self::Extra(_) => None,
+        }
+    }
+
+    pub fn identity(&self) -> String {
+        match self {
+            Self::Builtin(id) => format!("{id:?}").to_lowercase(),
+            Self::Extra(id) => id.clone(),
+        }
+    }
+}
+
+impl PartialEq<SystemCommand> for SystemEntryId {
+    fn eq(&self, other: &SystemCommand) -> bool {
+        matches!(self, Self::Builtin(id) if id == other)
+    }
+}
+
 /// One row of the system commands list.
 #[derive(Debug, Clone)]
 pub(super) struct SystemEntry {
-    pub id: SystemCommand,
-    pub title: &'static str,
+    pub id: SystemEntryId,
+    pub title: Cow<'static, str>,
     /// Completes "Press Enter again to ..." on entries needing confirmation.
-    pub verb: &'static str,
-    pub icon: &'static str,
+    pub verb: Cow<'static, str>,
+    pub icon: Cow<'static, str>,
     pub action: DeferredAction,
     /// The program that runs the action, when it is not installed.
     pub missing: Option<String>,
+    pub confirm: bool,
+    pub keep_open: bool,
 }
 
 impl SystemEntry {
     pub fn needs_confirmation(&self) -> bool {
-        self.id != SystemCommand::Lock
+        self.confirm
     }
 
     /// The command shown under the title.
@@ -143,6 +178,28 @@ fn program(action: &DeferredAction) -> Option<&str> {
     }
 }
 
+fn slugify_title(title: &str) -> String {
+    let mut slug = String::new();
+    let mut prev_dash = false;
+    for ch in title.chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash && !slug.is_empty() {
+            slug.push('-');
+            prev_dash = true;
+        }
+    }
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+    if slug.is_empty() {
+        "cmd".to_string()
+    } else {
+        slug
+    }
+}
+
 /// The visible entries for `config`. `compositor` and `session_id` select
 /// context-specific defaults; `exists` reports whether a program is installed.
 pub(super) fn system_entries(
@@ -151,7 +208,7 @@ pub(super) fn system_entries(
     session_id: Option<&str>,
     exists: impl Fn(&str) -> bool,
 ) -> Vec<SystemEntry> {
-    ENTRIES
+    let mut entries: Vec<SystemEntry> = ENTRIES
         .iter()
         .filter(|(id, ..)| !config.hide.contains(id))
         .filter_map(|&(id, title, verb, icon)| {
@@ -171,16 +228,65 @@ pub(super) fn system_entries(
                     .filter(|program| !exists(program))
                     .map(str::to_string)
             };
-            Some(SystemEntry {
+            let keep_open = matches!(
                 id,
-                title,
-                verb,
-                icon,
+                SystemCommand::Lock | SystemCommand::Suspend | SystemCommand::Hibernate
+            ) && matches!(
+                &action,
+                DeferredAction::Command(_)
+                    | DeferredAction::CommandBatch(_)
+                    | DeferredAction::Hypr(_)
+            );
+            Some(SystemEntry {
+                id: SystemEntryId::Builtin(id),
+                title: Cow::Borrowed(title),
+                verb: Cow::Borrowed(verb),
+                icon: Cow::Borrowed(icon),
                 action,
                 missing,
+                confirm: id != SystemCommand::Lock,
+                keep_open,
             })
         })
-        .collect()
+        .collect();
+
+    for (index, extra) in config.extra.iter().enumerate() {
+        let title = extra.title.trim();
+        if title.is_empty() || extra.argv.is_empty() || extra.argv[0].trim().is_empty() {
+            continue;
+        }
+        let action = DeferredAction::Command(extra.argv.clone());
+        let missing = program(&action)
+            .filter(|program| !exists(program))
+            .map(str::to_string);
+        let verb = extra
+            .verb
+            .as_deref()
+            .map(str::trim)
+            .filter(|verb| !verb.is_empty())
+            .map(|verb| verb.to_string())
+            .unwrap_or_else(|| title.to_lowercase());
+        let icon = extra
+            .icon
+            .as_deref()
+            .map(str::trim)
+            .filter(|icon| !icon.is_empty())
+            .unwrap_or("system-run")
+            .to_string();
+        let slug = slugify_title(title);
+        entries.push(SystemEntry {
+            id: SystemEntryId::Extra(format!("extra:{index}-{slug}")),
+            title: Cow::Owned(title.to_string()),
+            verb: Cow::Owned(verb),
+            icon: Cow::Owned(icon),
+            action,
+            missing,
+            confirm: extra.confirm.unwrap_or(true),
+            keep_open: extra.keep_open.unwrap_or(false),
+        });
+    }
+
+    entries
 }
 
 impl SystemEntry {
@@ -188,22 +294,25 @@ impl SystemEntry {
         let enter = if self.needs_confirmation() {
             format!("Press twice to {}", self.verb)
         } else {
-            format!("{} the session", self.title)
+            match &self.id {
+                SystemEntryId::Builtin(_) => format!("{} the session", self.title),
+                SystemEntryId::Extra(_) => format!("Run {}", self.title),
+            }
         };
-        let can_keep_open = matches!(
-            self.id,
-            SystemCommand::Lock | SystemCommand::Suspend | SystemCommand::Hibernate
-        ) && matches!(
-            &self.action,
-            DeferredAction::Command(_) | DeferredAction::CommandBatch(_) | DeferredAction::Hypr(_)
-        );
+        let can_keep_open = self.keep_open
+            && matches!(
+                &self.action,
+                DeferredAction::Command(_)
+                    | DeferredAction::CommandBatch(_)
+                    | DeferredAction::Hypr(_)
+            );
         CommandItem {
             title: self.title.to_string(),
             subtitle: self.command_line(),
             match_text: self.title.to_string(),
             icon_names: vec![self.icon.to_string()],
             icon: None,
-            identity: format!("{:?}", self.id).to_lowercase(),
+            identity: self.id.identity(),
             unavailable: self
                 .missing
                 .as_ref()
