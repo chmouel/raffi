@@ -581,7 +581,10 @@ def list_items(
         and (declared or options.any_owner)
         and (found := as_account(word, options.limit))
     ):
-        if declared or not repo_named(owner, word):
+        # The All view lists every configured account, so a repository of
+        # any of them makes the word a filter.
+        listed = owners if all_view else [owner]
+        if declared or not any(repo_named(name, word) for name in listed):
             return found["login"], items_for(found, rest.casefold().split(), options)
 
     if all_view and not named_owner and not same:
@@ -690,8 +693,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--owners",
         default=os.environ.get("OWNERS", "me"),
-        help="comma separated accounts or aliases listed as views, "
-        "the first one being the default",
+        help="comma separated accounts or aliases listed as views; "
+        "with several, the default view is All, mixing them",
     )
     parser.add_argument(
         "--limit", type=int, default=LIMIT, help="maximum repositories to list"

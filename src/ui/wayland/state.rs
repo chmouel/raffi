@@ -105,6 +105,9 @@ pub(super) struct ScriptFilterState {
     /// View whose items are on screen. A typed mode can make this differ from
     /// `view`, which keeps the requested override for later runs.
     pub displayed_view: Option<String>,
+    /// View the rows in `results` came from. Ctrl+Tab moves `displayed_view`
+    /// to the picked view before its rows land, so the two differ until then.
+    pub results_view: Option<String>,
     /// View the script shows when run without `RAFFI_VIEW`.
     pub default_view: Option<String>,
     /// Usage of the picked rows, by filter name and `arg`, seeded from the
@@ -148,6 +151,7 @@ impl ScriptFilterState {
         self.views.clear();
         self.view = None;
         self.displayed_view = None;
+        self.results_view = None;
         self.default_view = None;
     }
 
@@ -168,7 +172,8 @@ impl ScriptFilterState {
 
     /// Take the views a run reported. A default run names the default view;
     /// a view run that lists none keeps the known ones. The reported view is
-    /// what is on screen even when a typed mode overrode the requested view.
+    /// what is on screen even when a typed mode overrode the requested view,
+    /// and the view the adopted rows belong to.
     pub fn adopt_views(&mut self, result: &ScriptFilterResult) {
         if self.view.is_none() {
             self.views.clone_from(&result.views);
@@ -185,6 +190,7 @@ impl ScriptFilterState {
             .or_else(|| self.view.clone())
             .or_else(|| self.default_view.clone())
             .or_else(|| self.views.first().map(|view| view.id.clone()));
+        self.results_view.clone_from(&self.displayed_view);
     }
 
     /// Move to the next view, or the previous one when `backwards`. Returns

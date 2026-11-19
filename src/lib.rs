@@ -681,7 +681,8 @@ pub struct ScriptFilterConfig {
     /// Unset follows the script's top-level `"sort": "usage"`, `true` always
     /// ranks by usage, `false` always keeps the order the script prints. Rows
     /// never picked stay where the script put them, and a list with indented
-    /// rows keeps its shape.
+    /// rows keeps its shape. This ranks the filter's own list; the main view
+    /// keeps script-filter results in the order the script prints.
     #[serde(default)]
     pub sort_by_usage: Option<bool>,
 }

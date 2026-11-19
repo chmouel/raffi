@@ -32,9 +32,9 @@ struct ScriptFilterResponse {
     #[serde(default)]
     cache: Option<Box<serde_json::value::RawValue>>,
     /// `"usage"` asks for picked rows first; anything else, or nothing,
-    /// keeps the order the script prints.
+    /// keeps the order the script prints. Kept raw like `cache`.
     #[serde(default)]
-    sort: Option<serde_json::Value>,
+    sort: Option<Box<serde_json::value::RawValue>>,
 }
 
 /// What a script said about caching its output.
@@ -91,8 +91,9 @@ pub(super) fn parse_script_filter_output(
                 cache_hint: hint.seconds,
                 not_stored: hint.seconds == Some(0),
                 cache_warm: hint.warm,
-                sort_by_usage: response.sort.as_ref().and_then(|sort| sort.as_str())
-                    == Some("usage"),
+                sort_by_usage: response.sort.as_deref().is_some_and(|sort| {
+                    serde_json::from_str::<String>(sort.get()).is_ok_and(|sort| sort == "usage")
+                }),
             }
         })
         .map_err(|error| format!("Invalid JSON: {}", error))
@@ -932,6 +933,13 @@ mod tests {
             let result = parse_script_filter_output(stdout, None).expect("valid json");
             assert!(!result.sort_by_usage, "{stdout} keeps the script order");
         }
+
+        // A hint serde cannot hold as a value is ignored, not the whole list.
+        let odd = parse_script_filter_output(r#"{"sort":1e400,"items":[{"title":"kept"}]}"#, None)
+            .expect("an odd sort hint keeps the list");
+        assert!(!odd.sort_by_usage);
+        assert_eq!(odd.items.len(), 1);
+        assert_eq!(odd.items[0].title, "kept");
     }
 
     #[test]

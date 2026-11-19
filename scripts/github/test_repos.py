@@ -440,6 +440,21 @@ class AllViewTests(ReposTestCase):
         self.assertEqual(len(items), 1)
         self.assertFalse(items[0]["valid"])
 
+    def test_a_repository_of_any_listed_account_filters_with_any_owner(self):
+        # "twin" is an account and a repository of acme, the second account:
+        # the All view lists acme too, so the word filters.
+        accounts = {
+            "mine": account("mine", [repo("raffi")]),
+            "acme": account("acme", [repo("twin")]),
+            "twin": account("twin", [repo("x")]),
+        }
+        with self.mixed(accounts), environment():
+            owner, items = repos.list_items(
+                "twin", "", ["mine", "acme"], repos.Options(any_owner=True)
+            )
+        self.assertEqual(owner, "@all")
+        self.assertEqual(self.titles(items), ["twin"])
+
 
 class MainTests(ReposTestCase):
     def run_main(self, *argv, env=None):

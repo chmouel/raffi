@@ -3752,6 +3752,156 @@ fn test_script_filter_refresh_keeps_the_selected_row_after_a_kept_open_pick() {
     );
 }
 
+/// Ctrl+R and F5 adopt a cached snapshot through `adopt_script_filter_result`;
+/// cache reads are disabled under test, so drive that step directly.
+#[test]
+fn test_script_filter_cached_adoption_keeps_the_selected_row_after_a_kept_open_pick() {
+    let mut app = usage_app(picked_rows(), &[], None, true);
+    app.addons.script_filters[0].close_on_action = Some(false);
+    app.script_filter.results_are_cached = true;
+    assert_eq!(script_filter_titles(&app), ["Alpha", "Beta"]);
+    app.selected_index = app.keyword_rows() + 1;
+    let _ = app.handle_script_filter_selected(1);
+    assert!(app.script_filter.usage.contains_key(&usage_key("Beta-arg")));
+
+    let selected = app.selected_script_filter_row();
+    assert_eq!(selected.as_deref(), Some("Beta-arg"));
+    app.adopt_script_filter_result(
+        selected,
+        ScriptFilterResult {
+            items: picked_rows(),
+            sort_by_usage: true,
+            ..Default::default()
+        },
+    );
+    assert_eq!(script_filter_titles(&app), ["Beta", "Alpha"]);
+    assert_eq!(
+        app.selected_index - app.keyword_rows(),
+        0,
+        "the selection follows Beta to the row it moved to"
+    );
+}
+
+#[test]
+fn test_script_filter_refresh_keeps_the_index_when_rows_share_an_arg() {
+    let mut first = plain_item("Alpha");
+    first.arg = Some("shared".into());
+    let mut second = plain_item("Beta");
+    second.arg = Some("shared".into());
+    let rows = vec![first, second, plain_item("Gamma")];
+    let mut app = usage_app(rows.clone(), &[], Some(false), false);
+    app.selected_index = app.keyword_rows() + 1;
+    assert_eq!(
+        app.selected_script_filter_row(),
+        None,
+        "Beta shares its arg with Alpha, so it has no identity of its own"
+    );
+
+    let generation = app.script_filter.generation;
+    let _ = app.update(Message::ScriptFilterResult(
+        generation,
+        Ok(ScriptFilterResult {
+            items: rows,
+            ..Default::default()
+        }),
+    ));
+    assert_eq!(
+        app.selected_index - app.keyword_rows(),
+        1,
+        "the selection stays on Beta instead of jumping to Alpha"
+    );
+
+    // A row unique before the refresh but shared after it keeps its index too.
+    let mut repeat = plain_item("Gamma again");
+    repeat.arg = Some("Gamma-arg".into());
+    app.selected_index = app.keyword_rows() + 2;
+    let generation = app.script_filter.generation;
+    let _ = app.update(Message::ScriptFilterResult(
+        generation,
+        Ok(ScriptFilterResult {
+            items: vec![plain_item("Delta"), repeat, plain_item("Gamma")],
+            ..Default::default()
+        }),
+    ));
+    assert_eq!(app.selected_index - app.keyword_rows(), 2);
+}
+
+/// Ctrl+Tab replays the same query in another view with the selection reset
+/// and the old view's rows still on screen; a cached snapshot of the new view
+/// must not relocate the old view's first row. Cache reads are disabled under
+/// test, so the cached adoption is driven directly.
+#[test]
+fn test_script_filter_view_switch_starts_the_new_view_at_the_top() {
+    let mut addons = AddonsConfig::default();
+    addons.script_filters.push(ScriptFilterConfig {
+        name: "Jira".into(),
+        command: "true".into(),
+        keyword: "jira".into(),
+        ..Default::default()
+    });
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+    let views: Vec<super::types::ScriptFilterView> =
+        serde_json::from_str(r#"[{"id":"a","title":"A"},{"id":"b","title":"B"}]"#).unwrap();
+    let result = |view: &str, items: Vec<ScriptFilterItem>| ScriptFilterResult {
+        items,
+        views: views.clone(),
+        view: Some(view.into()),
+        ..Default::default()
+    };
+    let reply = |app: &mut LauncherApp, result: ScriptFilterResult| {
+        let generation = app.script_filter.generation;
+        let _ = app.update(Message::ScriptFilterResult(generation, Ok(result)));
+    };
+
+    let _ = app.update(Message::SearchChanged("jira bug".into()));
+    reply(
+        &mut app,
+        result("a", vec![plain_item("Common"), plain_item("A-only")]),
+    );
+    app.selected_index = app.keyword_rows() + 1;
+    assert_eq!(
+        app.selected_script_filter_row().as_deref(),
+        Some("A-only-arg")
+    );
+
+    // What `handle_cycle_view` leaves for the replayed query to read.
+    assert!(app.script_filter.cycle_view(false));
+    app.selected_index = app.keyword_rows();
+    let selected = app.selected_script_filter_row();
+    assert_eq!(
+        selected, None,
+        "the rows on screen belong to view A, not the view B being loaded"
+    );
+    app.adopt_script_filter_result(
+        selected,
+        result("b", vec![plain_item("B-only"), plain_item("Common")]),
+    );
+    assert_eq!(script_filter_titles(&app), ["B-only", "Common"]);
+    assert_eq!(
+        app.selected_index - app.keyword_rows(),
+        0,
+        "view A's first row does not pull the selection onto Common"
+    );
+
+    // With view B's rows on screen, a refresh of B keeps their selected row.
+    reply(
+        &mut app,
+        result("b", vec![plain_item("Common"), plain_item("B-only")]),
+    );
+    assert_eq!(app.selected_index - app.keyword_rows(), 1);
+
+    // The routed Ctrl+Tab back to A starts its live rows at the top too.
+    let _ = app.update(Message::CycleView(false));
+    assert_eq!(app.cycle_view_label().as_deref(), Some("A"));
+    assert_eq!(app.selected_script_filter_row(), None);
+    reply(
+        &mut app,
+        result("a", vec![plain_item("A-only"), plain_item("B-only")]),
+    );
+    assert_eq!(app.selected_index - app.keyword_rows(), 0);
+}
+
 #[test]
 fn test_script_filter_invalid_headings_do_not_activate_or_record() {
     let mut heading = plain_item("Working");

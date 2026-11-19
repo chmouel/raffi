@@ -2599,6 +2599,14 @@ impl LauncherApp {
         tasks: &mut Vec<Task<Message>>,
     ) {
         let mut query = query;
+        // Only a refresh of the rows on screen keeps their selected row; a new
+        // query, or a view Ctrl+Tab switched to, starts at the top. Read it
+        // before a refresh leaves a child list, whose rows are not the ones
+        // the cached result replaces.
+        let selected = (self.script_filter.config_index == Some(config_index)
+            && self.script_filter.query == query)
+            .then(|| self.selected_script_filter_row())
+            .flatten();
         if self.script_filter.config_index != Some(config_index) || force_refresh {
             if force_refresh && self.script_filter.config_index == Some(config_index) {
                 if let Some(root) = self.script_filter.navigation.first() {
@@ -2698,16 +2706,10 @@ impl LauncherApp {
         self.script_filter.cached_at = cached_at;
         self.script_filter.refresh_failed = false;
 
-        if let Some(mut result) = cached {
+        if let Some(result) = cached {
             // Show the snapshot at once; a stale one refreshes underneath.
             self.script_filter.loading = false;
-            self.sort_script_filter_rows(
-                Some(config_index),
-                result.sort_by_usage,
-                &mut result.items,
-            );
-            self.script_filter.adopt_views(&result);
-            self.script_filter.results = Some(result);
+            self.adopt_script_filter_result(selected, result);
             self.script_filter.loading_name = None;
             self.script_filter.results_are_cached = true;
             if !stale {
@@ -2720,6 +2722,9 @@ impl LauncherApp {
             self.script_filter.results_are_cached = false;
         }
 
+        // Adopting the snapshot borrowed `self` mutably; look the config up again.
+        let config = view_config(&self.addons.script_filters[config_index], view.as_ref());
+        let config = config.as_ref();
         let mut env = config.env.clone();
         if force_refresh {
             env.insert("RAFFI_REFRESH".into(), "1".into());
@@ -4463,24 +4468,59 @@ impl LauncherApp {
 
     /// Identity of a Script Filter row: sorting moves rows around, so a
     /// position alone does not name one.
-    fn script_filter_row_key(item: &ScriptFilterItem) -> String {
-        item.arg.clone().unwrap_or_else(|| item.title.clone())
+    fn script_filter_row_key(item: &ScriptFilterItem) -> &str {
+        item.arg.as_deref().unwrap_or(&item.title)
+    }
+
+    /// Position of the only row of `items` with identity `key`. Rows sharing
+    /// a key cannot be told apart, so they name no position.
+    fn unique_script_filter_row(items: &[ScriptFilterItem], key: &str) -> Option<usize> {
+        let mut matches = items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| Self::script_filter_row_key(item) == key)
+            .map(|(position, _)| position);
+        let position = matches.next()?;
+        matches.next().is_none().then_some(position)
     }
 
     /// Identity of the selected Script Filter row, when the rows it came from
-    /// are the ones an incoming result replaces.
-    fn selected_script_filter_row(&self) -> Option<String> {
+    /// are the ones an incoming result replaces and no other row shares it.
+    pub(super) fn selected_script_filter_row(&self) -> Option<String> {
         if !self.script_filter.navigation.is_empty() {
             // A child list is not the list a refresh of the filter replaces.
             return None;
         }
+        if self.script_filter.results_view.as_deref() != self.script_filter.current_view_id() {
+            // Ctrl+Tab switched views: the new view's rows start at the top.
+            return None;
+        }
         let index = self.selected_index.checked_sub(self.keyword_rows())?;
-        self.script_filter
-            .results
-            .as_ref()?
-            .items
-            .get(index)
-            .map(Self::script_filter_row_key)
+        let items = &self.script_filter.results.as_ref()?.items;
+        let key = Self::script_filter_row_key(items.get(index)?);
+        Self::unique_script_filter_row(items, key)?;
+        Some(key.to_string())
+    }
+
+    /// Show `result` as the filter's rows, ranked by usage when asked. Usage
+    /// sorting can move the `selected` row, so the selection follows the row
+    /// itself rather than its index when the new rows name it unambiguously.
+    pub(super) fn adopt_script_filter_result(
+        &mut self,
+        selected: Option<String>,
+        mut result: ScriptFilterResult,
+    ) {
+        self.sort_script_filter_rows(
+            self.script_filter.config_index,
+            result.sort_by_usage,
+            &mut result.items,
+        );
+        self.script_filter.adopt_views(&result);
+        let moved = selected.and_then(|key| Self::unique_script_filter_row(&result.items, &key));
+        self.script_filter.results = Some(result);
+        if let Some(position) = moved {
+            self.selected_index = self.keyword_rows() + position;
+        }
     }
 
     fn handle_script_filter_result(
@@ -4501,30 +4541,11 @@ impl LauncherApp {
                 crate::debug_log!("script_filter: refresh not stored, keeping cached rows");
                 self.script_filter.refresh_failed = true;
             }
-            Ok(mut result) => {
-                // Usage sorting can move the selected row, so keep the row
-                // itself rather than its index.
+            Ok(result) => {
                 let selected = self.selected_script_filter_row();
-                self.sort_script_filter_rows(
-                    self.script_filter.config_index,
-                    result.sort_by_usage,
-                    &mut result.items,
-                );
-                self.script_filter.adopt_views(&result);
-                self.script_filter.results = Some(result);
+                self.adopt_script_filter_result(selected, result);
                 self.script_filter.results_are_cached = false;
                 self.script_filter.refresh_failed = false;
-                if let Some(selected) = selected {
-                    let moved = self.script_filter.results.as_ref().and_then(|results| {
-                        results
-                            .items
-                            .iter()
-                            .position(|item| Self::script_filter_row_key(item) == selected)
-                    });
-                    if let Some(position) = moved {
-                        self.selected_index = self.keyword_rows() + position;
-                    }
-                }
                 // Indices from the old rows mean nothing once new rows land.
                 self.script_filter.previews.clear();
                 self.script_filter.bump_preview_generation();

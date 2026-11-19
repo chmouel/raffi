@@ -2055,7 +2055,7 @@
           ]
         },
         "sort_by_usage": {
-          "description": "Rank the rows you already picked first, most recently picked first.\nUnset follows the script's top-level `\"sort\": \"usage\"`, `true` always\nranks by usage, `false` always keeps the order the script prints. Rows\nnever picked stay where the script put them, and a list with indented\nrows keeps its shape.",
+          "description": "Rank the rows you already picked first, most recently picked first.\nUnset follows the script's top-level `\"sort\": \"usage\"`, `true` always\nranks by usage, `false` always keeps the order the script prints. Rows\nnever picked stay where the script put them, and a list with indented\nrows keeps its shape. This ranks the filter's own list; the main view\nkeeps script-filter results in the order the script prints.",
           "type": [
             "boolean",
             "null"

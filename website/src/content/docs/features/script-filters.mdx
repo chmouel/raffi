@@ -180,7 +180,9 @@ addons:
 ```
 
 Unset, `sort_by_usage` follows the script's `sort`. `true` always ranks by
-usage, and `false` always keeps the script's order.
+usage, and `false` always keeps the script's order. This ranks the filter's
+own list; the main view keeps script-filter results in the order the script
+prints.
 
 Picking a row inside a `children` list also counts for the row that listed it,
 so a repository opened from its pages moves up in the list above, and a child
