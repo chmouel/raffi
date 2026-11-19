@@ -29,17 +29,36 @@ architecture; user docs live in `website/src/content/docs/` (Astro Starlight).
 A behavior change is not done until these match it:
 
 - Config, CLI flags, or addon behavior: the relevant page under
-  `website/src/content/docs/`, `examples/raffi.yaml` when the example should
-  show it, and `README.md` if the top-level description changes.
+  `website/src/content/docs/`, the config reference (below), and `README.md`
+  if the top-level description changes.
 - Config structs: regenerate both checked-in schemas with
-  `cargo run -- --generate-schemas --configfile examples/raffi.yaml`.
-  The schema tests in `src/lib.rs` fail when they drift.
+  `cargo run -- --generate-schemas --configfile examples/raffi.yaml`, and the
+  reference config with `cargo run -- --print-config > examples/raffi.full.yaml`.
+  The schema and reference tests in `src/lib.rs` fail when they drift.
 - Native UI behavior: tests in `src/ui/wayland/tests.rs`. Sorting, history,
   MRU, and search changes also have tests in `src/ui/wayland/support.rs`.
 - Visible UI changes: re-shoot the docs screenshots with
   `make screenshots SHOTS="name ..."`, adding the shot to
   `misc/screenshots/catalogue.py` if it is new (see
   `misc/screenshots/README.md`).
+
+## Example configs
+
+- `examples/raffi.full.yaml` is the complete reference. Every new or changed
+  setting belongs there, with its values, default, and what it does. It is
+  generated from the `///` doc comments on the config structs in
+  `src/lib.rs`, so write the detail in those comments, state defaults as
+  `(default: X)`, and regenerate. Never edit the file by hand.
+- `examples/raffi.yaml` is a short starter for new users. Do not touch it as
+  part of a feature, a new setting, or a docs sync. Change it only when the
+  starter itself is wrong (a renamed key, a broken example, a failing test),
+  and ask the user before changing it, explaining why.
+- `examples/launchers.yaml` follows the same rule as the starter: about ten
+  generic entries, one per launcher feature, using placeholders and current,
+  widely used Wayland tools (btop, satty, swaync), never a personal setup.
+  Document a new launcher field in the docs and the full reference. Add an
+  entry here only to show a field no entry covers yet, and ask the user
+  first.
 
 ## Conventions
 

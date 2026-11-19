@@ -88,6 +88,18 @@ exit. Use `--configfile` to choose the config directory.
   ```
 
 
+**`--print-config`** `boolean` (default: `false`)
+
+Print a commented reference of every configuration setting to stdout and exit. The reference is generated from the same JSON Schema as the config file, so its descriptions come from the settings themselves. Redirect it to a file to keep it as a reminder; nothing is written to disk otherwise.
+
+  The output is what [`examples/raffi.full.yaml`](https://github.com/chmouel/raffi/blob/main/examples/raffi.full.yaml) holds, while [`examples/raffi.yaml`](https://github.com/chmouel/raffi/blob/main/examples/raffi.yaml) is a short starter config.
+
+  ```bash
+  raffi --print-config
+  raffi --print-config > ~/.config/raffi/reference.yaml
+  ```
+
+
 **`--install-browser-host`** `boolean` (default: `false`)
 
 Register Raffi as the native messaging host of the Vicinae browser extension, for the [browser tabs](../../features/browser-tabs/) list, and exit.

@@ -40,13 +40,13 @@ pub struct RaffiConfig {
     /// even when `general.show_preview` is `false`.
     pub show_preview: Option<bool>,
     /// Route this launcher to an internal command: picking it types this text
-    /// for you, such as `mp linus/linux` (an addon keyword
+    /// for you, such as `mp owner/project` (an addon keyword
     /// followed by its query). Cannot be combined with `binary`, `script`,
     /// `args` or `env`.
     pub alias: Option<String>,
-    /// Keyword that stands for `alias` while typing: with keyword `linoux`,
-    /// typing `linoux torvalds` searches `mp linus/linux torvalds`
-    /// while the input keeps showing `linoux torvalds`. Requires `alias`; no
+    /// Keyword that stands for `alias` while typing: with keyword `shortcut`,
+    /// typing `shortcut query` searches `mp owner/project query`
+    /// while the input keeps showing `shortcut query`. Requires `alias`; no
     /// whitespace.
     pub keyword: Option<String>,
     /// Close Raffi after launching this entry (default: `general.close_on_action`, else true).
@@ -215,12 +215,17 @@ impl CurrencyRateSource {
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct CurrencyAddonConfig {
+    /// Turn the addon off with `false` (default: true).
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Currencies an amount without a target converts to (default: [USD, EUR,
+    /// GBP]).
     #[serde(default)]
     pub currencies: Option<Vec<String>>,
+    /// Currency an amount without one converts from (default: USD).
     #[serde(default)]
     pub default_currency: Option<String>,
+    /// Character that opens the converter (default: $).
     #[serde(default)]
     pub trigger: Option<String>,
     /// Close Raffi after copying a conversion result (default: `general.close_on_action`, else true).
@@ -252,6 +257,7 @@ impl Default for CurrencyAddonConfig {
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct CalculatorAddonConfig {
+    /// Turn the addon off with `false` (default: true).
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// Close Raffi after copying a calculation result (default: `general.close_on_action`, else true).
@@ -272,6 +278,7 @@ impl Default for CalculatorAddonConfig {
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct UnitsAddonConfig {
+    /// Turn the addon off with `false` (default: true).
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// Close Raffi after copying a converted value (default: `general.close_on_action`, else true).
@@ -292,6 +299,7 @@ impl Default for UnitsAddonConfig {
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct ColorAddonConfig {
+    /// Turn the addon off with `false` (default: true).
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// Close Raffi after copying a color value (default: `general.close_on_action`, else true).
@@ -313,6 +321,7 @@ impl Default for ColorAddonConfig {
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct DevtoolsAddonConfig {
+    /// Turn the addon off with `false` (default: true).
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// Keyword that opens the transform list (default: `dev`).
@@ -353,6 +362,7 @@ impl Default for DevtoolsAddonConfig {
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct WorldClockAddonConfig {
+    /// Turn the addon off with `false` (default: true).
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// Close Raffi after copying a time value (default: `general.close_on_action`, else true).
@@ -373,8 +383,10 @@ impl Default for WorldClockAddonConfig {
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct FileBrowserAddonConfig {
+    /// Turn the addon off with `false` (default: true).
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// List dotfiles too, such as `~/.config` (default: false).
     #[serde(default)]
     pub show_hidden: Option<bool>,
     /// Edit paths the way Emacs fido-mode does: Backspace on a trailing `/`
@@ -561,14 +573,22 @@ pub const DEFAULT_EMOJI_FILES: &[&str] = &[
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct EmojiAddonConfig {
+    /// Turn the addon off with `false` (default: true).
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Keyword that opens the picker (default: `emoji`).
     #[serde(default)]
     pub trigger: Option<String>,
+    /// What Enter does: `copy`, `insert`, or a command run for the character
+    /// (default: copy).
     #[serde(default)]
     pub action: Option<String>,
+    /// What Ctrl+Enter does, with the same values as `action` (default:
+    /// insert).
     #[serde(default)]
     pub secondary_action: Option<String>,
+    /// Character lists to load, such as `emojis_smileys_emotion`, `gitmoji`
+    /// or `nerd_font` (default: the standard emoji groups).
     #[serde(default)]
     pub data_files: Option<Vec<String>>,
     /// Close Raffi after executing an emoji action (default: `general.close_on_action`, else true).
@@ -604,20 +624,34 @@ pub struct ScriptFilterActionConfig {
 #[derive(Deserialize, Serialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
 pub struct ScriptFilterConfig {
+    /// Name shown while its command runs, and used to address the filter in
+    /// `main_view`, `fallbacks` and `-o addons.script_filters.<name>.<key>`.
     pub name: String,
+    /// Program run for the filter, without a shell, with `args` then the typed
+    /// query as its last argument.
     pub command: String,
+    /// Keyword that opens the filter.
     pub keyword: String,
+    /// Icon of rows without one of their own: emoji, icon name or image path.
     pub icon: Option<String>,
+    /// Arguments passed to `command` before the query.
     #[serde(default)]
     pub args: Vec<String>,
+    /// What Enter does with the row: `copy`, `insert` or a shell command
+    /// (default: copy).
     pub action: Option<String>,
+    /// What Ctrl+Enter does, with the same values as `action` (default: same
+    /// as `action`).
     pub secondary_action: Option<String>,
     /// Extra entries of the action menu of every valid row, listed after the
     /// actions the row declares itself.
     #[serde(default)]
     pub actions: Vec<ScriptFilterActionConfig>,
+    /// Environment variables set for the command and its preview runs.
     #[serde(default)]
     pub env: std::collections::HashMap<String, String>,
+    /// Characters typed after the keyword before the command runs; until then
+    /// Raffi says how many more to type (default: 0).
     pub min_query_length: Option<usize>,
     /// Re-run the command with `RAFFI_PREVIEW=1` for the selected item and show
     /// the preview object it prints (default: true).
@@ -687,9 +721,13 @@ impl ScriptFilterConfig {
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
 pub struct WebSearchConfig {
+    /// Name shown in the search row, as in "Search Google for 'rust traits'".
     pub name: String,
+    /// Keyword that opens the search.
     pub keyword: String,
+    /// URL template; every `{query}` is replaced by the percent-encoded query.
     pub url: String,
+    /// Icon name shown next to the search row.
     pub icon: Option<String>,
     /// Close Raffi after opening a web search URL (default: `general.close_on_action`, else true).
     #[serde(default)]
@@ -700,7 +738,9 @@ pub struct WebSearchConfig {
 #[derive(Deserialize, JsonSchema, Debug, Clone, PartialEq)]
 #[schemars(deny_unknown_fields)]
 pub struct TextSnippet {
+    /// Name shown in the list and matched when searching.
     pub name: String,
+    /// Text copied, inserted or handed to the action.
     pub value: String,
     /// Emoji, icon name, or image path overriding the source icon.
     #[serde(default)]
@@ -714,26 +754,37 @@ pub struct TextSnippet {
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
 pub struct TextSnippetSourceConfig {
+    /// Name shown on its keyword row and while a `command` source loads.
     pub name: String,
+    /// Keyword that opens the source.
     pub keyword: String,
+    /// Default icon for its snippets: emoji, icon name or image path.
     #[serde(default)]
     pub icon: Option<String>,
+    /// Snippets written in the config, each with a `name` and a `value`.
     #[serde(default)]
     pub snippets: Option<Vec<TextSnippet>>,
+    /// Path to a YAML file of snippets, in the same format as `snippets`.
     #[serde(default)]
     pub file: Option<String>,
+    /// Program that prints its snippets as Script Filter JSON.
     #[serde(default)]
     pub command: Option<String>,
+    /// Path to a directory of `.snippet` files.
     #[serde(default)]
     pub directory: Option<String>,
     /// Markdown file of `## Name` snippets. Read as the source, and the file
     /// that clipboard entries are saved to with the browser's save action.
     #[serde(default)]
     pub markdown: Option<String>,
+    /// Arguments passed to `command`.
     #[serde(default)]
     pub args: Vec<String>,
+    /// What Enter does: `copy`, `insert`, `hypr_paste` or a shell command
+    /// (default: copy).
     #[serde(default)]
     pub action: Option<String>,
+    /// What Ctrl+Enter does, with the same values as `action`.
     #[serde(default)]
     pub secondary_action: Option<String>,
     /// Expand dynamic placeholders such as {clipboard} and {date} in snippet values.
@@ -802,6 +853,8 @@ pub struct ClipboardAddonConfig {
     /// (default: 50).
     #[serde(default)]
     pub max_image_size_mb: Option<u64>,
+    /// Read text from history images with tesseract, when it is installed
+    /// (default: off).
     #[serde(default)]
     pub ocr: ClipboardOcrConfig,
     /// Action on Enter (default: `copy`).
@@ -1121,6 +1174,7 @@ const SYSTEM_BUILTIN_TITLES: &[&str] = &[
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct SystemAddonConfig {
+    /// Turn the addon off with `false` (default: true).
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// Keyword that opens the list (default: `sys`).
@@ -1206,6 +1260,7 @@ impl Default for SystemAddonConfig {
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct WindowsAddonConfig {
+    /// Turn the addon off with `false` (default: true).
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// Keyword that opens the window list (default: `win`).
@@ -1237,6 +1292,7 @@ impl Default for WindowsAddonConfig {
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct BrowserTabsAddonConfig {
+    /// Turn the addon off with `false` (default: true).
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// Keyword that opens the tab list (default: `tabs`).
@@ -1344,6 +1400,7 @@ pub struct BookmarkSourceConfig {
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct BookmarksAddonConfig {
+    /// Turn the addon off with `false` (default: true).
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// Keyword that opens the bookmarks (default: `bm`).
@@ -1408,6 +1465,7 @@ pub struct BrowserHistorySourceConfig {
 #[derive(Deserialize, Serialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct BrowserHistoryAddonConfig {
+    /// Turn the addon off with `false` (default: true).
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// Keyword that opens browser history (default: `hist`).
@@ -1466,6 +1524,7 @@ impl Default for BrowserHistoryAddonConfig {
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct MediaAddonConfig {
+    /// Turn the addon off with `false` (default: true).
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// Keyword that opens the media controls (default: `media`).
@@ -1501,6 +1560,7 @@ impl Default for MediaAddonConfig {
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct AudioAddonConfig {
+    /// Turn the addon off with `false` (default: true).
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// Keyword that opens the audio device list (default: `audio`).
@@ -1577,6 +1637,7 @@ impl Default for AppsAddonConfig {
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct TerminalAddonConfig {
+    /// Turn the addon off with `false` (default: true).
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// Keyword that runs the rest of the query in a terminal (default: `>`).
@@ -1639,6 +1700,7 @@ impl Default for TerminalAddonConfig {
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct KillAddonConfig {
+    /// Turn the addon off with `false` (default: true).
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// Keyword that opens the process list (default: `kill`).
@@ -1674,6 +1736,7 @@ impl Default for KillAddonConfig {
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct BluetoothAddonConfig {
+    /// Turn the addon off with `false` (default: true).
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// Keyword that opens the Bluetooth list (default: `bt`).
@@ -1722,6 +1785,7 @@ pub enum PassPinentry {
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct PassAddonConfig {
+    /// Turn the addon off with `false` (default: true).
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// Keyword that opens the password list (default: `pass`).
@@ -1789,6 +1853,7 @@ impl Default for PassAddonConfig {
 #[derive(Deserialize, JsonSchema, Debug, Clone)]
 #[schemars(deny_unknown_fields)]
 pub struct BitwardenAddonConfig {
+    /// Turn the addon off with `false` (default: true).
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// Keyword that opens the vault list (default: `bw`).
@@ -1977,10 +2042,13 @@ pub struct AddonsConfig {
     pub slack: SlackAddonConfig,
     #[serde(default)]
     pub devtools: DevtoolsAddonConfig,
+    /// Script filters, each a command Raffi runs for a keyword
     #[serde(default)]
     pub script_filters: Vec<ScriptFilterConfig>,
+    /// Web searches opened in the browser for a keyword
     #[serde(default)]
     pub web_searches: Vec<WebSearchConfig>,
+    /// Text snippet sources, from inline snippets, a file or a command
     #[serde(default)]
     pub text_snippets: Vec<TextSnippetSourceConfig>,
     /// Characters to type before addon keywords are suggested (default: 3).
@@ -2007,13 +2075,21 @@ fn default_true() -> bool {
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
 pub struct ThemeColorsConfig {
+    /// Main window background (default: the theme's)
     pub bg_base: Option<String>,
+    /// Search input background (default: the theme's)
     pub bg_input: Option<String>,
+    /// Selected rows, borders and highlights (default: the theme's)
     pub accent: Option<String>,
+    /// Accent of hovered rows (default: the theme's)
     pub accent_hover: Option<String>,
+    /// Primary text (default: the theme's)
     pub text_main: Option<String>,
+    /// Secondary text, subtitles and hints (default: the theme's)
     pub text_muted: Option<String>,
+    /// Background of the selected row (default: the theme's)
     pub selection_bg: Option<String>,
+    /// Window and separator borders (default: the theme's)
     pub border: Option<String>,
 }
 
@@ -2237,14 +2313,23 @@ pub enum ClipboardHistory {
 #[derive(Deserialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
 pub struct GeneralConfig {
+    /// Window entries show in: `native` (Raffi's own window), or `fuzzel`;
+    /// `wayland` and `iced` are aliases of `native`. Unset uses the native
+    /// window when this build has it, and `fuzzel` otherwise.
     #[serde(default)]
     pub ui_type: Option<String>,
+    /// Shell that runs script launchers and terminal-addon commands
+    /// (default: bash).
     #[serde(default)]
     pub default_script_shell: Option<String>,
+    /// Start without loading icons, for a faster start (default: false).
     #[serde(default)]
     pub no_icons: Option<bool>,
+    /// Theme preset: dark, light, catppuccin, catppuccin-latte, tokyo-night,
+    /// nord, gruvbox, dracula, rose-pine or kanagawa (default: dark).
     #[serde(default)]
     pub theme: Option<String>,
+    /// Per-colour overrides of the theme, as #RGB, #RRGGBB or #RRGGBBAA
     #[serde(default)]
     pub theme_colors: Option<ThemeColorsConfig>,
     /// Opacity of the window backgrounds, from 0.0 (see-through) to 1.0
@@ -2261,20 +2346,31 @@ pub struct GeneralConfig {
     /// An `ICED_BACKEND` environment variable takes precedence.
     #[serde(default)]
     pub renderer: Renderer,
+    /// Search queries the history keeps; 0 disables it (default: 10).
     #[serde(default)]
     pub max_history: Option<u32>,
+    /// Base font size in px; the other sizes scale from it (default: 20).
     #[serde(default)]
     pub font_size: Option<f32>,
+    /// Font family name, such as `Inter` (default: the system UI font).
     #[serde(default)]
     pub font_family: Option<String>,
+    /// Window width in px (default: 800).
     #[serde(default)]
     pub window_width: Option<f32>,
+    /// Window height in px (default: 600).
     #[serde(default)]
     pub window_height: Option<f32>,
+    /// Outer margin around the window content in px, instead of the one that
+    /// follows `font_size` (default: 20).
     #[serde(default)]
     pub padding: Option<f32>,
+    /// Sort launcher, snippet and password rows by past use: `frequency`,
+    /// `recency` or `hybrid` (default: hybrid).
     #[serde(default)]
     pub sort_mode: SortMode,
+    /// Rows added below the main list while typing, such as
+    /// `addons.web_searches."Google"` or `addons.terminal` (default: none).
     #[serde(default)]
     pub fallbacks: Vec<String>,
     /// Sources mixed into the main view. An object with `entries` (the sources
@@ -2308,8 +2404,10 @@ pub struct GeneralConfig {
     /// Toggle at runtime with Ctrl+Alt+V.
     #[serde(default)]
     pub vim_mode: Option<bool>,
-    /// Close Raffi after executing an action (default: true).
-    /// Addon and launcher `close_on_action` settings override this.
+    /// Close Raffi after executing an action. Unset closes after most actions,
+    /// but keeps the media, audio, Bluetooth and kill addons open; `true` or
+    /// `false` applies to every addon and launcher without its own
+    /// `close_on_action`.
     #[serde(default)]
     pub close_on_action: Option<bool>,
     /// How launchers start their program: `auto` (default) asks Hyprland,
@@ -2550,6 +2648,11 @@ pub struct Args {
         no_short
     )]
     pub generate_schemas: bool,
+    #[options(
+        help = "print a commented reference of every config setting and exit",
+        no_short
+    )]
+    pub print_config: bool,
     #[options(
         help = "validate the config file against the JSON Schema and exit",
         no_short
@@ -3365,18 +3468,26 @@ pub fn check_config(filename: &str) -> Result<Vec<ConfigProblem>> {
                 problems.push(problem);
             }
             Ok(config) => {
-                #[cfg(feature = "wayland")]
-                for (path, message) in config.addons.clipboard.clipboard_problems() {
-                    problems.push(ConfigProblem::new(&path, message));
-                }
-                for (path, message) in config.addons.system.system_problems() {
-                    problems.push(ConfigProblem::new(&path, message));
-                }
+                problems.extend(parsed_config_problems(&config));
                 locate_config_problems(&mut problems, &contents, v0);
             }
         }
     }
     Ok(problems)
+}
+
+/// Problems `--check-config` reports beyond the JSON Schema: the addon checks
+/// that config loading enforces on the parsed config.
+fn parsed_config_problems(config: &Config) -> Vec<ConfigProblem> {
+    let mut problems = Vec::new();
+    #[cfg(feature = "wayland")]
+    for (path, message) in config.addons.clipboard.clipboard_problems() {
+        problems.push(ConfigProblem::new(&path, message));
+    }
+    for (path, message) in config.addons.system.system_problems() {
+        problems.push(ConfigProblem::new(&path, message));
+    }
+    problems
 }
 
 /// Split a dot-separated CLI override key into path segments, respecting
@@ -5943,6 +6054,608 @@ fn generate_launchers_schema() -> String {
     serde_json::to_string_pretty(&schema).expect("Failed to serialize JSON Schema")
 }
 
+/// Column the generated reference config wraps its comments at.
+const REFERENCE_WIDTH: usize = 88;
+
+/// Deepest nesting of the generated reference config, so a recursive schema
+/// cannot loop forever.
+const REFERENCE_MAX_DEPTH: usize = 10;
+
+/// Render a fully commented reference of every config setting, built from the
+/// JSON Schema of `ConfigSchema`.
+fn generate_config_reference() -> String {
+    let schema = serde_json::to_value(schemars::schema_for!(ConfigSchema))
+        .expect("Failed to serialize JSON Schema");
+    let mut out = String::new();
+    out.push_str("# yaml-language-server: $schema=raffi-schema.json\n");
+    out.push_str("# Generated by `raffi --print-config`, do not edit it by hand. Regenerate\n");
+    out.push_str("# it with `raffi --print-config > examples/raffi.full.yaml` in the raffi\n");
+    out.push_str("# sources. Every setting below is optional and commented out.\n");
+    out.push('\n');
+    out.push_str("version: 1\n");
+    out.push('\n');
+    let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) else {
+        return out;
+    };
+    let mut refs = Vec::new();
+    for (name, node) in properties {
+        if name == "version" {
+            continue;
+        }
+        render_reference_node(&mut out, &schema, node, name, 0, 0, &mut refs, None);
+    }
+    out
+}
+
+/// The definition a `#/$defs/Name` reference points at.
+fn reference_definition<'a>(
+    root: &'a serde_json::Value,
+    reference: &str,
+) -> Option<&'a serde_json::Value> {
+    let name = reference.strip_prefix("#/$defs/")?;
+    root.get("$defs").and_then(|defs| defs.get(name))
+}
+
+/// Type of a schema node, following `$ref` and `anyOf`/`oneOf` options.
+fn reference_kind_of(root: &serde_json::Value, node: &serde_json::Value) -> Option<&'static str> {
+    let mut current = node;
+    for _ in 0..REFERENCE_MAX_DEPTH {
+        if let Some(reference) = current.get("$ref").and_then(|r| r.as_str()) {
+            current = reference_definition(root, reference)?;
+        } else if let Some(branches) = current
+            .get("anyOf")
+            .or_else(|| current.get("oneOf"))
+            .and_then(|b| b.as_array())
+        {
+            current = branches
+                .iter()
+                .find(|branch| reference_kind_of(root, branch) != Some("null"))?;
+        } else {
+            break;
+        }
+    }
+    let declared = current.get("type")?;
+    let name = match declared.as_str() {
+        Some(name) => name,
+        None => declared
+            .as_array()?
+            .iter()
+            .filter_map(|value| value.as_str())
+            .find(|name| *name != "null")?,
+    };
+    Some(match name {
+        "string" => "string",
+        "boolean" => "boolean",
+        "integer" | "number" => "number",
+        "array" => "array",
+        "object" => "object",
+        "null" => "null",
+        _ => return None,
+    })
+}
+
+/// Whether the schema accepts `null` there, meaning the setting can be left
+/// unset.
+fn reference_allows_null(root: &serde_json::Value, node: &serde_json::Value) -> bool {
+    let mut current = node;
+    for _ in 0..REFERENCE_MAX_DEPTH {
+        if let Some(reference) = current.get("$ref").and_then(|r| r.as_str()) {
+            let Some(target) = reference_definition(root, reference) else {
+                return false;
+            };
+            current = target;
+        } else if let Some(branches) = current
+            .get("anyOf")
+            .or_else(|| current.get("oneOf"))
+            .and_then(|b| b.as_array())
+        {
+            if branches
+                .iter()
+                .any(|branch| reference_kind_of(root, branch) == Some("null"))
+            {
+                return true;
+            }
+            let Some(branch) = branches
+                .iter()
+                .find(|branch| reference_kind_of(root, branch) != Some("null"))
+            else {
+                return true;
+            };
+            current = branch;
+        } else {
+            return match current.get("type") {
+                Some(serde_json::Value::String(name)) => name == "null",
+                Some(serde_json::Value::Array(names)) => {
+                    names.iter().any(|name| name.as_str() == Some("null"))
+                }
+                _ => false,
+            };
+        }
+    }
+    false
+}
+
+/// Type of a value taken from a schema `default`.
+fn reference_value_kind(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Object(_) => "object",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::Null => "null",
+    }
+}
+
+/// Pick the option of an `anyOf`/`oneOf` to render: the one matching the shape
+/// of the default value when there is one, the first otherwise.
+fn choose_reference_branch<'a>(
+    root: &serde_json::Value,
+    branches: &[&'a serde_json::Value],
+    hint: Option<&serde_json::Value>,
+) -> Option<&'a serde_json::Value> {
+    if let Some(hint) = hint.filter(|hint| !hint.is_null()) {
+        let kind = reference_value_kind(hint);
+        if let Some(found) = branches
+            .iter()
+            .find(|branch| reference_kind_of(root, branch) == Some(kind))
+        {
+            return Some(found);
+        }
+    }
+    branches.first().copied()
+}
+
+/// Follow `$ref` and unwrap `anyOf`/`oneOf` options, dropping the `null` ones, to
+/// reach the schema of the value: returns it with its description. The references
+/// it walks are pushed onto `refs`, so a caller detects a schema looping on itself.
+fn resolve_reference_node<'a>(
+    root: &'a serde_json::Value,
+    node: &'a serde_json::Value,
+    refs: &mut Vec<String>,
+    hint: Option<&serde_json::Value>,
+) -> (&'a serde_json::Value, Option<String>) {
+    let mut description = node
+        .get("description")
+        .and_then(|d| d.as_str())
+        .map(collapse_whitespace);
+    let mut current = node;
+    for _ in 0..REFERENCE_MAX_DEPTH {
+        if let Some(reference) = current.get("$ref").and_then(|r| r.as_str()) {
+            if refs.iter().any(|seen| seen == reference) {
+                break;
+            }
+            let Some(target) = reference_definition(root, reference) else {
+                break;
+            };
+            refs.push(reference.to_string());
+            current = target;
+        } else if let Some(branches) = current
+            .get("anyOf")
+            .or_else(|| current.get("oneOf"))
+            .and_then(|b| b.as_array())
+        {
+            let options: Vec<&serde_json::Value> = branches
+                .iter()
+                .filter(|branch| reference_kind_of(root, branch) != Some("null"))
+                .collect();
+            let Some(chosen) = choose_reference_branch(root, &options, hint) else {
+                break;
+            };
+            current = chosen;
+        } else {
+            break;
+        }
+        if description.is_none() {
+            description = current
+                .get("description")
+                .and_then(|d| d.as_str())
+                .map(collapse_whitespace);
+        }
+    }
+    (current, description)
+}
+
+/// Join a doc comment's lines into one line.
+fn collapse_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Append one commented line of the reference: `#` then `indent` spaces then `text`.
+fn push_reference_commented(out: &mut String, indent: usize, text: &str) {
+    out.push('#');
+    out.push(' ');
+    for _ in 0..indent {
+        out.push(' ');
+    }
+    out.push_str(text);
+    out.push('\n');
+}
+
+/// Write a description above a key as commented lines, wrapped to the reference
+/// width. The extra `#` keeps them comments when the whole block is uncommented.
+fn push_reference_description(out: &mut String, indent: usize, description: Option<&str>) {
+    let Some(description) = description else {
+        return;
+    };
+    let width = REFERENCE_WIDTH.saturating_sub(indent + 4).max(40);
+    for line in wrap_reference_text(description, width) {
+        push_reference_commented(out, indent, &format!("# {line}"));
+    }
+}
+
+/// Write a block key, with its description trailing when short, above otherwise.
+fn push_reference_key(out: &mut String, indent: usize, name: &str, description: Option<&str>) {
+    let line = format!("{name}:");
+    let trailing = description.filter(|description| {
+        description.chars().count() <= 60
+            && indent + line.chars().count() + 6 + description.chars().count() <= REFERENCE_WIDTH
+    });
+    match trailing {
+        Some(description) => {
+            push_reference_commented(out, indent, &format!("{line}  # {description}"))
+        }
+        None => {
+            push_reference_description(out, indent, description);
+            push_reference_commented(out, indent, &line);
+        }
+    }
+}
+
+/// Greedily wrap `text` to `width` columns.
+fn wrap_reference_text(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        if !line.is_empty() && line.chars().count() + 1 + word.chars().count() > width {
+            lines.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
+/// Render a YAML scalar (or a flow list of them) for the reference, if the value
+/// can be written inline.
+fn reference_scalar_text(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Null => None,
+        serde_json::Value::Bool(flag) => Some(flag.to_string()),
+        serde_json::Value::Number(number) => Some(number.to_string()),
+        serde_json::Value::String(text) => Some(reference_string_text(text)),
+        serde_json::Value::Array(items) => {
+            let parts: Vec<String> = items.iter().filter_map(reference_scalar_text).collect();
+            (parts.len() == items.len()).then(|| format!("[{}]", parts.join(", ")))
+        }
+        serde_json::Value::Object(_) => None,
+    }
+}
+
+/// Quote a string for YAML only when it is empty or ambiguous as plain text.
+fn reference_string_text(text: &str) -> String {
+    let plain = !text.is_empty()
+        && !matches!(
+            text,
+            "true" | "false" | "yes" | "no" | "on" | "off" | "null" | "~"
+        )
+        && !text.starts_with(|c: char| c.is_ascii_digit())
+        && text.chars().all(|c| {
+            c.is_ascii_alphanumeric()
+                || matches!(
+                    c,
+                    '.' | '_' | '-' | '/' | ':' | '@' | '{' | '}' | '%' | '+' | '=' | '?' | '&'
+                )
+        });
+    if plain {
+        text.to_string()
+    } else {
+        serde_json::to_string(text).unwrap_or_else(|_| format!("\"{text}\""))
+    }
+}
+
+/// The plain literal a description documents as its default, when it names
+/// one that is not a reference to another setting.
+fn reference_description_default(
+    root: &serde_json::Value,
+    resolved: &serde_json::Value,
+    description: &str,
+) -> Option<serde_json::Value> {
+    const MARKERS: [&str; 3] = ["(default: ", "default: ", "defaults to "];
+    const PUNCTUATION: [char; 7] = [',', '.', ';', ':', ')', ']', '}'];
+    let lowered = description.to_lowercase();
+    let start = MARKERS
+        .iter()
+        .filter_map(|marker| lowered.find(marker).map(|at| at + marker.len()))
+        .min()?;
+    let rest = &description[start..];
+    let raw = rest.split_whitespace().next()?;
+    // A default that runs into the rest of the sentence, as in "default: every
+    // profile of every browser", names no single literal.
+    let remainder = rest[raw.len()..].trim_start();
+    if !remainder.is_empty() && !raw.ends_with(PUNCTUATION) {
+        return None;
+    }
+    let trimmed = raw.trim_end_matches(PUNCTUATION);
+    let token = match trimmed.strip_prefix('`') {
+        Some(inner) => inner.strip_suffix('`')?,
+        None if trimmed.contains('`') => return None,
+        None => trimmed,
+    };
+    let kind = reference_kind_of(root, resolved);
+    let number = || {
+        token
+            .parse::<u64>()
+            .ok()
+            .map(serde_json::Value::from)
+            .or_else(|| {
+                token
+                    .parse::<f64>()
+                    .ok()
+                    .and_then(serde_json::Number::from_f64)
+                    .map(serde_json::Value::Number)
+            })
+    };
+    if let Some(flag) = match token {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    } {
+        return (kind == Some("boolean")).then_some(serde_json::Value::Bool(flag));
+    }
+    if token.chars().all(|c| c.is_ascii_digit() || c == '.')
+        && token.starts_with(|c: char| c.is_ascii_digit())
+    {
+        return (kind == Some("number")).then(number)?;
+    }
+    let word = !token.is_empty()
+        && token != "none"
+        && !token.contains('.')
+        && token.chars().all(|c| {
+            c.is_ascii_alphanumeric()
+                || matches!(
+                    c,
+                    '_' | '-' | '/' | '~' | ':' | '>' | '{' | '}' | '&' | '@' | '=' | '+'
+                )
+        });
+    (word && kind == Some("string")).then(|| serde_json::Value::String(token.to_string()))
+}
+
+/// Placeholder for a setting the schema gives no default for.
+fn reference_placeholder(resolved: &serde_json::Value, name: &str) -> String {
+    let declared = resolved.get("type");
+    let kind = declared.and_then(|ty| match ty.as_str() {
+        Some(name) => Some(name.to_string()),
+        None => ty
+            .as_array()?
+            .iter()
+            .filter_map(|value| value.as_str())
+            .find(|name| *name != "null")
+            .map(str::to_string),
+    });
+    match kind.as_deref() {
+        // `--check-config` rejects an empty `argv`, so show one that runs.
+        Some("array") if name == "argv" => r#"["notify-send", "Example"]"#.to_string(),
+        Some("array") => "[]".to_string(),
+        Some("boolean") => "false".to_string(),
+        Some("integer") | Some("number") => resolved
+            .get("minimum")
+            .and_then(|minimum| minimum.as_f64())
+            .filter(|minimum| *minimum > 0.0)
+            .map(|minimum| minimum.to_string())
+            .unwrap_or_else(|| "0".to_string()),
+        _ => reference_example_string(name).to_string(),
+    }
+}
+
+/// A short illustrative value for a string the schema requires.
+fn reference_example_string(name: &str) -> &'static str {
+    match name {
+        "name" | "title" | "value" | "label" => "Example",
+        "keyword" => "ex",
+        "command" => "~/.config/raffi/scripts/example.py",
+        "url" => "https://example.com",
+        "action" | "secondary_action" => "copy",
+        "example" => "value",
+        _ => "example",
+    }
+}
+
+/// Render the settings of an object schema, one commented line each.
+fn render_reference_children(
+    out: &mut String,
+    root: &serde_json::Value,
+    properties: &serde_json::Map<String, serde_json::Value>,
+    indent: usize,
+    depth: usize,
+    refs: &mut Vec<String>,
+    hint: Option<&serde_json::Value>,
+) {
+    for (child_name, child) in properties {
+        let child_hint = hint.and_then(|hint| hint.get(child_name));
+        render_reference_node(
+            out,
+            root,
+            child,
+            child_name,
+            indent,
+            depth + 1,
+            refs,
+            child_hint,
+        );
+    }
+}
+
+/// Render one setting: a commented `name: value`, a nested block for objects, or
+/// one example item for arrays of objects.
+#[allow(clippy::too_many_arguments)]
+fn render_reference_node(
+    out: &mut String,
+    root: &serde_json::Value,
+    node: &serde_json::Value,
+    name: &str,
+    indent: usize,
+    depth: usize,
+    refs: &mut Vec<String>,
+    hint: Option<&serde_json::Value>,
+) {
+    let pushed = refs.len();
+    let hint = hint.or_else(|| node.get("default").filter(|value| !value.is_null()));
+    let (resolved, description) = resolve_reference_node(root, node, refs, hint);
+    let description = description.as_deref();
+    let depth_budget = depth < REFERENCE_MAX_DEPTH;
+    let properties = resolved
+        .get("properties")
+        .and_then(|p| p.as_object())
+        .filter(|p| !p.is_empty() && depth_budget);
+    if let Some(properties) = properties {
+        push_reference_key(out, indent, name, description);
+        render_reference_children(out, root, properties, indent + 2, depth, refs, hint);
+        refs.truncate(pushed);
+        return;
+    }
+    let map_values = resolved
+        .get("additionalProperties")
+        .filter(|value| value.is_object() && depth_budget);
+    if let Some(map_values) = map_values {
+        push_reference_key(out, indent, name, description);
+        render_reference_node(
+            out,
+            root,
+            map_values,
+            "example",
+            indent + 2,
+            depth + 1,
+            refs,
+            None,
+        );
+        refs.truncate(pushed);
+        return;
+    }
+    if let Some(items) = resolved.get("items").filter(|_| depth_budget) {
+        let before_items = refs.len();
+        let (item, _) = resolve_reference_node(root, items, refs, None);
+        let item_properties = item
+            .get("properties")
+            .and_then(|p| p.as_object())
+            .filter(|p| !p.is_empty() && depth + 1 < REFERENCE_MAX_DEPTH);
+        if let Some(item_properties) = item_properties {
+            push_reference_key(out, indent, name, description);
+            let mut block = String::new();
+            render_reference_children(
+                &mut block,
+                root,
+                item_properties,
+                indent + 4,
+                depth + 1,
+                refs,
+                None,
+            );
+            // The dash belongs on the first line holding a key, which is not
+            // always the first one: a description can come before it.
+            let prefix = format!("# {}", " ".repeat(indent + 4));
+            let mut dashed = false;
+            for line in block.lines() {
+                let content = line.strip_prefix(&prefix).unwrap_or(line);
+                if dashed || content.starts_with('#') {
+                    out.push_str(line);
+                    out.push('\n');
+                } else {
+                    push_reference_commented(out, indent + 2, &format!("- {content}"));
+                    dashed = true;
+                }
+            }
+            refs.truncate(before_items);
+            refs.truncate(pushed);
+            return;
+        }
+        refs.truncate(before_items);
+    }
+    let optional = reference_allows_null(root, node);
+    render_reference_leaf(
+        out,
+        root,
+        resolved,
+        name,
+        indent,
+        description,
+        hint,
+        optional,
+    );
+    refs.truncate(pushed);
+}
+
+/// Render a setting whose value is a scalar, an inline list, or a list of
+/// several scalars laid out one per line.
+#[allow(clippy::too_many_arguments)]
+fn render_reference_leaf(
+    out: &mut String,
+    root: &serde_json::Value,
+    resolved: &serde_json::Value,
+    name: &str,
+    indent: usize,
+    description: Option<&str>,
+    hint: Option<&serde_json::Value>,
+    optional: bool,
+) {
+    let documented = description
+        .and_then(|description| reference_description_default(root, resolved, description));
+    let values = hint
+        .filter(|value| !value.is_null())
+        .or_else(|| resolved.get("default").filter(|value| !value.is_null()))
+        .or(documented.as_ref());
+    if reference_kind_of(root, resolved) == Some("array") {
+        let items = resolved.get("items");
+        let item_is_object =
+            items.and_then(|items| reference_kind_of(root, items)) == Some("object");
+        let listed: Option<Vec<String>> = values.and_then(|values| {
+            values
+                .as_array()
+                .filter(|items| items.len() > 3 && !item_is_object)
+                .map(|items| items.iter().filter_map(reference_scalar_text).collect())
+        });
+        if let Some(listed) = listed.filter(|listed| listed.len() > 1) {
+            push_reference_key(out, indent, name, description);
+            for item in listed {
+                push_reference_commented(out, indent + 2, &format!("- {item}"));
+            }
+            return;
+        }
+    }
+    // An enum with no default stays unset: its first variant is rarely the
+    // default one.
+    let has_enum = resolved
+        .get("enum")
+        .and_then(|values| values.as_array())
+        .is_some_and(|values| !values.is_empty());
+    let value = values
+        .and_then(reference_scalar_text)
+        .or_else(|| resolved.get("const").and_then(reference_scalar_text))
+        .or_else(|| (!optional && !has_enum).then(|| reference_placeholder(resolved, name)));
+    let line = match value {
+        Some(value) => format!("{name}: {value}"),
+        None => format!("{name}:"),
+    };
+    let trailing = description.filter(|description| {
+        description.chars().count() <= 60
+            && indent + line.chars().count() + 6 + description.chars().count() <= REFERENCE_WIDTH
+    });
+    match trailing {
+        Some(description) => {
+            push_reference_commented(out, indent, &format!("{line}  # {description}"))
+        }
+        None => {
+            push_reference_description(out, indent, description);
+            push_reference_commented(out, indent, &line);
+        }
+    }
+}
+
 /// Write `schema` to `schema_path` when missing or out of date.
 fn write_schema_if_changed(schema_path: &Path, schema: &str) -> Result<()> {
     if fs::read_to_string(schema_path).is_ok_and(|current| current == schema) {
@@ -6003,6 +6716,11 @@ pub fn run(args: Args) -> Result<()> {
     debug_log!("config: using file {configfile}");
     let config_exists = Path::new(configfile).exists();
     let launchers_path = launchers_file_for(configfile);
+
+    if args.print_config {
+        print!("{}", generate_config_reference());
+        return Ok(());
+    }
 
     if args.generate_schemas {
         write_schemas_for_config(configfile)?;
@@ -6726,6 +7444,7 @@ launchers:
             theme: None,
             opacity: None,
             generate_schemas: false,
+            print_config: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -6814,6 +7533,7 @@ launchers:
             theme: None,
             opacity: None,
             generate_schemas: false,
+            print_config: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -6968,6 +7688,7 @@ launchers:
             theme: None,
             opacity: None,
             generate_schemas: false,
+            print_config: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -7129,6 +7850,7 @@ launchers:
             theme: None,
             opacity: None,
             generate_schemas: false,
+            print_config: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -7234,6 +7956,7 @@ launchers:
             theme: None,
             opacity: None,
             generate_schemas: false,
+            print_config: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -7440,6 +8163,7 @@ launchers:
             theme: None,
             opacity: None,
             generate_schemas: false,
+            print_config: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -7487,6 +8211,7 @@ launchers:
             theme: None,
             opacity: None,
             generate_schemas: false,
+            print_config: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -7570,6 +8295,7 @@ launchers:
             theme: None,
             opacity: None,
             generate_schemas: false,
+            print_config: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -7619,6 +8345,7 @@ launchers:
             theme: None,
             opacity: None,
             generate_schemas: false,
+            print_config: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -7664,6 +8391,7 @@ launchers:
             theme: None,
             opacity: None,
             generate_schemas: false,
+            print_config: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -7963,6 +8691,7 @@ launchers:
             theme: None,
             opacity: None,
             generate_schemas: false,
+            print_config: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -8037,6 +8766,7 @@ launchers:
             theme: None,
             opacity: None,
             generate_schemas: false,
+            print_config: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -8123,6 +8853,7 @@ launchers:
             theme: None,
             opacity: None,
             generate_schemas: false,
+            print_config: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -8172,6 +8903,7 @@ launchers:
             theme: None,
             opacity: None,
             generate_schemas: false,
+            print_config: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -8225,6 +8957,7 @@ launchers:
             theme: None,
             opacity: None,
             generate_schemas: false,
+            print_config: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -8274,6 +9007,7 @@ launchers:
             theme: None,
             opacity: None,
             generate_schemas: false,
+            print_config: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -8326,6 +9060,7 @@ launchers:
                 theme: None,
                 opacity: None,
                 generate_schemas: false,
+                print_config: false,
                 check_config: false,
                 debug_file: None,
                 install_browser_host: false,
@@ -8813,6 +9548,7 @@ shell:
             theme: None,
             opacity: None,
             generate_schemas: false,
+            print_config: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -8868,6 +9604,7 @@ shell:
             theme: None,
             opacity: None,
             generate_schemas: false,
+            print_config: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -8922,6 +9659,7 @@ shell:
             theme: None,
             opacity: None,
             generate_schemas: false,
+            print_config: false,
             check_config: false,
             debug_file: None,
             install_browser_host: false,
@@ -9850,6 +10588,151 @@ Icon=firefox
     }
 
     #[test]
+    #[cfg(feature = "wayland")]
+    fn test_example_full_reference_is_up_to_date() {
+        assert_eq!(
+            include_str!("../examples/raffi.full.yaml").trim_end(),
+            generate_config_reference().trim_end(),
+            "regenerate with: cargo run -- --print-config > examples/raffi.full.yaml"
+        );
+    }
+
+    /// The generated reference with every line uncommented, as the config it
+    /// documents.
+    fn uncommented_reference() -> Value {
+        let reference = generate_config_reference();
+        let body = reference
+            .lines()
+            .skip_while(|line| *line != "version: 1")
+            .map(|line| match line {
+                "version: 1" => line,
+                comment => comment
+                    .strip_prefix("# ")
+                    .or_else(|| (comment == "#").then_some(""))
+                    .unwrap_or(comment),
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        serde_yaml::from_str(&body).expect("the uncommented reference is not valid YAML")
+    }
+
+    #[test]
+    fn test_uncommented_reference_parses_as_yaml() {
+        let parsed = uncommented_reference();
+        assert!(parsed.get("general").is_some());
+        assert!(parsed.get("addons").is_some());
+        #[cfg(feature = "config-validation")]
+        {
+            assert_eq!(
+                validate_config_value(&parsed),
+                Vec::<ConfigProblem>::new(),
+                "the uncommented reference does not validate"
+            );
+            // The rest of what `--check-config` runs once the schema matches.
+            let config: Config = serde_yaml::from_value(parsed)
+                .expect("the uncommented reference does not parse as a config");
+            assert_eq!(
+                parsed_config_problems(&config),
+                Vec::<ConfigProblem>::new(),
+                "the uncommented reference fails the semantic config checks"
+            );
+        }
+    }
+
+    #[test]
+    fn test_reference_leaves_general_close_on_action_unset() {
+        let parsed = uncommented_reference();
+        // Setting it would make the media, audio, Bluetooth and kill addons
+        // close after an action, which is not their default behaviour.
+        assert!(
+            !matches!(
+                parsed.get("general").and_then(|general| general.get("close_on_action")),
+                Some(value) if !value.is_null()
+            ),
+            "the reference must leave general.close_on_action unset"
+        );
+    }
+
+    #[test]
+    fn test_reference_description_default() {
+        use serde_json::json;
+        fn documented(description: &str, resolved: serde_json::Value) -> Option<serde_json::Value> {
+            reference_description_default(&serde_json::Value::Null, &resolved, description)
+        }
+        assert_eq!(
+            documented(
+                "Highest output volume (default: 100).",
+                json!({"type": "integer"})
+            ),
+            Some(json!(100))
+        );
+        assert_eq!(
+            documented(
+                "Clamped (default: 2000, clamped to 100..10000).",
+                json!({"type": "integer"})
+            ),
+            Some(json!(2000))
+        );
+        assert_eq!(
+            documented("Opacity. Default: 0.95.", json!({"type": "number"})),
+            Some(json!(0.95))
+        );
+        assert_eq!(
+            documented("Blur it (default: true).", json!({"type": "boolean"})),
+            Some(json!(true))
+        );
+        assert_eq!(
+            documented(
+                "Keyword (default: `audio`).",
+                json!({"type": ["string", "null"]})
+            ),
+            Some(json!("audio"))
+        );
+        assert_eq!(
+            documented(
+                "Where it goes (defaults to `open`).",
+                json!({"type": "string"})
+            ),
+            Some(json!("open"))
+        );
+        // A default that points at another setting, or at prose, is no literal.
+        assert_eq!(
+            documented(
+                "Close after (default: `general.close_on_action`, else false).",
+                json!({"type": ["boolean", "null"]})
+            ),
+            None
+        );
+        assert_eq!(
+            documented("Label (default: every profile).", json!({"type": "string"})),
+            None
+        );
+        assert_eq!(
+            documented(
+                "Renderer (default: `gpu` when `opacity` is below 1).",
+                json!({"type": "string"})
+            ),
+            None
+        );
+        // `none` means unset, and a default of the wrong type is no default.
+        assert_eq!(
+            documented(
+                "Desktop entry (default: none).",
+                json!({"type": ["string", "null"]})
+            ),
+            None
+        );
+        assert_eq!(
+            documented("Ids (default: login).", json!({"type": "array"})),
+            None
+        );
+        assert_eq!(
+            documented("No default given.", json!({"type": "string"})),
+            None
+        );
+    }
+
+    #[test]
     fn test_example_launchers_schema_is_up_to_date() {
         assert_eq!(
             include_str!("../examples/launchers-schema.json").trim_end(),
@@ -9865,6 +10748,7 @@ Icon=firefox
         run(Args {
             configfile: Some(configfile.to_string_lossy().into_owned()),
             generate_schemas: true,
+            print_config: false,
             ..Args::default()
         })
         .unwrap();

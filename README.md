@@ -154,7 +154,7 @@ firefox_private:
   description: Firefox private window
 ```
 
-[`examples/raffi.yaml`](examples/raffi.yaml) shows every setting with a comment, and [`examples/launchers.yaml`](examples/launchers.yaml) has entries to copy from. The [configuration guide](https://chmouel.github.io/raffi/configuration/overview/) covers settings, addons and custom entries.
+[`examples/raffi.yaml`](examples/raffi.yaml) is a short starter config, and [`examples/raffi.full.yaml`](examples/raffi.full.yaml) is the generated reference listing every setting with its description (`raffi --print-config` prints it). [`examples/launchers.yaml`](examples/launchers.yaml) has entries to copy from. The [configuration guide](https://chmouel.github.io/raffi/configuration/overview/) covers settings, addons and custom entries.
 
 ## Contributing
 

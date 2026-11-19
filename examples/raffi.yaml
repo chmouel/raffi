@@ -1,641 +1,83 @@
 # yaml-language-server: $schema=raffi-schema.json
-# Validate this file with: raffi --check-config
+# Raffi starter config. Every setting is optional.
+# All settings and addons, commented: examples/raffi.full.yaml, or `raffi --print-config`.
+# Your own entries go in launchers.yaml next to this file (see examples/launchers.yaml).
 version: 1
 
-# Every setting below is optional and commented out. This file holds
-# settings and addons. Your own commands and scripts go in launchers.yaml next
-# to it (see examples/launchers.yaml). Installed applications are listed
-# automatically; once you add entries, set addons.apps.enabled to keep them.
-
-# General settings (all fields optional, CLI flags override these)
-# general:
-#   ui_type: fuzzel          # Show entries in Fuzzel instead of Raffi's own
-#                            # window (legacy; leave unset for the default)
-#   default_script_shell: bash  # Shell for script entries
-#   no_icons: false          # Hide icons
-#   max_history: 10          # Max search query history entries (0 to disable, navigate with Alt-P/N)
-#   theme: dark              # Built-in theme: dark (default), light, catppuccin, catppuccin-latte,
-#                            # tokyo-night, nord, gruvbox, dracula, rose-pine, or kanagawa.
-#                            # Also sets the ANSI palette used in previews
-#   opacity: 0.95            # Background opacity, 0.0 (see-through) to 1.0 (solid); --opacity overrides
-#   blur: true               # Ask the compositor to blur behind the window (KDE; see docs for others)
-#   font_size: 20            # Base font size in px (default: 20). Other sizes and paddings
-#                            # scale proportionally (input=24, items=20, subtitles=14, hints=12)
-#   font_family: "Inter"     # Font family name (default: system sans-serif)
-#   window_width: 800        # Initial window width in px (default: 800)
-#   window_height: 600       # Initial window height in px (default: 600)
-#   padding: 20              # Outer window padding in pixels (default: 20, scales with font_size)
-#   show_preview: true       # Right-hand preview pane (default: true). It stays open on the main
-#                            # page; false hides it except for launchers that set show_preview: true.
-#                            # Toggle at runtime with Ctrl+P.
-#   close_on_action: true    # Close Raffi after running an entry or addon action (default: true;
-#                            # media, audio, bluetooth, and kill default to false). Individual launchers
-#                            # and addons can override this with their own close_on_action setting, or
-#                            # pass --keep-open / -o general.close_on_action=false on the CLI.
-#   launch: auto             # auto (default): start apps through Hyprland, niri or sway when running
-#                            # inside one; direct: Raffi starts them itself
-#   raise_running: false     # Enter focuses an app's open window instead of starting it again;
-#                            # Ctrl+Enter starts a new one (Hyprland, niri, sway; launchers set raise)
-#   show_tips: true          # Keyword tip in the empty search box, e.g. "clip for Clipboard history"
-#   vim_mode: false          # Start with modal vim keys in normal mode; i/a/// to
-#                            # search, j/k to move, Ctrl+Alt+V toggles it; --vim-mode also enables
-#   preview:                 # Appearance of the preview pane
-#     font_size: 16          # Base preview text size in px (default: 0.8 x font_size, 16 at 20)
-#     font_family: "Inter"   # Font for the pane and its message/snippet text (default: the UI font)
-#     mono_font_family: "JetBrains Mono"  # Font for code blocks: files, commands, script output (default: system monospace)
-#     width_percent: 50      # Pane width as a share of the window, 10-80 (default: 50)
-#     colors:                # Hex overrides; defaults come from the theme
-#       bg: "#31324480"
-#       bg_block: "#1e1e2e"
-#       text_main: "#cdd6f4"
-#       text_muted: "#6c7086"
-#       accent: "#cba6f7"
-#       border: "#585b70"
-#   sort_mode: hybrid        # Order launchers, snippets and pass/bw entries by use: frequency, recency, or hybrid (default: hybrid)
-#   clipboard_history: auto  # Manager for {clipboard:N} in snippets: auto, cliphist, copyq, clipman or none
-#   terminal_classes:        # Extra window classes that hypr_paste treats as terminals (Ctrl+Shift+V)
-#     - my-terminal          # Added to the built-in list; find a class with `hyprctl activewindow`
-#   fallbacks:               # Addons shown at the bottom of results when typing a query
-#     - addons.web_searches."Google"           # Opens Google search with the current query
-#     - addons.web_searches."DuckDuckGo"       # Opens DuckDuckGo search with the current query
-#     - addons.script_filters."Search Google"  # Switches to the script filter mode
-#     - addons.terminal                        # Runs the query in a terminal
-#   main_view:               # Mix addon results into the main list; Ctrl+Tab shows one source at a time.
-#                            # An empty query shows one row of chips with each detected entry's name
-#                            # (Tabs, System, Clipboard...) above the apps; Left/Right pick one, Enter arms it.
-#                            # When main_view is omitted, raffi uses launchers, windows, browser_tabs, bookmarks,
-#                            # system, media, audio, bluetooth, pass, clipboard, bitwarden, terminal, emoji.
-#                            # browser_history is opt-in: add it below to show it in the main view.
-#     entries:
-#       - launchers          # Keep launchers; once main_view is set they only show if listed
-#       - browser_tabs       # Typing "gmail" lists matching tabs, up to 5 per addon;
-#                            # with no query, your 5 latest addon picks are listed;
-#                            # groups with a title starting with the query come first
-#       - windows            # Also: bookmarks, system, media, audio, bluetooth, kill, pass, slack
-#       - browser_history    # Visited pages; not in the automatic set, add it to opt in
-#       - slack              # Home rows when empty; searches messages as you type (enable and configure below)
-#                            # Sub-views: slack.unread, slack.threads, slack.activity, slack.actions,
-#                            # slack.directs (or slack.dms), slack.channels
-#       - clipboard          # Keyword chip only, no rows: also bitwarden, terminal, emoji
-#       - text_snippets."Emails"     # A snippet source, by name
-#       - script_filters."Bookmarks" # A script filter, run when typing pauses
-#     exclude:               # Sources to omit after resolving entries (useful with entries: [all])
-#       - script_filters."My Pull Requests"
-#   main_view_chips: name    # What those chips show: name (default), keyword, or off for no chips
-#   theme_colors:            # Override individual colours (hex: #RGB, #RRGGBB, or #RRGGBBAA)
-#     bg_base: "#1e1e2e"
-#     bg_input: "#313244"
-#     accent: "#cba6f7"
-#     accent_hover: "#89b4fa"
-#     text_main: "#cdd6f4"
-#     text_muted: "#6c7086"
-#     selection_bg: "#45475a"
-#     border: "#585b70"
-#   renderer: auto           # Window renderer: auto (default: gpu when opacity < 1, else cpu), cpu (opens
-#                            # fastest, opaque on Wayland) or gpu; ICED_BACKEND overrides it
-
-# Launchers live in launchers.yaml next to this file, see examples/launchers.yaml.
-# A `launchers:` section here still works and takes precedence over launchers.yaml.
+# General settings: https://chmouel.github.io/raffi/configuration/general-settings/
+general:
+  theme: dark
+  # font_size: 20            # Paddings and the other text sizes scale with it
+  # font_family: "Inter"     # Default: the system sans-serif
+  # window_width: 800
+  # window_height: 600
+  # padding: 20
+  # opacity: 0.95            # 0.0 is see-through, 1.0 is the theme as designed
+  # show_preview: true       # Right-hand preview pane; Ctrl+P toggles it
+  # preview:
+  #   width_percent: 50
+  #   font_size: 16
+  # close_on_action: true    # Close Raffi after running an entry
+  # launch: auto             # auto asks Hyprland, niri or sway to start apps; direct runs them
+  # raise_running: false     # Enter focuses an open window instead of starting the app again
+  # max_history: 10          # Search queries kept, Alt-P and Alt-N walk them
+  # sort_mode: hybrid        # Order snippets and passwords by frequency, recency or hybrid
+  # main_view: [launchers, windows, clipboard]   # Sources mixed into the main list
+  # theme_colors:            # Override single colours, as #RRGGBB or #RRGGBBAA
+  #   accent: "#cba6f7"
 
 addons:
-  # Keywords below (script_filters, web_searches, text_snippets) are typed with
-  # a trailing space: "tz " enters the timezone filter, while "tz" on its own
-  # keeps searching your launchers. While you type a keyword, raffi lists the
-  # matching keywords at the top of the results; Enter or Tab on one of those
-  # rows completes the input for you. Suggestions start after
-  # keyword_min_chars characters (default 3), or as soon as a keyword is typed
-  # in full. Whole words such as "volume", "password" or "lock" suggest the
-  # addon that handles them, and a query matching nothing lists the keywords
-  # whose help mentions it.
-  # keyword_min_chars: 3
-  #
-  # Press Ctrl+/ (or type ? alone) to see addon keywords/actions and keyboard
-  # shortcuts in separate sections. Typing filters both; opening help clears
-  # the current query temporarily, and Escape restores it. Enter or Tab on a
-  # keyword row applies its completion.
-  script_filters:
-    - name: "Google Contacts"
-      keyword: "contacts"
-      command: "~/.config/raffi/scripts/google-contacts/contacts.py"
-      icon: "contact-new"
-      action: "copy"
-      close_on_action: false
-      dynamic_preview: false
+  # Addon reference: https://chmouel.github.io/raffi/reference/addon-configuration/
 
-    # grab batz from https://github.com/chmouel/batzconverter
-    - name: "Timezones"
-      keyword: "tz"
-      command: "batz"
-      args: ["-j"]
-      icon: "clock"
-      min_query_length: 2 # only execute after 2 chars typed after keyword
-      env:
-        TZ_FORMAT: "short" # environment variables passed to the script process
-      # With the preview pane open (Ctrl+P), raffi runs the command again with
-      # RAFFI_PREVIEW=1 for the selected item and shows the preview object it
-      # prints. Scripts that only print items are detected and skipped.
-      # Commands with side effects should check RAFFI_PREVIEW or turn this off.
-      # dynamic_preview: false # turn it off for this filter (default: true)
-      # cache_seconds: 300     # Optional stale-while-revalidate cache; unset keeps side-effecting scripts uncached
-      # warm_queries: [""]     # Queries the server warms periodically, in every view
-      # sort_by_usage: true    # List the rows you picked first; unset follows the
-      #                        # script's "sort": "usage", false always keeps its order
-      # A script can also print "views" next to "items": Ctrl+Tab then switches
-      # between them and passes the picked one in RAFFI_VIEW.
-    # action/secondary_action accept two special keywords:
-    #   "copy"   — copy to clipboard via wl-copy (default for Enter)
-    #   "insert" — type into focused app via wtype/ydotool
-    # Any other string is run as a shell command via sh -c, with {value} replaced.
-    # Example with a custom action and secondary action (Ctrl+Enter):
-    # - name: "Bookmarks"
-    #   keyword: "bm"
-    #   command: "my-bookmark-script"
-    #   args: ["-j"]
-    #   action: "copy"
-    #   secondary_action: "xdg-open {value}"
+  # Clipboard history, type "clip " to browse it.
+  # https://chmouel.github.io/raffi/features/clipboard-history/
+  clipboard:
+    enabled: true
 
-    # Web search with DuckDuckGo autocomplete suggestions. The preview pane
-    # shows the DuckDuckGo Instant Answer (summary and image) for a suggestion.
-    # Copy scripts/search/search.py to ~/.config/raffi/scripts/search/search.py and make it executable.
-    # See scripts/search/README.md for full setup instructions.
-    # - name: "Search DuckDuckGo"
-    #   keyword: "ddg"
-    #   command: "~/.config/raffi/scripts/search/search.py"
-    #   args: ["duckduckgo"]
-    #   icon: "web-browser"
-    #   action: "xdg-open {value}"
-    #   secondary_action: "copy"
-    # - name: "Search Google"
-    #   keyword: "sg"
-    #   command: "~/.config/raffi/scripts/search/search.py"
-    #   args: ["google"]
-    #   icon: "google"
-    #   action: "xdg-open {value}"
-    #   secondary_action: "copy"
-    # - name: "Search Bing"
-    #   keyword: "sb"
-    #   command: "~/.config/raffi/scripts/search/search.py"
-    #   args: ["bing"]
-    #   icon: "web-browser"
-    #   action: "xdg-open {value}"
-    #   secondary_action: "copy"
-    # - name: "Search Brave"
-    #   keyword: "sbr"
-    #   command: "~/.config/raffi/scripts/search/search.py"
-    #   args: ["brave"]
-    #   icon: "web-browser"
-    #   action: "xdg-open {value}"
-    #   secondary_action: "copy"
+  # Password store, type "pass ". Enter copies, Ctrl+Enter types the password.
+  # https://chmouel.github.io/raffi/features/password-store/
+  pass:
+    enabled: true
+    # store_dir: ~/.password-store
+    # clipboard_timeout: 45
 
-    # Herdr session browser. Install herdr_filter.py and its sibling icons/
-    # directory from scripts/herdr/ (including the icon license notices).
-    # Single-pane tabs appear once; multi-pane tabs show their pane children.
-    # The query filters the tree and keeps ancestors of matches. Items
-    # export HERDR_KIND and HERDR_FOCUS, so the action focuses whatever you
-    # picked. Add args: ["--agents"] for a flat list of agents only.
-    # The preview pane shows live terminal output, pane lists, or tab lists.
-    # HERDR_VIEW: status groups agents by Working/Waiting/Idle/Done/Unknown,
-    # with counts and non-actionable headings; shells stay in the workspace view.
-    # Ctrl+Tab switches between the workspace tree, status tree and agents.
-    # - name: "Herdr"
-    #   keyword: "herdr"
-    #   command: "~/.config/raffi/scripts/herdr/herdr_filter.py"
-    #   icon: "utilities-terminal"
-    #   env:
-    #     HERDR_ICON_SET: color  # Default; mono-dark or mono-light for monochrome icons
-    #     HERDR_VIEW: workspace  # Default; status for an agent status tree (or args: ["--status"])
-    #   action: >-
-    #     case "$HERDR_KIND" in
-    #       workspace) herdr workspace focus "$HERDR_FOCUS" ;;
-    #       tab) herdr tab focus "$HERDR_FOCUS" ;;
-    #       agent) herdr agent focus "$HERDR_FOCUS" ;;
-    #       *) herdr tab focus "$HERDR_FOCUS" ;;
-    #     esac
-    # For compositor-specific window focus commands, see scripts/herdr/README.md.
+  # Apps are listed on their own when no valid launchers are configured; set
+  # `apps.enabled: true` to list them next to your launchers.
+  # https://chmouel.github.io/raffi/features/installed-apps/
+  # apps:
+  #   enabled: true
+  #   actions: true          # Also list actions such as "Firefox: New Private Window"
 
-    # GitHub pull requests with CI status. Install scripts/github/pr.py and
-    # ghcommon.py, which it imports, in the same directory first.
-    # "pr" lists your open pull requests, "pr owner/repo" those of a repository,
-    # "pr review", "pr assigned" and "pr involved" the ones that concern you;
-    # Ctrl+Tab switches between those lists too.
-    # Cross-repository results group under owner headings when multiple owners
-    # are present; single-owner and fixed-repository results stay flat.
-    # The preview pane shows reviewers, merge state, checks, closed issues,
-    # description, latest comments and changed files. Each row exports
-    # PR_URL, PR_REPO, PR_NUMBER and PR_BRANCH to the actions.
-    # See scripts/github/README.md for aliases and settings.
-    # - name: "Pull Requests"
-    #   keyword: "pr"
-    #   command: "~/.config/raffi/scripts/github/pr.py"
-    #   icon: "github"
-    #   action: "xdg-open {value}"
-    #   secondary_action: "copy"
-    #   cache_seconds: 300          # Show cached rows at once, refresh stale ones in the background
-    #   warm_queries: [""]           # Queries the server warms while Raffi is closed, in every view
-    #   warm_interval_seconds: 300   # Defaults to cache_seconds
-    # One keyword per repository, the typed text only filters:
-    # - name: "Project Pull Requests"
-    #   keyword: "ppr"
-    #   command: "~/.config/raffi/scripts/github/pr.py"
-    #   args: ["--repo", "owner/repo"]
-    #   icon: "github"
-    #   action: "xdg-open {value}"
-    #   secondary_action: "copy"
-
-    # GitHub repositories of an account, yours by default. Install
-    # scripts/github/repos.py and ghcommon.py in the same directory first.
-    # "repo a" lists an organization from --owners or an alias,
-    # "repo a api" filters it, "repo owner/repo" opens one, and the
-    # accounts in --owners are views switched with Ctrl+Tab, after an All
-    # view that mixes them, forks last. Other words only
-    # filter; add "--any-owner" to let them name any GitHub account. "me" is the
-    # logged in account; ALIAS_<name> adds short names.
-    # See scripts/github/README.md for aliases and settings.
-    # - name: "Repositories"
-    #   keyword: "repo"
-    #   command: "~/.config/raffi/scripts/github/repos.py"
-    #   args: ["--owners", "me,a,labs"]
-    #   env:
-    #     ALIAS_a: acme
-    #     ALIAS_labs: acme-labs
-    #   # Enter lists the repository and its pull requests, issues and
-    #   # releases ("--pages"); Right opens the action menu with copy entries
-    #   # and the actions below. "--actions pulls,issues" puts pages in that
-    #   # menu instead and "--path pulls" makes every row open one page.
-    #   # args: ["--owners", "me,a,labs", "--pages", "pulls,issues,releases"]
-    #   actions:
-    #     - title: "Clone"
-    #       action: 'git clone "$REPO_SSH" ~/src/"$REPO_NAME"'
-    #   icon: "github"
-    #   action: "xdg-open {value}"
-    #   secondary_action: "copy"
-    #   cache_seconds: 300       # Caching on; the script may ask for more, up to:
-    #   cache_max_seconds: 86400 # env CACHE_REPOS: 24h makes the script ask for a day
-    #   warm_queries: [""]
-
-  # text_snippets:
-  #   - name: "Emails"
-  #     keyword: "em"
-  #     icon: "mail"
-  #     # action/secondary_action accept three special keywords:
-  #     #   "copy"   — copy to clipboard via wl-copy (default for Enter)
-  #     #   "insert" — type into focused app via wtype/ydotool (default for Ctrl+Enter)
-  #     #   "hypr_paste" — paste into the original window on Hyprland (default for
-  #     #                  Enter inside Hyprland; set action: "copy" to keep copying)
-  #     #                  (Ctrl+V, or Ctrl+Shift+V in terminals; see general.terminal_classes)
-  #     # Any other string is run as a shell command via sh -c, with {value} replaced.
-  #     # The value is also exported as $RAFFI_VALUE; prefer "$RAFFI_VALUE" over
-  #     # {value} in custom commands when the snippet may contain shell syntax.
-  #     action: "insert"                       # primary action on Enter: type into focused app
-  #     secondary_action: "copy"               # secondary action on Ctrl+Enter: copy to clipboard
-  #     # Use action: "hypr_paste" on Hyprland (Lua API) with hyprctl and wl-clipboard.
-  #     # hypr_paste marks snippets sensitive so CopyQ's default settings keep them out of history.
-  #     # {cursor} does not reposition the caret with hypr_paste.
-  #     restore_clipboard: false               # hypr_paste: true restores old plain text after 1s
-  #     # Restoration needs wl-paste; skips newer copies and unavailable/non-text snapshots.
-  #     snippets:
-  #       - name: "Personal Email"
-  #         icon: "📨"                        # optional emoji, icon name, or image path
-  #         keyword: "!me"                     # optional abbreviation, ranked first when typed
-  #         value: "user@example.com"
-  #       - name: "Work Email"
-  #         value: "user@company.com"
-  #       # Dynamic placeholders (on by default):
-  #       #   {clipboard} {clipboard:1} {date} {time} {datetime} {date:%A %d %B} {date +1d}
-  #       #   {random:uuid} {random:1-100} {env:VAR} {snippet:NAME} {shell:CMD}
-  #       #   {cursor}, and transforms like {clipboard|trim|uppercase}.
-  #       #   Write \{date} for a literal {date}, in single quotes or a block
-  #       #   scalar since "\{" is an invalid YAML escape: value: '\{date} is {date}'
-  #       - name: "Quote clipboard"
-  #         value: "> {clipboard|trim}"
-  #       - name: "Previous copy"                # needs cliphist, CopyQ or clipman running
-  #         value: "{clipboard:1|trim}"
-  #       - name: "Follow-up"
-  #         value: "Follow up on {date +1w:%A %d %B}: {cursor}"
-  #   - name: "Templates"
-  #     keyword: "tpl"
-  #     icon: "document"
-  #     file: "~/.config/raffi/snippets.yaml"
-  #     placeholders: false                  # use values exactly as written
-  #   - name: "Dynamic"
-  #     keyword: "dyn"
-  #     icon: "terminal"
-  #     command: "my-snippet-gen"
-  #     args: ["-j"]
-  #   - name: "Snippets"
-  #     # Download the work templates linked in the text snippets documentation.
-  #     keyword: "sn"
-  #     icon: "snippets"
-  #     # A directory or markdown source also gets "Save to snippets" in the
-  #     # clipboard browser's action menu (Right arrow), which adds to it.
-  #     directory: "~/.local/share/snippets"
-  #   - name: "Notes"
-  #     keyword: "nt"
-  #     icon: "document"
-  #     # Markdown file of "## Name" sections. Clipboard entries saved with
-  #     # "Save to snippets" in the clipboard browser are appended to it.
-  #     markdown: "~/notes/snippets.md"
-
+  # A web search: the typed query replaces {query}.
+  # https://chmouel.github.io/raffi/features/web-search/
   web_searches:
-    - name: "Google"
-      keyword: "g"
-      url: "https://google.com/search?q={query}"
-      icon: "google"
-    - name: "DuckDuckGo"
-      keyword: "ddg"
-      url: "https://duckduckgo.com/?q={query}"
     - name: "GitHub"
       keyword: "gh"
       url: "https://github.com/search?q={query}&type=repositories"
       icon: "github"
 
-  # File browser: type "/" or "~/" to browse. fido_style (on by default) edits
-  # paths the way Emacs fido-mode does: Backspace on a trailing "/" goes up to
-  # the parent directory, and typing "~/" or "/" right after a "/" starts over
-  # from home or the root. Set it to false to edit the path as plain text.
-  # action (Enter on a file) and secondary_action (Ctrl+Enter or Ctrl+click on
-  # a file or directory) accept "open" (xdg-open), "copy", "insert", or a shell
-  # command where {value} is the full path.
-  # Ctrl+O opens the selected file or directory with xdg-open, whatever action
-  # says. Ctrl+B opens the browsed directory in a file manager. Leave file_manager
-  # unset to autodetect (desktop's own: dolphin, nautilus, thunar, nemo, caja,
-  # pcmanfm...; else the first installed; else xdg-open). Without {value} the
-  # directory is appended as the last argument. Nautilus, Dolphin, Nemo and
-  # Caja also get the selected entry highlighted.
-  # Ctrl+Y copies the selected path regardless of the configured actions.
-  # Ctrl+Alt+Y copies a supported image file to the system clipboard (requires
-  # wl-copy or xclip).
-  # sort sets the initial order: name, modified (alias: date) or created, the
-  # last two newest first. Ctrl+S cycles through them while browsing.
-  # sort_reverse: true flips the order (Z to A, or oldest first).
-  # show sets the initial listing: all, files or directories (alias: dirs).
-  # Ctrl+Tab cycles through them while browsing.
-  # preview_command previews the selected entry (PDF pages, video frames,
-  # ebook covers, archives, highlighted source...). Unset uses the previewer
-  # bundled with raffi when python3 is installed; "none" turns it off. A
-  # custom command gets the path as last argument and prints ANSI text or a
-  # preview JSON object; no output or a non-zero exit keeps the built-in
-  # preview. To customise the bundled one, copy
-  # scripts/file-preview/file-preview.py from the raffi repository.
-  # file_browser:
-  #   enabled: true
-  #   show_hidden: false
-  #   sort: name
-  #   sort_reverse: false
-  #   show: all
-  #   fido_style: true
-  #   action: open
-  #   secondary_action: copy
-  #   file_manager: thunar
-  #   preview_command: "~/.config/raffi/scripts/file-preview.py"
+  # A script filter: type its keyword, then a query; it prints items as JSON.
+  # https://chmouel.github.io/raffi/features/script-filters/
+  # script_filters:
+  #   - name: "Calculator"
+  #     keyword: "calc"
+  #     command: "~/.config/raffi/scripts/calc.py"
+  #     icon: "accessories-calculator"
+  #     action: "copy"
 
-  # Clipboard history browser. On by itself when CopyQ is
-  # running at startup; set enabled to force it on or off. Reads the
-  # history stored by CopyQ, which must be running. Type "clip " to browse,
-  # or bind a key to `raffi -i "clip "`. Enter copies the item with
-  # all its formats (text, HTML, images, file lists); Ctrl+Enter pastes it
-  # into the previous window on Hyprland. Ctrl+R refreshes the list and
-  # Ctrl+Tab cycles between all items, images only and URLs only.
-  # Ctrl+D deletes the selected entry from the history.
-  # Previews show the copy time when CopyQ stores it (its "Show Copy Time"
-  # command). action and secondary_action accept copy or hypr_paste.
-  # backend: raffi records the history in `raffi --server` instead of
-  # CopyQ, with copy times and source apps built in. The default, auto, uses
-  # that history when the server records it, else CopyQ; the server records
-  # under auto unless CopyQ is already running when it starts.
-  # clipboard:
-  #   enabled: true
-  #   trigger: clip
-  #   min_chars: 3            # hide text entries shorter than this
-  #   exclude_patterns: []    # regexes; matches are hidden (both backends) and not recorded by the raffi backend
-  #   # raffi backend: entries matching these regexes are recorded, then
-  #   # deleted from the history after temporary_timeout seconds (default 60).
-  #   # exclude_patterns still wins, and the system clipboard is untouched.
-  #   temporary_patterns:
-  #     - '(?i)^verification code:'
-  #     - '^OTP:'
-  #   temporary_timeout: 60
-  #   # Keep copies a password manager marked with x-kde-passwordManagerHint
-  #   # as temporary entries instead of skipping them (default false).
-  #   temporary_password_manager: false
-  #   backend: auto           # or copyq, raffi
-  #   max_items: 1000         # raffi backend: entries kept
-  #   max_size_mb: 500        # raffi backend: total history size
-  #   max_image_size_mb: 50   # raffi backend: larger images are skipped
-  #   ocr:
-  #     enabled: false        # recognize text in images with Tesseract
-  #     languages: [eng]      # installed Tesseract language codes
-  #   action: copy
-  #   secondary_action: hypr_paste
+  # Text snippets: type their keyword to pick one, Enter types or copies it.
+  # https://chmouel.github.io/raffi/features/text-snippets/
+  # text_snippets:
+  #   - name: "Emails"
+  #     keyword: "em"
+  #     icon: "mail"
+  #     action: "copy"
+  #     snippets:
+  #       - name: "Personal"
+  #         value: "user@example.com"
+  #       - name: "Work"
+  #         value: "user@company.com"
 
-  # System commands. Type "sys " to list lock, display off, suspend,
-  # hibernate, log out, reboot and shut down. Everything except lock asks
-  # for a second Enter. Display off uses the detected compositor's native
-  # command and is omitted when none is detected. Commands are argument lists
-  # run without a shell; an empty list hides the entry, like `hide`. The
-  # "sys " keyword takes over launcher searches starting with "sys "; change
-  # `trigger` or set `enabled: false` to keep them.
-  # system:
-  #   enabled: true
-  #   trigger: sys
-  #   commands:
-  #     lock: [hyprlock]
-  #   extra:
-  #     - title: Suspend then hibernate
-  #       argv: [systemctl, suspend-then-hibernate]
-  #       icon: system-suspend-hibernate
-  #   hide: [hibernate]
-
-  # Window switcher (Hyprland, niri or sway). Type "win " to
-  # list open windows, most recently used first. Enter focuses the window,
-  # Ctrl+Enter moves it to the current workspace and focuses it.
-  # windows:
-  #   enabled: true
-  #   trigger: win
-
-  # Browser tabs. Type "tabs " to list the tabs of your
-  # browsers, playing ones first. Enter switches to the tab, Ctrl+Enter
-  # closes it. Needs the Vicinae browser extension and a one-time
-  # `raffi --install-browser-host`. Site icons come from the browser
-  # profiles, then from favicon_service (twenty, google or none to stay
-  # offline), which receives the domains of the open tabs. The preview pane
-  # shows the selected page's description and image, fetched from the site
-  # unless favicon_service is none.
-  # browser_tabs:
-  #   enabled: true
-  #   trigger: tabs
-  #   favicon_service: twenty
-
-  # Bookmarks (native UI only). Type "bm " to list the bookmarks of every
-  # Firefox and Chromium profile found (Firefox, LibreWolf, Zen, Chrome,
-  # Brave, Vivaldi, Edge...). Words search every folder; Enter or Tab on a
-  # folder shows it ("bm Firefox/Bookmarks Toolbar/"), Backspace after its
-  # "/" goes back up. Enter opens the link in the browser and profile it
-  # comes from, Ctrl+Enter copies it, Ctrl+Tab shows one profile at a time.
-  # Listing sources replaces the detection.
-  # bookmarks:
-  #   enabled: true
-  #   trigger: bm
-  #   open_with: brave                    # Open every source's links in Brave
-  #   sources:
-  #     - browser: firefox
-  #       profile: default-release        # Profile name or directory; default: every profile
-  #       folder: Bookmarks Toolbar/Work  # Only this folder
-  #       name: Work                      # Label in the list and the Ctrl+Tab footer
-  #       open_with: chrome               # A browser, or a command:
-  #     - path: ~/sync/Bookmarks          # A Bookmarks or places.sqlite file, or a profile directory
-  #       open_with: ["qutebrowser", "{url}"]
-
-  # Browser history (native UI only). Type "hist " to search pages you
-  # visited in every Firefox and Chromium profile found. Ctrl+Tab cycles
-  # browser by browser; filters such as site:github.com,
-  # browser:firefox, profile:work, after:7d and before:2026-01-01 narrow the
-  # list. Enter opens the page, Ctrl+Enter copies the URL. Raffi never edits
-  # or deletes history.
-  # browser_history:
-  #   enabled: true
-  #   trigger: hist
-  #   max_entries: 2000                 # Stored visits read per source (100..10000)
-  #   cache_seconds: 300                # Reuse the parsed snapshot until a database changes
-  #   open_with: firefox                # A browser, or a command:
-  #   sources:
-  #     - browser: firefox
-  #       profile: default-release      # Default: every profile
-  #       name: Firefox                 # Label in the by-browser view
-  #     - path: ~/snap/chromium/History # A History or places.sqlite file, or a profile directory
-  #       open_with: ["qutebrowser", "{url}"]
-
-  # Media controls (needs playerctl). Type "media " to play,
-  # pause, skip or stop any running media player. Raffi stays open and
-  # refreshes after each action unless close_on_action is true.
-  # media:
-  #   enabled: true
-  #   trigger: media
-  #   close_on_action: false
-
-  # Audio switcher (needs pactl). Type "audio " to list
-  # volume controls, outputs and inputs. Enter makes a device the default,
-  # Ctrl+Enter mutes or unmutes it, and Ctrl+Tab cycles between all,
-  # outputs only and inputs only. "audio 40" or "vol 40" in main_view sets
-  # the output volume. Raffi stays open and refreshes unless close_on_action
-  # is true.
-  # audio:
-  #   enabled: true
-  #   trigger: audio
-  #   close_on_action: false
-  #   volume_step: 5      # Percent changed by Volume up and down
-  #   max_volume: 100     # Highest volume Volume up and "vol N" will set
-
-  # Installed applications. List the .desktop apps of your system next to
-  # your launchers, with their actions such as "Firefox: New Private Window".
-  # Apps with the same name or command as a launcher are skipped. Without
-  # any launcher configured, apps are listed even when this is off.
-  # apps:
-  #   enabled: false
-  #   actions: true       # Also list desktop actions
-
-  # Run in terminal. Type "> htop" to run htop in a
-  # terminal. The terminal is found automatically (xdg-terminal-exec,
-  # $TERMINAL, then kitty, foot, alacritty, wezterm, ghostty, konsole,
-  # gnome-terminal, xfce4-terminal, xterm) unless command is set. The command
-  # runs with general.default_script_shell; hold keeps the window open
-  # until Enter once it exits. With kitty or WezTerm already running, the
-  # command opens in a new tab of it (open_in: window turns that off). kitty
-  # needs allow_remote_control and listen_on in kitty.conf; kitty_socket
-  # overrides the listen_on read from there (Unix sockets only).
-  # terminal:
-  #   enabled: true
-  #   trigger: ">"
-  #   command: [alacritty, -e]
-  #   hold: true
-  #   open_in: tab
-  #   kitty_socket: unix:${XDG_RUNTIME_DIR}/kitty
-
-  # Kill process (needs kill). Type "kill " to list your own
-  # processes, biggest memory first. Enter twice sends SIGTERM, Ctrl+Enter
-  # twice sends SIGKILL. Raffi stays open and refreshes the list.
-  # kill:
-  #   enabled: true
-  #   trigger: kill
-
-  # Bluetooth (needs bluetoothctl). Type "bt " to list your
-  # paired devices under a row that turns Bluetooth on or off. Enter
-  # connects a device, or disconnects it when pressed twice. Turning
-  # Bluetooth off also needs a second Enter. Raffi stays open and refreshes
-  # the list.
-  # bluetooth:
-  #   enabled: true
-  #   trigger: bt
-  #   close_on_action: false
-
-  # Password store (needs pass and gpg). Type "pass " to
-  # list your entries. Enter copies the password, Ctrl+Enter types it,
-  # Ctrl+U copies the username, Ctrl+O the OTP code (pass-otp). When
-  # gpg-agent has no cached passphrase Raffi asks for it in a masked prompt;
-  # "pinentry: agent" lets gpg-agent's own pinentry ask instead (smartcards,
-  # YubiKeys). Pasting a URL lists the entries named after its site first.
-  # pass:
-  #   enabled: true
-  #   trigger: pass
-  #   store_dir: ~/.password-store   # default: $PASSWORD_STORE_DIR or this
-  #   pinentry: raffi                # raffi | agent
-  #   username_fields: [login, user, username]
-  #   clipboard_timeout: 45          # seconds, 0 = never clear
-  #   type_delay_ms: 200
-
-  # Bitwarden (through rbw, set up with "rbw login").
-  # Type "bw " to list your logins, same keys as pass. A locked vault is
-  # unlocked with rbw's pinentry; the lock timeout is rbw's lock_timeout.
-  # Pasting a URL lists that site's logins first, and after a pause rbw also
-  # searches notes and custom fields ("notes" pill).
-  # bitwarden:
-  #   enabled: true
-  #   trigger: bw
-  #   clipboard_timeout: 45
-  #   type_delay_ms: 200
-
-  # Slack (off by default). Type "slack " to open channels,
-  # DMs and people, "slack search <words>", "slack people <name>",
-  # "slack unread", or
-  # "slack status Lunch :pizza: 1h". The token is a user token (xoxp-) from
-  # your own Slack app, or a browser session token (xoxc-) with its "d"
-  # cookie. Ctrl+P previews the latest messages, and Ctrl+Tab cycles
-  # between Home, Unread and People.
-  # slack:
-  #   enabled: true
-  #   trigger: slack
-  #   token_command: "pass show slack/token"
-  #   cookie_command: "pass show slack/cookie"   # xoxc- tokens only
-  #   open_in: desktop                            # desktop | browser
-  #   message_order: newest_first                 # newest_first | oldest_first
-  #   unread_conversations: ["#ops", "@alice"]    # for xoxp- tokens
-  #   cache_minutes: 60                           # 0 asks Slack every time
-  #   warm_interval_minutes: 60                   # Server refresh interval (default: cache_minutes)
-
-  # Unit conversion. Type "10 km to mi", "70f to c" or
-  # "5 GB in MB" without any keyword. Enter copies the number, Ctrl+Enter
-  # copies it with the unit.
-  # units:
-  #   enabled: true
-
-  # Color converter. Type "#ff8800", "rgb(255 136 0)" or
-  # "hsl(32 100% 50%)" to see the color as hex, rgb, hsl and the nearest
-  # CSS color name. Enter copies the selected format.
-  # color:
-  #   enabled: true
-
-  # World clock (needs tzdata). Type "time tokyo" or
-  # "time in new york" for the current time there, or "15:00 paris to nyc"
-  # to convert a time. Enter copies the time, Ctrl+Enter a full timestamp.
-  # world_clock:
-  #   enabled: true
-
-  # Developer tools. Type "dev " followed by text to see it
-  # base64 and URL encoded or decoded, hashed (sha256sum, sha1sum, md5sum),
-  # converted between epoch and date, JSON reformatted or case changed.
-  # Typing "uuid", "pw" or "pw 32" shows a random UUID or password. Enter
-  # copies. Queries are saved in the search history when you run an action.
-  # devtools:
-  #   enabled: true
-  #   trigger: dev
-  #   password_length: 20
+# Find every CLI flag and option here:
+# https://chmouel.github.io/raffi/reference/cli-options/
+# Validate this file with: raffi --check-config

@@ -48,7 +48,7 @@
       "type": "object",
       "properties": {
         "alias": {
-          "description": "Route this launcher to an internal command: picking it types this text\nfor you, such as `mp linus/linux` (an addon keyword\nfollowed by its query). Cannot be combined with `binary`, `script`,\n`args` or `env`.",
+          "description": "Route this launcher to an internal command: picking it types this text\nfor you, such as `mp owner/project` (an addon keyword\nfollowed by its query). Cannot be combined with `binary`, `script`,\n`args` or `env`.",
           "type": [
             "string",
             "null"
@@ -151,7 +151,7 @@
           ]
         },
         "keyword": {
-          "description": "Keyword that stands for `alias` while typing: with keyword `linoux`,\ntyping `linoux torvalds` searches `mp linus/linux torvalds`\nwhile the input keeps showing `linoux torvalds`. Requires `alias`; no\nwhitespace.",
+          "description": "Keyword that stands for `alias` while typing: with keyword `shortcut`,\ntyping `shortcut query` searches `mp owner/project query`\nwhile the input keeps showing `shortcut query`. Requires `alias`; no\nwhitespace.",
           "type": [
             "string",
             "null"

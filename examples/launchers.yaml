@@ -1,24 +1,12 @@
 # yaml-language-server: $schema=launchers-schema.json
-# Validate this file with: raffi --check-config
-#
-# Launcher entries, keyed by name. Put this file next to raffi.yaml
-# (~/.config/raffi/launchers.yaml). It is used when raffi.yaml has no
-# `launchers:` section of its own.
-#
-# With addons.apps.enabled: true in raffi.yaml, installed .desktop applications
-# are listed automatically, so plain GUI apps usually need no entry here.
-# Raffi's native UI also includes built-in addons for clipboard history (`clip `),
-# passwords and Bitwarden (`pass `, `bw `), calculator expressions, emoji (`emoji `),
-# audio (`audio `), system power actions (`sys `), and file browsing (`~/`).
-# See https://chmouel.github.io/raffi/ for addon docs; if you use `ui_type: fuzzel`,
-# you can still add external tools as launchers here.
-#
-# Use `ifexist`, `ifenvset`, `ifenveq`, or `ifcompositor` to keep a shared
-# multi-machine config clean without showing entries whose tools are absent.
+# Your own entries, keyed by name: ~/.config/raffi/launchers.yaml.
+# Installed applications need no entry, see `addons.apps` in raffi.yaml.
+# Fields: https://chmouel.github.io/raffi/configuration/entries/
+# Conditions: https://chmouel.github.io/raffi/configuration/conditions/
+# Validate with: raffi --check-config
 
-# Enter focuses Thunderbird when it is already open, Ctrl+Enter starts a new
-# one (Hyprland, niri, sway). window_class defaults to the binary name, which
-# is enough for a plain binary without args.
+# Enter focuses Thunderbird when it is open, Ctrl+Enter starts another one.
+# The window class defaults to the binary name.
 thunderbird:
   binary: thunderbird
   description: "Thunderbird"
@@ -26,272 +14,92 @@ thunderbird:
   ifexist: thunderbird
   raise: true
 
-# Arguments or a script give `raise` no class to infer, so set `window_class`
-# explicitly. `desktop` links this launcher to the installed .desktop file so
-# `addons.apps` does not list Chromium a second time while keeping its actions.
-chromium-work:
-  binary: chromium
-  args: ["--profile-directory=Work"]
-  description: "Chromium (Work)"
-  icon: chromium
-  ifexist: chromium
-  raise: true
-  window_class: Chromium
-  desktop: chromium.desktop
-
-# jumpapp is a helper for compositors/WMs without built-in raise support:
-# https://gitlab.com/chmouel/chmouzies/-/blob/main/graphical/sway-jumpapp
-wally:
-  args: ["-X", "wally"]
-  binary: jumpapp
-  description: "Wally"
-  icon: wally
-  ifexist: wally
-  window_class: wally
-
-evolution-mail:
-  args: ["-t", "Evolution", "-X", "evolution"]
-  binary: jumpapp
-  description: "Evolution Mail"
-  icon: evolution-mail
-  ifexist: evolution
-  window_class: evolution
-
-signal:
-  args: ["-X", "signal", "signal-desktop"]
-  binary: jumpapp
-  description: "Signal"
-  icon: signal-desktop
-  ifexist: signal-desktop
-  window_class: signal
-
-firefox:
-  args: ["-X", "firefox"]
-  binary: jumpapp
-  description: "Firefox"
+# With arguments, name the window class. `desktop` stops the installed
+# Firefox from being listed twice and keeps its actions.
+firefox-work:
+  binary: firefox
+  args: ["-P", "work", "--name", "firefox-work"]
+  description: "Firefox (Work profile)"
   icon: firefox
-  window_class: firefox
+  raise: true
+  window_class: firefox-work
   desktop: firefox.desktop
 
-ipython:
-  binary: kitty-ctrl
-  args: ["jump", "-t IPython", "ipython3"]
-  description: "Ipython"
-  icon: ipython
-  window_class: kitty
-
-# env sets variables for this launcher only; values expand ~/ and ${VAR}.
-ipython-startup:
+# A terminal app in its own kitty window, focused again when already open.
+btop:
   binary: kitty
-  args: ["ipython3"]
-  description: "Ipython with startup file"
+  args: ["--class", "btop", "btop"]
+  description: "btop"
+  icon: utilities-system-monitor
+  ifexist: btop
+  raise: true
+  window_class: btop
+
+# `raise: false` always starts a new one, even with general.raise_running.
+ssh-server:
+  binary: kitty
+  args: ["ssh", "user@server.example.com"]
+  description: "SSH to server"
+  icon: utilities-terminal
+  raise: false
+
+# A script runs with general.default_script_shell. This one grabs a region
+# and opens it in satty to annotate, then copy or save it.
+screenshot:
+  script: |
+    grim -g "$(slurp -d)" - |
+      satty --filename - --copy-command wl-copy --early-exit
+  description: "Screenshot a region and annotate it"
+  icon: applets-screenshooter
+  ifcompositor: [hyprland, niri, sway]
+  ifexist: satty
+  raise: false
+
+# `env` applies to this entry only; values expand ~/ and ${VAR}.
+ipython:
+  binary: kitty
+  args: ["ipython"]
+  description: "IPython with a startup file"
   icon: ipython
-  window_class: kitty
+  ifexist: ipython
+  raise: false
   env:
     PYTHONSTARTUP: "~/.config/python/startup.py"
 
-ssh-kodi:
-  binary: kitty-ctrl
-  args: ["jump", "-t", "Kodi", "ssh", "kodi"]
-  description: "Kodi"
-  icon: kodi
-  window_class: kitty
-
-ssh-pi:
-  binary: kitty-ctrl
-  args: ["jump", "-t", "PI", "ssh", "pi"]
-  description: "PI"
-  icon: raspberry
-  window_class: kitty
-
-ssh-bootstrap:
-  binary: kitty-ctrl
-  args: ["jump", "-t", "Bootstrap", "ssh", "bootstrap"]
-  description: "Bootstrap SSH"
-  icon: bootstrap
-  window_class: kitty
-
-golang:
-  binary: jumpapp
-  args: ["-c", "jetbrains-goland", "goland"]
-  description: "Goland"
-  icon: /opt/goland/bin/goland.svg
-  window_class: jetbrains-goland
-  show_preview: true # show the command and usage stats in the preview pane for this entry
-
-add-org-note:
-  binary: add-org-task
-  description: "Add org note"
-  icon: writenote
-
-# An alias types its text into the search box when picked. With a keyword,
-# typing "ghraffi release" searches like "gh chmouel/raffi release"
-# ("gh" is configured under addons.web_searches in examples/raffi.yaml)
-# while the box keeps showing what you typed.
-ghraffi:
-  description: "Raffi on GitHub"
+# An alias types its text for you. With a keyword, "proj release" searches
+# "gh owner/project release" through the `gh` web search in raffi.yaml.
+project-on-github:
+  description: "Project on GitHub"
   icon: github
-  alias: "gh chmouel/raffi"
-  keyword: ghraffi
+  alias: "gh owner/project"
+  keyword: proj
 
-center-window:
-  binary: wmctrl-resize-and-center
-  description: "Center window"
-  icon: wmsnap
-  ifenveq: [XDG_SESSION_TYPE, x11]
-
-jump-to-org-file:
-  args: [jumpto]
-  binary: add-org-task
-  description: "Jump to org file"
-  icon: notes-app
-  raise: false
-
-keyboard-setting:
-  args: [keyboard]
+# Shown only in a GNOME session.
+keyboard-settings:
   binary: gnome-control-center
-  description: "Keyboard setting"
-  icon: preferences-desktop-keyboard-shortcuts
-  ifenveq: [DESKTOP_SESSION, GNOME]
-  window_class: gnome-control-center
-
-snap-window-around:
-  args: [rotate]
-  binary: wmctrl-resize-and-center
-  description: "Snap window around"
-  icon: wmaround
-  ifenveq: [XDG_SESSION_TYPE, x11]
+  args: ["keyboard"]
+  description: "Keyboard settings"
+  icon: preferences-desktop-keyboard
+  ifenveq: [XDG_CURRENT_DESKTOP, GNOME]
   raise: false
 
-ssh:
-  args: ["-show", "ssh", "-theme", "mounch"]
-  binary: rofi
-  description: "SSH"
-  icon: ssh
-  ifenveq: [XDG_SESSION_TYPE, x11]
+# Raffi stays open after it runs, to toggle again or pick something else.
+do-not-disturb:
+  binary: swaync-client
+  args: ["--toggle-dnd", "--skip-wait"]
+  description: "Toggle Do Not Disturb"
+  icon: notifications-disabled
+  ifexist: swaync-client
+  close_on_action: false
   raise: false
 
-bpytop:
-  binary: kitty-ctrl
-  args: ["jump", "bpytop"]
-  description: "BpyTOP"
-  icon: bashtop
-  ifexist: bpytop
-  window_class: kitty
-
-show-tv:
-  binary: playr
-  icon: tv
-  description: "Play TV"
-  ifexist: playr
-
-show-tv-groups:
-  binary: playr
-  args: ["-G"]
-  icon: tv
-  description: "Play TV choose groups"
-  ifexist: playr
-  raise: false
-
-gnome-activity:
-  binary: gnome-show-activity
-  description: "Gnome Activity"
-  icon: gnome-run
-  ifenveq: [DESKTOP_SESSION, GNOME]
-
-spotify:
-  args: ["-X", "-c", "Spotify", "spotify"]
-  binary: jumpapp
-  description: "Spotify"
-  icon: spotify
-  ifexist: spotify
-  window_class: Spotify
-
-vscode:
-  args: ["-X", "-c", "Visual Studio Code", "code"]
-  binary: jumpapp
-  description: "VSCode"
-  icon: visual-studio-code
-  ifexist: code
-  window_class: code
-  desktop: code.desktop
-
-start-kind:
-  binary: kitty-ctrl
-  args: ["jump", "-t", "Kind", "startkind"]
-  description: "Start Kind"
-  icon: kind-started
-  ifexist: kind
-  window_class: kitty
-
-stop-kind:
-  binary: kitty-ctrl
-  args: ["jump", "-t", "Kind", "stopkind"]
-  description: "Stop Kind"
-  icon: kind-stopped
-  ifexist: kind
-  window_class: kitty
-
-windows:
+# Hidden on machines where you export WORK_LAPTOP (set it in your session
+# environment there). `show_preview` previews it even with the pane off.
+reboot-to-windows:
   binary: systemctl
   args: ["reboot", "--boot-loader-entry=auto-windows"]
-  description: Reboot to windows
-  icon: windows
-  ifenvset: SWAYSOCK
-  raise: false
-
-screenshot-clipboard:
-  description: Screenshot to clipboard
-  args: [selection-clipboard]
-  binary: sway-screenshot
-  icon: screenshoticon
-  ifenvset: SWAYSOCK
-  raise: false
-
-screenshot-file:
-  description: Screenshot to file
-  args: [selection-file]
-  binary: sway-screenshot
-  icon: screenshoticon
-  ifenvset: SWAYSOCK
-  raise: false
-
-screenshot-window-clipboard:
-  description: Screenshot window to clipboard
-  args: [selection-window-clipboard]
-  binary: sway-screenshot
-  icon: screenshoticon
-  ifenvset: SWAYSOCK
-  raise: false
-
-screenshot-window-file:
-  description: Screenshot window to file
-  args: [selection-window-file]
-  binary: sway-screenshot
-  icon: screenshoticon
-  ifenvset: SWAYSOCK
-  raise: false
-
-screenshot-movie-selection:
-  description: Screencast movie selection
-  args: [movie-selection]
-  binary: sway-screenshot
-  icon: movierecord
-  ifenvset: SWAYSOCK
-  raise: false
-
-screenshot-movie-screen:
-  description: Screencast movie screen
-  args: [movie-screen]
-  binary: sway-screenshot
-  icon: movierecord
-  ifenvset: SWAYSOCK
-  raise: false
-
-screenshot-stop-recording:
-  description: Screencast stop recording
-  args: [stop-recording]
-  binary: sway-screenshot
-  icon: stoprecording
-  ifenvset: SWAYSOCK
+  description: "Reboot to Windows"
+  icon: system-reboot
+  ifenvnotset: WORK_LAPTOP
+  show_preview: true
   raise: false

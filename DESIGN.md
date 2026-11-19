@@ -296,7 +296,8 @@ Behavior changes usually need updates in more than one place:
 
 - `README.md` for high-level user-facing behavior
 - `website/src/content/docs/` for detailed docs
-- `examples/raffi.yaml` for canonical config examples
+- `examples/raffi.yaml` as the short starter config (see AGENTS.md before editing it), and
+  `examples/raffi.full.yaml` for the generated reference of every setting
 - `examples/raffi-schema.json` and `examples/launchers-schema.json` when config
   structs change
 - `src/ui/wayland/tests.rs` or nearby unit tests when routing or ranking behavior changes

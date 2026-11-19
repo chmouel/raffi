@@ -106,6 +106,7 @@
           "$ref": "#/$defs/PassAddonConfig"
         },
         "script_filters": {
+          "description": "Script filters, each a command Raffi runs for a keyword",
           "type": "array",
           "default": [],
           "items": {
@@ -134,6 +135,7 @@
           "$ref": "#/$defs/TerminalAddonConfig"
         },
         "text_snippets": {
+          "description": "Text snippet sources, from inline snippets, a file or a command",
           "type": "array",
           "items": {
             "$ref": "#/$defs/TextSnippetSourceConfig"
@@ -143,6 +145,7 @@
           "$ref": "#/$defs/UnitsAddonConfig"
         },
         "web_searches": {
+          "description": "Web searches opened in the browser for a keyword",
           "type": "array",
           "items": {
             "$ref": "#/$defs/WebSearchConfig"
@@ -187,6 +190,7 @@
           "default": null
         },
         "enabled": {
+          "description": "Turn the addon off with `false` (default: true).",
           "type": "boolean",
           "default": true
         },
@@ -244,6 +248,7 @@
           "default": null
         },
         "enabled": {
+          "description": "Turn the addon off with `false` (default: true).",
           "type": "boolean",
           "default": true
         },
@@ -281,6 +286,7 @@
           "default": null
         },
         "enabled": {
+          "description": "Turn the addon off with `false` (default: true).",
           "type": "boolean",
           "default": true
         },
@@ -405,6 +411,7 @@
           "default": null
         },
         "enabled": {
+          "description": "Turn the addon off with `false` (default: true).",
           "type": "boolean",
           "default": true
         },
@@ -464,6 +471,7 @@
           "default": null
         },
         "enabled": {
+          "description": "Turn the addon off with `false` (default: true).",
           "type": "boolean",
           "default": true
         },
@@ -579,6 +587,7 @@
           "default": null
         },
         "enabled": {
+          "description": "Turn the addon off with `false` (default: true).",
           "type": "boolean",
           "default": true
         },
@@ -610,6 +619,7 @@
           "default": null
         },
         "enabled": {
+          "description": "Turn the addon off with `false` (default: true).",
           "type": "boolean",
           "default": true
         }
@@ -707,6 +717,7 @@
           "minimum": 0
         },
         "ocr": {
+          "description": "Read text from history images with tesseract, when it is installed\n(default: off).",
           "$ref": "#/$defs/ClipboardOcrConfig"
         },
         "secondary_action": {
@@ -831,6 +842,7 @@
           "default": null
         },
         "enabled": {
+          "description": "Turn the addon off with `false` (default: true).",
           "type": "boolean",
           "default": true
         }
@@ -859,6 +871,7 @@
           "default": null
         },
         "currencies": {
+          "description": "Currencies an amount without a target converts to (default: [USD, EUR,\nGBP]).",
           "type": [
             "array",
             "null"
@@ -869,6 +882,7 @@
           }
         },
         "default_currency": {
+          "description": "Currency an amount without one converts from (default: USD).",
           "type": [
             "string",
             "null"
@@ -876,6 +890,7 @@
           "default": null
         },
         "enabled": {
+          "description": "Turn the addon off with `false` (default: true).",
           "type": "boolean",
           "default": true
         },
@@ -890,6 +905,7 @@
           }
         },
         "trigger": {
+          "description": "Character that opens the converter (default: $).",
           "type": [
             "string",
             "null"
@@ -954,6 +970,7 @@
           "default": null
         },
         "enabled": {
+          "description": "Turn the addon off with `false` (default: true).",
           "type": "boolean",
           "default": true
         },
@@ -984,6 +1001,7 @@
       "type": "object",
       "properties": {
         "action": {
+          "description": "What Enter does: `copy`, `insert`, or a command run for the character\n(default: copy).",
           "type": [
             "string",
             "null"
@@ -999,6 +1017,7 @@
           "default": null
         },
         "data_files": {
+          "description": "Character lists to load, such as `emojis_smileys_emotion`, `gitmoji`\nor `nerd_font` (default: the standard emoji groups).",
           "type": [
             "array",
             "null"
@@ -1009,10 +1028,12 @@
           }
         },
         "enabled": {
+          "description": "Turn the addon off with `false` (default: true).",
           "type": "boolean",
           "default": true
         },
         "secondary_action": {
+          "description": "What Ctrl+Enter does, with the same values as `action` (default:\ninsert).",
           "type": [
             "string",
             "null"
@@ -1020,6 +1041,7 @@
           "default": null
         },
         "trigger": {
+          "description": "Keyword that opens the picker (default: `emoji`).",
           "type": [
             "string",
             "null"
@@ -1070,6 +1092,7 @@
           "default": null
         },
         "enabled": {
+          "description": "Turn the addon off with `false` (default: true).",
           "type": "boolean",
           "default": true
         },
@@ -1107,6 +1130,7 @@
           "$ref": "#/$defs/FileBrowserShow"
         },
         "show_hidden": {
+          "description": "List dotfiles too, such as `~/.config` (default: false).",
           "type": [
             "boolean",
             "null"
@@ -1186,7 +1210,7 @@
           "$ref": "#/$defs/ClipboardHistory"
         },
         "close_on_action": {
-          "description": "Close Raffi after executing an action (default: true).\nAddon and launcher `close_on_action` settings override this.",
+          "description": "Close Raffi after executing an action. Unset closes after most actions,\nbut keeps the media, audio, Bluetooth and kill addons open; `true` or\n`false` applies to every addon and launcher without its own\n`close_on_action`.",
           "type": [
             "boolean",
             "null"
@@ -1194,6 +1218,7 @@
           "default": null
         },
         "default_script_shell": {
+          "description": "Shell that runs script launchers and terminal-addon commands\n(default: bash).",
           "type": [
             "string",
             "null"
@@ -1201,6 +1226,7 @@
           "default": null
         },
         "fallbacks": {
+          "description": "Rows added below the main list while typing, such as\n`addons.web_searches.\"Google\"` or `addons.terminal` (default: none).",
           "type": "array",
           "default": [],
           "items": {
@@ -1208,6 +1234,7 @@
           }
         },
         "font_family": {
+          "description": "Font family name, such as `Inter` (default: the system UI font).",
           "type": [
             "string",
             "null"
@@ -1215,6 +1242,7 @@
           "default": null
         },
         "font_size": {
+          "description": "Base font size in px; the other sizes scale from it (default: 20).",
           "type": [
             "number",
             "null"
@@ -1260,6 +1288,7 @@
           "$ref": "#/$defs/MainViewChips"
         },
         "max_history": {
+          "description": "Search queries the history keeps; 0 disables it (default: 10).",
           "type": [
             "integer",
             "null"
@@ -1269,6 +1298,7 @@
           "minimum": 0
         },
         "no_icons": {
+          "description": "Start without loading icons, for a faster start (default: false).",
           "type": [
             "boolean",
             "null"
@@ -1287,6 +1317,7 @@
           "minimum": 0.0
         },
         "padding": {
+          "description": "Outer margin around the window content in px, instead of the one that\nfollows `font_size` (default: 20).",
           "type": [
             "number",
             "null"
@@ -1327,6 +1358,7 @@
           "default": null
         },
         "sort_mode": {
+          "description": "Sort launcher, snippet and password rows by past use: `frequency`,\n`recency` or `hybrid` (default: hybrid).",
           "$ref": "#/$defs/SortMode"
         },
         "terminal_classes": {
@@ -1338,6 +1370,7 @@
           }
         },
         "theme": {
+          "description": "Theme preset: dark, light, catppuccin, catppuccin-latte, tokyo-night,\nnord, gruvbox, dracula, rose-pine or kanagawa (default: dark).",
           "type": [
             "string",
             "null"
@@ -1345,6 +1378,7 @@
           "default": null
         },
         "theme_colors": {
+          "description": "Per-colour overrides of the theme, as #RGB, #RRGGBB or #RRGGBBAA",
           "anyOf": [
             {
               "$ref": "#/$defs/ThemeColorsConfig"
@@ -1355,6 +1389,7 @@
           ]
         },
         "ui_type": {
+          "description": "Window entries show in: `native` (Raffi's own window), or `fuzzel`;\n`wayland` and `iced` are aliases of `native`. Unset uses the native\nwindow when this build has it, and `fuzzel` otherwise.",
           "type": [
             "string",
             "null"
@@ -1370,6 +1405,7 @@
           "default": null
         },
         "window_height": {
+          "description": "Window height in px (default: 600).",
           "type": [
             "number",
             "null"
@@ -1378,6 +1414,7 @@
           "default": null
         },
         "window_width": {
+          "description": "Window width in px (default: 800).",
           "type": [
             "number",
             "null"
@@ -1401,6 +1438,7 @@
           "default": null
         },
         "enabled": {
+          "description": "Turn the addon off with `false` (default: true).",
           "type": "boolean",
           "default": true
         },
@@ -1494,6 +1532,7 @@
           "default": null
         },
         "enabled": {
+          "description": "Turn the addon off with `false` (default: true).",
           "type": "boolean",
           "default": true
         },
@@ -1559,6 +1598,7 @@
           "default": null
         },
         "enabled": {
+          "description": "Turn the addon off with `false` (default: true).",
           "type": "boolean",
           "default": true
         },
@@ -1727,7 +1767,7 @@
       "type": "object",
       "properties": {
         "alias": {
-          "description": "Route this launcher to an internal command: picking it types this text\nfor you, such as `mp linus/linux` (an addon keyword\nfollowed by its query). Cannot be combined with `binary`, `script`,\n`args` or `env`.",
+          "description": "Route this launcher to an internal command: picking it types this text\nfor you, such as `mp owner/project` (an addon keyword\nfollowed by its query). Cannot be combined with `binary`, `script`,\n`args` or `env`.",
           "type": [
             "string",
             "null"
@@ -1830,7 +1870,7 @@
           ]
         },
         "keyword": {
-          "description": "Keyword that stands for `alias` while typing: with keyword `linoux`,\ntyping `linoux torvalds` searches `mp linus/linux torvalds`\nwhile the input keeps showing `linoux torvalds`. Requires `alias`; no\nwhitespace.",
+          "description": "Keyword that stands for `alias` while typing: with keyword `shortcut`,\ntyping `shortcut query` searches `mp owner/project query`\nwhile the input keeps showing `shortcut query`. Requires `alias`; no\nwhitespace.",
           "type": [
             "string",
             "null"
@@ -1914,6 +1954,7 @@
       "type": "object",
       "properties": {
         "action": {
+          "description": "What Enter does with the row: `copy`, `insert` or a shell command\n(default: copy).",
           "type": [
             "string",
             "null"
@@ -1928,6 +1969,7 @@
           }
         },
         "args": {
+          "description": "Arguments passed to `command` before the query.",
           "type": "array",
           "default": [],
           "items": {
@@ -1963,6 +2005,7 @@
           "default": null
         },
         "command": {
+          "description": "Program run for the filter, without a shell, with `args` then the typed\nquery as its last argument.",
           "type": "string"
         },
         "dynamic_preview": {
@@ -1973,6 +2016,7 @@
           ]
         },
         "env": {
+          "description": "Environment variables set for the command and its preview runs.",
           "type": "object",
           "additionalProperties": {
             "type": "string"
@@ -1980,15 +2024,18 @@
           "default": {}
         },
         "icon": {
+          "description": "Icon of rows without one of their own: emoji, icon name or image path.",
           "type": [
             "string",
             "null"
           ]
         },
         "keyword": {
+          "description": "Keyword that opens the filter.",
           "type": "string"
         },
         "min_query_length": {
+          "description": "Characters typed after the keyword before the command runs; until then\nRaffi says how many more to type (default: 0).",
           "type": [
             "integer",
             "null"
@@ -1997,9 +2044,11 @@
           "minimum": 0
         },
         "name": {
+          "description": "Name shown while its command runs, and used to address the filter in\n`main_view`, `fallbacks` and `-o addons.script_filters.<name>.<key>`.",
           "type": "string"
         },
         "secondary_action": {
+          "description": "What Ctrl+Enter does, with the same values as `action` (default: same\nas `action`).",
           "type": [
             "string",
             "null"
@@ -2187,6 +2236,7 @@
           "$ref": "#/$defs/SystemCommandsConfig"
         },
         "enabled": {
+          "description": "Turn the addon off with `false` (default: true).",
           "type": "boolean",
           "default": true
         },
@@ -2390,6 +2440,7 @@
           }
         },
         "enabled": {
+          "description": "Turn the addon off with `false` (default: true).",
           "type": "boolean",
           "default": true
         },
@@ -2457,9 +2508,11 @@
           "default": null
         },
         "name": {
+          "description": "Name shown in the list and matched when searching.",
           "type": "string"
         },
         "value": {
+          "description": "Text copied, inserted or handed to the action.",
           "type": "string"
         }
       },
@@ -2474,6 +2527,7 @@
       "type": "object",
       "properties": {
         "action": {
+          "description": "What Enter does: `copy`, `insert`, `hypr_paste` or a shell command\n(default: copy).",
           "type": [
             "string",
             "null"
@@ -2481,6 +2535,7 @@
           "default": null
         },
         "args": {
+          "description": "Arguments passed to `command`.",
           "type": "array",
           "default": [],
           "items": {
@@ -2496,6 +2551,7 @@
           "default": null
         },
         "command": {
+          "description": "Program that prints its snippets as Script Filter JSON.",
           "type": [
             "string",
             "null"
@@ -2503,6 +2559,7 @@
           "default": null
         },
         "directory": {
+          "description": "Path to a directory of `.snippet` files.",
           "type": [
             "string",
             "null"
@@ -2510,6 +2567,7 @@
           "default": null
         },
         "file": {
+          "description": "Path to a YAML file of snippets, in the same format as `snippets`.",
           "type": [
             "string",
             "null"
@@ -2517,6 +2575,7 @@
           "default": null
         },
         "icon": {
+          "description": "Default icon for its snippets: emoji, icon name or image path.",
           "type": [
             "string",
             "null"
@@ -2524,6 +2583,7 @@
           "default": null
         },
         "keyword": {
+          "description": "Keyword that opens the source.",
           "type": "string"
         },
         "markdown": {
@@ -2535,6 +2595,7 @@
           "default": null
         },
         "name": {
+          "description": "Name shown on its keyword row and while a `command` source loads.",
           "type": "string"
         },
         "placeholders": {
@@ -2548,6 +2609,7 @@
           "default": false
         },
         "secondary_action": {
+          "description": "What Ctrl+Enter does, with the same values as `action`.",
           "type": [
             "string",
             "null"
@@ -2555,6 +2617,7 @@
           "default": null
         },
         "snippets": {
+          "description": "Snippets written in the config, each with a `name` and a `value`.",
           "type": [
             "array",
             "null"
@@ -2575,48 +2638,56 @@
       "type": "object",
       "properties": {
         "accent": {
+          "description": "Selected rows, borders and highlights (default: the theme's)",
           "type": [
             "string",
             "null"
           ]
         },
         "accent_hover": {
+          "description": "Accent of hovered rows (default: the theme's)",
           "type": [
             "string",
             "null"
           ]
         },
         "bg_base": {
+          "description": "Main window background (default: the theme's)",
           "type": [
             "string",
             "null"
           ]
         },
         "bg_input": {
+          "description": "Search input background (default: the theme's)",
           "type": [
             "string",
             "null"
           ]
         },
         "border": {
+          "description": "Window and separator borders (default: the theme's)",
           "type": [
             "string",
             "null"
           ]
         },
         "selection_bg": {
+          "description": "Background of the selected row (default: the theme's)",
           "type": [
             "string",
             "null"
           ]
         },
         "text_main": {
+          "description": "Primary text (default: the theme's)",
           "type": [
             "string",
             "null"
           ]
         },
         "text_muted": {
+          "description": "Secondary text, subtitles and hints (default: the theme's)",
           "type": [
             "string",
             "null"
@@ -2638,6 +2709,7 @@
           "default": null
         },
         "enabled": {
+          "description": "Turn the addon off with `false` (default: true).",
           "type": "boolean",
           "default": true
         }
@@ -2657,18 +2729,22 @@
           "default": null
         },
         "icon": {
+          "description": "Icon name shown next to the search row.",
           "type": [
             "string",
             "null"
           ]
         },
         "keyword": {
+          "description": "Keyword that opens the search.",
           "type": "string"
         },
         "name": {
+          "description": "Name shown in the search row, as in \"Search Google for 'rust traits'\".",
           "type": "string"
         },
         "url": {
+          "description": "URL template; every `{query}` is replaced by the percent-encoded query.",
           "type": "string"
         }
       },
@@ -2692,6 +2768,7 @@
           "default": null
         },
         "enabled": {
+          "description": "Turn the addon off with `false` (default: true).",
           "type": "boolean",
           "default": true
         },
@@ -2719,6 +2796,7 @@
           "default": null
         },
         "enabled": {
+          "description": "Turn the addon off with `false` (default: true).",
           "type": "boolean",
           "default": true
         }
