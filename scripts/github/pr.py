@@ -25,11 +25,14 @@ from ghcommon import (
     GREY,
     ICON,
     RED,
+    TYPED_TIME,
     YELLOW,
     GhError,
     ago,
     colored,
     error_rows,
+    time_field,
+    time_text,
     with_cache,
 )
 
@@ -312,9 +315,10 @@ def build_item(pr: dict, show_repo: bool) -> dict:
         details.append(f"\U0001f4ac {threads} unresolved")
     if "additions" in pr:
         details.append(size(pr))
-    if updated := pr.get("updatedAt"):
+    updated = pr.get("updatedAt")
+    if updated and not TYPED_TIME:
         details.append(colored(f"updated {ago(updated)}", GREY))
-    return {
+    item = {
         "title": f"PR #{pr['number']}: {pr['title']} - {suffix}",
         "subtitle": " \u00b7 ".join(details),
         "arg": url,
@@ -325,6 +329,9 @@ def build_item(pr: dict, show_repo: bool) -> dict:
             "PR_BRANCH": pr.get("headRefName", ""),
         },
     }
+    if TYPED_TIME and updated:
+        item["time"] = time_field(updated, "updated")
+    return item
 
 
 def avatar_path(owner: str) -> Path:
@@ -394,7 +401,7 @@ def list_items(
     matches: list[tuple[dict, dict]] = []
     for pr in filter(None, pulls):
         item = build_item(pr, show_repo=target in MODES)
-        text = f"{item['title']} {item['subtitle']} {author_login(pr)}"
+        text = f"{item['title']} {item['subtitle']} {time_text(item)} {author_login(pr)}"
         if needle in ANSI.sub("", text).casefold():
             matches.append((pr, item))
 

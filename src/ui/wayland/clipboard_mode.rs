@@ -22,9 +22,15 @@ type OcrTextReader = Box<dyn Fn(&super::clipboard::ItemRef) -> Result<String, St
 /// Report every [`EXPIRY_TICK`] while the subscription is kept, so the list
 /// can drop the entries that reached their deadline.
 pub(super) fn expiry_tick() -> UnboundedReceiver<()> {
+    ticker(EXPIRY_TICK)
+}
+
+/// Report every `period` while the subscription is kept. The thread ends
+/// when the receiver is dropped.
+pub(super) fn ticker(period: std::time::Duration) -> UnboundedReceiver<()> {
     let (sender, receiver) = unbounded();
     std::thread::spawn(move || loop {
-        std::thread::sleep(EXPIRY_TICK);
+        std::thread::sleep(period);
         if sender.unbounded_send(()).is_err() {
             break;
         }

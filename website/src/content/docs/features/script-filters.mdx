@@ -787,6 +787,29 @@ Value the actions use. The title is used when it is missing.
 
 Absolute path to a PNG or SVG icon. Without it, the filter's `icon` is used.
 
+**`time`** `string`, `integer` or `object`
+
+A moment, shown after the subtitle as how long ago it was, such as `pushed 3h
+ago`, and in the preview as a row with the date in your time zone. Because
+Raffi works the text out when it draws the row, it stays true while a cached
+list is served, which text baked into `subtitle` does not.
+
+```json
+{ "title": "raffi", "subtitle": "Rust", "time": "2026-11-19T05:10:04Z" }
+{ "title": "raffi", "time": 1763529004 }
+{ "title": "raffi", "time": { "at": "2026-11-19T05:10:04Z", "label": "pushed" } }
+```
+
+`at` is RFC 3339 text or integer Unix seconds. The optional `label` goes in
+front (`pushed 3h ago`) and names the preview row; control characters are
+removed and it is cut at 32 characters. A time that does not fit, or lies more
+than a century from now, is ignored and never fails the list. Times within a
+minute either way read `just now`, a later one reads `in 2d`, and units are
+whole minutes, hours, days (30 days make a month) and years, rounded down.
+While a row with a `time` is visible, Raffi redraws every 30 seconds. A Raffi
+without this field shows the item without it, so a script that needs the text
+on those should keep sending it in the subtitle.
+
 **`actions`** `list of objects`
 
 Custom entries of the row's action menu, see [Custom actions](#custom-actions).

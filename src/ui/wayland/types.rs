@@ -329,6 +329,10 @@ pub(crate) struct ScriptFilterItemAction {
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct ScriptFilterItem {
     pub title: String,
+    /// A moment shown after the subtitle as how long ago it was. Raffi
+    /// extension, ignored by Alfred.
+    #[serde(default, deserialize_with = "super::item_time::lenient_time")]
+    pub time: Option<super::item_time::ScriptFilterTime>,
     /// Custom entries of the action menu opened with Right.
     #[serde(default)]
     pub actions: Vec<ScriptFilterItemAction>,
@@ -719,6 +723,8 @@ pub(crate) enum Message {
     ClipboardRefresh,
     /// A one-second tick while the browser lists entries with a deadline.
     ClipboardTick,
+    /// Redraw rows that show how long ago something was.
+    TimeTick,
     ClipboardOcrRevision(u64, std::result::Result<i64, String>),
     /// Switch the selected image preview between the image and its text.
     ClipboardToggleOcrText,

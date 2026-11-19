@@ -414,6 +414,7 @@ fn test_preview_script_filter_reads_virtual_file_with_zero_reported_size() {
     app.script_filter.results = Some(ScriptFilterResult {
         items: vec![ScriptFilterItem {
             actions: Vec::new(),
+            time: None,
             children: None,
             title: "CPU info".into(),
             valid: true,
@@ -3002,6 +3003,7 @@ fn test_preview_script_filter_precedence() {
         items: vec![
             ScriptFilterItem {
                 actions: Vec::new(),
+                time: None,
                 children: None,
                 title: "Item 1".into(),
                 valid: true,
@@ -3021,6 +3023,7 @@ fn test_preview_script_filter_precedence() {
             },
             ScriptFilterItem {
                 actions: Vec::new(),
+                time: None,
                 children: None,
                 title: "Item 2".into(),
                 valid: true,
@@ -3073,6 +3076,7 @@ fn test_preview_script_filter_decodes_file_url_paths() {
     let localhost_file_url = format!("file://localhost{escaped_path}");
     let make_item = |quicklookurl| ScriptFilterItem {
         actions: Vec::new(),
+        time: None,
         children: None,
         title: "File".into(),
         valid: true,
@@ -3140,6 +3144,7 @@ fn dynamic_preview_app(items: Vec<ScriptFilterItem>) -> LauncherApp {
 fn plain_item(title: &str) -> ScriptFilterItem {
     ScriptFilterItem {
         actions: Vec::new(),
+        time: None,
         children: None,
         title: title.into(),
         valid: true,
@@ -9792,6 +9797,7 @@ fn test_main_view_script_filter_waits_for_min_length_and_drops_stale_runs() {
     let result = |title: &str| ScriptFilterResult {
         items: vec![ScriptFilterItem {
             actions: Vec::new(),
+            time: None,
             children: None,
             title: title.into(),
             valid: true,
@@ -9870,6 +9876,7 @@ fn test_main_view_late_rows_keep_the_selection() {
     let items = (0..2)
         .map(|index| ScriptFilterItem {
             actions: Vec::new(),
+            time: None,
             children: None,
             title: format!("mail issue {index}"),
             valid: true,
@@ -9974,6 +9981,7 @@ fn issue_items(count: usize) -> ScriptFilterResult {
         items: (0..count)
             .map(|index| ScriptFilterItem {
                 actions: Vec::new(),
+                time: None,
                 children: None,
                 title: format!("issue {index}"),
                 valid: true,
@@ -11036,6 +11044,8 @@ fn test_main_view_empty_query_lists_recent_picks() {
         arg: Some("raffi".into()),
         icon: None,
         variables: std::collections::HashMap::new(),
+        time_at: None,
+        time_label: None,
     });
     app.main_view.recent = vec![
         recent_pick("browser_tabs", "10:2"),
@@ -12176,6 +12186,7 @@ fn test_main_view_keep_open_preserves_query_and_selection() {
         Some(Ok(ScriptFilterResult {
             items: vec![ScriptFilterItem {
                 actions: Vec::new(),
+                time: None,
                 children: None,
                 title: "mail bug".into(),
                 valid: true,
@@ -14973,4 +14984,115 @@ fn test_script_filter_menu_action_runs_from_a_main_view_row() {
     run_menu_entry(&mut app, "Write");
     assert_eq!(wait_for_file(&out).as_deref(), Some("custom"));
     assert!(app.menu_script_action.is_none());
+}
+
+fn timed_item(title: &str, subtitle: Option<&str>, label: Option<&str>) -> ScriptFilterItem {
+    timed_item_at(super::item_time::now_unix(), title, subtitle, label)
+}
+
+/// An item whose `time` is three hours before `now`.
+fn timed_item_at(
+    now: i64,
+    title: &str,
+    subtitle: Option<&str>,
+    label: Option<&str>,
+) -> ScriptFilterItem {
+    let mut item = plain_item(title);
+    item.subtitle = subtitle.map(str::to_string);
+    item.time = Some(super::item_time::ScriptFilterTime {
+        at: now - 3 * 3600,
+        label: label.map(str::to_string),
+    });
+    item
+}
+
+#[test]
+fn test_subtitle_shows_how_long_ago_after_the_subtitle() {
+    let now = super::item_time::now_unix();
+    let both = timed_item_at(now, "a", Some("Go · ★ 7"), Some("pushed"));
+    assert_eq!(
+        both.subtitle_with_time(now).unwrap(),
+        "Go · ★ 7\u{1b}[0m \u{b7} pushed 3h ago"
+    );
+    let time_only = timed_item_at(now, "b", None, None);
+    assert_eq!(time_only.subtitle_with_time(now).unwrap(), "3h ago");
+    let mut subtitle_only = plain_item("c");
+    subtitle_only.subtitle = Some("plain".into());
+    assert_eq!(subtitle_only.subtitle_with_time(now).unwrap(), "plain");
+    assert_eq!(plain_item("d").subtitle_with_time(now), None);
+    // An empty subtitle is still a subtitle: the time follows it.
+    let empty = timed_item_at(now, "e", Some(""), None);
+    assert!(empty.subtitle_with_time(now).unwrap().ends_with("3h ago"));
+}
+
+#[test]
+fn test_time_tick_only_runs_while_timed_rows_are_visible() {
+    let mut app = dynamic_preview_app(vec![plain_item("plain")]);
+    assert!(!app.wants_time_tick());
+    app.script_filter
+        .results
+        .as_mut()
+        .unwrap()
+        .items
+        .push(timed_item("t", None, None));
+    assert!(app.wants_time_tick());
+    app.script_filter.config_index = None;
+    assert!(!app.wants_time_tick(), "not in a script filter any more");
+    app.script_filter.config_index = Some(0);
+    app.script_filter.results = None;
+    assert!(!app.wants_time_tick());
+}
+
+#[test]
+fn test_time_tick_follows_timed_main_view_rows() {
+    use super::main_view::Source;
+    let mut addons = AddonsConfig::default();
+    addons.script_filters.push(issues_filter());
+    let mut app = main_view_app(&["script_filters.Issues"], Vec::new(), addons);
+    assert!(!app.wants_time_tick());
+    let Source::ScriptFilter { results, .. } = &mut app.main_view.sources[0] else {
+        panic!("script filter source");
+    };
+    *results = Some(ScriptFilterResult {
+        items: vec![plain_item("plain")],
+        ..Default::default()
+    });
+    assert!(!app.wants_time_tick());
+    let Source::ScriptFilter { results, .. } = &mut app.main_view.sources[0] else {
+        panic!("script filter source");
+    };
+    results
+        .as_mut()
+        .unwrap()
+        .items
+        .push(timed_item("t", None, None));
+    assert!(app.wants_time_tick());
+    app.main_view.active = false;
+    assert!(!app.wants_time_tick(), "the main view is not showing");
+}
+
+#[test]
+fn test_time_tick_message_changes_nothing() {
+    let mut app = dynamic_preview_app(vec![timed_item("t", Some("s"), None)]);
+    let before = app.selected_index;
+    assert_eq!(app.update(Message::TimeTick).units(), 0);
+    assert_eq!(app.selected_index, before);
+}
+
+#[test]
+fn test_script_filter_preview_lists_the_item_time() {
+    let mut app = dynamic_preview_app(vec![timed_item("t", None, Some("pushed"))]);
+    app.view.show_preview = true;
+    let preview = app.resolve_selected_preview().unwrap();
+    let (name, value) = preview
+        .metadata
+        .iter()
+        .find(|(name, _)| name == "Pushed")
+        .expect("a Pushed row");
+    assert_eq!(name, "Pushed");
+    assert!(value.starts_with("3h ago \u{b7} "), "{value}");
+    // The Enter rows of the action menu stay what they were.
+    let plain = dynamic_preview_app(vec![plain_item("p")]);
+    let preview = plain.resolve_selected_preview().unwrap();
+    assert!(!preview.metadata.iter().any(|(name, _)| name == "Time"));
 }

@@ -11,6 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 import json
+import time
 from zoneinfo import ZoneInfo
 
 
@@ -123,6 +124,7 @@ def repo_actions(config):
     result = {"items": [{
         "title": "raffi", "subtitle": "A launcher for Wayland \u00b7 Rust \u00b7 \u2605 120", "arg": repo,
         "variables": {"REPO_SSH": "git@github.com:chmouel/raffi.git"},
+        "time": {"at": int(time.time()) - 3 * 3600, "label": "pushed"},
         "actions": [
             {"title": "Pull requests", "arg": f"{repo}/pulls"},
             {"title": "Issues", "arg": f"{repo}/issues"},

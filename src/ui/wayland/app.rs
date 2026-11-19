@@ -1915,6 +1915,7 @@ impl LauncherApp {
             }
             Message::ClipboardRefresh => self.handle_refresh(),
             Message::ClipboardTick => self.handle_clipboard_tick(),
+            Message::TimeTick => Task::none(),
             Message::ClipboardOcrRevision(session, result) => {
                 self.handle_clipboard_ocr_revision(session, result)
             }

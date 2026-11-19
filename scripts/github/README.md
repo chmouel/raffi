@@ -132,6 +132,7 @@ These environment variables can also be set in the entry's `env`:
 |----------|---------|-------------|
 | `API_HOST` | `github.com` | GitHub host, for GitHub Enterprise |
 | `CACHE_PULLS` | `10m` | How long `gh` caches the pull request list |
+| `TYPED_TIME` | | Set to `1` to send `updated` and `pushed` as a `time` field that Raffi renders ("3h ago") instead of text that freezes in its cache. Needs a Raffi that knows the field |
 
 Raffi sets `RAFFI_REFRESH=1` when you press Ctrl+R or when the server
 refreshes a filter. The script then skips `gh api --cache` so it reads live
@@ -298,6 +299,7 @@ also read `REPO_PATH`, `REPO_PAGES` and `REPO_ACTIONS` from `env`.
 |----------|---------|-------------|
 | `API_HOST` | `github.com` | GitHub host, for GitHub Enterprise |
 | `CACHE_REPOS` | `10m` | How long `gh` caches the repository list |
+| `TYPED_TIME` | | Same as for pull requests, for the `pushed` time |
 | `REPO_PATH` | | Default for `--path` |
 | `REPO_PAGES` | | Default for `--pages` |
 | `REPO_ACTIONS` | | Default for `--actions` |
@@ -348,8 +350,10 @@ When `gh` fails, the scripts ask Raffi not to keep the error row
 instead of replacing it for a day.
 
 The cost of a long window is that a new repository, or a changed star count,
-shows up after the next refresh, and the "pushed 3h ago" text is frozen at
-that moment. Ctrl+R refreshes the list you are looking at straight away.
+shows up after the next refresh. The "pushed 3h ago" text is frozen at that
+moment too, unless you set `TYPED_TIME: 1` in `env`: the script then sends the
+date as data and Raffi works out the age each time it draws the row. Ctrl+R
+refreshes the list you are looking at straight away.
 
 Ctrl+R, and the server's warming runs, set `RAFFI_REFRESH=1`, which skips the
 `gh` cache: an uncached page of 100 repositories takes one to three seconds,

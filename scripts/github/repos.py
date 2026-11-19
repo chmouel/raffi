@@ -25,12 +25,15 @@ from ghcommon import (
     ICON,
     RED,
     RESET,
+    TYPED_TIME,
     YELLOW,
     GhError,
     ago,
     colored,
     error_rows,
     seconds,
+    time_field,
+    time_text,
     with_cache,
 )
 
@@ -316,7 +319,8 @@ def build_preview(repo: dict) -> dict:
         metadata.append(["State", "archived"])
     if repo["isFork"]:
         metadata.append(["Fork of", "another repository"])
-    if pushed := ago(repo.get("pushedAt")):
+    # Raffi adds a live row of its own for a typed time.
+    if not TYPED_TIME and (pushed := ago(repo.get("pushedAt"))):
         metadata.append(["Last push", pushed])
     if repo.get("updatedAt"):
         metadata.append(["Updated", ago(repo["updatedAt"])])
@@ -449,7 +453,7 @@ def build_item(repo: dict, options: Options = DEFAULTS) -> dict:
         details.append(colored("private", YELLOW))
     if repo["isFork"]:
         details.append(colored("fork", GREY))
-    if pushed := ago(repo.get("pushedAt")):
+    if not TYPED_TIME and (pushed := ago(repo.get("pushedAt"))):
         details.append(colored(f"pushed {pushed}", GREY))
     if options.path:
         details.append(colored(PAGES.get(options.path) or options.path, GREY))
@@ -461,6 +465,8 @@ def build_item(repo: dict, options: Options = DEFAULTS) -> dict:
         "variables": repo_variables(repo),
         "preview": build_preview(repo),
     }
+    if TYPED_TIME and (pushed := time_field(repo.get("pushedAt"), "pushed")):
+        item["time"] = pushed
     return with_menus(item, repo["nameWithOwner"], options)
 
 
@@ -519,7 +525,7 @@ def rank(repo: dict, item: dict, words: list[str]) -> int | None:
         return 0
     name = repo["name"].casefold()
     short = initials(repo["name"])
-    shown = ANSI.sub("", f"{item['title']} {item['subtitle']}")
+    shown = ANSI.sub("", f"{item['title']} {item['subtitle']} {time_text(item)}")
     # The row shows a shortened description, so search the whole one.
     rest = f"{repo.get('description') or ''} {' '.join(topics(repo))}"
     text = f"{shown} {rest}".casefold()

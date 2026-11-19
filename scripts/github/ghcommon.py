@@ -15,6 +15,9 @@ API_HOST = os.environ.get("API_HOST", "github.com")
 # Raffi sets it for Ctrl+R and for the server's warming runs: read live state.
 REFRESH = os.environ.get("RAFFI_REFRESH") == "1"
 ICON = "github"
+# Send times as data for Raffi to render ("3h ago") instead of text that goes
+# stale in its cache. Needs a Raffi that knows the `time` item field.
+TYPED_TIME = os.environ.get("TYPED_TIME") == "1"
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 DURATION = re.compile(r"(\d+(?:\.\d+)?)([smhd])")
@@ -71,6 +74,19 @@ def graphql(
 
 def colored(text: str, color: str) -> str:
     return f"{color}{text}{RESET}"
+
+
+def time_field(timestamp: str | None, label: str) -> dict | None:
+    """The `time` item field for an ISO 8601 timestamp, or None without one."""
+    return {"at": timestamp, "label": label} if timestamp else None
+
+
+def time_text(item: dict) -> str:
+    """What Raffi will show for an item's `time` field, for matching filters."""
+    time = item.get("time")
+    if not time:
+        return ""
+    return f"{time.get('label') or ''} {ago(time['at'])}".strip()
 
 
 def ago(timestamp: str | None) -> str:

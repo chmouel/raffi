@@ -506,6 +506,48 @@ class ActionTests(ReposTestCase):
         )
 
 
+class TypedTimeTests(ReposTestCase):
+    def pushed(self):
+        return datetime.now(UTC) - timedelta(hours=3)
+
+    def test_by_default_the_row_carries_baked_text_and_no_time(self):
+        pushed = self.pushed().isoformat()
+        with patch.object(repos, "TYPED_TIME", False):
+            item = repos.build_item(repo("raffi", pushedAt=pushed))
+        self.assertIn("pushed 3h ago", repos.ANSI.sub("", item["subtitle"]))
+        self.assertNotIn("time", item)
+
+    def test_typed_time_sends_data_and_no_baked_text(self):
+        pushed = self.pushed().isoformat()
+        with patch.object(repos, "TYPED_TIME", True):
+            item = repos.build_item(repo("raffi", pushedAt=pushed))
+        self.assertEqual(item["time"], {"at": pushed, "label": "pushed"})
+        self.assertNotIn("pushed", repos.ANSI.sub("", item["subtitle"]))
+
+    def test_the_filter_still_matches_the_age_the_row_shows(self):
+        pushed = self.pushed().isoformat()
+        words = ["pushed"]
+        for typed in (False, True):
+            with patch.object(repos, "TYPED_TIME", typed):
+                found = repos.items_for(
+                    account("me", [repo("raffi", pushedAt=pushed)]), words
+                )
+            self.assertEqual(self.titles(found)[0], "raffi", typed)
+
+    def test_the_preview_does_not_repeat_a_typed_time(self):
+        pushed = self.pushed().isoformat()
+        for typed, expected in ((False, True), (True, False)):
+            with patch.object(repos, "TYPED_TIME", typed):
+                preview = repos.build_preview(repo("raffi", pushedAt=pushed))
+            rows = [name for name, _ in preview["metadata"]]
+            self.assertEqual("Last push" in rows, expected, typed)
+
+    def test_typed_time_without_a_push_date_sends_nothing(self):
+        with patch.object(repos, "TYPED_TIME", True):
+            item = repos.build_item(repo("raffi"))
+        self.assertNotIn("time", item)
+
+
 class ItemTests(ReposTestCase):
     def test_item_carries_action_variables(self):
         item = repos.build_item(repo("raffi", description="A launcher"))

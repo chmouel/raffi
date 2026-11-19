@@ -407,6 +407,7 @@ mod tests {
         let config = super::view_config(&config, Some(&result.views[0]));
         let item = super::ScriptFilterItem {
             actions: Vec::new(),
+            time: None,
             children: None,
             title: "Agent".into(),
             valid: true,
@@ -721,6 +722,7 @@ mod tests {
         };
         let item = super::ScriptFilterItem {
             actions: Vec::new(),
+            time: None,
             children: None,
             title: "\u{1b}[32mAgent\u{1b}[0m".into(),
             valid: true,
@@ -747,6 +749,64 @@ mod tests {
     fn test_parse_script_filter_output_invalid_json() {
         let result = parse_script_filter_output("{not json}", None);
         assert!(result.is_err());
+    }
+
+    fn times(stdout: &str) -> Vec<Option<(i64, Option<String>)>> {
+        parse_script_filter_output(stdout, None)
+            .expect("the list still parses")
+            .items
+            .into_iter()
+            .map(|item| item.time.map(|time| (time.at, time.label)))
+            .collect()
+    }
+
+    #[test]
+    fn test_item_time_accepts_rfc3339_epoch_and_object() {
+        let now = super::super::item_time::now_unix();
+        let rfc = jiff::Timestamp::from_second(now - 3600).unwrap();
+        let stdout = format!(
+            r#"{{"items":[
+                {{"title":"a","time":"{rfc}"}},
+                {{"title":"b","time":{epoch}}},
+                {{"title":"c","time":{{"at":"{rfc}","label":"pushed"}}}},
+                {{"title":"d"}}
+            ]}}"#,
+            epoch = now - 60
+        );
+        assert_eq!(
+            times(&stdout),
+            [
+                Some((now - 3600, None)),
+                Some((now - 60, None)),
+                Some((now - 3600, Some("pushed".to_string()))),
+                None,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_invalid_item_time_is_ignored_not_fatal() {
+        for bad in [
+            r#""yesterday""#,
+            "1e400",
+            "-1e400",
+            "1.5",
+            "[1]",
+            "{}",
+            r#"{"at":"x"}"#,
+            "null",
+            "true",
+            "99999999999999999999999",
+        ] {
+            let stdout = format!(
+                r#"{{"items":[{{"title":"kept","time":{bad},"children":[{{"title":"child","time":{bad}}}]}}]}}"#
+            );
+            let result = parse_script_filter_output(&stdout, None)
+                .unwrap_or_else(|error| panic!("{bad} must not fail the list: {error}"));
+            assert_eq!(result.items.len(), 1, "{bad}");
+            assert!(result.items[0].time.is_none(), "{bad}");
+            assert_eq!(result.items[0].children.as_ref().map(Vec::len), Some(1));
+        }
     }
 
     fn hint(stdout: &str) -> Option<u64> {

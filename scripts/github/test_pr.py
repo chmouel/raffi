@@ -142,6 +142,39 @@ VIEW = {
 }
 
 
+class TypedTimeTests(unittest.TestCase):
+    def pull(self):
+        return {**node(1, "Fix login"), "updatedAt": "2026-11-19T05:10:04Z"}
+
+    def test_by_default_the_row_carries_baked_text_and_no_time(self):
+        with patch.object(pr, "TYPED_TIME", False):
+            item = pr.build_item(self.pull(), show_repo=False)
+        self.assertIn("updated", pr.ANSI.sub("", item["subtitle"]))
+        self.assertNotIn("time", item)
+
+    def test_typed_time_sends_data_and_no_baked_text(self):
+        with patch.object(pr, "TYPED_TIME", True):
+            item = pr.build_item(self.pull(), show_repo=False)
+        self.assertEqual(
+            item["time"], {"at": "2026-11-19T05:10:04Z", "label": "updated"}
+        )
+        self.assertNotIn("updated", pr.ANSI.sub("", item["subtitle"]))
+
+
+class TypedTimeFilterTests(unittest.TestCase):
+    def test_the_filter_still_matches_the_age_the_row_shows(self):
+        pull = {**node(1, "Fix login"), "updatedAt": "2026-11-19T05:10:04Z"}
+        for typed in (False, True):
+            with (
+                patch.object(pr, "TYPED_TIME", typed),
+                patch.object(ghcommon, "run_gh", return_value={"data": {"repository": {"pullRequests": {"nodes": [pull]}}}}),
+            ):
+                _, items = pr.list_items("owner/repo updated")
+            self.assertTrue(
+                any("Fix login" in item["title"] for item in items), typed
+            )
+
+
 class ParseQueryTests(unittest.TestCase):
     def test_targets(self):
         cases = {

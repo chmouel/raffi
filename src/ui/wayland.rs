@@ -35,6 +35,7 @@ mod file_preview;
 mod help;
 mod hot_files;
 mod hyprland;
+mod item_time;
 mod kill;
 mod main_view;
 mod media;

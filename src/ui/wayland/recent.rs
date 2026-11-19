@@ -48,6 +48,11 @@ pub(super) struct StoredItem {
     pub icon: Option<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub variables: HashMap<String, String>,
+    /// The item's `time`, so a recent row can still say how long ago it was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_label: Option<String>,
 }
 
 impl StoredItem {
@@ -62,12 +67,18 @@ impl StoredItem {
                 .and_then(|icon| icon.path.clone())
                 .or_else(|| default_icon.map(str::to_string)),
             variables: item.variables.clone(),
+            time_at: item.time.as_ref().map(|time| time.at),
+            time_label: item.time.as_ref().and_then(|time| time.label.clone()),
         }
     }
 
     pub fn to_item(&self) -> ScriptFilterItem {
         ScriptFilterItem {
             actions: Vec::new(),
+            time: self.time_at.map(|at| super::item_time::ScriptFilterTime {
+                at,
+                label: self.time_label.clone(),
+            }),
             children: None,
             title: self.title.clone(),
             valid: true,
@@ -175,6 +186,41 @@ mod tests {
             last_used,
             ..RecentPick::new(source.into(), key.into())
         }
+    }
+
+    #[test]
+    fn a_recent_row_keeps_its_time_and_old_records_still_load() {
+        let mut item = ScriptFilterItem {
+            actions: Vec::new(),
+            time: Some(super::super::item_time::ScriptFilterTime {
+                at: 1_795_065_004,
+                label: Some("pushed".into()),
+            }),
+            children: None,
+            title: "raffi".into(),
+            valid: true,
+            subtitle: None,
+            arg: None,
+            indent: 0,
+            icon: None,
+            preview: None,
+            variables: HashMap::new(),
+            quicklookurl: None,
+            text: None,
+        };
+        let stored = StoredItem::of(&item, None);
+        let restored: StoredItem =
+            serde_json::from_str(&serde_json::to_string(&stored).unwrap()).unwrap();
+        let time = restored.to_item().time.unwrap();
+        assert_eq!(
+            (time.at, time.label.as_deref()),
+            (1_795_065_004, Some("pushed"))
+        );
+        item.time = None;
+        let plain = serde_json::to_string(&StoredItem::of(&item, None)).unwrap();
+        assert!(!plain.contains("time"), "{plain}");
+        let old: StoredItem = serde_json::from_str(r#"{"title":"raffi"}"#).unwrap();
+        assert!(old.to_item().time.is_none());
     }
 
     #[test]

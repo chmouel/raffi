@@ -1435,6 +1435,11 @@ impl LauncherApp {
         if let Some(copy_text) = item.text.as_ref().and_then(|t| t.copy.as_ref()) {
             metadata.push(("Copy Text".to_string(), copy_text.clone()));
         }
+        if let Some(time) = &item.time {
+            metadata.push(
+                time.metadata_row(super::item_time::now_unix(), &jiff::tz::TimeZone::system()),
+            );
+        }
 
         if item.valid {
             let primary = action.unwrap_or("copy");

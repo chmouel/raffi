@@ -202,6 +202,8 @@ pub(super) fn fit_hints<'a>(
 
 /// Horizontal shift of one tree-view indentation level.
 const INDENT_STEP: f32 = 24.0;
+/// How often rows that show how long ago something was are redrawn.
+const TIME_TICK_SECS: u64 = 30;
 /// Highest indentation level rendered; deeper levels keep this shift.
 const MAX_INDENT: u32 = 10;
 const TREE_GUIDE_THICKNESS: f32 = 1.0;
@@ -1657,9 +1659,9 @@ impl LauncherApp {
                     iced::Font::default(),
                     &self.view.preview_style.ansi,
                 )));
-                if let Some(subtitle) = &item.subtitle {
+                if let Some(subtitle) = item.subtitle_with_time(super::item_time::now_unix()) {
                     text_col = text_col.push(rich_text(ansi_to_spans(
-                        subtitle,
+                        &subtitle,
                         fs.subtitle,
                         t.text_muted,
                         iced::Font::default(),
@@ -2920,9 +2922,9 @@ impl LauncherApp {
                     iced::Font::default(),
                     &self.view.preview_style.ansi,
                 )));
-                if let Some(subtitle) = &item.subtitle {
+                if let Some(subtitle) = item.subtitle_with_time(super::item_time::now_unix()) {
                     text_col = text_col.push(rich_text(ansi_to_spans(
-                        subtitle,
+                        &subtitle,
                         fs.subtitle,
                         t.text_muted,
                         iced::Font::default(),
@@ -3972,6 +3974,26 @@ impl LauncherApp {
         self.shell(&self.view.placeholder, hint_spans, items_column)
     }
 
+    /// Whether a visible row shows how long ago something was, which needs a
+    /// redraw now and then to stay true. Idle windows pay nothing.
+    pub(super) fn wants_time_tick(&self) -> bool {
+        let timed = |result: &super::types::ScriptFilterResult| {
+            result.items.iter().any(|item| item.time.is_some())
+        };
+        if self.script_filter.config_index.is_some()
+            && self.script_filter.results.as_ref().is_some_and(timed)
+        {
+            return true;
+        }
+        self.main_view.active
+            && self.main_view.sources.iter().any(|source| {
+                matches!(
+                    source,
+                    MainViewSource::ScriptFilter { results: Some(results), .. } if timed(results)
+                )
+            })
+    }
+
     pub(super) fn subscription(&self) -> iced::Subscription<Message> {
         use iced::keyboard;
         use iced::keyboard::key::Named;
@@ -4143,14 +4165,23 @@ impl LauncherApp {
         } else {
             iced::Subscription::none()
         };
+        let times = if self.wants_time_tick() {
+            iced::Subscription::run_with(TIME_TICK_SECS, |seconds| {
+                super::clipboard_mode::ticker(std::time::Duration::from_secs(*seconds))
+            })
+            .map(|()| Message::TimeTick)
+        } else {
+            iced::Subscription::none()
+        };
         match compositor {
             Some(compositor) => iced::Subscription::batch([
                 keys,
                 iced::Subscription::run_with(compositor, super::window_events::watch)
                     .map(|()| Message::WindowsChanged),
                 expiry,
+                times,
             ]),
-            None => iced::Subscription::batch([keys, expiry]),
+            None => iced::Subscription::batch([keys, expiry, times]),
         }
     }
 }

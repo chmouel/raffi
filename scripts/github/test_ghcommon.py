@@ -159,6 +159,19 @@ class CacheContractTests(unittest.TestCase):
         output = ghcommon.with_cache({}, rows, "10m", warm=("review",))
         self.assertEqual(output["cache"], {"seconds": 0})
 
+    def test_a_timestamp_becomes_a_time_field(self):
+        self.assertEqual(
+            ghcommon.time_field("2026-11-19T05:10:04Z", "pushed"),
+            {"at": "2026-11-19T05:10:04Z", "label": "pushed"},
+        )
+        self.assertIsNone(ghcommon.time_field(None, "pushed"))
+        self.assertIsNone(ghcommon.time_field("", "pushed"))
+
+    def test_the_time_text_is_what_a_filter_can_match(self):
+        item = {"time": {"at": "2020-01-01T00:00:00Z", "label": "pushed"}}
+        self.assertRegex(ghcommon.time_text(item), r"^pushed \d+y ago$")
+        self.assertEqual(ghcommon.time_text({}), "")
+
     def test_a_plain_empty_list_is_still_kept(self):
         self.assertEqual(ghcommon.with_cache({}, [], "10m")["cache"], {"seconds": 600})
 
