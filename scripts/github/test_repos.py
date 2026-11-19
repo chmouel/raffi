@@ -1,6 +1,8 @@
+import io
 import json
 import os
 import tempfile
+import time
 import unittest
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -8,6 +10,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 import repos
+
+# A fixed age for the live rows, so their "updated" text is predictable.
+UPDATED = (datetime.now(UTC) - timedelta(hours=3)).isoformat()
 
 
 def repo(name, **fields):
@@ -65,9 +70,76 @@ ACCOUNTS = {
 }
 
 
+def live_pull(repo_name, number, title, **fields):
+    node = {
+        "number": number,
+        "title": title,
+        "url": f"https://github.com/{repo_name}/pull/{number}",
+        "isDraft": False,
+        "updatedAt": UPDATED,
+        "author": {"login": "chmouel"},
+        "headRefName": f"branch-{number}",
+        "reviewDecision": None,
+    }
+    node.update(fields)
+    return node
+
+
+def live_issue(repo_name, number, title, labels=(), **fields):
+    node = {
+        "number": number,
+        "title": title,
+        "url": f"https://github.com/{repo_name}/issues/{number}",
+        "updatedAt": UPDATED,
+        "author": {"login": "chmouel"},
+        "labels": {"nodes": [{"name": label} for label in labels]},
+    }
+    node.update(fields)
+    return node
+
+
+# Deterministic open lists, for the repositories the live query is asked about.
+LIVE = {
+    "owner/raffi": {
+        "pullRequests": {
+            "totalCount": 34,
+            "nodes": [
+                live_pull(
+                    "owner/raffi", 412, "Add clipboard view",
+                    reviewDecision="APPROVED",
+                ),
+                live_pull(
+                    "owner/raffi", 410, "Fix config reload",
+                    isDraft=True, reviewDecision="CHANGES_REQUESTED",
+                ),
+            ],
+        },
+        "issues": {
+            "totalCount": 2,
+            "nodes": [
+                live_issue(
+                    "owner/raffi", 388, "Crash on empty config",
+                    labels=("bug", "crash"),
+                ),
+            ],
+        },
+    },
+    "tektoncd/pipeline": {
+        "pullRequests": {
+            "totalCount": 1,
+            "nodes": [live_pull("tektoncd/pipeline", 7, "Bump deps")],
+        },
+        "issues": {"totalCount": 0, "nodes": []},
+    },
+}
+
+
 def graphql(query, cache=None, timeout=30, **variables):
     if "viewer" in query:
         return {"viewer": {"login": "me"}}
+    if "pullRequests" in query:
+        name = f"{variables.get('owner')}/{variables.get('name')}"
+        return {"repository": LIVE.get(name)}
     found = ACCOUNTS.get(variables.get("owner"))
     if "repository(" in query:
         named = any(
@@ -105,17 +177,21 @@ def environment(**values):
 class ReposTestCase(unittest.TestCase):
     def setUp(self):
         repos.ACCOUNTS.clear()
+        repos.PENDING.clear()
+        self.prefetched = []
         self.cache = tempfile.TemporaryDirectory()
         cache_dir = Path(self.cache.name)
         self.patches = [
             patch.object(repos, "graphql", graphql),
             patch.object(repos, "CACHE_DIR", cache_dir),
+            patch.object(repos, "start_prefetch", self.prefetched.append),
         ]
         for patcher in self.patches:
             patcher.start()
             self.addCleanup(patcher.stop)
         self.addCleanup(self.cache.cleanup)
         self.addCleanup(repos.ACCOUNTS.clear)
+        self.addCleanup(repos.PENDING.clear)
 
     def titles(self, items):
         return [repos.ANSI.sub("", item["title"]) for item in items]
@@ -485,9 +561,14 @@ class MainTests(ReposTestCase):
 
     def test_actions_flag(self):
         output = self.run_main("--actions", "pulls,issues", "me", "raffi")
-        titles = [entry["title"] for entry in output["items"][0]["actions"]]
+        item = output["items"][0]
+        titles = [entry["title"] for entry in item["actions"]]
         self.assertEqual(titles[:2], ["Pull requests", "Issues"])
-        self.assertNotIn("children", output["items"][0])
+        # Both pages are live, so they are also listed under the row.
+        self.assertEqual(
+            [child["title"] for child in item["children"]],
+            ["Open owner/raffi", "Pull requests", "Issues"],
+        )
 
     def test_pages_flag(self):
         output = self.run_main("--pages", "pulls,issues", "me", "raffi")

@@ -7,12 +7,19 @@ with Ctrl+Tab and passed in RAFFI_VIEW; with more than one, the default All
 view mixes their repositories. Typing one of those accounts or an
 alias in front of the query lists that account instead, any GitHub account with
 --any-owner, and `owner/repo` opens one repository directly.
+
+The pull requests and issues pages of a repository are live menus when --pages
+or --actions name them: their children are the repository's open pull requests
+or issues, fetched ahead of time by a detached run of this script.
 """
 
 import argparse
+import fcntl
 import json
 import os
 import re
+import subprocess
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -42,8 +49,17 @@ from ghcommon import (
 CACHE_REPOS = os.environ.get("CACHE_REPOS", "10m")
 CACHE_LOGIN = os.environ.get("CACHE_LOGIN", "1h")
 CACHE_MISSING = os.environ.get("CACHE_MISSING", "24h")
+CACHE_LIVE = os.environ.get("CACHE_LIVE", "10m")
 PAGE_SIZE = 100
 LIMIT = 500
+# How many rows a live menu shows, and how many repositories it prefetches.
+LIVE_ITEMS = int(os.environ.get("LIVE_ITEMS", "20"))
+LIVE_PREFETCH = int(os.environ.get("LIVE_PREFETCH", "20"))
+
+# Paths listing GitHub state instead of linking a static page.
+LIVE_PATHS = ("pulls", "issues")
+# Where each live path keeps its nodes in the per-repository cache file.
+LIVE_KEYS = {"pulls": "pull_requests", "issues": "issues"}
 
 # Pages --actions can point a repository at, with the labels they get by
 # default. A path missing here is labelled after its last segment.
@@ -81,6 +97,11 @@ def missing_file() -> Path:
 
 def login_file() -> Path:
     return CACHE_DIR / "login.json"
+
+
+def live_file(name: str) -> Path:
+    """The live pull request and issue cache of one owner/repo."""
+    return CACHE_DIR / "live" / f"{name.replace('/', '__')}.json"
 
 # Short names accepted in front of the query, and as --owners entries. "me"
 # stands for the account gh is logged in as; any other alias comes from an
@@ -138,6 +159,53 @@ query($owner: String!, $name: String!) {
 }
 """
 
+LIVE_QUERY = """
+query($owner: String!, $name: String!, $first: Int!) {
+  repository(owner: $owner, name: $name) {
+    nameWithOwner
+    pullRequests(
+      first: $first
+      states: OPEN
+      orderBy: { field: UPDATED_AT, direction: DESC }
+    ) {
+      totalCount
+      nodes {
+        number
+        title
+        url
+        isDraft
+        updatedAt
+        author { login }
+        headRefName
+        reviewDecision
+      }
+    }
+    issues(
+      first: $first
+      states: OPEN
+      orderBy: { field: UPDATED_AT, direction: DESC }
+    ) {
+      totalCount
+      nodes {
+        number
+        title
+        url
+        updatedAt
+        author { login }
+        labels(first: 3) { nodes { name } }
+      }
+    }
+  }
+}
+"""
+
+# Review decisions as the row shows them, and their colour.
+REVIEWS = {
+    "APPROVED": ("approved", GREEN),
+    "CHANGES_REQUESTED": ("changes requested", RED),
+    "REVIEW_REQUIRED": ("review required", YELLOW),
+}
+
 
 class Options(NamedTuple):
     """How the filter lists and links repositories."""
@@ -151,6 +219,10 @@ class Options(NamedTuple):
     pages: tuple[tuple[str, str], ...] = ()
     # Whether a typed word may list any GitHub account, not only --owners.
     any_owner: bool = False
+    # Whether pulls and issues list the real pull requests and issues.
+    live: bool = True
+    # How many pull requests or issues a live menu lists.
+    live_items: int = LIVE_ITEMS
 
 
 DEFAULTS = Options()
@@ -203,7 +275,7 @@ def read_cache(file: Path) -> dict:
 
 def write_cache(file: Path, data: dict) -> None:
     try:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        file.parent.mkdir(parents=True, exist_ok=True)
         partial = file.with_suffix(".part")
         partial.write_text(json.dumps(data))
         partial.replace(file)
@@ -229,6 +301,125 @@ def remember_miss(name: str) -> None:
     }
     entries[name.casefold()] = time.time()
     write_cache(missing_file(), entries)
+
+
+# Repositories whose live cache needs a fetch, in the order they were drawn.
+PENDING: list[str] = []
+
+
+def note_pending(name: str) -> None:
+    """Remember that name needs a live fetch, once and in order."""
+    if name not in PENDING:
+        PENDING.append(name)
+
+
+def live_entry(name: str) -> dict:
+    """The cached live lists of a repository, queuing a fetch when stale."""
+    entry = read_cache(live_file(name))
+    if not entry or not fresh(entry.get("at"), CACHE_LIVE):
+        note_pending(name)
+    return entry
+
+
+def live_section(section: dict | None) -> dict:
+    """A totalCount and the nodes of one live list, without empty entries."""
+    section = section or {}
+    return {
+        "totalCount": section.get("totalCount") or 0,
+        "nodes": [node for node in section.get("nodes") or [] if node],
+    }
+
+
+def fetch_live(name: str) -> None:
+    """Fetch a repository's open pull requests and issues into its cache."""
+    owner, _, repo = name.partition("/")
+    found = graphql(
+        LIVE_QUERY, cache=CACHE_LIVE, owner=owner, name=repo, first=LIVE_ITEMS
+    ).get("repository") or {}
+    write_cache(
+        live_file(name),
+        {
+            "at": time.time(),
+            "pull_requests": live_section(found.get("pullRequests")),
+            "issues": live_section(found.get("issues")),
+        },
+    )
+
+
+def fetch_quietly(name: str) -> None:
+    try:
+        fetch_live(name)
+    except GhError:
+        pass
+
+
+def load_pending() -> None:
+    """Fetch the pending repositories now, for a Ctrl+R that has to list them."""
+    names = PENDING[: max(LIVE_PREFETCH, 0)]
+    if not names:
+        return
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(fetch_quietly, names))
+    PENDING.clear()
+
+
+def start_prefetch(names: list[str]) -> None:
+    """Run this script detached to fetch names, so Raffi gets its children."""
+    wanted = names[: max(LIVE_PREFETCH, 0)]
+    if not wanted:
+        return
+    try:
+        child = subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve()), "--prefetch"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            text=True,
+        )
+        child.stdin.write(json.dumps(wanted))
+        child.stdin.close()
+    except OSError:
+        pass
+
+
+def run_prefetch() -> int:
+    """The --prefetch run: fetch the names on stdin, unless one is running."""
+    try:
+        names = json.load(sys.stdin)
+    except (OSError, ValueError):
+        return 0
+    if not isinstance(names, list):
+        return 0
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        lock = open(CACHE_DIR / "live.lock", "w")
+    except OSError:
+        return 0
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        lock.close()
+        return 0
+    wanted = [
+        name
+        for name in names
+        if isinstance(name, str)
+        and not fresh(read_cache(live_file(name)).get("at"), CACHE_LIVE)
+    ]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(fetch_quietly, wanted[: max(LIVE_PREFETCH, 0)]))
+    return 0
+
+
+def build_with_live(build):
+    """Build the items, again after a Ctrl+R fetched the pending live lists."""
+    PENDING.clear()
+    items = build()
+    if not ghcommon.REFRESH or not PENDING:
+        return items
+    load_pending()
+    return build()
 
 
 ACCOUNTS: dict[str, dict | None] = {}
@@ -414,35 +605,224 @@ def row_actions(name: str, options: Options) -> list[dict]:
     return pages + copy_actions(page_url(name, ""), name, clone=True)
 
 
-def page_children(name: str, options: Options) -> list[dict]:
-    """What Enter lists under a repository: itself, then each --pages page."""
+def plain_child(name: str, path: str, label: str, variables: dict) -> dict:
+    """A page of a repository that Enter opens straight away."""
+    url = page_url(name, path)
+    return {
+        "title": label,
+        "subtitle": url,
+        "arg": url,
+        "variables": variables,
+        "actions": copy_actions(url, f"{label} \u00b7 {name}" if path else name),
+        "preview": {
+            "title": label,
+            "subtitle": url,
+            "icon": ICON,
+            "text": f"Enter opens {url}\nCtrl+Enter copies it.",
+            "dynamic": False,
+        },
+    }
+
+
+def live_paths(options: Options) -> tuple[tuple[str, str], ...]:
+    """The live pages named by --pages or --actions, --pages first."""
+    if not options.live:
+        return ()
+    found: dict[str, str] = {}
+    for path, label in (*options.pages, *options.actions):
+        if path in LIVE_PATHS and path not in found:
+            found[path] = label
+    return tuple(found.items())
+
+
+def live_placeholder(name: str, label: str) -> dict:
+    """The row a live menu shows before its first fetch lands."""
+    return {
+        "title": label,
+        "subtitle": "loading in the background \u00b7 Ctrl+R to load it now",
+        "valid": False,
+        "preview": {
+            "title": label,
+            "text": f"The open {label.lower()} of {name} are being fetched in "
+            "the background, and the rows fill in once that is done.\n"
+            "Press Ctrl+R to load them now.",
+            "dynamic": False,
+        },
+    }
+
+
+def live_preview(label: str, url: str, name: str, loaded: bool) -> dict:
+    """What the preview says about a live menu, before or after its fetch."""
+    if loaded:
+        text = f"Enter lists the open {label.lower()} of {name}.\nCtrl+Enter " \
+            f"copies {url}."
+    else:
+        text = f"The open {label.lower()} of {name} are loading in the " \
+            f"background.\nThe menu fills in once the fetch is done; Ctrl+R " \
+            "loads them now."
+    return {
+        "title": label,
+        "subtitle": url,
+        "icon": ICON,
+        "text": text,
+        "dynamic": False,
+    }
+
+
+def pr_leaf(name: str, pr: dict, variables: dict) -> dict:
+    """A row for an open pull request, carrying what pr.py's actions need."""
+    url = pr["url"]
+    number = pr["number"]
+    title = f"#{number} {shorten(pr.get('title') or '', 70)}"
+    details = []
+    if author := (pr.get("author") or {}).get("login"):
+        details.append(f"@{author}")
+    if pr.get("isDraft"):
+        details.append(colored("draft", YELLOW))
+    if review := REVIEWS.get(pr.get("reviewDecision") or ""):
+        details.append(colored(*review))
+    if not TYPED_TIME and (updated := ago(pr.get("updatedAt"))):
+        details.append(f"updated {updated}")
+    item = {
+        "title": title,
+        "subtitle": " \u00b7 ".join(details),
+        "arg": url,
+        "variables": {
+            **variables,
+            "PR_URL": url,
+            "PR_REPO": name,
+            "PR_NUMBER": str(number),
+            "PR_BRANCH": pr.get("headRefName") or "",
+        },
+        "actions": copy_actions(url, f"{name}#{number}"),
+        "preview": {
+            "title": title,
+            "subtitle": url,
+            "icon": ICON,
+            "text": pr.get("title") or "",
+            "dynamic": False,
+        },
+    }
+    if TYPED_TIME and (when := time_field(pr.get("updatedAt"), "updated")):
+        item["time"] = when
+    return item
+
+
+def issue_leaf(name: str, issue: dict, variables: dict) -> dict:
+    """A row for an open issue, carrying what issue actions need."""
+    url = issue["url"]
+    number = issue["number"]
+    title = f"#{number} {shorten(issue.get('title') or '', 70)}"
+    details = []
+    if author := (issue.get("author") or {}).get("login"):
+        details.append(f"@{author}")
+    labels = [
+        node["name"]
+        for node in (issue.get("labels") or {}).get("nodes") or []
+        if node and node.get("name")
+    ]
+    if labels:
+        details.append(", ".join(labels[:3]))
+    if not TYPED_TIME and (updated := ago(issue.get("updatedAt"))):
+        details.append(f"updated {updated}")
+    item = {
+        "title": title,
+        "subtitle": " \u00b7 ".join(details),
+        "arg": url,
+        "variables": {
+            **variables,
+            "ISSUE_URL": url,
+            "ISSUE_REPO": name,
+            "ISSUE_NUMBER": str(number),
+        },
+        "actions": copy_actions(url, f"{name}#{number}"),
+        "preview": {
+            "title": title,
+            "subtitle": url,
+            "icon": ICON,
+            "text": issue.get("title") or "",
+            "dynamic": False,
+        },
+    }
+    if TYPED_TIME and (when := time_field(issue.get("updatedAt"), "updated")):
+        item["time"] = when
+    return item
+
+
+def all_rows_leaf(
+    name: str, label: str, url: str, variables: dict
+) -> dict:
+    """The last row of a live menu: the whole page, on GitHub."""
+    title = f"All {label.lower()} on GitHub"
+    return {
+        "title": title,
+        "subtitle": url,
+        "arg": url,
+        "variables": variables,
+        "actions": copy_actions(url, f"{label} \u00b7 {name}"),
+        "preview": {
+            "title": title,
+            "subtitle": url,
+            "icon": ICON,
+            "text": f"Enter opens {url}\nCtrl+Enter copies it.",
+            "dynamic": False,
+        },
+    }
+
+
+def live_menu(name: str, path: str, label: str, options: Options) -> dict:
+    """A page of a repository whose children are its open rows, live."""
+    url = page_url(name, path)
     variables = repo_variables({"nameWithOwner": name, "url": page_url(name, "")})
-    children = []
-    for path, label in [("", f"Open {name}"), *options.pages]:
-        url = page_url(name, path)
-        children.append(
-            {
-                "title": label,
-                "subtitle": url,
-                "arg": url,
-                "variables": variables,
-                "actions": copy_actions(url, f"{label} \u00b7 {name}" if path else name),
-                "preview": {
-                    "title": label,
-                    "subtitle": url,
-                    "icon": ICON,
-                    "text": f"Enter opens {url}\nCtrl+Enter copies it.",
-                    "dynamic": False,
-                },
-            }
-        )
+    entry = live_entry(name)
+    child = {
+        "title": label,
+        "subtitle": f"open {url}",
+        "arg": url,
+        "variables": variables,
+        "actions": [{"title": "Open on GitHub", "arg": url}]
+        + copy_actions(url, f"{label} \u00b7 {name}"),
+        "preview": live_preview(label, url, name, bool(entry)),
+    }
+    if not entry:
+        child["children"] = [live_placeholder(name, label)]
+        return child
+    section = entry.get(LIVE_KEYS[path]) or {}
+    nodes = (section.get("nodes") or [])[: max(options.live_items, 0)]
+    build = pr_leaf if path == "pulls" else issue_leaf
+    total = section.get("totalCount") or 0
+    child["title"] = f"{label} \u00b7 {total}"
+    child["subtitle"] = f"{total} open \u00b7 {name}"
+    child["children"] = [
+        build(name, node, variables) for node in nodes if node
+    ] + [all_rows_leaf(name, label, url, variables)]
+    return child
+
+
+def page_children(name: str, options: Options) -> list[dict]:
+    """What Enter lists under a repository: itself, then each --pages page.
+
+    A live page becomes a menu of its own, ahead of the plain links, and a
+    live page only --actions names is listed after the --pages ones.
+    """
+    variables = repo_variables({"nameWithOwner": name, "url": page_url(name, "")})
+    children = [plain_child(name, "", f"Open {name}", variables)]
+    listed = {path for path, _ in options.pages}
+    for path, label in options.pages:
+        if options.live and path in LIVE_PATHS:
+            children.append(live_menu(name, path, label, options))
+        else:
+            children.append(plain_child(name, path, label, variables))
+    for path, label in live_paths(options):
+        if path not in listed:
+            children.append(live_menu(name, path, label, options))
     return children
 
 
 def with_menus(item: dict, name: str, options: Options) -> dict:
     """Give a repository row its action menu and, with --pages, its pages."""
     item["actions"] = row_actions(name, options)
-    if options.pages:
+    if options.pages or live_paths(options):
         item["children"] = page_children(name, options)
     return item
 
@@ -730,8 +1110,26 @@ def main(argv: list[str] | None = None) -> int:
         help="let a typed word list any GitHub account, not only --owners "
         "and aliases",
     )
+    parser.add_argument(
+        "--live-items",
+        type=int,
+        default=LIVE_ITEMS,
+        help="how many pull requests or issues a live page lists",
+    )
+    parser.add_argument(
+        "--no-live",
+        action="store_true",
+        default=os.environ.get("LIVE") == "0",
+        help="link the pull requests and issues pages instead of listing "
+        "the open ones",
+    )
+    parser.add_argument(
+        "--prefetch", action="store_true", help=argparse.SUPPRESS
+    )
     parser.add_argument("query", nargs="*", help="text typed after the Raffi keyword")
     args = parser.parse_args(argv)
+    if args.prefetch:
+        return run_prefetch()
     query = " ".join(args.query).strip()
     options = Options(
         limit=args.limit,
@@ -739,24 +1137,33 @@ def main(argv: list[str] | None = None) -> int:
         actions=parse_actions(args.actions),
         pages=parse_actions(args.pages),
         any_owner=args.any_owner,
+        live=not args.no_live,
+        live_items=args.live_items,
     )
 
     # No views here: Raffi would replace the ones it knows with this single
     # row, losing the view Ctrl+Tab switched to.
     if direct := direct_repository(query):
-        print(json.dumps({"items": [repo_item(direct, options)]}, ensure_ascii=False))
+        items = build_with_live(lambda: [repo_item(direct, options)])
+        if not ghcommon.REFRESH:
+            start_prefetch(PENDING)
+        print(json.dumps({"items": items}, ensure_ascii=False))
         return 0
 
     try:
         owners = [alias_target(word) or word for word in args.owners.split(",") if word]
         owners = owners or [login()]
         view = os.environ.get("RAFFI_VIEW", "")
-        owner, items = list_items(query, view, owners, options)
+        owner, items = build_with_live(
+            lambda: list_items(query, view, owners, options)
+        )
     except GhError as error:
         items = error_rows("GitHub error", str(error))
         print(json.dumps(with_cache({}, items, CACHE_REPOS), ensure_ascii=False))
         return 0
 
+    if not ghcommon.REFRESH:
+        start_prefetch(PENDING)
     views = [{"id": name, "title": name} for name in owners]
     if len(owners) > 1:
         views.insert(0, {"id": ALL_VIEW, "title": "All"})
