@@ -253,17 +253,25 @@ page gives single-key access:
       secondary_action: "copy"
 ```
 
-`--actions` adds pages to the action menu of each row. Enter still opens the
-repository, and Right at the end of the query (or a right-click) lists the
-pages you name, with Enter opening one and Ctrl+Enter copying its URL. It
-needs a Raffi that supports `actions` on script filter items.
+`--pages` makes Enter list pages under each repository: the repository
+itself first, then the pages you name, with Enter opening one and Ctrl+Enter
+copying its URL. Escape goes back to the list.
 
 ```yaml
-      args: ["--owners", "me,t,osp", "--actions", "pulls,issues,releases,actions"]
+      args: ["--owners", "me,t,osp", "--pages", "pulls,issues,releases,actions"]
 ```
 
-The filter's own `actions` in `raffi.yaml` add entries that script cannot
-know, such as cloning with the row's `$REPO_SSH`:
+`--actions` puts pages in the row's action menu instead, opened with Right at
+the end of the query or a right-click, so Enter keeps opening the repository.
+The two combine. Both need a Raffi that supports `actions` on script filter
+items for the menu, and `--pages` works on older ones.
+
+Every row also has copy entries in its action menu: the URL, a Markdown link,
+the SSH and HTTPS clone URLs and `owner/name` for repositories, and the URL and
+a Markdown link for each page listed by `--pages`.
+
+The filter's own `actions` in `raffi.yaml` add entries a script cannot know,
+such as cloning with the row's `$REPO_SSH`:
 
 ```yaml
       actions:
@@ -274,8 +282,8 @@ know, such as cloning with the row's `$REPO_SSH`:
 Pages are written by path: `pulls`, `issues`, `releases`, `actions`, `tags`,
 `branches`, `commits`, `discussions`, `wiki`, `security`, `settings`, `pulse`,
 `graphs/traffic`, `graphs/contributors`, or any other. `path:Label` sets the
-label, and the row subtitle shows the page `--path` points at. Both options
-also read `REPO_PATH` and `REPO_ACTIONS` from `env`.
+label, and the row subtitle shows the page `--path` points at. The options
+also read `REPO_PATH`, `REPO_PAGES` and `REPO_ACTIONS` from `env`.
 
 ### Settings
 
@@ -284,6 +292,7 @@ also read `REPO_PATH` and `REPO_ACTIONS` from `env`.
 | `API_HOST` | `github.com` | GitHub host, for GitHub Enterprise |
 | `CACHE_REPOS` | `10m` | How long `gh` caches the repository list |
 | `REPO_PATH` | | Default for `--path` |
+| `REPO_PAGES` | | Default for `--pages` |
 | `REPO_ACTIONS` | | Default for `--actions` |
 | `CACHE_LOGIN` | `1h` | How long `gh` caches the logged in account |
 | `CACHE_MISSING` | `24h` | How long a word is remembered as not being an account |

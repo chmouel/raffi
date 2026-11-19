@@ -130,8 +130,10 @@ class Options(NamedTuple):
     limit: int = LIMIT
     # GitHub page each row opens, empty for the repository itself.
     path: str = ""
-    # Pages offered in the action menu of each row, as (path, label) pairs.
+    # Pages listed in the action menu of each row, as (path, label) pairs.
     actions: tuple[tuple[str, str], ...] = ()
+    # Pages Enter lists under each row before opening one, same pairs.
+    pages: tuple[tuple[str, str], ...] = ()
 
 
 DEFAULTS = Options()
@@ -420,12 +422,73 @@ def page_url(name: str, path: str) -> str:
     return f"https://{API_HOST}/{name}/{path}" if path else f"https://{API_HOST}/{name}"
 
 
-def action_menu(repo: dict, options: Options) -> list[dict]:
-    """The pages --actions offers for a repository, in Raffi's action menu."""
-    name = repo["nameWithOwner"]
-    return [
+def copy_actions(url: str, label: str, clone: bool = False) -> list[dict]:
+    """Copy entries for the action menu of a row that opens url."""
+    entries = [
+        {"title": "Copy URL", "arg": url, "action": "copy"},
+        {
+            "title": "Copy Markdown link",
+            "arg": f"[{label}]({url})",
+            "action": "copy",
+        },
+    ]
+    if clone:
+        name = url.removeprefix(f"https://{API_HOST}/")
+        entries += [
+            {
+                "title": "Copy SSH clone URL",
+                "arg": f"git@{API_HOST}:{name}.git",
+                "action": "copy",
+            },
+            {
+                "title": "Copy HTTPS clone URL",
+                "arg": f"https://{API_HOST}/{name}.git",
+                "action": "copy",
+            },
+            {"title": "Copy name", "arg": name, "action": "copy"},
+        ]
+    return entries
+
+
+def row_actions(name: str, options: Options) -> list[dict]:
+    """The action menu of a repository: --actions pages, then copy entries."""
+    pages = [
         {"title": label, "arg": page_url(name, path)} for path, label in options.actions
     ]
+    return pages + copy_actions(page_url(name, ""), name, clone=True)
+
+
+def page_children(name: str, options: Options) -> list[dict]:
+    """What Enter lists under a repository: itself, then each --pages page."""
+    variables = repo_variables({"nameWithOwner": name, "url": page_url(name, "")})
+    children = []
+    for path, label in [("", f"Open {name}"), *options.pages]:
+        url = page_url(name, path)
+        children.append(
+            {
+                "title": label,
+                "subtitle": url,
+                "arg": url,
+                "variables": variables,
+                "actions": copy_actions(url, f"{label} \u00b7 {name}" if path else name),
+                "preview": {
+                    "title": label,
+                    "subtitle": url,
+                    "icon": ICON,
+                    "text": f"Enter opens {url}\nCtrl+Enter copies it.",
+                    "dynamic": False,
+                },
+            }
+        )
+    return children
+
+
+def with_menus(item: dict, name: str, options: Options) -> dict:
+    """Give a repository row its action menu and, with --pages, its pages."""
+    item["actions"] = row_actions(name, options)
+    if options.pages:
+        item["children"] = page_children(name, options)
+    return item
 
 
 def build_item(repo: dict, options: Options = DEFAULTS) -> dict:
@@ -454,9 +517,7 @@ def build_item(repo: dict, options: Options = DEFAULTS) -> dict:
         "variables": repo_variables(repo),
         "preview": build_preview(repo),
     }
-    if options.actions:
-        item["actions"] = action_menu(repo, options)
-    return item
+    return with_menus(item, repo["nameWithOwner"], options)
 
 
 def account_item(account: dict) -> dict:
@@ -497,9 +558,7 @@ def repo_item(name: str, options: Options = DEFAULTS) -> dict:
             "dynamic": False,
         },
     }
-    if options.actions:
-        item["actions"] = action_menu({"nameWithOwner": name}, options)
-    return item
+    return with_menus(item, name, options)
 
 
 def error_item(title: str, message: str) -> dict:
@@ -646,8 +705,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--actions",
         default=os.environ.get("REPO_ACTIONS", ""),
-        help="pages offered in each row's action menu, as a comma separated "
-        "list of paths, such as pulls,issues,releases or graphs/traffic:Traffic",
+        help="pages listed in each row's action menu (Right), as a comma "
+        "separated list of paths, such as pulls,issues,releases or "
+        "graphs/traffic:Traffic",
+    )
+    parser.add_argument(
+        "--pages",
+        default=os.environ.get("REPO_PAGES", ""),
+        help="pages Enter lists under each row, same syntax as --actions",
     )
     parser.add_argument("query", nargs="*", help="text typed after the Raffi keyword")
     args = parser.parse_args(argv)
@@ -656,6 +721,7 @@ def main(argv: list[str] | None = None) -> int:
         limit=args.limit,
         path=args.path.strip().strip("/"),
         actions=parse_actions(args.actions),
+        pages=parse_actions(args.pages),
     )
 
     # No views here: Raffi would replace the ones it knows with this single

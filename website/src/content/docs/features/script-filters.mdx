@@ -346,10 +346,13 @@ preview shows the description, stars, forks, visibility and topics.
 
 A row opens its repository. Add `--path pulls` (or `issues`, `releases`,
 `actions`, `tags`, or another path) to make every row open that page instead,
-which gives one keyword per page single-key access. `--actions
-pulls,issues,releases` adds those pages to the row's
-[action menu](#custom-actions) instead, opened with Right, so Enter still
-opens the repository.
+which gives one keyword per page single-key access. `--pages
+pulls,issues,releases` makes Enter list those pages under the repository
+(Enter opens one, Ctrl+Enter copies it), and `--actions` puts pages in the
+row's [action menu](#custom-actions) instead, so Enter still opens the
+repository. Every row also has copy entries there: the URL, a Markdown link,
+the clone URLs and `owner/name`, and the pages of `--pages` have the URL and
+a Markdown link.
 
 Raffi's own `cache_seconds` shows each query's last result at once while
 refreshing it in the background, and `gh` caches every account's pages, so a

@@ -252,10 +252,11 @@ addons:
     #   env:
     #     ALIAS_t: tektoncd
     #     ALIAS_osp: openshift-pipelines
-    #   # Right on a row lists its pull requests, issues and releases, and
-    #   # the actions below; Enter still opens the repository. "--path pulls"
-    #   # makes every row open that page instead.
-    #   # args: ["--owners", "me,t,osp", "--actions", "pulls,issues,releases"]
+    #   # Enter lists the repository and its pull requests, issues and
+    #   # releases ("--pages"); Right opens the action menu with copy entries
+    #   # and the actions below. "--actions pulls,issues" puts pages in that
+    #   # menu instead and "--path pulls" makes every row open one page.
+    #   # args: ["--owners", "me,t,osp", "--pages", "pulls,issues,releases"]
     #   actions:
     #     - title: "Clone"
     #       action: 'git clone "$REPO_SSH" ~/src/"$REPO_NAME"'

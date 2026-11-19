@@ -329,7 +329,13 @@ class MainTests(ReposTestCase):
     def test_actions_flag(self):
         output = self.run_main("--actions", "pulls,issues", "me", "raffi")
         titles = [entry["title"] for entry in output["items"][0]["actions"]]
-        self.assertEqual(titles, ["Pull requests", "Issues"])
+        self.assertEqual(titles[:2], ["Pull requests", "Issues"])
+        self.assertNotIn("children", output["items"][0])
+
+    def test_pages_flag(self):
+        output = self.run_main("--pages", "pulls,issues", "me", "raffi")
+        titles = [child["title"] for child in output["items"][0]["children"]]
+        self.assertEqual(titles, ["Open owner/raffi", "Pull requests", "Issues"])
 
     def test_missing_cache_is_per_host(self):
         self.assertEqual(repos.cache_dir().name, repos.API_HOST)
@@ -376,34 +382,109 @@ class ActionTests(ReposTestCase):
         item = repos.repo_item("owner/raffi", repos.Options(path="releases"))
         self.assertEqual(item["arg"], "https://github.com/owner/raffi/releases")
 
-    def test_actions_are_declared_on_the_row(self):
+    def titles_of(self, entries):
+        return [entry["title"] for entry in entries]
+
+    def test_actions_list_pages_then_copy_entries(self):
         item = repos.build_item(
             repo("raffi"),
             repos.Options(actions=(("pulls", "Pull requests"), ("issues", "Issues"))),
         )
         self.assertEqual(
-            item["actions"],
+            self.titles_of(item["actions"]),
             [
-                {"title": "Pull requests", "arg": "https://github.com/owner/raffi/pulls"},
-                {"title": "Issues", "arg": "https://github.com/owner/raffi/issues"},
+                "Pull requests",
+                "Issues",
+                "Copy URL",
+                "Copy Markdown link",
+                "Copy SSH clone URL",
+                "Copy HTTPS clone URL",
+                "Copy name",
             ],
+        )
+        self.assertEqual(
+            item["actions"][0]["arg"], "https://github.com/owner/raffi/pulls"
         )
         self.assertNotIn("children", item)
         self.assertEqual(item["arg"], "https://github.com/owner/raffi")
 
+    def test_copy_entries_copy_the_right_values(self):
+        item = repos.build_item(repo("raffi"))
+        by_title = {entry["title"]: entry for entry in item["actions"]}
+        self.assertEqual(by_title["Copy URL"]["arg"], "https://github.com/owner/raffi")
+        self.assertEqual(
+            by_title["Copy Markdown link"]["arg"],
+            "[owner/raffi](https://github.com/owner/raffi)",
+        )
+        self.assertEqual(
+            by_title["Copy SSH clone URL"]["arg"], "git@github.com:owner/raffi.git"
+        )
+        self.assertEqual(
+            by_title["Copy HTTPS clone URL"]["arg"],
+            "https://github.com/owner/raffi.git",
+        )
+        self.assertEqual(by_title["Copy name"]["arg"], "owner/raffi")
+        self.assertTrue(all(entry["action"] == "copy" for entry in item["actions"]))
+
+    def test_pages_make_enter_list_them(self):
+        item = repos.build_item(
+            repo("raffi"),
+            repos.Options(pages=(("pulls", "Pull requests"), ("issues", "Issues"))),
+        )
+        self.assertEqual(
+            self.titles_of(item["children"]),
+            ["Open owner/raffi", "Pull requests", "Issues"],
+        )
+        self.assertEqual(
+            [child["arg"] for child in item["children"]],
+            [
+                "https://github.com/owner/raffi",
+                "https://github.com/owner/raffi/pulls",
+                "https://github.com/owner/raffi/issues",
+            ],
+        )
+        self.assertEqual(
+            item["children"][1]["variables"]["REPO_NAME"], "owner/raffi"
+        )
+        # Enter still means "list the pages", so the row's own arg stays.
+        self.assertEqual(item["arg"], "https://github.com/owner/raffi")
+
+    def test_pages_carry_their_own_context_menu(self):
+        item = repos.build_item(
+            repo("raffi"), repos.Options(pages=(("pulls", "Pull requests"),))
+        )
+        pulls = item["children"][1]
+        self.assertEqual(
+            self.titles_of(pulls["actions"]), ["Copy URL", "Copy Markdown link"]
+        )
+        self.assertEqual(
+            pulls["actions"][1]["arg"],
+            "[Pull requests \u00b7 owner/raffi](https://github.com/owner/raffi/pulls)",
+        )
+        self.assertEqual(
+            item["children"][0]["actions"][1]["arg"],
+            "[owner/raffi](https://github.com/owner/raffi)",
+        )
+
+    def test_no_children_without_pages(self):
+        self.assertNotIn("children", repos.build_item(repo("raffi")))
+
     def test_path_applies_to_a_typed_repository_menu(self):
         item = repos.repo_item(
             "owner/raffi",
-            repos.Options(path="pulls", actions=(("issues", "Issues"),)),
+            repos.Options(
+                path="pulls", actions=(("issues", "Issues"),), pages=(("tags", "Tags"),)
+            ),
         )
         self.assertEqual(item["arg"], "https://github.com/owner/raffi/pulls")
+        self.assertEqual(item["actions"][0]["arg"], "https://github.com/owner/raffi/issues")
         self.assertEqual(
-            [entry["arg"] for entry in item["actions"]],
-            ["https://github.com/owner/raffi/issues"],
+            [child["arg"] for child in item["children"]],
+            [
+                "https://github.com/owner/raffi",
+                "https://github.com/owner/raffi/tags",
+            ],
         )
-
-    def test_no_menu_without_actions(self):
-        self.assertNotIn("actions", repos.build_item(repo("raffi")))
 
 
 class ItemTests(ReposTestCase):
