@@ -2659,9 +2659,10 @@ impl LauncherApp {
         let mut stale = false;
         if let Some(ttl) = cache_ttl {
             let key = cache::script_filter_list_key(config, &query);
+            let ceiling = config.cache_ceiling().unwrap_or(ttl);
             if let Some(snapshot) = cache::read_list(&key) {
                 if let Some(result) = cache::parse_list(&snapshot, config.icon.clone()) {
-                    stale = force_refresh || !snapshot.is_fresh(ttl);
+                    stale = force_refresh || !snapshot.fresh_within(ttl, ceiling);
                     cached = Some(result);
                 }
             }
@@ -4377,6 +4378,11 @@ impl LauncherApp {
         self.script_filter.loading = false;
         self.script_filter.loading_name = None;
         match result {
+            // The script asked not to keep this output: with rows already
+            // on screen it counts as a failed refresh and they stay.
+            Ok(result) if result.not_stored && self.script_filter.results_are_cached => {
+                crate::debug_log!("script_filter: refresh not stored, keeping cached rows");
+            }
             Ok(result) => {
                 self.script_filter.adopt_views(&result);
                 self.script_filter.results = Some(result);

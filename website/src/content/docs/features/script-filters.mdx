@@ -68,13 +68,56 @@ addons:
 
 `warm_queries` are run periodically by
 [`raffi --server`](../../reference/cli-options/#cache-management),
-in every [view](#views) the script offers, so these queries are already
-fresh when Raffi opens. `warm_interval_seconds`
-defaults to `cache_seconds`. Pressing Ctrl+R runs the script again with
+in every [view](#views) the script offers (up to 16 besides the default), so these queries are
+already fresh when Raffi opens. A list is refreshed once its result has
+outlived its freshness, which is `cache_seconds` unless the script
+[asked for more](#letting-the-script-choose), and never more often than
+`warm_interval_seconds`, which defaults to `cache_seconds`. Each list is
+scheduled on its own from the snapshot on disk, so restarting the server does
+not refresh what is still fresh, and a short jitter spreads lists that were
+created together. A run is killed after 60 seconds, and only one background run of a list goes on at a time; a refresh you ask for with F5 never waits for one.
+
+When a refresh fails, or the script answers `"seconds": 0`, the server keeps
+the last good result and tries again after a minute, then two, doubling up to
+an hour, however long the freshness window is. Pressing Ctrl+R runs the script again with
 `RAFFI_REFRESH=1` in its environment, which the bundled GitHub script uses to
 bypass the `gh` CLI cache and fetch live state. When the server is
 running, F5 asks it to do the same refresh and Raffi reads the new snapshot
 it writes.
+
+### Letting the script choose
+
+The script knows how fast its data changes, so it can say how long its output
+stays fresh with a top-level `cache`:
+
+```json
+{ "cache": { "seconds": 86400 }, "items": [] }
+```
+
+A bare number works too. The user's config keeps the last word:
+
+| Script says | Result |
+|-------------|--------|
+| nothing | `cache_seconds`, as without this feature |
+| less than `cache_seconds` | the smaller value: a script can always ask for less caching |
+| more than `cache_seconds` | the larger value, up to `cache_max_seconds` and never past seven days |
+| `0` | this output is not kept |
+
+```yaml raffi.yaml
+      cache_seconds: 300       # turns caching on, and the default freshness
+      cache_max_seconds: 86400 # how far a script may raise it
+```
+
+A script cannot turn caching on: without `cache_seconds` nothing is cached and
+the hint is ignored. The limits are applied when a snapshot is read, so
+lowering `cache_max_seconds` takes effect on results already cached.
+
+`"seconds": 0` is for output that must not replace what is already cached, such
+as an error row. Raffi keeps the rows on screen and treats the run as a failed
+refresh, so F5 reports a failure. When nothing was cached yet the rows are
+shown, and they are not stored either way. The bundled GitHub scripts do this
+when `gh` is unavailable, so a network outage does not overwrite a good list
+for the rest of the freshness window.
 
 Cached item lists and dynamic previews live under
 `$XDG_CACHE_HOME/raffi/script-filters/`. `raffi --refresh-cache` removes them.
@@ -582,6 +625,12 @@ Entries added to the action menu of every valid row, after the ones the row
 declares. Each has a `title` and an `action` that takes the same values as
 `action` and runs on the row's value, see [Custom actions](#custom-actions).
 
+**`cache_max_seconds`** `integer`
+
+Longest freshness a script may ask for with `"cache": {"seconds": N}`, when
+that is more than `cache_seconds`. It never turns caching on and never lowers
+`cache_seconds`, see [Letting the script choose](#letting-the-script-choose).
+
 **`env`** `map of strings` (default: `{}`)
 
 Environment variables passed to the command, including its
@@ -624,7 +673,8 @@ addons:
 ## Output format
 
 The command prints a JSON object with an `items` list on its standard
-output. Anything it writes on standard error is ignored. When the command
+output, and optionally a [`cache`](#letting-the-script-choose) saying how long
+the list stays fresh. Anything it writes on standard error is ignored. When the command
 fails or prints something that is not valid JSON, the list stays empty, so
 try a script in a terminal first, such as `my-script -j "test query"`.
 

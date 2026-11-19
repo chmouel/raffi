@@ -265,7 +265,8 @@ addons:
     #   icon: "github"
     #   action: "xdg-open {value}"
     #   secondary_action: "copy"
-    #   cache_seconds: 300
+    #   cache_seconds: 300       # Caching on; the script may ask for more, up to:
+    #   cache_max_seconds: 86400 # env CACHE_REPOS: 24h makes the script ask for a day
     #   warm_queries: [""]
 
   # text_snippets:

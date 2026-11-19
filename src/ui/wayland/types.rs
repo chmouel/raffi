@@ -404,6 +404,12 @@ pub(crate) struct ScriptFilterResult {
     pub views: Vec<ScriptFilterView>,
     /// View these items belong to, when the script says.
     pub view: Option<String>,
+    /// Seconds the script asked its output to stay fresh. `Some(0)` asks not
+    /// to keep the output at all.
+    pub cache_hint: Option<u64>,
+    /// The script asked not to keep this output, so a run that produced it
+    /// counts as a failed refresh.
+    pub not_stored: bool,
 }
 
 /// A file or directory entry for the file browser addon.

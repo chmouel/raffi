@@ -64,6 +64,7 @@ mod units;
 mod url_match;
 mod vault;
 mod view;
+mod warm_schedule;
 mod window_events;
 mod windows;
 mod world_clock;

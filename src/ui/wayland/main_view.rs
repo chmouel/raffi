@@ -2258,6 +2258,10 @@ impl LauncherApp {
             return self.start_main_view_script_filter(source);
         }
         let result = match result {
+            Some(Ok(result)) if result.not_stored => {
+                crate::debug_log!("main_view: script filter hidden: output not to be kept");
+                None
+            }
             Some(Ok(result)) => Some(result),
             Some(Err(error)) => {
                 crate::debug_log!("main_view: script filter hidden: {error}");

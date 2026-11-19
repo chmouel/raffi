@@ -23,10 +23,11 @@ use crate::{AddonsConfig, ParsedConfig, ScriptFilterConfig};
 use super::clipboard_store::MAX_MIME_BYTES;
 use super::script_filters::{self, PreviewRequest};
 use super::types::{ScriptFilterResult, ScriptFilterView};
+use super::warm_schedule::{Policy, Run, Warmer, MAX_WARM_VIEWS};
 
 const SNAPSHOT_VERSION: u32 = 1;
 /// Snapshots older than this are discarded instead of shown while refreshing.
-const MAX_STALE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+pub(super) const MAX_STALE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const LIST_KEEP: usize = 200;
 const PREVIEW_KEEP: usize = 200;
 const SERVER_CLIENT_TIMEOUT: Duration = Duration::from_millis(100);
@@ -37,6 +38,9 @@ const CLIPBOARD_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const CLIPBOARD_NOT_RUNNING: &str =
     "Raffi clipboard server is not running: start `raffi --server`";
 const WARM_TICK: Duration = Duration::from_secs(30);
+/// Longest a script filter run for the server may take. Shorter than
+/// `WAIT_TIMEOUT`, so a client waiting on F5 hears about it first.
+const SERVER_RUN_TIMEOUT: Duration = Duration::from_secs(60);
 /// Protocol revision reported by `Status`; servers from before it existed
 /// report 0 and ignore `wait`. Revision 2 adds `clipboard_select`, revision
 /// 3 the `clipboard` status flag, revision 4 `clipboard_set`, revision 5 its
@@ -59,6 +63,15 @@ const fn base64_len(bytes: usize) -> usize {
     bytes.div_ceil(3) * 4
 }
 
+/// How long a result stays fresh: the script's hint up to `ceiling`, else the
+/// config's `ttl`. A ceiling below the ttl never lowers it, and nothing
+/// outlives `MAX_STALE`.
+pub(super) fn effective_ttl(hint_secs: Option<u64>, ttl: Duration, ceiling: Duration) -> Duration {
+    hint_secs.map_or(ttl, |hint| {
+        Duration::from_secs(hint).min(ceiling.max(ttl).min(MAX_STALE))
+    })
+}
+
 /// A snapshot file to write after a successful script run.
 #[derive(Debug, Clone)]
 pub(crate) struct SnapshotTarget {
@@ -74,6 +87,10 @@ pub(crate) struct Snapshot {
     pub fetched_at: u64,
     pub ttl_secs: u64,
     pub payload: String,
+    /// The freshness the script asked for, as it asked. Clamping happens when
+    /// the snapshot is read, so the current config always has the last word.
+    #[serde(default)]
+    pub hint_secs: Option<u64>,
 }
 
 impl Snapshot {
@@ -83,6 +100,13 @@ impl Snapshot {
 
     pub fn is_fresh(&self, ttl: Duration) -> bool {
         self.age() < ttl
+    }
+
+    /// Whether the snapshot is fresh for a config with freshness `ttl`: the
+    /// script's own request counts, up to `ceiling`, so it can ask for less
+    /// caching and, when the user allows it, for more.
+    pub fn fresh_within(&self, ttl: Duration, ceiling: Duration) -> bool {
+        self.age() < effective_ttl(self.hint_secs, ttl, ceiling)
     }
 
     pub fn is_usable(&self) -> bool {
@@ -114,6 +138,9 @@ pub(crate) enum Request {
         /// Run the script now and reply once its snapshot is written.
         #[serde(default)]
         wait: bool,
+        /// Longest freshness the script may ask for; `ttl_secs` when missing.
+        #[serde(default)]
+        max_ttl_secs: Option<u64>,
     },
     GetScriptFilterPreview {
         key: String,
@@ -234,6 +261,20 @@ impl Response {
     }
 }
 
+/// A script run for the server. Output the script asked not to keep counts as
+/// a failed refresh, reported with the first row's title.
+fn server_run(result: Result<ScriptFilterResult, String>) -> Result<ScriptFilterResult, String> {
+    match result {
+        Ok(result) if result.not_stored => Err(result
+            .items
+            .first()
+            .map(|item| super::ansi::strip_ansi(&item.title))
+            .filter(|title| !title.is_empty())
+            .unwrap_or_else(|| "the script asked not to cache this output".to_string())),
+        other => other,
+    }
+}
+
 impl From<Failure> for Response {
     fn from(failure: Failure) -> Self {
         Self::Error {
@@ -269,6 +310,10 @@ pub(crate) struct ServerState {
     pub addons: AddonsConfig,
     status: Mutex<HashMap<String, SourceStatus>>,
     inflight: Mutex<HashSet<String>>,
+    /// Lists a client is waiting on right now, counted: a refresh asked for
+    /// by a user never waits behind a background one, so several runs of one
+    /// list can overlap and each must be remembered until it ends.
+    forced: Mutex<HashMap<String, usize>>,
 }
 
 impl ServerState {
@@ -278,6 +323,7 @@ impl ServerState {
             addons,
             status: Mutex::new(HashMap::new()),
             inflight: Mutex::new(HashSet::new()),
+            forced: Mutex::new(HashMap::new()),
         }
     }
 
@@ -323,6 +369,71 @@ impl ServerState {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .remove(key);
+    }
+
+    /// Mark a list as being refreshed until the guard is dropped, or `None`
+    /// when another run, background or asked for by a user, already has it.
+    fn hold(self: &Arc<Self>, key: String) -> Option<InFlight> {
+        let forced = self
+            .forced
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if forced.contains_key(&key) {
+            return None;
+        }
+        self.begin(&key).then(|| InFlight {
+            state: self.clone(),
+            key,
+        })
+    }
+
+    /// Mark a list as being refreshed for a user who is waiting. Never
+    /// refused, and it keeps background runs away until it is dropped.
+    fn force(self: &Arc<Self>, key: String) -> Forced {
+        *self
+            .forced
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .entry(key.clone())
+            .or_insert(0) += 1;
+        Forced {
+            state: self.clone(),
+            key,
+        }
+    }
+}
+
+/// Releases a list marked by `ServerState::force`.
+struct Forced {
+    state: Arc<ServerState>,
+    key: String,
+}
+
+impl Drop for Forced {
+    fn drop(&mut self) {
+        let mut forced = self
+            .state
+            .forced
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(count) = forced.get_mut(&self.key) {
+            *count -= 1;
+            if *count == 0 {
+                forced.remove(&self.key);
+            }
+        }
+    }
+}
+
+/// Releases a list marked by `ServerState::hold`, whatever ends the run.
+struct InFlight {
+    state: Arc<ServerState>,
+    key: String,
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        self.state.finish(&self.key);
     }
 }
 
@@ -539,12 +650,14 @@ pub(crate) fn write_snapshot_path(
     payload: &str,
     ttl: Duration,
     keep: usize,
+    hint_secs: Option<u64>,
 ) -> Result<()> {
     let snapshot = Snapshot {
         version: SNAPSHOT_VERSION,
         fetched_at: now_secs(),
         ttl_secs: ttl.as_secs(),
         payload: payload.to_string(),
+        hint_secs,
     };
     let bytes = serde_json::to_vec(&snapshot)?;
     write_private_bytes(path, &bytes)?;
@@ -829,6 +942,7 @@ pub(crate) fn script_filter_refresh_request(
         force_refresh: true,
         ttl_secs: ttl.as_secs(),
         wait: true,
+        max_ttl_secs: config.cache_ceiling().map(|ceiling| ceiling.as_secs()),
     })
 }
 
@@ -859,15 +973,19 @@ pub(crate) fn handle_request(state: &Arc<ServerState>, request: Request) -> Resp
                 || command.clone(),
                 |name| name.to_string_lossy().into_owned(),
             );
+            // An F5 never waits for a background run, so it is registered
+            // whether or not one is going on, and keeps the next one away.
+            let _forced = state.force(format!("list:{key}"));
             let result = logged(&format!("script filter {name} {query:?}"), || {
-                script_filters::run_script_filter(
+                server_run(script_filters::run_script_filter(
                     &command,
                     &args,
                     &env,
                     &query,
                     None,
                     list_target_from_key(&key, ttl),
-                )
+                    Some(SERVER_RUN_TIMEOUT),
+                ))
             });
             state.set_status("script-filters", result.as_ref().err().cloned());
             match result {
@@ -887,28 +1005,33 @@ pub(crate) fn handle_request(state: &Arc<ServerState>, request: Request) -> Resp
             force_refresh,
             ttl_secs,
             wait: false,
+            max_ttl_secs,
         } => {
             let ttl = Duration::from_secs(ttl_secs);
+            let ceiling = max_ttl_secs.map_or(ttl, Duration::from_secs);
             let snapshot = read_list(&key);
             let stale = force_refresh
                 || snapshot
                     .as_ref()
-                    .is_none_or(|snapshot| !snapshot.is_fresh(ttl));
+                    .is_none_or(|snapshot| !snapshot.fresh_within(ttl, ceiling));
             let payload = snapshot.map(|snapshot| snapshot.payload);
-            if (payload.is_none() || stale) && state.begin(&format!("list:{key}")) {
+            let held = (payload.is_none() || stale)
+                .then(|| state.hold(format!("list:{key}")))
+                .flatten();
+            if let Some(held) = held {
                 let state = state.clone();
-                let job_key = format!("list:{key}");
                 std::thread::spawn(move || {
-                    let result = script_filters::run_script_filter(
+                    let result = server_run(script_filters::run_script_filter(
                         &command,
                         &args,
                         &env,
                         &query,
                         None,
                         list_target_from_key(&key, ttl),
-                    );
+                        Some(SERVER_RUN_TIMEOUT),
+                    ));
                     state.set_status("script-filters", result.err());
-                    state.finish(&job_key);
+                    drop(held);
                 });
             }
             Response::ScriptFilter { payload, stale }
@@ -1377,19 +1500,27 @@ pub(crate) fn run_server(config: ParsedConfig) -> Result<()> {
 fn warm_loop(state: Arc<ServerState>) {
     std::thread::spawn(move || {
         let mut last: HashMap<String, u64> = HashMap::new();
+        let mut warmer = Warmer::default();
         loop {
             let now = now_secs();
             for (index, config) in state.addons.script_filters.iter().enumerate() {
                 if config.warm_queries.is_empty() {
                     continue;
                 }
-                let Some(interval) = config.warm_interval() else {
+                let Some(policy) = Policy::of(config) else {
                     continue;
                 };
-                let source = format!("script:{index}");
-                if due(&last, &source, now, interval.as_secs()) {
-                    last.insert(source, now);
-                    let _ = warm_script_filter(&state, index, config);
+                let report = warmer.tick(
+                    &now_secs,
+                    config,
+                    &policy,
+                    &read_list,
+                    &mut |view, query, still_due| {
+                        warm_run(&state, config, policy.ttl, view, query, still_due)
+                    },
+                );
+                if report.ran > 0 {
+                    state.set_status(&format!("script:{index}"), report.error);
                 }
             }
             if state.addons.slack.enabled {
@@ -1417,6 +1548,7 @@ fn due(last: &HashMap<String, u64>, source: &str, now: u64, interval: u64) -> bo
         .is_none_or(|previous| now.saturating_sub(*previous) >= interval)
 }
 
+/// Refresh every list of a script filter now, whatever its snapshots say.
 fn warm_script_filter(
     state: &Arc<ServerState>,
     index: usize,
@@ -1426,10 +1558,13 @@ fn warm_script_filter(
         return Ok(());
     };
     let mut error = None;
+    let mut ran = false;
+    let always = || true;
     for query in &config.warm_queries {
         // The default run names the other views, each warmed under its own key.
-        let views = match warm_script_filter_view(config, None, query, ttl) {
-            Ok(result) => {
+        let views = match warm_run(state, config, ttl, None, query, &always) {
+            Run::Done(Ok(result)) => {
+                ran = true;
                 let default = result
                     .view
                     .or_else(|| result.views.first().map(|view| view.id.clone()));
@@ -1437,40 +1572,60 @@ fn warm_script_filter(
                     .views
                     .into_iter()
                     .filter(|view| Some(&view.id) != default.as_ref())
+                    .take(MAX_WARM_VIEWS)
                     .collect()
             }
-            Err(message) => {
+            Run::Done(Err(message)) => {
+                ran = true;
                 error.get_or_insert(format!("{}: {message}", config.name));
                 Vec::new()
             }
+            Run::Skipped => Vec::new(),
         };
         for view in &views {
-            if let Err(message) = warm_script_filter_view(config, Some(view), query, ttl) {
-                error.get_or_insert(format!("{} ({}): {message}", config.name, view.title));
+            if let Run::Done(outcome) = warm_run(state, config, ttl, Some(view), query, &always) {
+                ran = true;
+                if let Err(message) = outcome {
+                    error.get_or_insert(format!("{} ({}): {message}", config.name, view.title));
+                }
             }
         }
     }
-    state.set_status(&format!("script:{index}"), error.clone());
+    if ran {
+        state.set_status(&format!("script:{index}"), error.clone());
+    }
     error.map_or(Ok(()), Err)
 }
 
-fn warm_script_filter_view(
+/// One refresh run of a script filter list for the server. A list another
+/// run holds is left to that run, and so is one `still_due` finds refreshed
+/// by the time this run has it.
+fn warm_run(
+    state: &Arc<ServerState>,
     config: &ScriptFilterConfig,
+    ttl: Duration,
     view: Option<&ScriptFilterView>,
     query: &str,
-    ttl: Duration,
-) -> Result<ScriptFilterResult, String> {
+    still_due: &dyn Fn() -> bool,
+) -> Run {
     let config = script_filters::view_config(config, view);
+    let Some(_held) = state.hold(format!("list:{}", script_filter_list_key(&config, query))) else {
+        return Run::Skipped;
+    };
+    if !still_due() {
+        return Run::Skipped;
+    }
     let mut env = config.env.clone();
     env.insert("RAFFI_REFRESH".into(), "1".into());
-    script_filters::run_script_filter(
+    Run::Done(server_run(script_filters::run_script_filter(
         &config.command,
         &config.args,
         &env,
         query,
         config.icon.clone(),
         list_target(&config, query, ttl),
-    )
+        Some(SERVER_RUN_TIMEOUT),
+    )))
 }
 
 fn warm_named(state: &Arc<ServerState>, source: &str) -> Result<(), String> {
@@ -1648,7 +1803,7 @@ mod tests {
     fn snapshot_round_trip_and_expiry() {
         let dir = tempdir("snapshot");
         let path = dir.join("lists").join("key.json");
-        write_snapshot_path(&path, r#"{"items":[]}"#, Duration::from_secs(300), 10).unwrap();
+        write_snapshot_path(&path, r#"{"items":[]}"#, Duration::from_secs(300), 10, None).unwrap();
         let snapshot = read_snapshot_path(&path).unwrap();
         assert_eq!(snapshot.payload, r#"{"items":[]}"#);
         assert!(snapshot.is_fresh(Duration::from_secs(300)));
@@ -1829,6 +1984,7 @@ mod tests {
             force_refresh: true,
             ttl_secs: 60,
             wait: true,
+            max_ttl_secs: None,
         };
         assert!(matches!(
             handle_request(&state, script("sh")),
@@ -1837,6 +1993,204 @@ mod tests {
         assert!(matches!(
             handle_request(&state, script("/nonexistent/raffi-script")),
             Response::Error { .. }
+        ));
+    }
+
+    fn snapshot_aged(age: u64, hint: Option<u64>) -> Snapshot {
+        Snapshot {
+            version: SNAPSHOT_VERSION,
+            fetched_at: now_secs() - age,
+            ttl_secs: 300,
+            payload: String::new(),
+            hint_secs: hint,
+        }
+    }
+
+    #[test]
+    fn snapshot_freshness_follows_the_hint_capped_by_the_current_config() {
+        let secs = Duration::from_secs;
+        let fresh = |age, hint, ttl, ceiling| {
+            snapshot_aged(age, hint).fresh_within(secs(ttl), secs(ceiling))
+        };
+        // No hint: exactly the config TTL, so raising it applies at once.
+        assert!(fresh(200, None, 300, 300));
+        assert!(!fresh(400, None, 300, 300));
+        assert!(fresh(400, None, 600, 600));
+        // A hint above the TTL needs the ceiling's permission.
+        assert!(!fresh(400, Some(86400), 300, 300));
+        assert!(fresh(400, Some(86400), 300, 86400));
+        assert!(fresh(40_000, Some(86400), 300, 86400));
+        assert!(!fresh(90_000, Some(86400), 300, 86400));
+        // A smaller hint asks for less caching and needs no permission.
+        assert!(fresh(30, Some(60), 300, 300));
+        assert!(!fresh(61, Some(60), 300, 300));
+        // A ceiling below the TTL never lowers the TTL.
+        assert!(fresh(200, Some(10_000), 300, 60));
+        // Nothing outlives the staleness limit.
+        let week = MAX_STALE.as_secs();
+        assert!(!snapshot_aged(week + 10, Some(u64::MAX)).fresh_within(secs(300), secs(u64::MAX)));
+    }
+
+    #[test]
+    fn snapshot_files_stay_readable_across_versions() {
+        #[derive(Deserialize)]
+        struct OldSnapshot {
+            version: u32,
+            payload: String,
+        }
+        let legacy: Snapshot =
+            serde_json::from_str(r#"{"version":1,"fetched_at":5,"ttl_secs":60,"payload":"{}"}"#)
+                .unwrap();
+        assert_eq!(legacy.hint_secs, None);
+        let written = serde_json::to_string(&snapshot_aged(0, Some(86400))).unwrap();
+        let old: OldSnapshot = serde_json::from_str(&written).unwrap();
+        assert_eq!(old.version, 1);
+        assert_eq!(old.payload, "");
+        assert_eq!(SNAPSHOT_VERSION, 1);
+    }
+
+    #[test]
+    fn refresh_requests_carry_the_ceiling_and_old_ones_still_parse() {
+        let config: ScriptFilterConfig = serde_yaml::from_str(
+            "name: r\ncommand: r\nkeyword: r\ncache_seconds: 300\ncache_max_seconds: 86400\n",
+        )
+        .unwrap();
+        let Some(Request::GetScriptFilter {
+            ttl_secs,
+            max_ttl_secs,
+            ..
+        }) = script_filter_refresh_request(&config, "q")
+        else {
+            panic!("a refresh request");
+        };
+        assert_eq!((ttl_secs, max_ttl_secs), (300, Some(86400)));
+        let old: Request = serde_json::from_str(
+            r#"{"type":"get_script_filter","key":"k","command":"c","args":[],"env":{},"query":"","ttl_secs":60}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            old,
+            Request::GetScriptFilter {
+                max_ttl_secs: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn server_list_runs_time_out() {
+        let started = Instant::now();
+        let result = script_filters::run_script_filter(
+            "sh",
+            &["-c".into(), "sleep 5".into()],
+            &HashMap::new(),
+            "",
+            None,
+            None,
+            Some(Duration::from_millis(200)),
+        );
+        assert!(result.unwrap_err().contains("timed out"));
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn a_held_list_is_released_when_the_run_ends_or_panics() {
+        let state = Arc::new(ServerState::new(quiet_addons()));
+        let held = state.hold("list:k".into()).expect("free list");
+        assert!(state.hold("list:k".into()).is_none(), "one run per list");
+        drop(held);
+        assert!(state.hold("list:k".into()).is_some());
+        let again = state.clone();
+        let panicked = std::panic::catch_unwind(move || {
+            let _held = again.hold("list:p".into());
+            panic!("script run blew up");
+        });
+        assert!(panicked.is_err());
+        assert!(
+            state.hold("list:p".into()).is_some(),
+            "released by unwinding"
+        );
+    }
+
+    #[test]
+    fn the_warm_loop_leaves_a_list_held_by_another_run() {
+        let state = Arc::new(ServerState::new(quiet_addons()));
+        let mut config: ScriptFilterConfig =
+            serde_yaml::from_str("name: r\ncommand: sh\nkeyword: r\ncache_seconds: 60\n").unwrap();
+        config.args = vec!["-c".into(), r#"printf '{"items":[]}'"#.into()];
+        let key = script_filter_list_key(&config, "q");
+        let held = state.hold(format!("list:{key}")).unwrap();
+        let ttl = Duration::from_secs(60);
+        let always = || true;
+        let skipped = warm_run(&state, &config, ttl, None, "q", &always);
+        assert!(matches!(skipped, Run::Skipped));
+        drop(held);
+        // Once it holds the list it checks again, and a refreshed list is left.
+        let refreshed = || false;
+        assert!(matches!(
+            warm_run(&state, &config, ttl, None, "q", &refreshed),
+            Run::Skipped
+        ));
+        assert!(matches!(
+            warm_run(&state, &config, ttl, None, "q", &always),
+            Run::Done(Ok(_))
+        ));
+        // A user's refresh keeps background runs away until it ends, however
+        // many overlap.
+        let first = state.force(format!("list:{key}"));
+        let second = state.force(format!("list:{key}"));
+        assert!(matches!(
+            warm_run(&state, &config, ttl, None, "q", &always),
+            Run::Skipped
+        ));
+        drop(first);
+        assert!(state.hold(format!("list:{key}")).is_none());
+        drop(second);
+        assert!(state.hold(format!("list:{key}")).is_some());
+    }
+
+    #[test]
+    fn server_runs_count_unstored_output_as_a_failure() {
+        let run =
+            |output: &str| server_run(script_filters::parse_script_filter_output(output, None));
+        assert!(run(r#"{"items":[]}"#).is_ok());
+        assert_eq!(
+            run(r#"{"cache":{"seconds":0},"items":[{"title":"\u001b[31mGitHub error\u001b[0m"}]}"#)
+                .unwrap_err(),
+            "GitHub error"
+        );
+        assert_eq!(
+            run(r#"{"cache":{"seconds":0},"items":[]}"#).unwrap_err(),
+            "the script asked not to cache this output"
+        );
+        assert!(run("nope").unwrap_err().starts_with("Invalid JSON"));
+    }
+
+    #[test]
+    fn waited_refresh_of_unstored_output_replies_with_an_error() {
+        let state = Arc::new(ServerState::new(quiet_addons()));
+        let script = |output: &str| Request::GetScriptFilter {
+            key: "k-not-stored".into(),
+            command: "sh".into(),
+            args: vec!["-c".into(), format!("printf '%s' '{output}'")],
+            env: HashMap::new(),
+            query: String::new(),
+            force_refresh: true,
+            ttl_secs: 60,
+            wait: true,
+            max_ttl_secs: None,
+        };
+        let Response::Error { message, code } = handle_request(
+            &state,
+            script(r#"{"cache":{"seconds":0},"items":[{"title":"GitHub error"}]}"#),
+        ) else {
+            panic!("an error reply");
+        };
+        assert_eq!(message, "GitHub error");
+        assert_eq!(code, None);
+        assert!(matches!(
+            handle_request(&state, script(r#"{"items":[]}"#)),
+            Response::ScriptFilter { .. }
         ));
     }
 

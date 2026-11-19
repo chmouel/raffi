@@ -229,6 +229,60 @@ fn test_failed_refresh_keeps_cached_script_filter_rows() {
 }
 
 #[test]
+fn test_not_stored_result_keeps_cached_rows_and_shows_cold_error_rows() {
+    let outage = || ScriptFilterResult {
+        items: vec![plain_item("GitHub error")],
+        cache_hint: Some(0),
+        not_stored: true,
+        ..Default::default()
+    };
+    let mut app = test_app(AddonsConfig::default());
+    app.script_filter.results = Some(ScriptFilterResult {
+        items: vec![plain_item("good")],
+        ..Default::default()
+    });
+    app.script_filter.generation = 7;
+    app.script_filter.results_are_cached = true;
+    let _ = app.update(Message::ScriptFilterResult(7, Ok(outage())));
+    let items = &app.script_filter.results.as_ref().unwrap().items;
+    assert_eq!(items[0].title, "good", "the cached rows survive the outage");
+    assert!(app.script_filter.results_are_cached);
+
+    // Nothing cached: the error row is all there is to show.
+    app.script_filter.results_are_cached = false;
+    let _ = app.update(Message::ScriptFilterResult(7, Ok(outage())));
+    let items = &app.script_filter.results.as_ref().unwrap().items;
+    assert_eq!(items[0].title, "GitHub error");
+}
+
+#[test]
+fn test_main_view_hides_a_script_filter_result_that_is_not_to_be_kept() {
+    use super::main_view::Source;
+    let mut addons = AddonsConfig::default();
+    addons.script_filters.push(issues_filter());
+    let mut app = main_view_app(&["script_filters.Issues"], Vec::new(), addons);
+    let _ = app.update(Message::SearchChanged("working".into()));
+    let run = |app: &mut LauncherApp, not_stored: bool| {
+        let Source::ScriptFilter { generation, .. } = &app.main_view.sources[0] else {
+            panic!("script filter source");
+        };
+        let generation = *generation;
+        let result = ScriptFilterResult {
+            items: vec![plain_item("Working")],
+            not_stored,
+            ..Default::default()
+        };
+        let _ = app.handle_main_view_script_filter(0, generation, Some(Ok(result)));
+        let Source::ScriptFilter { results, .. } = &app.main_view.sources[0] else {
+            panic!("script filter source");
+        };
+        results.is_some()
+    };
+    assert!(run(&mut app, false));
+    assert!(!run(&mut app, true));
+}
+
+#[test]
 fn test_script_filter_tree_guides_follow_sibling_branches() {
     let items = tree_items(&[0, 1, 2, 2, 1, 0, 1, 2]);
     let guides = super::view::tree_guide_segments(&items);

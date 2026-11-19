@@ -16,6 +16,8 @@ use super::types::{
 
 /// Longest a `RAFFI_PREVIEW=1` run may take before it is killed.
 const PREVIEW_TIMEOUT: Duration = Duration::from_secs(3);
+/// Largest list output accepted from a time-limited run.
+const MAX_LIST_OUTPUT: usize = 64 * 1024 * 1024;
 /// Largest preview output accepted, enough for a base64 screenshot.
 const MAX_PREVIEW_OUTPUT: usize = 8 * 1024 * 1024;
 
@@ -26,6 +28,19 @@ struct ScriptFilterResponse {
     views: Vec<ScriptFilterView>,
     #[serde(default)]
     view: Option<String>,
+    /// Kept raw so that a malformed hint never fails the whole list.
+    #[serde(default)]
+    cache: Option<Box<serde_json::value::RawValue>>,
+}
+
+/// The seconds of a `cache` hint: `{"seconds": N}` or a bare `N`, a whole
+/// number. Anything else means no hint.
+fn parse_cache_hint(raw: &serde_json::value::RawValue) -> Option<u64> {
+    let value = serde_json::from_str::<serde_json::Value>(raw.get()).ok()?;
+    match value {
+        serde_json::Value::Object(fields) => fields.get("seconds")?.as_u64(),
+        other => other.as_u64(),
+    }
 }
 
 pub(super) fn parse_script_filter_output(
@@ -33,11 +48,16 @@ pub(super) fn parse_script_filter_output(
     default_icon: Option<String>,
 ) -> Result<ScriptFilterResult, String> {
     serde_json::from_str::<ScriptFilterResponse>(stdout)
-        .map(|response| ScriptFilterResult {
-            items: response.items,
-            default_icon,
-            views: response.views,
-            view: response.view,
+        .map(|response| {
+            let cache_hint = response.cache.as_deref().and_then(parse_cache_hint);
+            ScriptFilterResult {
+                items: response.items,
+                default_icon,
+                views: response.views,
+                view: response.view,
+                cache_hint,
+                not_stored: cache_hint == Some(0),
+            }
         })
         .map_err(|error| format!("Invalid JSON: {}", error))
 }
@@ -67,12 +87,14 @@ pub(super) fn execute_script_filter(
     cache: Option<SnapshotTarget>,
 ) -> Task<Message> {
     Task::perform(
-        async move { run_script_filter(&command, &args, &env, &query, default_icon, cache) },
+        async move { run_script_filter(&command, &args, &env, &query, default_icon, cache, None) },
         move |result| Message::ScriptFilterResult(generation, result),
     )
 }
 
-/// Run a script filter for `query` and parse its items. Blocking.
+/// Run a script filter for `query` and parse its items. Blocking. With a
+/// `timeout` the script runs in its own process group, which is killed when
+/// the time is up.
 pub(super) fn run_script_filter(
     command: &str,
     args: &[String],
@@ -80,27 +102,34 @@ pub(super) fn run_script_filter(
     query: &str,
     default_icon: Option<String>,
     cache: Option<SnapshotTarget>,
+    timeout: Option<Duration>,
 ) -> Result<ScriptFilterResult, String> {
     crate::debug_log!("script_filter: executing command={command:?} args={args:?} query={query:?}");
-    let output = Command::new(command)
-        .args(args)
-        .envs(env)
-        .arg(query)
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output();
+    let mut process = Command::new(command);
+    process.args(args).envs(env).arg(query);
+    let output = match timeout {
+        Some(timeout) => super::actions::run_bounded_status(process, timeout, MAX_LIST_OUTPUT)
+            .map_err(|error| format!("Failed to execute: {error}")),
+        None => process
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .map(|output| (output.status, output.stdout))
+            .map_err(|error| format!("Failed to execute: {error}")),
+    };
 
     match output {
-        Ok(output) if output.status.success() => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok((status, stdout)) if status.success() => {
+            let stdout = String::from_utf8_lossy(&stdout);
             match parse_script_filter_output(&stdout, default_icon) {
                 Ok(result) => {
-                    if let Some(target) = cache {
+                    if let Some(target) = cache.filter(|_| !result.not_stored) {
                         if let Err(error) = cache::write_snapshot_path(
                             &target.path,
                             &stdout,
                             target.ttl,
                             target.keep,
+                            result.cache_hint,
                         ) {
                             crate::debug_log!("script_filter: cannot write cache: {error}");
                         }
@@ -118,21 +147,15 @@ pub(super) fn run_script_filter(
                 }
             }
         }
-        Ok(output) => {
-            eprintln!(
-                "Script filter: {} exited with status {}",
-                command, output.status
-            );
-            crate::debug_log!(
-                "script_filter: {command:?} exited with status {}",
-                output.status
-            );
-            Err(format!("Script exited with status {}", output.status))
+        Ok((status, _)) => {
+            eprintln!("Script filter: {} exited with status {}", command, status);
+            crate::debug_log!("script_filter: {command:?} exited with status {status}");
+            Err(format!("Script exited with status {status}"))
         }
         Err(error) => {
             eprintln!("Script filter: failed to execute {}: {}", command, error);
             crate::debug_log!("script_filter: failed to execute {command:?}: {error}");
-            Err(format!("Failed to execute: {}", error))
+            Err(error)
         }
     }
 }
@@ -208,9 +231,13 @@ impl PreviewRequest {
         if preview.is_some() {
             if let Some(target) = self.cache {
                 let payload = String::from_utf8_lossy(&output);
-                if let Err(error) =
-                    cache::write_snapshot_path(&target.path, &payload, target.ttl, target.keep)
-                {
+                if let Err(error) = cache::write_snapshot_path(
+                    &target.path,
+                    &payload,
+                    target.ttl,
+                    target.keep,
+                    None,
+                ) {
                     crate::debug_log!("script_filter: cannot write preview cache: {error}");
                 }
             }
@@ -320,9 +347,16 @@ mod tests {
             std::borrow::Cow::Borrowed(_)
         ));
         let config = super::view_config(&config, Some(&result.views[1]));
-        let run =
-            super::run_script_filter(&config.command, &config.args, &config.env, "", None, None)
-                .unwrap();
+        let run = super::run_script_filter(
+            &config.command,
+            &config.args,
+            &config.env,
+            "",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(run.items[0].title, "b bee view");
     }
 
@@ -650,6 +684,7 @@ mod tests {
             dynamic_preview: None,
             close_on_action: None,
             cache_seconds: None,
+            cache_max_seconds: None,
             warm_queries: Vec::new(),
             warm_interval_seconds: None,
             actions: Vec::new(),
@@ -684,6 +719,125 @@ mod tests {
         assert!(result.is_err());
     }
 
+    fn hint(stdout: &str) -> Option<u64> {
+        parse_script_filter_output(stdout, None)
+            .expect("the list still parses")
+            .cache_hint
+    }
+
+    #[test]
+    fn test_cache_hint_is_read_leniently() {
+        assert_eq!(
+            hint(r#"{"cache":{"seconds":86400},"items":[]}"#),
+            Some(86400)
+        );
+        assert_eq!(hint(r#"{"cache":90,"items":[]}"#), Some(90));
+        assert_eq!(hint(r#"{"cache":{"seconds":0},"items":[]}"#), Some(0));
+        assert_eq!(
+            hint(r#"{"cache":{"seconds":60,"loosereload":true},"items":[]}"#),
+            Some(60)
+        );
+        for bad in [
+            r#""soon""#,
+            "-1",
+            "1.5",
+            "60.0",
+            "1e400",
+            "{}",
+            "null",
+            "[60]",
+            r#"{"seconds":"60"}"#,
+            r#"{"seconds":-5}"#,
+            "true",
+        ] {
+            let stdout = format!(r#"{{"cache":{bad},"items":[{{"title":"kept"}}]}}"#);
+            let result = parse_script_filter_output(&stdout, None)
+                .unwrap_or_else(|error| panic!("{bad} must not fail the list: {error}"));
+            assert_eq!(result.cache_hint, None, "{bad}");
+            assert!(!result.not_stored, "{bad}");
+            assert_eq!(result.items.len(), 1, "{bad}");
+        }
+        assert_eq!(hint(r#"{"items":[]}"#), None);
+    }
+
+    #[test]
+    fn test_zero_cache_hint_marks_the_result_not_stored() {
+        let result =
+            parse_script_filter_output(r#"{"cache":{"seconds":0},"items":[]}"#, None).unwrap();
+        assert!(result.not_stored);
+        let result =
+            parse_script_filter_output(r#"{"cache":{"seconds":5},"items":[]}"#, None).unwrap();
+        assert!(!result.not_stored);
+    }
+
+    fn temp_snapshot_path(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "raffi-script-hint-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("list.json")
+    }
+
+    fn run_printing(path: &std::path::Path, output: &str) -> super::ScriptFilterResult {
+        let target = super::SnapshotTarget {
+            path: path.to_path_buf(),
+            ttl: std::time::Duration::from_secs(300),
+            keep: 10,
+        };
+        super::run_script_filter(
+            "sh",
+            &["-c".into(), format!("printf '%s' '{output}'")],
+            &Default::default(),
+            "",
+            None,
+            Some(target),
+            None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn test_snapshot_keeps_the_hint_as_the_script_gave_it() {
+        let path = temp_snapshot_path("kept");
+        run_printing(&path, r#"{"cache":{"seconds":86400},"items":[]}"#);
+        let snapshot = super::cache::read_snapshot_path(&path).unwrap();
+        assert_eq!(snapshot.hint_secs, Some(86400));
+        assert_eq!(snapshot.ttl_secs, 300);
+    }
+
+    #[test]
+    fn test_zero_cache_hint_keeps_the_previous_snapshot() {
+        let path = temp_snapshot_path("zero");
+        run_printing(&path, r#"{"items":[{"title":"good"}]}"#);
+        let before = std::fs::read(&path).unwrap();
+        let result = run_printing(
+            &path,
+            r#"{"cache":{"seconds":0},"items":[{"title":"GitHub error"}]}"#,
+        );
+        assert!(result.not_stored);
+        assert_eq!(result.items[0].title, "GitHub error");
+        let snapshot = super::cache::read_snapshot_path(&path).unwrap();
+        assert!(snapshot.payload.contains("good"));
+        assert!(!snapshot.payload.contains("GitHub error"));
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            before,
+            "not even its metadata"
+        );
+    }
+
+    #[test]
+    fn test_zero_cache_hint_writes_nothing_when_nothing_was_cached() {
+        let path = temp_snapshot_path("zero-cold");
+        run_printing(&path, r#"{"cache":{"seconds":0},"items":[]}"#);
+        assert!(!path.exists());
+    }
+
     #[test]
     fn test_invalid_output_does_not_overwrite_a_valid_snapshot() {
         let dir = std::env::temp_dir().join(format!(
@@ -711,6 +865,7 @@ mod tests {
             "",
             None,
             target(),
+            None,
         )
         .unwrap();
         assert_eq!(valid.items[0].title, "ok");
@@ -723,6 +878,7 @@ mod tests {
             "",
             None,
             target(),
+            None,
         );
         assert!(invalid.is_err());
         let snapshot = super::cache::read_snapshot_path(&path).unwrap();

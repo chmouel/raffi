@@ -1934,6 +1934,16 @@
             "type": "string"
           }
         },
+        "cache_max_seconds": {
+          "description": "How long a script may ask its output to stay fresh, with a top-level\n`\"cache\": {\"seconds\": N}`, when that is more than `cache_seconds`. A\nscript can always ask for less. Needs `cache_seconds`, which turns\ncaching on.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
         "cache_seconds": {
           "description": "How long a query's items and previews stay fresh before Raffi refreshes\nthem in the background. Unset disables caching, so side-effecting\nscripts never run from or through the cache.",
           "type": [

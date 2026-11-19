@@ -630,6 +630,12 @@ pub struct ScriptFilterConfig {
     /// scripts never run from or through the cache.
     #[serde(default)]
     pub cache_seconds: Option<u64>,
+    /// How long a script may ask its output to stay fresh, with a top-level
+    /// `"cache": {"seconds": N}`, when that is more than `cache_seconds`. A
+    /// script can always ask for less. Needs `cache_seconds`, which turns
+    /// caching on.
+    #[serde(default)]
+    pub cache_max_seconds: Option<u64>,
     /// Queries the server warms periodically, such as `["", "review"]`.
     #[serde(default)]
     pub warm_queries: Vec<String>,
@@ -645,6 +651,13 @@ impl ScriptFilterConfig {
         self.cache_seconds
             .filter(|seconds| *seconds > 0)
             .map(std::time::Duration::from_secs)
+    }
+
+    /// Longest freshness a script may ask for, if caching is enabled.
+    pub fn cache_ceiling(&self) -> Option<std::time::Duration> {
+        let ttl = self.cache_ttl()?;
+        let raised = std::time::Duration::from_secs(self.cache_max_seconds.unwrap_or(0));
+        Some(ttl.max(raised))
     }
 
     /// Interval between background warming runs, if any.
@@ -8647,6 +8660,31 @@ shell:
             "name: x\ncommand: y\nkeyword: z\nactions:\n  - {title: A}\n"
         )
         .is_err());
+    }
+
+    #[test]
+    fn test_cache_max_seconds_only_raises_the_ceiling() {
+        let filter = |extra: &str| -> ScriptFilterConfig {
+            serde_yaml::from_str(&format!("name: x\ncommand: y\nkeyword: z\n{extra}")).unwrap()
+        };
+        let secs = |filter: &ScriptFilterConfig| filter.cache_ceiling().map(|d| d.as_secs());
+        assert_eq!(secs(&filter("cache_seconds: 300\n")), Some(300));
+        assert_eq!(
+            secs(&filter("cache_seconds: 300\ncache_max_seconds: 86400\n")),
+            Some(86400)
+        );
+        // A ceiling below the TTL never lowers it.
+        assert_eq!(
+            secs(&filter("cache_seconds: 300\ncache_max_seconds: 60\n")),
+            Some(300)
+        );
+        // It never turns caching on by itself.
+        assert_eq!(secs(&filter("cache_max_seconds: 86400\n")), None);
+        assert_eq!(filter("cache_max_seconds: 86400\n").cache_ttl(), None);
+        assert_eq!(
+            secs(&filter("cache_seconds: 0\ncache_max_seconds: 60\n")),
+            None
+        );
     }
 
     #[test]
