@@ -121,5 +121,37 @@ class HelperTests(unittest.TestCase):
         self.assertFalse(row["preview"]["dynamic"])
 
 
+class CacheContractTests(unittest.TestCase):
+    def test_gh_durations_become_seconds(self):
+        self.assertEqual(ghcommon.seconds("10m"), 600)
+        self.assertEqual(ghcommon.seconds("24h"), 86400)
+        self.assertEqual(ghcommon.seconds("1.5h"), 5400)
+        self.assertEqual(ghcommon.seconds("90s"), 90)
+        self.assertEqual(ghcommon.seconds("2d"), 172800)
+
+    def test_unreadable_durations_fall_back(self):
+        self.assertEqual(ghcommon.seconds("soon"), 600)
+        self.assertEqual(ghcommon.seconds("", default=30), 30)
+
+    def test_the_cache_window_becomes_the_hint(self):
+        output = ghcommon.with_cache({"view": "x"}, [{"title": "a"}], "24h")
+        self.assertEqual(output["cache"], {"seconds": 86400})
+        self.assertEqual(output["view"], "x")
+        self.assertEqual(output["items"], [{"title": "a"}])
+
+    def test_error_rows_ask_not_to_be_kept(self):
+        rows = ghcommon.error_rows("GitHub error", "boom")
+        self.assertEqual(rows[0]["title"], "GitHub error")
+        self.assertEqual(ghcommon.with_cache({}, rows, "24h")["cache"], {"seconds": 0})
+
+    def test_a_successful_list_never_sends_the_error_sentinel(self):
+        for window in ("0s", "0.5s", "0m"):
+            output = ghcommon.with_cache({}, [{"title": "a"}], window)
+            self.assertEqual(output["cache"], {"seconds": 1}, window)
+
+    def test_a_plain_empty_list_is_still_kept(self):
+        self.assertEqual(ghcommon.with_cache({}, [], "10m")["cache"], {"seconds": 600})
+
+
 if __name__ == "__main__":
     unittest.main()

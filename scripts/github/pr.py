@@ -29,7 +29,8 @@ from ghcommon import (
     GhError,
     ago,
     colored,
-    error_item,
+    error_rows,
+    with_cache,
 )
 
 CACHE_PULLS = os.environ.get("CACHE_PULLS", "10m")
@@ -370,9 +371,9 @@ def list_items(
     """List the pull requests for the query, with the target it resolved to."""
     target, needle = parse_query(query, repo_arg, view)
     if target not in MODES and not REPO.fullmatch(target):
-        return target, [
-            error_item("Invalid repository", f"Expected owner/repo, got {target!r}")
-        ]
+        return target, error_rows(
+            "Invalid repository", f"Expected owner/repo, got {target!r}"
+        )
 
     try:
         if target in MODES:
@@ -387,7 +388,7 @@ def list_items(
             url = f"https://{API_HOST}/{target}/pulls"
             items = [link_item("Open all pull requests page", url)]
     except GhError as error:
-        return target, [error_item("GitHub error", str(error))]
+        return target, error_rows("GitHub error", str(error))
 
     needle = needle.casefold()
     matches: list[tuple[dict, dict]] = []
@@ -721,10 +722,11 @@ def main(argv: list[str] | None = None) -> int:
         query = " ".join(args.query)
         view = os.environ.get("RAFFI_VIEW")
         target, items = list_items(query, args.repo, view)
-        output = {"items": items}
+        output = {}
         if target in MODES:
             output["views"] = [{"id": mode, "title": title} for mode, title in VIEWS]
             output["view"] = target
+        output = with_cache(output, items, CACHE_PULLS)
     print(json.dumps(output, ensure_ascii=False))
     return 0
 

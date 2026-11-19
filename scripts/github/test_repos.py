@@ -337,6 +337,25 @@ class MainTests(ReposTestCase):
         titles = [child["title"] for child in output["items"][0]["children"]]
         self.assertEqual(titles, ["Open owner/raffi", "Pull requests", "Issues"])
 
+    def test_output_hints_the_cache_window(self):
+        with patch.object(repos, "CACHE_REPOS", "24h"):
+            output = self.run_main("--owners", "me", "raffi")
+        self.assertEqual(output["cache"], {"seconds": 86400})
+
+    def test_github_errors_are_not_kept(self):
+        def offline(*args, **kwargs):
+            raise repos.GhError("offline")
+
+        with patch.object(repos, "graphql", offline):
+            output = self.run_main("--owners", "me", "raffi")
+        self.assertEqual(output["cache"], {"seconds": 0})
+        self.assertEqual(output["items"][0]["title"], "GitHub error")
+
+    def test_an_unknown_account_is_not_kept(self):
+        output = self.run_main("--owners", "ghost")
+        self.assertEqual(output["items"][0]["title"], "Account not found")
+        self.assertEqual(output["cache"], {"seconds": 0})
+
     def test_missing_cache_is_per_host(self):
         self.assertEqual(repos.cache_dir().name, repos.API_HOST)
 

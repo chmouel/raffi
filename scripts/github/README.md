@@ -323,21 +323,33 @@ Four layers keep typing cheap:
 - Listing another account asks GitHub about that account only, plus one
   one-repository check when the word is not one of the `--owners`.
 
-Repository lists change slowly, so a day is a reasonable window. Raise the
-three values together, so the server refreshes in the background about as often
-as results go stale:
+Both scripts tell Raffi how long their output stays fresh, using the `gh`
+cache window (`CACHE_REPOS`, `CACHE_PULLS`), and Raffi applies it up to your
+`cache_max_seconds`. For repositories, which change slowly, a day is a
+reasonable window:
 
 ```yaml
       env:
         CACHE_REPOS: 24h
-      cache_seconds: 86400
+      cache_seconds: 300
+      cache_max_seconds: 86400
       warm_queries: [""]
-      warm_interval_seconds: 86400
 ```
 
-The cost is that a new repository, or a changed star count, shows up after the
-next refresh, and the "pushed 3h ago" text is frozen at that moment. Ctrl+R
-refreshes the list you are looking at straight away.
+Without `cache_max_seconds` the hint is clamped to `cache_seconds`, which is
+the old behaviour. The server refreshes a list once its result has outlived
+that window, so `warm_interval_seconds` is only a minimum gap and can be left
+out: the 24h above means one background refresh a day per list, not one every
+five minutes. A failed refresh is retried after a minute and then at doubling
+delays, while the cached list keeps being served.
+
+When `gh` fails, the scripts ask Raffi not to keep the error row
+(`"cache": {"seconds": 0}`), so an outage leaves the cached list in place
+instead of replacing it for a day.
+
+The cost of a long window is that a new repository, or a changed star count,
+shows up after the next refresh, and the "pushed 3h ago" text is frozen at
+that moment. Ctrl+R refreshes the list you are looking at straight away.
 
 Ctrl+R, and the server's warming runs, set `RAFFI_REFRESH=1`, which skips the
 `gh` cache: an uncached page of 100 repositories takes one to three seconds,

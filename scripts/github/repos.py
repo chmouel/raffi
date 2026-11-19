@@ -29,7 +29,9 @@ from ghcommon import (
     GhError,
     ago,
     colored,
-    error_item,
+    error_rows,
+    seconds,
+    with_cache,
 )
 
 CACHE_REPOS = os.environ.get("CACHE_REPOS", "10m")
@@ -82,7 +84,6 @@ ALIASES = {"me": ""}
 
 OWNER = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}")
 REPO = re.compile(r"[\w.-]+/[\w.-]+")
-DURATION = re.compile(r"(\d+(?:\.\d+)?)([smhd])")
 
 
 OWNER_QUERY = """
@@ -217,15 +218,6 @@ def remember_miss(name: str) -> None:
     }
     entries[name.casefold()] = time.time()
     write_cache(missing_file(), entries)
-
-
-def seconds(duration: str) -> float:
-    """A gh-style duration such as 10m or 1h, in seconds."""
-    match = DURATION.fullmatch(duration.strip())
-    if not match:
-        return 600
-    units = {"s": 1, "m": 60, "h": 3600, "d": 86400}
-    return float(match.group(1)) * units[match.group(2)]
 
 
 ACCOUNTS: dict[str, dict | None] = {}
@@ -570,9 +562,9 @@ def list_items(
 
     account = account_repos(owner, options.limit)
     if not account:
-        return owner, [
-            error_item("Account not found", f"No GitHub account named {owner!r}")
-        ]
+        return owner, error_rows(
+            "Account not found", f"No GitHub account named {owner!r}"
+        )
     if same:
         return owner, items_for(account, rest.casefold().split(), options)
     return owner, items_for(account, needle.casefold().split(), options)
@@ -679,17 +671,15 @@ def main(argv: list[str] | None = None) -> int:
         view = os.environ.get("RAFFI_VIEW", "")
         owner, items = list_items(query, view, owners, options)
     except GhError as error:
-        print(json.dumps({"items": [error_item("GitHub error", str(error))]}))
+        items = error_rows("GitHub error", str(error))
+        print(json.dumps(with_cache({}, items, CACHE_REPOS), ensure_ascii=False))
         return 0
 
     views = [{"id": name, "title": name} for name in owners]
     if all(entry["id"] != owner for entry in views):
         views.append({"id": owner, "title": owner})
-    print(
-        json.dumps(
-            {"views": views, "view": owner, "items": items}, ensure_ascii=False
-        )
-    )
+    output = with_cache({"views": views, "view": owner}, items, CACHE_REPOS)
+    print(json.dumps(output, ensure_ascii=False))
     return 0
 
 

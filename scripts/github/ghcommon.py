@@ -17,6 +17,7 @@ REFRESH = os.environ.get("RAFFI_REFRESH") == "1"
 ICON = "github"
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
+DURATION = re.compile(r"(\d+(?:\.\d+)?)([smhd])")
 BOLD = "\033[1m"
 GREEN = "\033[32m"
 RED = "\033[31m"
@@ -98,3 +99,34 @@ def error_item(title: str, message: str) -> dict:
         "valid": False,
         "preview": {"title": title, "text": message, "dynamic": False},
     }
+
+
+class ErrorRows(list):
+    """Rows that report a failure, which Raffi must not keep as the result."""
+
+
+def error_rows(title: str, message: str) -> ErrorRows:
+    return ErrorRows([error_item(title, message)])
+
+
+def seconds(duration: str, default: float = 600) -> float:
+    """A gh-style duration such as 10m or 1h, in seconds."""
+    match = DURATION.fullmatch(duration.strip())
+    if not match:
+        return default
+    units = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    return float(match.group(1)) * units[match.group(2)]
+
+
+def with_cache(output: dict, items: list, duration: str) -> dict:
+    """Tell Raffi how long `output` stays fresh.
+
+    A gh cache window such as `10m` becomes the hint, so Raffi keeps the list
+    as long as `gh` would serve it, within what the user's `cache_max_seconds`
+    allows. Error rows ask not to be kept: Raffi then keeps the rows it already
+    has and reports the failed refresh instead of replacing them.
+    """
+    # Zero is how an error asks not to be kept, so a successful list never
+    # sends it, however short the gh window.
+    hint = 0 if isinstance(items, ErrorRows) else max(1, int(seconds(duration)))
+    return {**output, "cache": {"seconds": hint}, "items": items}

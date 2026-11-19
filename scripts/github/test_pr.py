@@ -402,6 +402,29 @@ class PreviewTests(unittest.TestCase):
         args = run_gh.call_args.args
         self.assertEqual(args[args.index("--cache") + 1], pr.CACHE_PULLS)
 
+    def run_main(self, argv):
+        stdout = io.StringIO()
+        with (
+            patch.dict(os.environ, {"RAFFI_PREVIEW": "", "RAFFI_VIEW": ""}),
+            redirect_stdout(stdout),
+        ):
+            pr.main(argv)
+        return json.loads(stdout.getvalue())
+
+    def test_main_hints_the_pull_request_cache_window(self):
+        with (
+            patch.object(pr, "CACHE_PULLS", "30m"),
+            patch.object(pr, "list_items", return_value=("owner/repo", [])),
+        ):
+            output = self.run_main(["owner/repo"])
+        self.assertEqual(output["cache"], {"seconds": 1800})
+
+    def test_main_does_not_ask_raffi_to_keep_an_outage(self):
+        with patch.object(ghcommon, "run_gh", side_effect=ghcommon.GhError("boom")):
+            output = self.run_main(["owner/repo"])
+        self.assertEqual(output["items"][0]["title"], "GitHub error")
+        self.assertEqual(output["cache"], {"seconds": 0})
+
     def test_preview_error_is_shown_in_the_pane(self):
         with patch.object(ghcommon, "run_gh", side_effect=ghcommon.GhError("offline")):
             preview = pr.preview(VIEW["url"])
