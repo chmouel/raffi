@@ -2628,6 +2628,9 @@ impl LauncherApp {
         if let Some(min) = config.min_query_length {
             if query.len() < min {
                 self.script_filter.results = None;
+                self.script_filter.results_are_cached = false;
+                self.script_filter.cached_at = None;
+                self.script_filter.refresh_failed = false;
                 self.script_filter.loading = false;
                 let remaining = min - query.len();
                 self.script_filter.help_message = Some(format!(
@@ -2657,6 +2660,7 @@ impl LauncherApp {
 
         let cache_ttl = config.cache_ttl();
         let mut cached = None;
+        let mut cached_at = None;
         let mut stale = false;
         if let Some(ttl) = cache_ttl {
             let key = cache::script_filter_list_key(config, &query);
@@ -2664,10 +2668,13 @@ impl LauncherApp {
             if let Some(snapshot) = cache::read_list(&key) {
                 if let Some(result) = cache::parse_list(&snapshot, config.icon.clone()) {
                     stale = force_refresh || !snapshot.fresh_within(ttl, ceiling);
+                    cached_at = Some(snapshot.fetched_at);
                     cached = Some(result);
                 }
             }
         }
+        self.script_filter.cached_at = cached_at;
+        self.script_filter.refresh_failed = false;
 
         if let Some(result) = cached {
             // Show the snapshot at once; a stale one refreshes underneath.
@@ -4383,11 +4390,13 @@ impl LauncherApp {
             // on screen it counts as a failed refresh and they stay.
             Ok(result) if result.not_stored && self.script_filter.results_are_cached => {
                 crate::debug_log!("script_filter: refresh not stored, keeping cached rows");
+                self.script_filter.refresh_failed = true;
             }
             Ok(result) => {
                 self.script_filter.adopt_views(&result);
                 self.script_filter.results = Some(result);
                 self.script_filter.results_are_cached = false;
+                self.script_filter.refresh_failed = false;
                 // Indices from the old rows mean nothing once new rows land.
                 self.script_filter.previews.clear();
                 self.script_filter.bump_preview_generation();
@@ -4395,6 +4404,7 @@ impl LauncherApp {
             Err(error) => {
                 if self.script_filter.results_are_cached {
                     // A failed revalidation keeps the rows the user can still use.
+                    self.script_filter.refresh_failed = true;
                     crate::debug_log!(
                         "script_filter: background refresh failed, keeping cached rows: {error}"
                     );

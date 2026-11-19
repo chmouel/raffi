@@ -3934,7 +3934,7 @@ impl LauncherApp {
             hint_spans.push(span("Ctrl+R").size(fs.hint).color(t.accent));
             hint_spans.push(span(" refresh").size(fs.hint).color(t.text_muted));
         }
-        for hint in self.server_hints() {
+        for hint in self.cache_hint().into_iter().chain(self.server_hints()) {
             if !hint_spans.is_empty() {
                 hint_spans.push(sep.clone());
             }
@@ -3977,6 +3977,10 @@ impl LauncherApp {
     /// Whether a visible row shows how long ago something was, which needs a
     /// redraw now and then to stay true. Idle windows pay nothing.
     pub(super) fn wants_time_tick(&self) -> bool {
+        // The footer's "cached 3h ago" counts up too.
+        if self.cache_hint().is_some() {
+            return true;
+        }
         let timed = |result: &super::types::ScriptFilterResult| {
             result.items.iter().any(|item| item.time.is_some())
         };

@@ -228,6 +228,175 @@ fn test_failed_refresh_keeps_cached_script_filter_rows() {
     );
 }
 
+fn cached_rows_app() -> LauncherApp {
+    let mut app = test_app(AddonsConfig::default());
+    app.script_filter.results = Some(ScriptFilterResult {
+        items: vec![plain_item("good")],
+        ..Default::default()
+    });
+    app.script_filter.generation = 7;
+    app.script_filter.results_are_cached = true;
+    app.script_filter.cached_at = Some(super::item_time::now_unix() as u64 - 3 * 3600);
+    app
+}
+
+fn cache_hint_text(app: &LauncherApp) -> Option<String> {
+    app.cache_hint().map(|hint| hint.label)
+}
+
+#[test]
+fn test_a_failed_refresh_says_how_old_the_cached_rows_are() {
+    let mut app = cached_rows_app();
+    assert_eq!(cache_hint_text(&app), None, "nothing is wrong yet");
+    let _ = app.update(Message::ScriptFilterResult(7, Err("offline".into())));
+    assert_eq!(
+        cache_hint_text(&app).as_deref(),
+        Some("cached 3h ago \u{b7} refresh failed")
+    );
+    assert_eq!(
+        app.cache_hint().map(|hint| hint.tone),
+        Some(super::server_refresh::Tone::Warning)
+    );
+}
+
+#[test]
+fn test_an_output_not_to_be_kept_counts_as_a_failed_refresh_for_the_hint() {
+    let mut app = cached_rows_app();
+    let outage = ScriptFilterResult {
+        items: vec![plain_item("GitHub error")],
+        not_stored: true,
+        ..Default::default()
+    };
+    let _ = app.update(Message::ScriptFilterResult(7, Ok(outage)));
+    assert!(cache_hint_text(&app).unwrap().ends_with("refresh failed"));
+}
+
+#[test]
+fn test_a_good_refresh_or_a_new_query_clears_the_cached_hint() {
+    let mut app = cached_rows_app();
+    let _ = app.update(Message::ScriptFilterResult(7, Err("offline".into())));
+    assert!(app.cache_hint().is_some());
+    let fresh = ScriptFilterResult {
+        items: vec![plain_item("fresh")],
+        ..Default::default()
+    };
+    let _ = app.update(Message::ScriptFilterResult(7, Ok(fresh)));
+    assert_eq!(
+        cache_hint_text(&app),
+        None,
+        "fresh rows are not cached rows"
+    );
+
+    let mut app = cached_rows_app();
+    let _ = app.update(Message::ScriptFilterResult(7, Err("offline".into())));
+    app.script_filter.clear();
+    assert_eq!(cache_hint_text(&app), None, "leaving the filter forgets it");
+}
+
+/// A cached list of a filter whose F5 goes through the server.
+fn f5_cached_app() -> LauncherApp {
+    let mut app = cached_rows_app();
+    app.addons.script_filters.push(ScriptFilterConfig {
+        name: "Agents".into(),
+        command: "agents".into(),
+        keyword: "ag".into(),
+        cache_seconds: Some(60),
+        ..Default::default()
+    });
+    app.script_filter.config_index = Some(0);
+    app.search_query = "ag ".into();
+    app.history.max_items = 0;
+    connect_server(&mut app);
+    app
+}
+
+#[test]
+fn test_a_failed_f5_says_how_old_the_cached_rows_are() {
+    let mut app = f5_cached_app();
+    let _ = app.update(Message::ServerRefresh(false));
+    let token = app.server.token;
+    assert_eq!(cache_hint_text(&app), None);
+    let _ = app.update(Message::ServerRefreshDone(
+        token,
+        Err(super::cache::CallError::Failed("offline".into())),
+    ));
+    assert_eq!(
+        cache_hint_text(&app).as_deref(),
+        Some("cached 3h ago \u{b7} refresh failed")
+    );
+}
+
+#[test]
+fn test_a_failed_f5_for_rows_that_are_gone_marks_nothing() {
+    let mut app = f5_cached_app();
+    let _ = app.update(Message::ServerRefresh(false));
+    let token = app.server.token;
+    app.script_filter.generation += 1;
+    let _ = app.update(Message::ServerRefreshDone(
+        token,
+        Err(super::cache::CallError::Failed("offline".into())),
+    ));
+    assert_eq!(cache_hint_text(&app), None);
+}
+
+#[test]
+fn test_a_good_f5_clears_the_hint_even_inside_a_child_list() {
+    let mut app = f5_cached_app();
+    let _ = app.update(Message::ScriptFilterResult(7, Err("offline".into())));
+    assert!(app.cache_hint().is_some());
+    let _ = app.update(Message::ServerRefresh(false));
+    let token = app.server.token;
+    // A child list answers the refresh from its parent's rows.
+    app.script_filter
+        .navigation
+        .push(super::state::ScriptFilterNavigation {
+            items: Vec::new(),
+            unfiltered_items: Vec::new(),
+            query: String::new(),
+            search_query: "ag ".into(),
+            selection: 0,
+        });
+    let _ = app.update(Message::ServerRefreshDone(token, Ok(())));
+    assert_eq!(cache_hint_text(&app), None);
+}
+
+#[test]
+fn test_a_query_too_short_for_the_filter_forgets_the_cached_hint() {
+    let mut app = f5_cached_app();
+    app.addons.script_filters[0].min_query_length = Some(3);
+    let _ = app.update(Message::ScriptFilterResult(7, Err("offline".into())));
+    assert!(app.cache_hint().is_some());
+    let mut tasks = Vec::new();
+    app.handle_script_filter_query(0, "a".into(), false, &mut tasks);
+    assert_eq!(cache_hint_text(&app), None);
+    assert!(!app.script_filter.results_are_cached);
+    assert_eq!(app.script_filter.cached_at, None);
+}
+
+#[test]
+fn test_the_cached_hint_keeps_the_clock_ticking() {
+    let mut app = cached_rows_app();
+    app.script_filter.config_index = Some(0);
+    assert!(!app.wants_time_tick());
+    app.script_filter.refresh_failed = true;
+    assert!(app.wants_time_tick(), "the age in the footer counts up");
+}
+
+#[test]
+fn test_no_hint_for_rows_that_were_not_cached() {
+    let mut app = cached_rows_app();
+    app.script_filter.results_are_cached = false;
+    app.script_filter.refresh_failed = true;
+    assert_eq!(cache_hint_text(&app), None);
+    app.script_filter.results_are_cached = true;
+    app.script_filter.cached_at = None;
+    assert_eq!(
+        cache_hint_text(&app),
+        None,
+        "without an age there is no hint"
+    );
+}
+
 #[test]
 fn test_not_stored_result_keeps_cached_rows_and_shows_cold_error_rows() {
     let outage = || ScriptFilterResult {

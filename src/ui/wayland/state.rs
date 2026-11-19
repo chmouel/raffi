@@ -67,6 +67,10 @@ pub(super) struct ScriptFilterState {
     pub navigation_items: Vec<super::types::ScriptFilterItem>,
     /// The visible rows came from a snapshot and may be kept if a refresh fails.
     pub results_are_cached: bool,
+    /// When the snapshot behind the visible rows was fetched, in Unix seconds.
+    pub cached_at: Option<u64>,
+    /// A refresh of those rows failed, so they may be out of date.
+    pub refresh_failed: bool,
     pub loading: bool,
     pub loading_name: Option<String>,
     pub generation: u64,
@@ -120,6 +124,8 @@ impl ScriptFilterState {
         self.navigation.clear();
         self.navigation_items.clear();
         self.results_are_cached = false;
+        self.cached_at = None;
+        self.refresh_failed = false;
         self.loading = false;
         self.loading_name = None;
         self.action = None;

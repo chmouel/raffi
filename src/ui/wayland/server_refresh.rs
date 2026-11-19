@@ -154,6 +154,30 @@ impl LauncherApp {
         self.server.ready() && self.server_backed_view().is_some()
     }
 
+    /// Whether a refresh asked for this script filter list still has its rows
+    /// on screen.
+    fn script_filter_target_is_shown(&self, index: usize, query: &str, generation: u64) -> bool {
+        self.script_filter.config_index == Some(index)
+            && self.script_filter.query == query
+            && self.script_filter.generation == generation
+    }
+
+    /// The footer hint for rows served from the cache whose refresh failed:
+    /// how old they are, so they are not mistaken for current ones.
+    pub(super) fn cache_hint(&self) -> Option<ServerHint> {
+        let state = &self.script_filter;
+        if state.results.is_none() || !state.results_are_cached || !state.refresh_failed {
+            return None;
+        }
+        let at = i64::try_from(state.cached_at?).ok()?;
+        let age = super::item_time::relative(super::item_time::now_unix(), at);
+        Some(ServerHint::new(
+            None,
+            format!("cached {age} \u{b7} refresh failed"),
+            Tone::Warning,
+        ))
+    }
+
     /// Footer hints about the server. Ctrl+Shift+F5 is left out on
     /// purpose; the help lists it.
     pub(super) fn server_hints(&self) -> Vec<ServerHint> {
@@ -314,6 +338,17 @@ impl LauncherApp {
             .take()
             .and_then(|pending| pending.target);
         if let Err(error) = result {
+            // The rows on screen came from the cache and could not be refreshed.
+            if let Some(Target::ScriptFilter {
+                index,
+                query,
+                generation,
+            }) = &target
+            {
+                if self.script_filter_target_is_shown(*index, query, *generation) {
+                    self.script_filter.refresh_failed = self.script_filter.results_are_cached;
+                }
+            }
             self.server.notice = Some(match error {
                 CallError::Unreachable => {
                     self.server.info = None;
@@ -349,10 +384,8 @@ impl LauncherApp {
                 index,
                 query,
                 generation,
-            }) if self.script_filter.config_index == Some(index)
-                && self.script_filter.query == query
-                && self.script_filter.generation == generation =>
-            {
+            }) if self.script_filter_target_is_shown(index, &query, generation) => {
+                self.script_filter.refresh_failed = false;
                 let mut tasks = Vec::new();
                 self.handle_script_filter_query(index, query, false, &mut tasks);
                 Task::batch(tasks)

@@ -133,6 +133,11 @@ shown, and they are not stored either way. The bundled GitHub scripts do this
 when `gh` is unavailable, so a network outage does not overwrite a good list
 for the rest of the freshness window.
 
+When a refresh fails while rows from the cache are on screen, whether the script
+exited with an error, printed invalid JSON, or answered `"seconds": 0`, the
+footer says how old they are: `cached 3h ago · refresh failed`. It goes away
+when a refresh succeeds, the query changes, or you leave the filter.
+
 Cached item lists and dynamic previews live under
 `$XDG_CACHE_HOME/raffi/script-filters/`. `raffi --refresh-cache` removes them.
 The cache keys include the command, arguments, environment and query, so
