@@ -118,6 +118,25 @@ def contact_fields(config):
     })
 
 
+def repo_actions(config):
+    repo = "https://github.com/chmouel/raffi"
+    result = {"items": [{
+        "title": "raffi", "subtitle": "A launcher for Wayland \u00b7 Rust \u00b7 \u2605 120", "arg": repo,
+        "variables": {"REPO_SSH": "git@github.com:chmouel/raffi.git"},
+        "actions": [
+            {"title": "Pull requests", "arg": f"{repo}/pulls"},
+            {"title": "Issues", "arg": f"{repo}/issues"},
+            {"title": "Releases", "arg": f"{repo}/releases"},
+            {"title": "Copy SSH URL", "arg": "git@github.com:chmouel/raffi.git", "action": "copy"},
+        ],
+    }]}
+    config["addons"]["script_filters"].append({
+        "name": "Repositories", "keyword": "repo", "command": "python3",
+        "args": ["-c", f"print({json.dumps(result)!r})"], "action": "xdg-open {value}",
+        "close_on_action": False, "dynamic_preview": False, "icon": "github",
+    })
+
+
 def solarized_light(config):
     config["general"]["theme"] = "light"
     config["general"]["theme_colors"] = SOLARIZED_LIGHT
@@ -171,6 +190,7 @@ SHOTS = [
     Shot("herdr-status", "agents ", down(), height=720),
     Shot("script-filter-pr", "pr review", down(), height=720),
     Shot("script-filter-contacts", "contacts Alice", ("Return",), tweak=contact_fields),
+    Shot("script-filter-actions", "repo raffi", ("Right",), height=720, tweak=repo_actions),
     Shot("file-browser-rich-preview", "~/Documents/preview.py", height=720),
     Shot("file-browser-pdf", "~/Documents/keyboard-first.pdf", height=720),
     Shot("browser-tabs", "tabs ", height=720, needs=frozenset({"browser"})),

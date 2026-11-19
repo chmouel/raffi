@@ -8,6 +8,7 @@ import { Image } from 'astro:assets';
 import scriptFilterTzScreenshot from '../../../assets/screenshots/script-filter-tz.png';
 import scriptFilterPrScreenshot from '../../../assets/screenshots/script-filter-pr.png';
 import scriptFilterContactsScreenshot from '../../../assets/screenshots/script-filter-contacts.png';
+import scriptFilterActionsScreenshot from '../../../assets/screenshots/script-filter-actions.png';
 import herdrTreeScreenshot from '../../../assets/screenshots/herdr-tree.png';
 import herdrStatusScreenshot from '../../../assets/screenshots/herdr-status.png';
 
@@ -97,6 +98,12 @@ one of:
   `wtype` or `ydotool`
 - any other text, run with `sh -c` after replacing `{value}` with the value
 
+Press Right at the end of the query, or right-click a row, to open its
+action menu. It lists Enter and Ctrl+Enter, then the
+[custom actions](#custom-actions) the row declares and those of the filter's
+[`actions`](#configuration). Choosing one runs it on that row without leaving
+the list.
+
 An item with `children` opens those items when you press Enter or click it.
 Type to filter the current child list by title, subtitle or `arg`; Raffi does
 not rerun the script while filtering inside it. Press Escape to return to the
@@ -122,6 +129,58 @@ addons:
 `{value}` is pasted into the command as raw text, so quotes or `$(...)` in it
 are read by the shell. Prefer `"$RAFFI_VALUE"` when the value comes from
 somewhere you do not control.
+
+## Custom actions
+
+A row can carry any number of extra actions, shown in its action menu:
+
+<Image src={scriptFilterActionsScreenshot} alt="Action menu of a repository row listing its pull requests, issues and releases" width={800} />
+
+```json
+{
+  "title": "raffi",
+  "arg": "https://github.com/chmouel/raffi",
+  "variables": { "REPO_SSH": "git@github.com:chmouel/raffi.git" },
+  "actions": [
+    { "title": "Pull requests", "arg": "https://github.com/chmouel/raffi/pulls" },
+    { "title": "Copy SSH URL", "arg": "git@github.com:chmouel/raffi.git", "action": "copy" },
+    { "title": "Clone", "action": "git clone \"$REPO_SSH\" ~/src/raffi" }
+  ]
+}
+```
+
+**`title`** is the label, and typing in the menu filters on it. **`arg`** is
+the value for `{value}` and `$RAFFI_VALUE`, the row's own value when missing.
+**`variables`** are exported on top of the row's `variables`. **`action``
+takes the same values as the filter's [`action`](#configuration), and
+defaults to it: `copy`, `insert` or a shell command.
+
+An action runs like Enter does, so `close_on_action` applies and `insert`
+closes Raffi. It never opens the row's `children`, and no recent pick is
+recorded for a row that has some. Rows with `valid: false` offer none. If a
+refresh replaces the row while the menu is open, the action does nothing.
+
+<Aside type="caution">
+An item's `action` is run with `sh -c`, whatever the filter's own `action` is.
+Anything a script prints from an untrusted source must stay out of `action`
+strings, and shell examples should read `"$VAR"` instead of pasting `{value}`.
+Results are cached with `cache_seconds`, actions included.
+</Aside>
+
+The filter can add the same entries to every row with `actions`, a list of
+`title` and `action` pairs listed after the row's own:
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Repositories"
+      keyword: "repo"
+      command: "~/.config/raffi/scripts/github/repos.py"
+      action: "xdg-open {value}"
+      actions:
+        - title: "Clone"
+          action: 'git clone "$REPO_SSH" ~/src/"$REPO_NAME"'
+```
 
 ## Examples
 
@@ -287,9 +346,10 @@ preview shows the description, stars, forks, visibility and topics.
 
 A row opens its repository. Add `--path pulls` (or `issues`, `releases`,
 `actions`, `tags`, or another path) to make every row open that page instead,
-which gives one keyword per page single-key access; `--actions
-pulls,issues,releases` gives each row an action menu instead, opened with
-Enter, with Ctrl+Enter copying the chosen URL.
+which gives one keyword per page single-key access. `--actions
+pulls,issues,releases` adds those pages to the row's
+[action menu](#custom-actions) instead, opened with Right, so Enter still
+opens the repository.
 
 Raffi's own `cache_seconds` shows each query's last result at once while
 refreshing it in the background, and `gh` caches every account's pages, so a
@@ -510,6 +570,12 @@ variables an item exports.
 What Ctrl+Enter does. It takes the same values as `action` and is expanded
 the same way.
 
+**`actions`** `list of objects` (default: `[]`)
+
+Entries added to the action menu of every valid row, after the ones the row
+declares. Each has a `title` and an `action` that takes the same values as
+`action` and runs on the row's value, see [Custom actions](#custom-actions).
+
 **`env`** `map of strings` (default: `{}`)
 
 Environment variables passed to the command, including its
@@ -650,6 +716,10 @@ Value the actions use. The title is used when it is missing.
 **`icon.path`** `string`
 
 Absolute path to a PNG or SVG icon. Without it, the filter's `icon` is used.
+
+**`actions`** `list of objects`
+
+Custom entries of the row's action menu, see [Custom actions](#custom-actions).
 
 **`valid`** `boolean` (default: `true`)
 

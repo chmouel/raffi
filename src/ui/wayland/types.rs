@@ -310,10 +310,28 @@ impl ScriptFilterPreview {
     }
 }
 
+/// A custom entry of a row's action menu.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct ScriptFilterItemAction {
+    pub title: String,
+    /// Value for `{value}` and `$RAFFI_VALUE`; the row's value when missing.
+    #[serde(default)]
+    pub arg: Option<String>,
+    /// Laid over the row's `variables`.
+    #[serde(default)]
+    pub variables: std::collections::HashMap<String, String>,
+    /// Same values as the filter's `action`; that action when missing.
+    #[serde(default)]
+    pub action: Option<String>,
+}
+
 /// Alfred Script Filter JSON item.
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct ScriptFilterItem {
     pub title: String,
+    /// Custom entries of the action menu opened with Right.
+    #[serde(default)]
+    pub actions: Vec<ScriptFilterItemAction>,
     /// Optional child list opened when this item is selected.
     #[serde(default)]
     pub children: Option<Vec<ScriptFilterItem>>,

@@ -19,7 +19,8 @@ use super::state::{
 use super::system::system_entries;
 use super::theme::ThemeColors;
 use super::types::{
-    InlineProvider, InlineResult, InlineRow, ScriptFilterItem, ScriptFilterItemText,
+    InlineProvider, InlineResult, InlineRow, ScriptFilterItem, ScriptFilterItemAction,
+    ScriptFilterItemText,
 };
 use super::windows::Compositor;
 use crate::ui::FontSizes;
@@ -358,6 +359,7 @@ fn test_preview_script_filter_reads_virtual_file_with_zero_reported_size() {
     let mut app = test_app(AddonsConfig::default());
     app.script_filter.results = Some(ScriptFilterResult {
         items: vec![ScriptFilterItem {
+            actions: Vec::new(),
             children: None,
             title: "CPU info".into(),
             valid: true,
@@ -2945,6 +2947,7 @@ fn test_preview_script_filter_precedence() {
     app.script_filter.results = Some(ScriptFilterResult {
         items: vec![
             ScriptFilterItem {
+                actions: Vec::new(),
                 children: None,
                 title: "Item 1".into(),
                 valid: true,
@@ -2963,6 +2966,7 @@ fn test_preview_script_filter_precedence() {
                 }),
             },
             ScriptFilterItem {
+                actions: Vec::new(),
                 children: None,
                 title: "Item 2".into(),
                 valid: true,
@@ -3014,6 +3018,7 @@ fn test_preview_script_filter_decodes_file_url_paths() {
     let file_url = format!("file://{escaped_path}");
     let localhost_file_url = format!("file://localhost{escaped_path}");
     let make_item = |quicklookurl| ScriptFilterItem {
+        actions: Vec::new(),
         children: None,
         title: "File".into(),
         valid: true,
@@ -3080,6 +3085,7 @@ fn dynamic_preview_app(items: Vec<ScriptFilterItem>) -> LauncherApp {
 
 fn plain_item(title: &str) -> ScriptFilterItem {
     ScriptFilterItem {
+        actions: Vec::new(),
         children: None,
         title: title.into(),
         valid: true,
@@ -9731,6 +9737,7 @@ fn test_main_view_script_filter_waits_for_min_length_and_drops_stale_runs() {
     let mut app = main_view_app(&["script_filters.Issues"], Vec::new(), addons);
     let result = |title: &str| ScriptFilterResult {
         items: vec![ScriptFilterItem {
+            actions: Vec::new(),
             children: None,
             title: title.into(),
             valid: true,
@@ -9808,6 +9815,7 @@ fn test_main_view_late_rows_keep_the_selection() {
     let run = *generation;
     let items = (0..2)
         .map(|index| ScriptFilterItem {
+            actions: Vec::new(),
             children: None,
             title: format!("mail issue {index}"),
             valid: true,
@@ -9911,6 +9919,7 @@ fn issue_items(count: usize) -> ScriptFilterResult {
     ScriptFilterResult {
         items: (0..count)
             .map(|index| ScriptFilterItem {
+                actions: Vec::new(),
                 children: None,
                 title: format!("issue {index}"),
                 valid: true,
@@ -12112,6 +12121,7 @@ fn test_main_view_keep_open_preserves_query_and_selection() {
         run,
         Some(Ok(ScriptFilterResult {
             items: vec![ScriptFilterItem {
+                actions: Vec::new(),
                 children: None,
                 title: "mail bug".into(),
                 valid: true,
@@ -14663,4 +14673,250 @@ fn test_footer_keys_are_drawn_as_keycaps_and_labels_are_not() {
     );
     assert!(plain.iter().all(|hint| hint.highlight.is_none()));
     assert_eq!(footer_text(&plain), "Ctrl+D delete");
+}
+
+fn actions_app(items: Vec<ScriptFilterItem>) -> LauncherApp {
+    let mut app = dynamic_preview_app(items);
+    app.addons.script_filters[0].action = Some("true".into());
+    app.search_query = "ag ".into();
+    app.query_class = classify_query(&app.search_query, &app.addons);
+    app.script_filter.query.clear();
+    // Running an action exits and saves the query; keep the real cache intact.
+    app.history.max_items = 0;
+    app
+}
+
+fn declared_action(title: &str, arg: Option<&str>, action: Option<&str>) -> ScriptFilterItemAction {
+    ScriptFilterItemAction {
+        title: title.into(),
+        arg: arg.map(str::to_string),
+        variables: Default::default(),
+        action: action.map(str::to_string),
+    }
+}
+
+fn labels(app: &LauncherApp) -> Vec<String> {
+    app.selected_actions()
+        .into_iter()
+        .map(|entry| entry.label)
+        .collect()
+}
+
+fn wait_for_file(path: &std::path::Path) -> Option<String> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        if let Ok(text) = std::fs::read_to_string(path) {
+            if !text.is_empty() {
+                return Some(text);
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    None
+}
+
+fn scratch_file(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("raffi-sf-actions-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join(name);
+    let _ = std::fs::remove_file(&file);
+    file
+}
+
+fn run_menu_entry(app: &mut LauncherApp, label: &str) {
+    let _ = app.update(Message::OpenActions);
+    let index = app
+        .action_menu
+        .as_ref()
+        .expect("the action menu opens")
+        .entries
+        .iter()
+        .position(|entry| entry.label == label)
+        .unwrap_or_else(|| panic!("no menu entry {label:?}"));
+    let _ = app.execute_menu_action(index);
+}
+
+#[test]
+fn test_script_filter_actions_follow_item_then_config_order() {
+    let mut item = plain_item("raffi");
+    item.actions = vec![
+        declared_action("Pull requests", Some("https://x/pulls"), None),
+        declared_action("Issues", Some("https://x/issues"), None),
+    ];
+    let mut app = actions_app(vec![item]);
+    app.addons.script_filters[0].actions = vec![crate::ScriptFilterActionConfig {
+        title: "Clone".into(),
+        action: "true".into(),
+    }];
+    let labels = labels(&app);
+    let tail: Vec<_> = labels.iter().rev().take(3).rev().cloned().collect();
+    assert_eq!(tail, ["Pull requests", "Issues", "Clone"]);
+}
+
+#[test]
+fn test_script_filter_actions_skip_invalid_rows() {
+    let mut item = plain_item("heading");
+    item.valid = false;
+    item.actions = vec![declared_action("Nope", None, None)];
+    let app = actions_app(vec![item]);
+    assert!(!labels(&app).iter().any(|label| label == "Nope"));
+}
+
+#[test]
+fn test_script_filter_action_runs_with_its_value_and_merged_variables() {
+    let out = scratch_file("merged");
+    let mut item = plain_item("raffi");
+    item.variables = [("A".into(), "row".into()), ("B".into(), "row".into())].into();
+    let mut action = declared_action("Pull requests", Some("https://x/pulls"), None);
+    action.variables = [("B".into(), "action".into())].into();
+    item.actions = vec![action];
+    let mut app = actions_app(vec![item]);
+    app.addons.script_filters[0].action = Some(format!(
+        "printf '%s|%s|%s' \"$RAFFI_VALUE\" \"$A\" \"$B\" > '{}'",
+        out.display()
+    ));
+    run_menu_entry(&mut app, "Pull requests");
+    assert_eq!(
+        wait_for_file(&out).as_deref(),
+        Some("https://x/pulls|row|action")
+    );
+    assert!(app.menu_script_action.is_none());
+}
+
+#[test]
+fn test_script_filter_action_overrides_the_action_and_defaults_the_value() {
+    let out = scratch_file("own-action");
+    let mut item = plain_item("raffi");
+    item.actions = vec![declared_action(
+        "Write",
+        None,
+        Some(&format!(
+            "printf '%s' \"$RAFFI_VALUE\" > '{}'",
+            out.display()
+        )),
+    )];
+    let mut app = actions_app(vec![item]);
+    run_menu_entry(&mut app, "Write");
+    assert_eq!(wait_for_file(&out).as_deref(), Some("raffi-arg"));
+}
+
+#[test]
+fn test_script_filter_config_action_runs_on_the_row_value() {
+    let out = scratch_file("config-action");
+    let mut app = actions_app(vec![plain_item("raffi")]);
+    app.addons.script_filters[0].actions = vec![crate::ScriptFilterActionConfig {
+        title: "Record".into(),
+        action: format!("printf '%s' \"$RAFFI_VALUE\" > '{}'", out.display()),
+    }];
+    run_menu_entry(&mut app, "Record");
+    assert_eq!(wait_for_file(&out).as_deref(), Some("raffi-arg"));
+}
+
+#[test]
+fn test_script_filter_menu_action_does_not_open_children_or_record_a_pick() {
+    let out = scratch_file("children");
+    let mut item = plain_item("Alice");
+    item.children = Some(vec![plain_item("Email")]);
+    item.actions = vec![declared_action(
+        "Write",
+        None,
+        Some(&format!(
+            "printf '%s' \"$RAFFI_VALUE\" > '{}'",
+            out.display()
+        )),
+    )];
+    let mut app = actions_app(vec![item]);
+    app.history.items.clear();
+    app.main_view.recent.clear();
+    run_menu_entry(&mut app, "Write");
+    assert_eq!(wait_for_file(&out).as_deref(), Some("Alice-arg"));
+    assert!(app.script_filter.navigation.is_empty());
+    assert_eq!(app.script_filter.results.as_ref().unwrap().items.len(), 1);
+    assert!(app.main_view.recent.is_empty());
+}
+
+#[test]
+fn test_script_filter_enter_after_a_menu_action_runs_the_filter_action() {
+    let out = scratch_file("enter-after");
+    let mut item = plain_item("raffi");
+    item.actions = vec![declared_action("Custom", None, Some("true"))];
+    let mut app = actions_app(vec![item]);
+    app.addons.script_filters[0].action = Some(format!(
+        "printf '%s' \"$RAFFI_VALUE\" > '{}'",
+        out.display()
+    ));
+    app.script_filter.action = app.addons.script_filters[0].action.clone();
+    run_menu_entry(&mut app, "Custom");
+    assert!(app.menu_script_action.is_none());
+    let _ = app.handle_script_filter_selected(0);
+    assert_eq!(wait_for_file(&out).as_deref(), Some("raffi-arg"));
+}
+
+#[test]
+fn test_script_filter_menu_action_ignores_a_row_replaced_by_a_refresh() {
+    let out = scratch_file("replaced");
+    let mut item = plain_item("raffi");
+    item.variables = [("REPO_SSH".into(), "old".into())].into();
+    item.actions = vec![declared_action("Write", None, None)];
+    let mut app = actions_app(vec![item]);
+    app.addons.script_filters[0].action =
+        Some(format!("printf '%s' \"$REPO_SSH\" > '{}'", out.display()));
+    let _ = app.update(Message::OpenActions);
+    let index = app
+        .action_menu
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .position(|entry| entry.label == "Write")
+        .unwrap();
+    // Same title and arg, different variables, and no generation bump.
+    app.script_filter.results.as_mut().unwrap().items[0]
+        .variables
+        .insert("REPO_SSH".into(), "new".into());
+    let _ = app.execute_menu_action(index);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert!(std::fs::read_to_string(&out).is_err(), "nothing ran");
+    assert!(app.menu_script_action.is_none());
+}
+
+#[test]
+fn test_script_filter_menu_action_runs_from_a_main_view_row() {
+    use super::main_view::Source;
+    let out = scratch_file("main-view");
+    let mut addons = AddonsConfig::default();
+    let mut config = issues_filter();
+    config.action = Some("true".into());
+    config.close_on_action = Some(false);
+    addons.script_filters.push(config);
+    let mut app = main_view_app(&["script_filters.Issues"], Vec::new(), addons);
+    app.view.show_preview = true;
+    let _ = app.update(Message::SearchChanged("working".into()));
+    let mut item = plain_item("Working");
+    item.actions = vec![declared_action(
+        "Write",
+        Some("custom"),
+        Some(&format!(
+            "printf '%s' \"$RAFFI_VALUE\" > '{}'",
+            out.display()
+        )),
+    )];
+    let Source::ScriptFilter { results, .. } = &mut app.main_view.sources[0] else {
+        panic!("script filter source");
+    };
+    *results = Some(ScriptFilterResult {
+        items: vec![item],
+        ..Default::default()
+    });
+    let _ = app.update(Message::SearchChanged("working ".into()));
+    let _ = app.update(Message::SearchChanged("working".into()));
+    let Some((0, 0)) = app.selected_main_view() else {
+        panic!(
+            "the script filter row is selected: {:?}",
+            app.selected_main_row()
+        );
+    };
+    run_menu_entry(&mut app, "Write");
+    assert_eq!(wait_for_file(&out).as_deref(), Some("custom"));
+    assert!(app.menu_script_action.is_none());
 }

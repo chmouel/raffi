@@ -420,31 +420,12 @@ def page_url(name: str, path: str) -> str:
     return f"https://{API_HOST}/{name}/{path}" if path else f"https://{API_HOST}/{name}"
 
 
-def child_item(title: str, url: str, repo: dict) -> dict:
-    """One row of an action menu."""
-    return {
-        "title": title,
-        "subtitle": url,
-        "arg": url,
-        "variables": repo_variables(repo),
-        "preview": {
-            "title": title,
-            "subtitle": url,
-            "icon": ICON,
-            "text": f"Enter opens {url}\nCtrl+Enter copies it.",
-            "dynamic": False,
-        },
-    }
-
-
 def action_menu(repo: dict, options: Options) -> list[dict]:
-    """The repository itself, then each page --actions offers for it."""
-    menu = [child_item(f"Open {repo['nameWithOwner']}", repo["url"], repo)]
-    menu += [
-        child_item(label, page_url(repo["nameWithOwner"], path), repo)
-        for path, label in options.actions
+    """The pages --actions offers for a repository, in Raffi's action menu."""
+    name = repo["nameWithOwner"]
+    return [
+        {"title": label, "arg": page_url(name, path)} for path, label in options.actions
     ]
-    return menu
 
 
 def build_item(repo: dict, options: Options = DEFAULTS) -> dict:
@@ -474,7 +455,7 @@ def build_item(repo: dict, options: Options = DEFAULTS) -> dict:
         "preview": build_preview(repo),
     }
     if options.actions:
-        item["children"] = action_menu(repo, options)
+        item["actions"] = action_menu(repo, options)
     return item
 
 
@@ -517,10 +498,7 @@ def repo_item(name: str, options: Options = DEFAULTS) -> dict:
         },
     }
     if options.actions:
-        item["children"] = action_menu(
-            {"name": name.split("/", 1)[-1], "nameWithOwner": name, "url": root},
-            options,
-        )
+        item["actions"] = action_menu({"nameWithOwner": name}, options)
     return item
 
 

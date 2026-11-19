@@ -809,6 +809,10 @@ pub(super) struct LauncherApp {
     pub filtered_config_scores: Vec<Option<super::ranking::ScoredMatch>>,
     pub search_query: String,
     pub action_menu: Option<super::action_menu::ActionMenu>,
+    /// The custom action of a script filter row being run from the action
+    /// menu. It lives here and not on the script filter state because the main
+    /// view enters the filter before it handles the selection.
+    pub menu_script_action: Option<super::action_menu::ScriptMenuAction>,
     /// Name and keyword prompt of a clipboard entry being saved as a snippet.
     pub snippet_save: Option<super::clipboard_snippet::SnippetSave>,
     pub onboarding: super::onboarding::Onboarding,

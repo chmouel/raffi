@@ -67,6 +67,7 @@ impl StoredItem {
 
     pub fn to_item(&self) -> ScriptFilterItem {
         ScriptFilterItem {
+            actions: Vec::new(),
             children: None,
             title: self.title.clone(),
             valid: true,

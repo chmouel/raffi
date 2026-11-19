@@ -253,13 +253,22 @@ page gives single-key access:
       secondary_action: "copy"
 ```
 
-`--actions` adds an action menu to each row instead. Enter opens a list with
-the repository itself and the pages you name, and Enter on one of those opens
-it while Ctrl+Enter copies it. As Raffi gives each row one key, the menu takes
-the place of opening the repository directly.
+`--actions` adds pages to the action menu of each row. Enter still opens the
+repository, and Right at the end of the query (or a right-click) lists the
+pages you name, with Enter opening one and Ctrl+Enter copying its URL. It
+needs a Raffi that supports `actions` on script filter items.
 
 ```yaml
       args: ["--owners", "me,t,osp", "--actions", "pulls,issues,releases,actions"]
+```
+
+The filter's own `actions` in `raffi.yaml` add entries that script cannot
+know, such as cloning with the row's `$REPO_SSH`:
+
+```yaml
+      actions:
+        - title: "Clone"
+          action: 'git clone "$REPO_SSH" ~/src/"$REPO_NAME"'
 ```
 
 Pages are written by path: `pulls`, `issues`, `releases`, `actions`, `tags`,

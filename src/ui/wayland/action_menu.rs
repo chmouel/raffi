@@ -2,9 +2,11 @@ use iced::keyboard::Modifiers;
 use iced::widget::operation::{focus, move_cursor_to_end};
 use iced::Task;
 
+use std::collections::HashMap;
+
 use super::main_view::{MainRowRef, Source};
 use super::state::{LauncherApp, MainRowKey};
-use super::types::Message;
+use super::types::{Message, ScriptFilterItem};
 use super::vault::{EntryAction, Field, VaultAddon};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,6 +14,27 @@ enum Target {
     Main(MainRowKey),
     Command(u64, String),
     Other(String, usize, String, [u64; 3]),
+}
+
+/// A custom entry of a script filter row, resolved when the menu opens so it
+/// runs what the user saw even if a refresh replaces the results meanwhile.
+#[derive(Debug, Clone)]
+pub(super) struct ScriptMenuAction {
+    pub action: String,
+    pub value: String,
+    pub env: HashMap<String, String>,
+    item_title: String,
+    item_arg: Option<String>,
+    item_variables: HashMap<String, String>,
+}
+
+impl ScriptMenuAction {
+    /// Whether `item` is still the row the entry was resolved for.
+    pub fn is_for(&self, item: &ScriptFilterItem) -> bool {
+        item.title == self.item_title
+            && item.arg == self.item_arg
+            && item.variables == self.item_variables
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -22,6 +45,7 @@ pub(super) struct ActionEntry {
     pub glyph: Option<&'static str>,
     message: Message,
     modifiers: Modifiers,
+    script_action: Option<ScriptMenuAction>,
 }
 
 pub(super) struct ActionMenu {
@@ -210,11 +234,13 @@ impl LauncherApp {
                     shortcut,
                     message,
                     modifiers,
+                    script_action: None,
                 })
             })
             .collect();
         entries.extend(self.clipboard_ocr_entries());
         entries.extend(self.clipboard_snippet_entries());
+        entries.extend(self.script_filter_action_entries());
         entries
     }
 
@@ -239,6 +265,7 @@ impl LauncherApp {
             glyph: (!self.no_icons).then(|| action_glyph(label, &message)),
             message,
             modifiers: Modifiers::empty(),
+            script_action: None,
         })
         .collect()
     }
@@ -267,6 +294,85 @@ impl LauncherApp {
                     .then(|| action_glyph("", &Message::SaveClipboardSnippet(index))),
                 message: Message::SaveClipboardSnippet(index),
                 modifiers: Modifiers::empty(),
+                script_action: None,
+            })
+            .collect()
+    }
+
+    /// The script filter row under the selection and the index of its config,
+    /// in a filter's own list or among the rows of the main view.
+    fn selected_script_filter_item(&self) -> Option<(&ScriptFilterItem, usize)> {
+        if let Some((source, row)) = self.selected_main_view() {
+            return match self.main_view.sources.get(source)? {
+                Source::ScriptFilter {
+                    config_index,
+                    results,
+                    ..
+                } => Some((results.as_ref()?.items.get(row)?, *config_index)),
+                _ => None,
+            };
+        }
+        if self.script_filter.loading
+            || self.script_filter.help_message.is_some()
+            || self.command_list.is_active()
+            || self.clipboard.active
+        {
+            return None;
+        }
+        let row = self.selected_index.checked_sub(self.keyword_rows())?;
+        let config_index = self.script_filter.config_index?;
+        let item = self.script_filter.results.as_ref()?.items.get(row)?;
+        Some((item, config_index))
+    }
+
+    /// The actions a script filter row declares, then those of its config.
+    fn script_filter_action_entries(&self) -> Vec<ActionEntry> {
+        let Some((item, config_index)) = self.selected_script_filter_item() else {
+            return Vec::new();
+        };
+        let Some(config) = self.addons.script_filters.get(config_index) else {
+            return Vec::new();
+        };
+        if !item.valid {
+            return Vec::new();
+        }
+        let default_action = config.action.as_deref().unwrap_or("copy");
+        let row_value = item.arg.as_deref().unwrap_or(&item.title);
+        let declared = item.actions.iter().map(|entry| {
+            (
+                &entry.title,
+                entry.arg.as_deref(),
+                Some(&entry.variables),
+                entry.action.as_deref(),
+            )
+        });
+        let configured = config
+            .actions
+            .iter()
+            .map(|entry| (&entry.title, None, None, Some(entry.action.as_str())));
+        declared
+            .chain(configured)
+            .map(|(title, arg, variables, action)| {
+                let mut env = item.variables.clone();
+                for (name, value) in variables.into_iter().flatten() {
+                    env.insert(name.clone(), value.clone());
+                }
+                let script_action = ScriptMenuAction {
+                    action: action.unwrap_or(default_action).to_string(),
+                    value: arg.unwrap_or(row_value).to_string(),
+                    env,
+                    item_title: item.title.clone(),
+                    item_arg: item.arg.clone(),
+                    item_variables: item.variables.clone(),
+                };
+                ActionEntry {
+                    label: title.clone(),
+                    shortcut: String::new(),
+                    glyph: (!self.no_icons).then(|| action_glyph(title, &Message::Submit)),
+                    message: Message::Submit,
+                    modifiers: Modifiers::empty(),
+                    script_action: Some(script_action),
+                }
             })
             .collect()
     }
@@ -313,7 +419,11 @@ impl LauncherApp {
         };
         let modifiers = self.view.current_modifiers;
         self.view.current_modifiers = entry.modifiers;
+        // Consumed by the script filter's selection handler, which the
+        // message reaches synchronously.
+        self.menu_script_action.clone_from(&entry.script_action);
         let task = self.update(entry.message.clone());
+        self.menu_script_action = None;
         self.view.current_modifiers = modifiers;
         task.chain(focus(self.view.search_input_id.clone()))
             .chain(move_cursor_to_end(self.view.search_input_id.clone()))

@@ -1159,6 +1159,7 @@ impl LauncherApp {
                 launcher_documents,
                 configs,
                 action_menu: None,
+                menu_script_action: None,
                 snippet_save: None,
                 onboarding: Default::default(),
                 search_query: initial_query.clone(),
@@ -4611,6 +4612,18 @@ impl LauncherApp {
     }
 
     pub(super) fn handle_script_filter_selected(&mut self, index: usize) -> Task<Message> {
+        let menu_action = self.menu_script_action.take();
+        if let Some(chosen) = &menu_action {
+            // A refresh may have replaced the row since the menu opened.
+            let current = self
+                .script_filter
+                .results
+                .as_ref()
+                .and_then(|result| result.items.get(index));
+            if !current.is_some_and(|item| chosen.is_for(item)) {
+                return Task::none();
+            }
+        }
         if let Some(item) = self
             .script_filter
             .results
@@ -4621,7 +4634,8 @@ impl LauncherApp {
             if !item.valid {
                 return Task::none();
             }
-            if let Some(children) = item.children {
+            // A menu action runs on the row, it does not open its children.
+            if let Some(children) = item.children.filter(|_| menu_action.is_none()) {
                 self.script_filter
                     .navigation
                     .push(super::state::ScriptFilterNavigation {
@@ -4677,18 +4691,27 @@ impl LauncherApp {
                     recent.item = Some(StoredItem::of(item, result.default_icon.as_deref()));
                     pick = Some(recent);
                 }
-                let value = item.arg.as_deref().unwrap_or(&item.title);
-                let action = if self.view.current_modifiers.control() {
-                    self.script_filter
-                        .secondary_action
-                        .as_deref()
-                        .or(self.script_filter.action.as_deref())
+                if menu_action.is_some() && item.children.is_some() {
+                    // Recent picks cannot keep a row's children.
+                    pick = None;
+                }
+                if let Some(chosen) = &menu_action {
+                    force_close = chosen.action == "insert";
+                    execute_action_with_env(&chosen.action, &chosen.value, &chosen.env);
                 } else {
-                    self.script_filter.action.as_deref()
-                };
-                let act = action.unwrap_or("copy");
-                force_close = act == "insert";
-                execute_action_with_env(act, value, &item.variables);
+                    let value = item.arg.as_deref().unwrap_or(&item.title);
+                    let action = if self.view.current_modifiers.control() {
+                        self.script_filter
+                            .secondary_action
+                            .as_deref()
+                            .or(self.script_filter.action.as_deref())
+                    } else {
+                        self.script_filter.action.as_deref()
+                    };
+                    let act = action.unwrap_or("copy");
+                    force_close = act == "insert";
+                    execute_action_with_env(act, value, &item.variables);
+                }
             }
         }
         if let Some(pick) = pick {

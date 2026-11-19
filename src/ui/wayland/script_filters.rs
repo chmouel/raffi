@@ -342,6 +342,7 @@ mod tests {
         };
         let config = super::view_config(&config, Some(&result.views[0]));
         let item = super::ScriptFilterItem {
+            actions: Vec::new(),
             children: None,
             title: "Agent".into(),
             valid: true,
@@ -422,6 +423,31 @@ mod tests {
         assert!(result.items[0].quicklookurl.is_none());
         assert!(result.items[0].text.is_none());
         assert_eq!(result.items[0].indent, 0);
+    }
+
+    #[test]
+    fn test_parse_script_filter_output_with_actions() {
+        let stdout = r#"{"items":[
+            {"title":"raffi","actions":[
+                {"title":"Pull requests","arg":"https://x/pulls"},
+                {"title":"Clone","action":"git clone \"$REPO\"","variables":{"REPO":"x"}}
+            ]},
+            {"title":"plain"}
+        ]}"#;
+        let result = parse_script_filter_output(stdout, None).expect("valid json");
+        let actions = &result.items[0].actions;
+        assert_eq!(actions.len(), 2);
+        assert_eq!(actions[0].arg.as_deref(), Some("https://x/pulls"));
+        assert!(actions[0].action.is_none());
+        assert_eq!(actions[1].action.as_deref(), Some("git clone \"$REPO\""));
+        assert_eq!(actions[1].variables["REPO"], "x");
+        assert!(result.items[1].actions.is_empty());
+    }
+
+    #[test]
+    fn test_parse_script_filter_output_rejects_an_action_without_a_title() {
+        let stdout = r#"{"items":[{"title":"raffi","actions":[{"arg":"x"}]}]}"#;
+        assert!(parse_script_filter_output(stdout, None).is_err());
     }
 
     #[test]
@@ -626,8 +652,10 @@ mod tests {
             cache_seconds: None,
             warm_queries: Vec::new(),
             warm_interval_seconds: None,
+            actions: Vec::new(),
         };
         let item = super::ScriptFilterItem {
+            actions: Vec::new(),
             children: None,
             title: "\u{1b}[32mAgent\u{1b}[0m".into(),
             valid: true,

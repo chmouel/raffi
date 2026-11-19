@@ -1890,6 +1890,25 @@
         }
       ]
     },
+    "ScriptFilterActionConfig": {
+      "description": "A custom action listed in the action menu of every row of a script filter.",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "What the entry does with the row's value, with the same values as the\nfilter's `action`.",
+          "type": "string"
+        },
+        "title": {
+          "description": "Label shown in the action menu.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "action"
+      ]
+    },
     "ScriptFilterConfig": {
       "description": "Configuration for a script filter addon",
       "type": "object",
@@ -1899,6 +1918,14 @@
             "string",
             "null"
           ]
+        },
+        "actions": {
+          "description": "Extra entries of the action menu of every valid row, listed after the\nactions the row declares itself.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ScriptFilterActionConfig"
+          }
         },
         "args": {
           "type": "array",

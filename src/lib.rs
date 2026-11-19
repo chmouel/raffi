@@ -589,6 +589,17 @@ impl Default for EmojiAddonConfig {
     }
 }
 
+/// A custom action listed in the action menu of every row of a script filter.
+#[derive(Deserialize, Serialize, JsonSchema, Debug, Clone, Default)]
+#[schemars(deny_unknown_fields)]
+pub struct ScriptFilterActionConfig {
+    /// Label shown in the action menu.
+    pub title: String,
+    /// What the entry does with the row's value, with the same values as the
+    /// filter's `action`.
+    pub action: String,
+}
+
 /// Configuration for a script filter addon
 #[derive(Deserialize, Serialize, JsonSchema, Debug, Clone, Default)]
 #[schemars(deny_unknown_fields)]
@@ -601,6 +612,10 @@ pub struct ScriptFilterConfig {
     pub args: Vec<String>,
     pub action: Option<String>,
     pub secondary_action: Option<String>,
+    /// Extra entries of the action menu of every valid row, listed after the
+    /// actions the row declares itself.
+    #[serde(default)]
+    pub actions: Vec<ScriptFilterActionConfig>,
     #[serde(default)]
     pub env: std::collections::HashMap<String, String>,
     pub min_query_length: Option<usize>,
@@ -4470,6 +4485,9 @@ fn process_config(config: Config, args: &Args) -> Result<ParsedConfig> {
         sf.icon = sf.icon.as_ref().map(|s| expand_config_value(s));
         sf.action = sf.action.as_ref().map(|s| expand_config_value(s));
         sf.secondary_action = sf.secondary_action.as_ref().map(|s| expand_config_value(s));
+        for entry in &mut sf.actions {
+            entry.action = expand_config_value(&entry.action);
+        }
     }
     let bm = &mut addons.bookmarks;
     for source in bm.sources.iter_mut().flatten() {
@@ -8610,6 +8628,25 @@ shell:
         assert!(
             serde_yaml::from_str::<BrowserHistoryAddonConfig>("open_with: netscape\n").is_err()
         );
+    }
+
+    #[test]
+    fn test_script_filter_actions_config() {
+        let filter: ScriptFilterConfig = serde_yaml::from_str(
+            "name: r\ncommand: r.py\nkeyword: r\nactions:\n  - {title: Clone, action: 'git clone $REPO_SSH'}\n",
+        )
+        .unwrap();
+        assert_eq!(filter.actions.len(), 1);
+        assert_eq!(filter.actions[0].title, "Clone");
+        assert_eq!(filter.actions[0].action, "git clone $REPO_SSH");
+
+        let filter: ScriptFilterConfig =
+            serde_yaml::from_str("name: x\ncommand: y\nkeyword: z\n").unwrap();
+        assert!(filter.actions.is_empty());
+        assert!(serde_yaml::from_str::<ScriptFilterConfig>(
+            "name: x\ncommand: y\nkeyword: z\nactions:\n  - {title: A}\n"
+        )
+        .is_err());
     }
 
     #[test]

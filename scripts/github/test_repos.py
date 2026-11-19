@@ -328,8 +328,8 @@ class MainTests(ReposTestCase):
 
     def test_actions_flag(self):
         output = self.run_main("--actions", "pulls,issues", "me", "raffi")
-        titles = [child["title"] for child in output["items"][0]["children"]]
-        self.assertEqual(titles, ["Open owner/raffi", "Pull requests", "Issues"])
+        titles = [entry["title"] for entry in output["items"][0]["actions"]]
+        self.assertEqual(titles, ["Pull requests", "Issues"])
 
     def test_missing_cache_is_per_host(self):
         self.assertEqual(repos.cache_dir().name, repos.API_HOST)
@@ -376,27 +376,20 @@ class ActionTests(ReposTestCase):
         item = repos.repo_item("owner/raffi", repos.Options(path="releases"))
         self.assertEqual(item["arg"], "https://github.com/owner/raffi/releases")
 
-    def test_actions_make_a_menu(self):
+    def test_actions_are_declared_on_the_row(self):
         item = repos.build_item(
             repo("raffi"),
             repos.Options(actions=(("pulls", "Pull requests"), ("issues", "Issues"))),
         )
-        titles = [child["title"] for child in item["children"]]
         self.assertEqual(
-            titles, ["Open owner/raffi", "Pull requests", "Issues"]
-        )
-        urls = [child["arg"] for child in item["children"]]
-        self.assertEqual(
-            urls,
+            item["actions"],
             [
-                "https://github.com/owner/raffi",
-                "https://github.com/owner/raffi/pulls",
-                "https://github.com/owner/raffi/issues",
+                {"title": "Pull requests", "arg": "https://github.com/owner/raffi/pulls"},
+                {"title": "Issues", "arg": "https://github.com/owner/raffi/issues"},
             ],
         )
-        self.assertEqual(
-            item["children"][1]["variables"]["REPO_NAME"], "owner/raffi"
-        )
+        self.assertNotIn("children", item)
+        self.assertEqual(item["arg"], "https://github.com/owner/raffi")
 
     def test_path_applies_to_a_typed_repository_menu(self):
         item = repos.repo_item(
@@ -405,15 +398,12 @@ class ActionTests(ReposTestCase):
         )
         self.assertEqual(item["arg"], "https://github.com/owner/raffi/pulls")
         self.assertEqual(
-            [child["arg"] for child in item["children"]],
-            [
-                "https://github.com/owner/raffi",
-                "https://github.com/owner/raffi/issues",
-            ],
+            [entry["arg"] for entry in item["actions"]],
+            ["https://github.com/owner/raffi/issues"],
         )
 
     def test_no_menu_without_actions(self):
-        self.assertNotIn("children", repos.build_item(repo("raffi")))
+        self.assertNotIn("actions", repos.build_item(repo("raffi")))
 
 
 class ItemTests(ReposTestCase):
