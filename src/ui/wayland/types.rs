@@ -410,6 +410,8 @@ pub(crate) struct ScriptFilterResult {
     /// The script asked not to keep this output, so a run that produced it
     /// counts as a failed refresh.
     pub not_stored: bool,
+    /// Queries the script says are worth keeping fresh in the background.
+    pub cache_warm: Vec<String>,
 }
 
 /// A file or directory entry for the file browser addon.

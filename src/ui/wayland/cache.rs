@@ -23,7 +23,7 @@ use crate::{AddonsConfig, ParsedConfig, ScriptFilterConfig};
 use super::clipboard_store::MAX_MIME_BYTES;
 use super::script_filters::{self, PreviewRequest};
 use super::types::{ScriptFilterResult, ScriptFilterView};
-use super::warm_schedule::{Policy, Run, Warmer, MAX_WARM_VIEWS};
+use super::warm_schedule::{advertised_queries, Policy, Run, Warmer, MAX_WARM_VIEWS};
 
 const SNAPSHOT_VERSION: u32 = 1;
 /// Snapshots older than this are discarded instead of shown while refreshing.
@@ -1500,7 +1500,7 @@ pub(crate) fn run_server(config: ParsedConfig) -> Result<()> {
 fn warm_loop(state: Arc<ServerState>) {
     std::thread::spawn(move || {
         let mut last: HashMap<String, u64> = HashMap::new();
-        let mut warmer = Warmer::default();
+        let mut warmers: HashMap<usize, Warmer> = HashMap::new();
         loop {
             let now = now_secs();
             for (index, config) in state.addons.script_filters.iter().enumerate() {
@@ -1510,7 +1510,7 @@ fn warm_loop(state: Arc<ServerState>) {
                 let Some(policy) = Policy::of(config) else {
                     continue;
                 };
-                let report = warmer.tick(
+                let report = warmers.entry(index).or_default().tick(
                     &now_secs,
                     config,
                     &policy,
@@ -1548,7 +1548,8 @@ fn due(last: &HashMap<String, u64>, source: &str, now: u64, interval: u64) -> bo
         .is_none_or(|previous| now.saturating_sub(*previous) >= interval)
 }
 
-/// Refresh every list of a script filter now, whatever its snapshots say.
+/// Refresh every list of a script filter now, whatever its snapshots say:
+/// each warmed query and the queries their output asked to have warmed.
 fn warm_script_filter(
     state: &Arc<ServerState>,
     index: usize,
@@ -1560,27 +1561,28 @@ fn warm_script_filter(
     let mut error = None;
     let mut ran = false;
     let always = || true;
-    for query in &config.warm_queries {
+    let mut warm_query = |query: &str| -> Vec<String> {
         // The default run names the other views, each warmed under its own key.
-        let views = match warm_run(state, config, ttl, None, query, &always) {
+        let (views, asked) = match warm_run(state, config, ttl, None, query, &always) {
             Run::Done(Ok(result)) => {
                 ran = true;
                 let default = result
                     .view
                     .or_else(|| result.views.first().map(|view| view.id.clone()));
-                result
+                let views: Vec<ScriptFilterView> = result
                     .views
                     .into_iter()
                     .filter(|view| Some(&view.id) != default.as_ref())
                     .take(MAX_WARM_VIEWS)
-                    .collect()
+                    .collect();
+                (views, result.cache_warm)
             }
             Run::Done(Err(message)) => {
                 ran = true;
                 error.get_or_insert(format!("{}: {message}", config.name));
-                Vec::new()
+                (Vec::new(), Vec::new())
             }
-            Run::Skipped => Vec::new(),
+            Run::Skipped => (Vec::new(), Vec::new()),
         };
         for view in &views {
             if let Run::Done(outcome) = warm_run(state, config, ttl, Some(view), query, &always) {
@@ -1590,6 +1592,14 @@ fn warm_script_filter(
                 }
             }
         }
+        asked
+    };
+    let mut asked = Vec::new();
+    for query in &config.warm_queries {
+        asked.extend(warm_query(query));
+    }
+    for query in advertised_queries(config, &asked) {
+        warm_query(&query);
     }
     if ran {
         state.set_status(&format!("script:{index}"), error.clone());
@@ -1949,6 +1959,40 @@ mod tests {
         let key = script_filter_list_key(&config, "q");
         let viewed = script_filters::view_config(&config, Some(&view));
         assert_ne!(key, script_filter_list_key(&viewed, "q"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_forced_refresh_also_warms_the_queries_the_script_asks_for() {
+        let dir = tempdir("advertised");
+        let log = dir.join("runs");
+        let config = ScriptFilterConfig {
+            name: "Ask".into(),
+            command: "sh".into(),
+            args: vec![
+                "-c".into(),
+                r#"echo "[$1]" >> "$LOG"
+                   if [ -z "$1" ]; then
+                     echo '{"cache":{"warm":["review","review","other"]},"items":[]}'
+                   else
+                     echo '{"cache":{"warm":["deeper"]},"items":[]}'
+                   fi"#
+                .into(),
+                "sh".into(),
+            ],
+            keyword: "a".into(),
+            env: [("LOG".into(), log.display().to_string())].into(),
+            cache_seconds: Some(60),
+            warm_queries: vec!["".into()],
+            ..Default::default()
+        };
+        let state = Arc::new(ServerState::new(quiet_addons()));
+        warm_script_filter(&state, 0, &config).unwrap();
+        let runs = fs::read_to_string(&log).unwrap();
+        assert_eq!(
+            runs.lines().collect::<Vec<_>>(),
+            ["[]", "[review]", "[other]"]
+        );
         let _ = fs::remove_dir_all(dir);
     }
 

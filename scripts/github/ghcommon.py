@@ -118,8 +118,13 @@ def seconds(duration: str, default: float = 600) -> float:
     return float(match.group(1)) * units[match.group(2)]
 
 
-def with_cache(output: dict, items: list, duration: str) -> dict:
+def with_cache(
+    output: dict, items: list, duration: str, warm: tuple[str, ...] = ()
+) -> dict:
     """Tell Raffi how long `output` stays fresh.
+
+    `warm` lists queries worth keeping fresh in the background besides the
+    ones the config warms, which Raffi bounds to a few short ones.
 
     A gh cache window such as `10m` becomes the hint, so Raffi keeps the list
     as long as `gh` would serve it, within what the user's `cache_max_seconds`
@@ -129,4 +134,7 @@ def with_cache(output: dict, items: list, duration: str) -> dict:
     # Zero is how an error asks not to be kept, so a successful list never
     # sends it, however short the gh window.
     hint = 0 if isinstance(items, ErrorRows) else max(1, int(seconds(duration)))
-    return {**output, "cache": {"seconds": hint}, "items": items}
+    cache: dict = {"seconds": hint}
+    if warm and hint:
+        cache["warm"] = list(warm)
+    return {**output, "cache": cache, "items": items}

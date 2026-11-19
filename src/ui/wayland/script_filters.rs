@@ -33,13 +33,38 @@ struct ScriptFilterResponse {
     cache: Option<Box<serde_json::value::RawValue>>,
 }
 
-/// The seconds of a `cache` hint: `{"seconds": N}` or a bare `N`, a whole
-/// number. Anything else means no hint.
-fn parse_cache_hint(raw: &serde_json::value::RawValue) -> Option<u64> {
-    let value = serde_json::from_str::<serde_json::Value>(raw.get()).ok()?;
+/// What a script said about caching its output.
+#[derive(Default)]
+struct CacheHint {
+    seconds: Option<u64>,
+    warm: Vec<String>,
+}
+
+/// A `cache` hint: `{"seconds": N, "warm": ["query", ...]}`, or a bare `N`.
+/// Anything that does not fit is left out, so an odd hint never costs more
+/// than itself.
+fn parse_cache_hint(raw: &serde_json::value::RawValue) -> CacheHint {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(raw.get()) else {
+        return CacheHint::default();
+    };
     match value {
-        serde_json::Value::Object(fields) => fields.get("seconds")?.as_u64(),
-        other => other.as_u64(),
+        serde_json::Value::Object(fields) => CacheHint {
+            seconds: fields.get("seconds").and_then(serde_json::Value::as_u64),
+            warm: fields
+                .get("warm")
+                .and_then(serde_json::Value::as_array)
+                .map(|queries| {
+                    queries
+                        .iter()
+                        .filter_map(|query| query.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        },
+        other => CacheHint {
+            seconds: other.as_u64(),
+            warm: Vec::new(),
+        },
     }
 }
 
@@ -49,14 +74,19 @@ pub(super) fn parse_script_filter_output(
 ) -> Result<ScriptFilterResult, String> {
     serde_json::from_str::<ScriptFilterResponse>(stdout)
         .map(|response| {
-            let cache_hint = response.cache.as_deref().and_then(parse_cache_hint);
+            let hint = response
+                .cache
+                .as_deref()
+                .map(parse_cache_hint)
+                .unwrap_or_default();
             ScriptFilterResult {
                 items: response.items,
                 default_icon,
                 views: response.views,
                 view: response.view,
-                cache_hint,
-                not_stored: cache_hint == Some(0),
+                cache_hint: hint.seconds,
+                not_stored: hint.seconds == Some(0),
+                cache_warm: hint.warm,
             }
         })
         .map_err(|error| format!("Invalid JSON: {}", error))
@@ -758,6 +788,42 @@ mod tests {
             assert_eq!(result.items.len(), 1, "{bad}");
         }
         assert_eq!(hint(r#"{"items":[]}"#), None);
+    }
+
+    fn warm(stdout: &str) -> Vec<String> {
+        parse_script_filter_output(stdout, None)
+            .expect("the list still parses")
+            .cache_warm
+    }
+
+    #[test]
+    fn test_warm_queries_are_read_leniently() {
+        assert_eq!(
+            warm(r#"{"cache":{"seconds":60,"warm":["","review"]},"items":[]}"#),
+            ["", "review"]
+        );
+        assert_eq!(
+            warm(r#"{"cache":{"warm":["a",1,null,["b"],"c"]},"items":[]}"#),
+            ["a", "c"],
+            "only the strings count"
+        );
+        for bad in [
+            r#""review""#,
+            "5",
+            "{}",
+            "null",
+            r#"{"warm":"review"}"#,
+            r#"{"warm":7}"#,
+        ] {
+            let stdout = format!(r#"{{"cache":{bad},"items":[{{"title":"kept"}}]}}"#);
+            assert!(warm(&stdout).is_empty(), "{bad}");
+        }
+        assert!(warm(r#"{"items":[]}"#).is_empty());
+        // A warm list does not disturb the seconds.
+        assert_eq!(
+            hint(r#"{"cache":{"seconds":90,"warm":["x"]},"items":[]}"#),
+            Some(90)
+        );
     }
 
     #[test]

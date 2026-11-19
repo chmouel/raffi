@@ -108,6 +108,20 @@ A bare number works too. The user's config keeps the last word:
       cache_max_seconds: 86400 # how far a script may raise it
 ```
 
+The script can also name queries worth keeping fresh, next to the ones in
+`warm_queries`:
+
+```json
+{ "cache": { "seconds": 86400, "warm": ["review", "assigned"] }, "items": [] }
+```
+
+Those come from the output of the queries you list in `warm_queries`, which
+stay the starting point: the server never runs a filter by itself unless
+you named a query. At most four extra queries of 64 characters each are
+warmed, in every [view](#views) their output offers; text with control
+characters is ignored, and the extra queries' own `warm` lists are not
+followed. They are refreshed on the same schedule as the others, and a name the script stops listing is forgotten, so a list that keeps changing only adds the extra queries of each refresh of the listed query.
+
 A script cannot turn caching on: without `cache_seconds` nothing is cached and
 the hint is ignored. The limits are applied when a snapshot is read, so
 lowering `cache_max_seconds` takes effect on results already cached.

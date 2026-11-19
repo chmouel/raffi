@@ -234,8 +234,10 @@ newline-delimited JSON over `$XDG_RUNTIME_DIR/raffi/cache.sock`. It warms
 opted-in Script Filters, Slack views and browser history while Raffi is
 closed. Each Script Filter list is its own target, due when its snapshot has
 outlived the freshness the script asked for (capped by `cache_max_seconds`,
-never below `warm_interval_seconds`), retried with a backoff after a failure
-and bounded by a run timeout and one background run per list (a user's F5 never waits for it); the scheduling is in
+never below `warm_interval_seconds`) and retried with a backoff after a
+failure. Besides `warm_queries` it warms up to four queries their own output
+asked for. A run is bounded by a timeout, and there is one background run per
+list (a user's F5 never waits for it); the scheduling is in
 `src/ui/wayland/warm_schedule.rs`. The UI never blocks on it: it reads the same snapshots directly and
 falls back to running sources itself when the socket is absent or slow. At
 startup the UI sends a short `status` probe; when it answers with a recent

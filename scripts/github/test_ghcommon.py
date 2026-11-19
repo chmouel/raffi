@@ -149,6 +149,16 @@ class CacheContractTests(unittest.TestCase):
             output = ghcommon.with_cache({}, [{"title": "a"}], window)
             self.assertEqual(output["cache"], {"seconds": 1}, window)
 
+    def test_queries_worth_warming_ride_along_with_the_hint(self):
+        output = ghcommon.with_cache({}, [], "10m", warm=("", "review"))
+        self.assertEqual(output["cache"], {"seconds": 600, "warm": ["", "review"]})
+        self.assertNotIn("warm", ghcommon.with_cache({}, [], "10m")["cache"])
+
+    def test_an_error_never_asks_for_warming(self):
+        rows = ghcommon.error_rows("GitHub error", "boom")
+        output = ghcommon.with_cache({}, rows, "10m", warm=("review",))
+        self.assertEqual(output["cache"], {"seconds": 0})
+
     def test_a_plain_empty_list_is_still_kept(self):
         self.assertEqual(ghcommon.with_cache({}, [], "10m")["cache"], {"seconds": 600})
 

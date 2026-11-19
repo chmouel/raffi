@@ -7,7 +7,7 @@
 //! backoff while the last good snapshot keeps being served.
 
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
@@ -19,6 +19,10 @@ use crate::ScriptFilterConfig;
 
 /// Views of one query's default output that are warmed, besides the default.
 pub(super) const MAX_WARM_VIEWS: usize = 16;
+/// Queries a script may add to what the config warms, in all.
+pub(super) const MAX_WARM_ADVERTISED: usize = 4;
+/// Longest query a script may ask to have warmed, in characters.
+pub(super) const MAX_WARM_QUERY_CHARS: usize = 64;
 /// First retry after a failed refresh; each further failure doubles it.
 const RETRY_MIN_SECS: u64 = 60;
 const RETRY_MAX_SECS: u64 = 60 * 60;
@@ -135,21 +139,62 @@ pub(super) struct Report {
 
 /// The views a default list names, and which one it is itself.
 struct Offered {
-    fetched_at: u64,
+    /// Which snapshot this came from: its time and a digest of its payload,
+    /// since a rewrite within the same second keeps the time.
+    fingerprint: (u64, u64),
     default: Option<String>,
     views: Vec<ScriptFilterView>,
+    warm: Vec<String>,
 }
 
+/// The queries a script asked to have warmed that the config does not
+/// already warm: bounded, whatever the script prints.
+pub(super) fn advertised_queries<'a>(
+    config: &ScriptFilterConfig,
+    asked: impl IntoIterator<Item = &'a String>,
+) -> Vec<String> {
+    let mut chosen: Vec<String> = Vec::new();
+    for query in asked {
+        let allowed = query.chars().count() <= MAX_WARM_QUERY_CHARS
+            && !query.chars().any(char::is_control)
+            && !config.warm_queries.contains(query)
+            && !chosen.contains(query);
+        if allowed && chosen.len() < MAX_WARM_ADVERTISED {
+            chosen.push(query.clone());
+        }
+    }
+    chosen
+}
+
+/// What one pass over a filter reads, shared by its targets.
+struct Pass<'a> {
+    clock: &'a dyn Fn() -> u64,
+    config: &'a ScriptFilterConfig,
+    policy: &'a Policy,
+    read: &'a dyn Fn(&str) -> Option<Snapshot>,
+}
+
+fn fingerprint(snapshot: &Snapshot) -> (u64, u64) {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    snapshot.payload.hash(&mut hasher);
+    (snapshot.fetched_at, hasher.finish())
+}
+
+/// The scheduling state of one script filter's lists.
 #[derive(Default)]
 pub(super) struct Warmer {
     targets: HashMap<String, TargetState>,
     /// What each default list offers, with the snapshot it came from.
     offered: HashMap<String, Offered>,
+    /// Lists seen during the pass under way. Anything not seen has been
+    /// dropped by the script, and its state goes with it.
+    seen: HashSet<String>,
 }
 
 impl Warmer {
     /// Run what is due for `config`: each warmed query, then the views its
-    /// default output offers. `read` gives the snapshot of a list key.
+    /// default output offers, then the few queries those outputs asked to
+    /// have warmed. `read` gives the snapshot of a list key.
     pub fn tick(
         &mut self,
         clock: &dyn Fn() -> u64,
@@ -158,55 +203,89 @@ impl Warmer {
         read: &dyn Fn(&str) -> Option<Snapshot>,
         run: &mut dyn FnMut(Option<&ScriptFilterView>, &str, StillDue) -> Run,
     ) -> Report {
+        let pass = Pass {
+            clock,
+            config,
+            policy,
+            read,
+        };
+        self.seen.clear();
         let mut report = Report::default();
+        let mut asked = Vec::new();
         for query in &config.warm_queries {
-            let default_key = script_filter_list_key(&view_config(config, None), query);
-            let ran = self.visit(
+            asked.extend(self.warm_query(&pass, run, query, &mut report));
+        }
+        for query in advertised_queries(config, &asked) {
+            self.warm_query(&pass, run, &query, &mut report);
+        }
+        // A script that keeps changing what it asks for must not make the
+        // server remember every name it ever used.
+        self.targets.retain(|key, _| self.seen.contains(key));
+        self.offered.retain(|key, _| self.seen.contains(key));
+        report
+    }
+
+    /// Warm one query: its default list, then the views that list offers.
+    /// Returns the queries the default list asked to have warmed.
+    fn warm_query(
+        &mut self,
+        pass: &Pass,
+        run: &mut dyn FnMut(Option<&ScriptFilterView>, &str, StillDue) -> Run,
+        query: &str,
+        report: &mut Report,
+    ) -> Vec<String> {
+        let Pass {
+            clock,
+            config,
+            policy,
+            read,
+        } = *pass;
+        let default_key = script_filter_list_key(&view_config(config, None), query);
+        let ran = self.visit(
+            clock,
+            &default_key,
+            policy,
+            read,
+            &mut |view, still_due| run(view, query, still_due),
+            None,
+        );
+        let default = match &ran {
+            Some(Ok(result)) => Some(result.clone()),
+            _ => None,
+        };
+        if let Some(outcome) = ran {
+            report.ran += 1;
+            if let Err(message) = outcome {
+                report
+                    .error
+                    .get_or_insert(format!("{}: {message}", config.name));
+            }
+        }
+        let (default_view, views, warm) = self.default_views(&default_key, default, config, read);
+        for view in views
+            .iter()
+            .filter(|view| Some(&view.id) != default_view.as_ref())
+            .take(MAX_WARM_VIEWS)
+        {
+            let key = script_filter_list_key(&view_config(config, Some(view)), query);
+            let outcome = self.visit(
                 clock,
-                &default_key,
+                &key,
                 policy,
                 read,
                 &mut |view, still_due| run(view, query, still_due),
-                None,
+                Some(view),
             );
-            let default = match &ran {
-                Some(Ok(result)) => Some(result.clone()),
-                _ => None,
-            };
-            if let Some(outcome) = ran {
+            if let Some(outcome) = outcome {
                 report.ran += 1;
                 if let Err(message) = outcome {
                     report
                         .error
-                        .get_or_insert(format!("{}: {message}", config.name));
-                }
-            }
-            let (default_view, views) = self.default_views(&default_key, default, config, read);
-            for view in views
-                .iter()
-                .filter(|view| Some(&view.id) != default_view.as_ref())
-                .take(MAX_WARM_VIEWS)
-            {
-                let key = script_filter_list_key(&view_config(config, Some(view)), query);
-                let outcome = self.visit(
-                    clock,
-                    &key,
-                    policy,
-                    read,
-                    &mut |view, still_due| run(view, query, still_due),
-                    Some(view),
-                );
-                if let Some(outcome) = outcome {
-                    report.ran += 1;
-                    if let Err(message) = outcome {
-                        report
-                            .error
-                            .get_or_insert(format!("{} ({}): {message}", config.name, view.title));
-                    }
+                        .get_or_insert(format!("{} ({}): {message}", config.name, view.title));
                 }
             }
         }
-        report
+        warm
     }
 
     /// Run one target if it is due. `None` when it was not, or was skipped.
@@ -221,6 +300,7 @@ impl Warmer {
         run: &mut dyn FnMut(Option<&ScriptFilterView>, StillDue) -> Run,
         view: Option<&ScriptFilterView>,
     ) -> Option<Result<ScriptFilterResult, String>> {
+        self.seen.insert(key.to_string());
         let state = self.targets.entry(key.to_string()).or_default();
         let due = |state: &TargetState| {
             let snapshot = read(key);
@@ -279,29 +359,40 @@ impl Warmer {
         fresh: Option<ScriptFilterResult>,
         config: &ScriptFilterConfig,
         read: &dyn Fn(&str) -> Option<Snapshot>,
-    ) -> (Option<String>, Vec<ScriptFilterView>) {
+    ) -> (Option<String>, Vec<ScriptFilterView>, Vec<String>) {
         // What the run just printed serves this pass. It is not remembered:
         // only the snapshot on disk is what the UI and later passes see.
+        self.seen.insert(key.to_string());
         if let Some(result) = fresh {
-            return (default_view(&result), result.views);
+            return (default_view(&result), result.views, result.cache_warm);
         }
         let Some(snapshot) = read(key) else {
-            return (None, Vec::new());
+            return (None, Vec::new(), Vec::new());
         };
+        let fingerprint = fingerprint(&snapshot);
         if let Some(offered) = self.offered.get(key) {
-            if offered.fetched_at == snapshot.fetched_at {
-                return (offered.default.clone(), offered.views.clone());
+            if offered.fingerprint == fingerprint {
+                return (
+                    offered.default.clone(),
+                    offered.views.clone(),
+                    offered.warm.clone(),
+                );
             }
         }
         let Some(result) = parse_list(&snapshot, config.icon.clone()) else {
-            return (None, Vec::new());
+            return (None, Vec::new(), Vec::new());
         };
         let offered = Offered {
-            fetched_at: snapshot.fetched_at,
+            fingerprint,
             default: default_view(&result),
             views: result.views,
+            warm: result.cache_warm,
         };
-        let answer = (offered.default.clone(), offered.views.clone());
+        let answer = (
+            offered.default.clone(),
+            offered.views.clone(),
+            offered.warm.clone(),
+        );
         self.offered.insert(key.to_string(), offered);
         answer
     }
@@ -659,19 +750,25 @@ mod tests {
     }
 
     #[test]
-    fn views_are_parsed_once_per_snapshot() {
+    fn views_are_remembered_for_as_long_as_the_snapshot_is_the_same() {
         let fixture = Fixture::new(&[""]);
         let payload = views_payload("mine", &["review"]);
         fixture.store(None, "", snapshot(NOW - 10, Some(86_400), &payload));
         let mut warmer = Warmer::default();
         fixture.tick(&mut warmer, NOW);
         fixture.ran();
-        // The payload goes bad but the snapshot keeps its age, so only the
-        // memo can still name the views.
-        fixture.store(None, "", snapshot(NOW - 10, Some(86_400), "not json"));
+        let key = key(&fixture.config, None, "");
+        assert_eq!(warmer.offered[&key].views.len(), 2);
+        // The same snapshot answers from the memo, and the view is due again.
         fixture.tick(&mut warmer, NOW + 400);
         let ran: Vec<_> = fixture.ran().into_iter().map(|(view, _)| view).collect();
         assert_eq!(ran, [Some("review".into())]);
+        // A rewritten payload is read afresh, even with the same timestamp.
+        let payload = views_payload("mine", &["other"]);
+        fixture.store(None, "", snapshot(NOW - 10, Some(86_400), &payload));
+        fixture.tick(&mut warmer, NOW + 800);
+        let ran: Vec<_> = fixture.ran().into_iter().map(|(view, _)| view).collect();
+        assert_eq!(ran, [Some("other".into())]);
     }
 
     #[test]
@@ -925,5 +1022,186 @@ mod tests {
         assert!(fixture.ran().is_empty());
         fixture.tick(&mut warmer, retry + 1 + 60);
         assert_eq!(fixture.ran().len(), 1);
+    }
+
+    fn asked(config: &ScriptFilterConfig, queries: &[&str]) -> Vec<String> {
+        let queries: Vec<String> = queries.iter().map(|query| query.to_string()).collect();
+        advertised_queries(config, &queries)
+    }
+
+    #[test]
+    fn advertised_queries_are_bounded_and_deduplicated() {
+        let config = config(&[""]);
+        // Already warmed by the config, repeated, too long, or not text.
+        let long = "x".repeat(65);
+        let fine = "y".repeat(64);
+        assert_eq!(
+            asked(
+                &config,
+                &["", "review", "review", &long, "bad\nquery", &fine]
+            ),
+            ["review".to_string(), fine.clone()]
+        );
+        let many: Vec<String> = (0..20).map(|index| format!("q{index}")).collect();
+        let refs: Vec<&str> = many.iter().map(String::as_str).collect();
+        assert_eq!(asked(&config, &refs), ["q0", "q1", "q2", "q3"]);
+        assert!(asked(&config, &[]).is_empty());
+    }
+
+    fn warm_payload(warm: &[&str]) -> String {
+        let warm: Vec<String> = warm.iter().map(|query| format!("{query:?}")).collect();
+        format!(
+            r#"{{"cache":{{"seconds":86400,"warm":[{}]}},"items":[]}}"#,
+            warm.join(",")
+        )
+    }
+
+    #[test]
+    fn queries_a_default_list_asks_for_are_warmed_too() {
+        let fixture = Fixture::new(&[""]);
+        fixture.store(
+            None,
+            "",
+            snapshot(
+                NOW - 10,
+                Some(86_400),
+                &warm_payload(&["review", "assigned"]),
+            ),
+        );
+        fixture.tick(&mut Warmer::default(), NOW);
+        let ran: Vec<_> = fixture.ran().into_iter().map(|(_, query)| query).collect();
+        assert_eq!(ran, ["review", "assigned"]);
+    }
+
+    #[test]
+    fn advertised_queries_do_not_advertise_more() {
+        let fixture = Fixture::new(&[""]);
+        // Everything is due, and each query's own output asks for another.
+        *fixture.script.borrow_mut() = Box::new(|_, query| match query {
+            "" => ok(&warm_payload(&["review"])),
+            "review" => ok(&warm_payload(&["deeper"])),
+            _ => ok(r#"{"items":[]}"#),
+        });
+        fixture.tick(&mut Warmer::default(), NOW);
+        let ran: Vec<_> = fixture.ran().into_iter().map(|(_, query)| query).collect();
+        assert_eq!(ran, ["", "review"]);
+    }
+
+    #[test]
+    fn advertised_queries_come_from_a_run_made_in_the_same_pass() {
+        let fixture = Fixture::new(&[""]);
+        *fixture.script.borrow_mut() = Box::new(|_, query| {
+            if query.is_empty() {
+                ok(&warm_payload(&["review"]))
+            } else {
+                ok(r#"{"items":[]}"#)
+            }
+        });
+        fixture.tick(&mut Warmer::default(), NOW);
+        let ran: Vec<_> = fixture.ran().into_iter().map(|(_, query)| query).collect();
+        assert_eq!(ran, ["", "review"]);
+    }
+
+    #[test]
+    fn views_of_an_advertised_query_are_warmed_with_it() {
+        let fixture = Fixture::new(&[""]);
+        fixture.store(
+            None,
+            "",
+            snapshot(NOW - 10, Some(86_400), &warm_payload(&["review"])),
+        );
+        fixture.store(
+            None,
+            "review",
+            snapshot(NOW - 10, Some(86_400), &views_payload("mine", &["theirs"])),
+        );
+        fixture.tick(&mut Warmer::default(), NOW);
+        assert_eq!(
+            fixture.ran(),
+            [(Some("theirs".to_string()), "review".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_script_rotating_what_it_asks_for_cannot_grow_the_server() {
+        let fixture = Fixture::new(&[""]);
+        let pass = std::rc::Rc::new(Cell::new(0));
+        let counter = pass.clone();
+        *fixture.script.borrow_mut() = Box::new(move |_, query| {
+            if query.is_empty() {
+                let round = counter.get();
+                counter.set(round + 1);
+                let names: Vec<String> = (0..4).map(|n| format!("round{round}-{n}")).collect();
+                let names: Vec<&str> = names.iter().map(String::as_str).collect();
+                ok(&warm_payload(&names))
+            } else {
+                ok(r#"{"items":[]}"#)
+            }
+        });
+        // The default list is rewritten on disk by each run, as it is for real.
+        let mut warmer = Warmer::default();
+        let mut now = NOW;
+        for _ in 0..40 {
+            fixture.tick(&mut warmer, now);
+            let ran = fixture.ran();
+            if let Some((_, _)) = ran.first() {
+                let round = pass.get() - 1;
+                let names: Vec<String> = (0..4).map(|n| format!("round{round}-{n}")).collect();
+                let names: Vec<&str> = names.iter().map(String::as_str).collect();
+                fixture.store(None, "", snapshot(now, Some(86_400), &warm_payload(&names)));
+                for name in &names {
+                    fixture.store(None, name, snapshot(now, None, r#"{"items":[]}"#));
+                }
+            }
+            now += 100_000;
+            assert!(
+                warmer.targets.len() <= 1 + MAX_WARM_ADVERTISED,
+                "{}",
+                warmer.targets.len()
+            );
+            assert!(
+                warmer.offered.len() <= 1 + MAX_WARM_ADVERTISED,
+                "{}",
+                warmer.offered.len()
+            );
+        }
+    }
+
+    #[test]
+    fn a_rewritten_snapshot_is_read_again_even_within_the_same_second() {
+        let fixture = Fixture::new(&[""]);
+        fixture.store(
+            None,
+            "",
+            snapshot(NOW - 10, Some(86_400), &warm_payload(&["old"])),
+        );
+        let mut warmer = Warmer::default();
+        fixture.tick(&mut warmer, NOW);
+        assert_eq!(fixture.ran(), [(None, "old".to_string())]);
+        // Same time, new payload.
+        fixture.store(
+            None,
+            "",
+            snapshot(NOW - 10, Some(86_400), &warm_payload(&["new"])),
+        );
+        fixture.tick(&mut warmer, NOW + 400);
+        let ran: Vec<_> = fixture.ran().into_iter().map(|(_, query)| query).collect();
+        assert_eq!(ran, ["new"]);
+    }
+
+    #[test]
+    fn what_a_snapshot_asked_for_is_remembered_between_ticks() {
+        let fixture = Fixture::new(&[""]);
+        fixture.store(
+            None,
+            "",
+            snapshot(NOW - 10, Some(86_400), &warm_payload(&["review"])),
+        );
+        let mut warmer = Warmer::default();
+        for later in [0, 400, 800] {
+            fixture.tick(&mut warmer, NOW + later);
+            let ran: Vec<_> = fixture.ran().into_iter().map(|(_, query)| query).collect();
+            assert_eq!(ran, ["review"], "at +{later}");
+        }
     }
 }
