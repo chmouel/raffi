@@ -211,7 +211,8 @@ addons:
     #     esac
     # For compositor-specific window focus commands, see scripts/herdr/README.md.
 
-    # GitHub pull requests with CI status. Install scripts/github/pr.py first.
+    # GitHub pull requests with CI status. Install scripts/github/pr.py and
+    # ghcommon.py, which it imports, in the same directory first.
     # "pr" lists your open pull requests, "pr owner/repo" those of a repository,
     # "pr review", "pr assigned" and "pr involved" the ones that concern you;
     # Ctrl+Tab switches between those lists too.
@@ -240,7 +241,8 @@ addons:
     #   secondary_action: "copy"
 
     # GitHub repositories of an account, yours by default. Install
-    # scripts/github/repos.py first. "repo tektoncd" lists an organization,
+    # scripts/github/repos.py and ghcommon.py in the same directory first.
+    # "repo tektoncd" lists an organization,
     # "repo tektoncd pac" filters it, "repo owner/repo" opens one, and the
     # accounts in --owners are views switched with Ctrl+Tab. "me" is the
     # logged in account; ALIAS_<name> adds short names.

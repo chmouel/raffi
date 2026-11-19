@@ -249,9 +249,12 @@ conflicts, unresolved threads and size, using the
 
 ```bash
 mkdir -p ~/.config/raffi/scripts/github
-cp scripts/github/pr.py ~/.config/raffi/scripts/github/pr.py
+cp scripts/github/pr.py scripts/github/ghcommon.py ~/.config/raffi/scripts/github/
 chmod +x ~/.config/raffi/scripts/github/pr.py
 ```
+
+`ghcommon.py` holds what both GitHub scripts share and must stay in the same
+directory as the script. A symlink to the checked-out script works too.
 
 ```yaml raffi.yaml
 addons:
@@ -297,12 +300,12 @@ for all options.
 
 The [`scripts/github/repos.py`](https://github.com/chmouel/raffi/blob/main/scripts/github/repos.py)
 script lists the repositories of a GitHub account, yours by default or the one
-you name, using the [GitHub CLI](https://cli.github.com). Install it next to
-`pr.py`:
+you name, using the [GitHub CLI](https://cli.github.com). Both GitHub scripts
+import `ghcommon.py`, so keep it beside whichever one you install:
 
 ```bash
 mkdir -p ~/.config/raffi/scripts/github
-cp scripts/github/repos.py ~/.config/raffi/scripts/github/repos.py
+cp scripts/github/repos.py scripts/github/ghcommon.py ~/.config/raffi/scripts/github/
 chmod +x ~/.config/raffi/scripts/github/repos.py
 ```
 

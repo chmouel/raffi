@@ -7,6 +7,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import ghcommon
 import pr
 
 
@@ -172,7 +173,7 @@ class ParseQueryTests(unittest.TestCase):
 
 class ListItemsTests(unittest.TestCase):
     def list(self, query, response):
-        with patch.object(pr, "run_gh", return_value={"data": response}) as run_gh:
+        with patch.object(ghcommon, "run_gh", return_value={"data": response}) as run_gh:
             return pr.list_items(query)[1], run_gh
 
     def test_repository_pulls_are_filtered(self):
@@ -288,7 +289,7 @@ class ListItemsTests(unittest.TestCase):
 
     def test_errors_become_items(self):
         self.assertEqual(pr.list_items("owner/")[1][0]["title"], "Invalid repository")
-        with patch.object(pr, "run_gh", side_effect=pr.GhError("boom")):
+        with patch.object(ghcommon, "run_gh", side_effect=ghcommon.GhError("boom")):
             self.assertEqual(pr.list_items("")[1][0]["subtitle"], "boom")
 
 
@@ -355,7 +356,7 @@ class PreviewTests(unittest.TestCase):
         with (
             patch.dict(os.environ, env),
             patch.object(
-                pr,
+                ghcommon,
                 "run_gh",
                 return_value={"data": {"repository": {"pullRequest": VIEW}}},
             ) as run_gh,
@@ -393,29 +394,22 @@ class PreviewTests(unittest.TestCase):
         self.assertEqual(len(output["views"]), len(pr.MODES))
         self.assertNotIn("views", run(["owner/repo"], "assigned"))
 
-    def test_raffi_refresh_bypasses_the_gh_cache(self):
-        with (
-            patch.object(pr, "REFRESH", True),
-            patch.object(pr, "run_gh", return_value={"data": {"ok": True}}) as run_gh,
-        ):
-            self.assertEqual(pr.graphql("query"), {"ok": True})
-        self.assertNotIn("--cache", run_gh.call_args.args)
-
-    def test_default_graphql_uses_the_gh_cache(self):
+    def test_graphql_uses_the_pull_request_cache_window(self):
         with patch.object(
-            pr, "run_gh", return_value={"data": {"ok": True}}
+            ghcommon, "run_gh", return_value={"data": {"ok": True}}
         ) as run_gh:
             pr.graphql("query")
-        self.assertIn("--cache", run_gh.call_args.args)
+        args = run_gh.call_args.args
+        self.assertEqual(args[args.index("--cache") + 1], pr.CACHE_PULLS)
 
     def test_preview_error_is_shown_in_the_pane(self):
-        with patch.object(pr, "run_gh", side_effect=pr.GhError("offline")):
+        with patch.object(ghcommon, "run_gh", side_effect=ghcommon.GhError("offline")):
             preview = pr.preview(VIEW["url"])
 
         self.assertIn("offline", preview["text"])
         self.assertEqual(pr.preview("nope")["text"], "Not a pull request URL.")
         missing = {"data": {"repository": {"pullRequest": None}}}
-        with patch.object(pr, "run_gh", return_value=missing):
+        with patch.object(ghcommon, "run_gh", return_value=missing):
             self.assertIn("not found", pr.preview(VIEW["url"])["text"])
 
 
@@ -510,7 +504,7 @@ class AvatarTests(unittest.TestCase):
                 else {"repository": {"pullRequests": {"nodes": nodes}}}
             )
             with (
-                patch.object(pr, "run_gh", return_value={"data": response}),
+                patch.object(ghcommon, "run_gh", return_value={"data": response}),
                 patch.object(
                     pr, "account_icon", side_effect=lambda a: f"/{a['login']}.svg"
                 ),

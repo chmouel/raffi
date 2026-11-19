@@ -13,16 +13,26 @@ import base64
 import json
 import os
 import re
-import subprocess
 import urllib.request
 from collections import Counter
-from datetime import UTC, datetime
 from pathlib import Path
 
-API_HOST = os.environ.get("API_HOST", "github.com")
+import ghcommon
+from ghcommon import (
+    ANSI,
+    API_HOST,
+    GREEN,
+    GREY,
+    ICON,
+    RED,
+    YELLOW,
+    GhError,
+    ago,
+    colored,
+    error_item,
+)
+
 CACHE_PULLS = os.environ.get("CACHE_PULLS", "10m")
-REFRESH = os.environ.get("RAFFI_REFRESH") == "1"
-ICON = "github"
 # Raffi gives the preview command 3 seconds in total.
 PREVIEW_TIMEOUT = 2.5
 PREVIEW_REFRESH_SECONDS = 20
@@ -46,7 +56,6 @@ AVATAR_SVG = (
 
 REPO = re.compile(r"[\w.-]+/[\w.-]+")
 PR_URL = re.compile(r"https?://[^/]+/([\w.-]+)/([\w.-]+)/pull/(\d+)")
-ANSI = re.compile(r"\x1b\[[0-9;]*m")
 HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 BLANK_LINES = re.compile(r"\n{3,}")
 
@@ -64,12 +73,6 @@ IMAGE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
 LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
 STRONG = re.compile(r"(\*\*|__)(.+?)\1")
 EMPHASIS = re.compile(r"(?<![\w*])([*_])(?!\s)(.+?)(?<!\s)\1(?![\w*])")
-
-GREEN = "\033[32m"
-RED = "\033[31m"
-YELLOW = "\033[33m"
-GREY = "\033[90m"
-RESET = "\033[0m"
 
 # In the order checks are listed in the preview.
 CI_STYLES = {
@@ -234,40 +237,10 @@ query($owner: String!, $name: String!, $number: Int!, $files: Int!) {
 """
 
 
-class GhError(Exception):
-    pass
-
-
-def run_gh(*args: str, timeout: float = 30) -> dict:
-    try:
-        result = subprocess.run(
-            ["gh", *args], capture_output=True, text=True, timeout=timeout, check=False
-        )
-    except FileNotFoundError:
-        raise GhError("GitHub CLI not found, see https://cli.github.com") from None
-    except subprocess.TimeoutExpired:
-        raise GhError(f"gh did not answer within {timeout} seconds") from None
-    if result.returncode:
-        raise GhError(result.stderr.strip() or f"gh exited with {result.returncode}")
-    try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError as error:
-        raise GhError(f"gh returned invalid JSON: {error}") from None
-
-
 def graphql(
     query: str, cache: str | None = CACHE_PULLS, timeout: float = 30, **variables
 ) -> dict:
-    args = ["api", "graphql", "--hostname", API_HOST]
-    if cache and not REFRESH:
-        args += ["--cache", cache]
-    for name, value in {"query": query, **variables}.items():
-        # -F sends integers as numbers, -f keeps everything else a string.
-        args += ["-F" if isinstance(value, int) else "-f", f"{name}={value}"]
-    response = run_gh(*args, timeout=timeout)
-    if errors := response.get("errors"):
-        raise GhError(errors[0].get("message", "GraphQL error"))
-    return response["data"]
+    return ghcommon.graphql(query, cache=cache, timeout=timeout, **variables)
 
 
 def parse_query(
@@ -299,10 +272,6 @@ def ci_group(state: str) -> str:
     if state == "SUCCESS":
         return "passed"
     return "skipped"
-
-
-def colored(text: str, color: str) -> str:
-    return f"{color}{text}{RESET}"
 
 
 def author_login(pr: dict) -> str:
@@ -392,14 +361,6 @@ def link_item(title: str, url: str) -> dict:
         "subtitle": url,
         "arg": url,
         "preview": {"title": title, "text": f"Opens {url}", "dynamic": False},
-    }
-
-
-def error_item(title: str, message: str) -> dict:
-    return {
-        "title": title,
-        "subtitle": message,
-        "preview": {"title": title, "text": message, "dynamic": False},
     }
 
 
@@ -498,20 +459,6 @@ def checks_section(checks: list[dict]) -> dict:
         "heading": f"Checks: {summary}",
         "content": "\n".join(lines),
     }
-
-
-def ago(timestamp: str) -> str:
-    seconds = (datetime.now(UTC) - datetime.fromisoformat(timestamp)).total_seconds()
-    for unit, length in (
-        ("y", 31536000),
-        ("mo", 2592000),
-        ("d", 86400),
-        ("h", 3600),
-        ("m", 60),
-    ):
-        if seconds >= length:
-            return f"{int(seconds // length)}{unit} ago"
-    return "just now"
 
 
 def pr_state(pr: dict) -> str:

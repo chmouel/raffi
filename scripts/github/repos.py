@@ -12,18 +12,29 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import time
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 
-API_HOST = os.environ.get("API_HOST", "github.com")
+import ghcommon
+from ghcommon import (
+    ANSI,
+    API_HOST,
+    BOLD,
+    GREY,
+    ICON,
+    RED,
+    RESET,
+    YELLOW,
+    GhError,
+    ago,
+    colored,
+    error_item,
+)
+
 CACHE_REPOS = os.environ.get("CACHE_REPOS", "10m")
 CACHE_LOGIN = os.environ.get("CACHE_LOGIN", "1h")
 CACHE_MISSING = os.environ.get("CACHE_MISSING", "24h")
-REFRESH = os.environ.get("RAFFI_REFRESH") == "1"
-ICON = "github"
 PAGE_SIZE = 100
 LIMIT = 500
 
@@ -72,13 +83,7 @@ ALIASES = {"me": ""}
 OWNER = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}")
 REPO = re.compile(r"[\w.-]+/[\w.-]+")
 DURATION = re.compile(r"(\d+(?:\.\d+)?)([smhd])")
-ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
-BOLD = "\033[1m"
-GREY = "\033[90m"
-RED = "\033[31m"
-YELLOW = "\033[33m"
-RESET = "\033[0m"
 
 OWNER_QUERY = """
 query($owner: String!, $first: Int!, $after: String) {
@@ -139,42 +144,10 @@ class Options(NamedTuple):
 DEFAULTS = Options()
 
 
-class GhError(Exception):
-    pass
-
-
-def run_gh(*args: str, timeout: float = 30) -> dict:
-    try:
-        result = subprocess.run(
-            ["gh", *args], capture_output=True, text=True, timeout=timeout, check=False
-        )
-    except FileNotFoundError:
-        raise GhError("GitHub CLI not found, see https://cli.github.com") from None
-    except subprocess.TimeoutExpired:
-        raise GhError(f"gh did not answer within {timeout} seconds") from None
-    if result.returncode:
-        raise GhError(result.stderr.strip() or f"gh exited with {result.returncode}")
-    try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError as error:
-        raise GhError(f"gh returned invalid JSON: {error}") from None
-
-
 def graphql(
     query: str, cache: str | None = CACHE_REPOS, timeout: float = 30, **variables
 ) -> dict:
-    args = ["api", "graphql", "--hostname", API_HOST]
-    if cache and not REFRESH:
-        args += ["--cache", cache]
-    for name, value in {"query": query, **variables}.items():
-        if value is None:
-            continue
-        # -F sends integers as numbers, -f keeps everything else a string.
-        args += ["-F" if isinstance(value, int) else "-f", f"{name}={value}"]
-    response = run_gh(*args, timeout=timeout)
-    if errors := response.get("errors"):
-        raise GhError(errors[0].get("message", "GraphQL error"))
-    return response["data"]
+    return ghcommon.graphql(query, cache=cache, timeout=timeout, **variables)
 
 
 def login() -> str:
@@ -182,7 +155,7 @@ def login() -> str:
     if account := os.environ.get("GITHUB_USER"):
         return account
     entry = read_cache(login_file())
-    if not REFRESH and fresh(entry.get("at"), CACHE_LOGIN):
+    if not ghcommon.REFRESH and fresh(entry.get("at"), CACHE_LOGIN):
         return entry["login"]
     account = graphql(LOGIN_QUERY, cache=CACHE_LOGIN)["viewer"]["login"]
     write_cache(login_file(), {"login": account, "at": time.time()})
@@ -324,27 +297,6 @@ def count(number: int) -> str:
     if number < 1_000_000:
         return f"{number / 1000:.1f}k".replace(".0k", "k")
     return f"{number / 1_000_000:.1f}M".replace(".0M", "M")
-
-
-def ago(timestamp: str | None) -> str:
-    if not timestamp:
-        return ""
-    since = datetime.now(UTC) - datetime.fromisoformat(timestamp)
-    elapsed = int(since.total_seconds())
-    for unit, size in (
-        ("y", 31536000),
-        ("mo", 2592000),
-        ("d", 86400),
-        ("h", 3600),
-        ("m", 60),
-    ):
-        if elapsed >= size:
-            return f"{elapsed // size}{unit} ago"
-    return "just now"
-
-
-def colored(text: str, color: str) -> str:
-    return f"{color}{text}{RESET}"
 
 
 def shorten(text: str, width: int = 80) -> str:
@@ -559,15 +511,6 @@ def repo_item(name: str, options: Options = DEFAULTS) -> dict:
         },
     }
     return with_menus(item, name, options)
-
-
-def error_item(title: str, message: str) -> dict:
-    return {
-        "title": title,
-        "subtitle": message,
-        "valid": False,
-        "preview": {"title": title, "text": message, "dynamic": False},
-    }
 
 
 def initials(name: str) -> str:

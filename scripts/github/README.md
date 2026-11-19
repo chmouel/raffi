@@ -1,7 +1,9 @@
 # GitHub Script Filters
 
 Two scripts browse GitHub from Raffi, with the
-[GitHub CLI](https://cli.github.com) logged in with `gh auth login`.
+[GitHub CLI](https://cli.github.com) logged in with `gh auth login`. They share
+`ghcommon.py`, which runs `gh`, sends GraphQL requests through its cache and
+builds error rows, so it must be installed next to whichever one you use.
 `pr.py` lists pull requests, with their CI status, review decision,
 conflicts, unresolved review threads, size and last update, and a preview
 pane showing reviewers, merge state, checks, linked issues, description,
@@ -20,9 +22,14 @@ account, yours by default, or of the one you name.
 
 ```bash
 mkdir -p ~/.config/raffi/scripts/github
-cp scripts/github/pr.py ~/.config/raffi/scripts/github/pr.py
+cp scripts/github/pr.py scripts/github/ghcommon.py ~/.config/raffi/scripts/github/
 chmod +x ~/.config/raffi/scripts/github/pr.py
 ```
+
+Keep `ghcommon.py` in the same directory as the script. A symlink to the
+checked-out script works too, as Python looks for the module beside the real
+file. A script copied alone fails with `No module named 'ghcommon'`, which
+Raffi shows as an empty list; run the script in a terminal to see the error.
 
 ### Configure
 
@@ -175,7 +182,7 @@ account: yours by default, or the one you name. It needs the same
 
 ```bash
 mkdir -p ~/.config/raffi/scripts/github
-cp scripts/github/repos.py ~/.config/raffi/scripts/github/repos.py
+cp scripts/github/repos.py scripts/github/ghcommon.py ~/.config/raffi/scripts/github/
 chmod +x ~/.config/raffi/scripts/github/repos.py
 ```
 
@@ -316,6 +323,22 @@ Four layers keep typing cheap:
 - Listing another account asks GitHub about that account only, plus one
   one-repository check when the word is not one of the `--owners`.
 
+Repository lists change slowly, so a day is a reasonable window. Raise the
+three values together, so the server refreshes in the background about as often
+as results go stale:
+
+```yaml
+      env:
+        CACHE_REPOS: 24h
+      cache_seconds: 86400
+      warm_queries: [""]
+      warm_interval_seconds: 86400
+```
+
+The cost is that a new repository, or a changed star count, shows up after the
+next refresh, and the "pushed 3h ago" text is frozen at that moment. Ctrl+R
+refreshes the list you are looking at straight away.
+
 Ctrl+R, and the server's warming runs, set `RAFFI_REFRESH=1`, which skips the
 `gh` cache: an uncached page of 100 repositories takes one to three seconds,
 so `repo` against a large account is slower there. Words that are not accounts
@@ -324,8 +347,20 @@ are remembered in `~/.cache/raffi/github-repos/<host>/missing.json` for
 request per keystroke, and the logged in account is remembered for
 `CACHE_LOGIN` in `login.json` next to it.
 
+## Layout
+
+| File | Holds |
+|------|-------|
+| `ghcommon.py` | Running `gh`, GraphQL through its cache (`RAFFI_REFRESH` bypasses it), error rows, relative dates and terminal colours |
+| `pr.py` | Pull request queries, rows, markdown rendering and the live preview |
+| `repos.py` | Repository listing, account and alias resolution, filtering, pages and action menus |
+
+New GitHub scripts should import from `ghcommon.py` rather than copy it.
+`test_ghcommon.py` covers the shared parts, so the other two test files only
+patch `ghcommon.run_gh` to fake GitHub.
+
 ## Tests
 
 ```bash
-cd scripts/github && python3 -m unittest test_pr test_repos
+cd scripts/github && python3 -m unittest test_ghcommon test_pr test_repos
 ```
