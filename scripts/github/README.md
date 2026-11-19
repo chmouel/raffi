@@ -1,19 +1,22 @@
-# GitHub Pull Requests Script Filter
+# GitHub Script Filters
 
-This script lets Raffi browse open GitHub pull requests: your own, the ones
-waiting for your review, assigned to you or involving you, or the ones of a
-given repository. Each row shows CI status, review decision, merge conflicts,
-unresolved review threads, size and last update. The preview pane shows the
-full picture: reviewers, merge state, checks, linked issues, description,
-latest comments and changed files.
+Two scripts browse GitHub from Raffi, with the
+[GitHub CLI](https://cli.github.com) logged in with `gh auth login`.
+`pr.py` lists pull requests, with their CI status, review decision,
+conflicts, unresolved review threads, size and last update, and a preview
+pane showing reviewers, merge state, checks, linked issues, description,
+latest comments and changed files. `repos.py` lists the repositories of an
+account, yours by default, or of the one you name.
 
-## Requirements
+## Pull requests
+
+### Requirements
 
 - Raffi native mode
 - Python 3.11 or newer
 - The [GitHub CLI](https://cli.github.com), logged in with `gh auth login`
 
-## Install
+### Install
 
 ```bash
 mkdir -p ~/.config/raffi/scripts/github
@@ -21,7 +24,7 @@ cp scripts/github/pr.py ~/.config/raffi/scripts/github/pr.py
 chmod +x ~/.config/raffi/scripts/github/pr.py
 ```
 
-## Configure
+### Configure
 
 Add this entry under `addons.script_filters` in `raffi.yaml`:
 
@@ -58,7 +61,7 @@ after the keyword then filters that repository's pull requests:
       secondary_action: "copy"
 ```
 
-## Usage
+### Usage
 
 ```text
 pr                         your open pull requests
@@ -102,7 +105,7 @@ downloaded once into `~/.cache/raffi/github-avatars/` (or under
 `$XDG_CACHE_HOME`); delete that directory to refresh them. When an avatar
 cannot be downloaded, the entry's icon is used instead.
 
-## Aliases
+### Aliases
 
 Set `ALIAS_<name>` in the entry's `env` to use a short name for a repository,
 as the first word of the query or as the `--repo` value:
@@ -114,7 +117,7 @@ as the first word of the query or as the `--repo` value:
 
 `pr linoux` then lists the pull requests of `linus/linux`.
 
-## Settings
+### Settings
 
 These environment variables can also be set in the entry's `env`:
 
@@ -127,7 +130,7 @@ Raffi sets `RAFFI_REFRESH=1` when you press Ctrl+R or when the server
 refreshes a filter. The script then skips `gh api --cache` so it reads live
 GitHub state instead of the `gh` CLI's own cache.
 
-## Live preview
+### Live preview
 
 With the preview pane open (`Ctrl+P`), the selected pull request shows:
 
@@ -156,14 +159,155 @@ RAFFI_PREVIEW=1 RAFFI_VALUE=https://github.com/chmouel/raffi/pull/1 \
 
 Add `dynamic_preview: false` to the entry to turn this off.
 
-## Coming from alfred-pr-workflow
+### Coming from alfred-pr-workflow
 
 This script replaces `pr.py` from
 [alfred-pr-workflow](https://gitlab.com/chmouel/alfred-pr-workflow). Colours
 are always on, so remove `--color` from `args`.
 
+## Repositories
+
+`repos.py`, in the same directory, browses the repositories of a GitHub
+account: yours by default, or the one you name. It needs the same
+[GitHub CLI](https://cli.github.com) setup as `pr.py`.
+
+### Install
+
+```bash
+mkdir -p ~/.config/raffi/scripts/github
+cp scripts/github/repos.py ~/.config/raffi/scripts/github/repos.py
+chmod +x ~/.config/raffi/scripts/github/repos.py
+```
+
+### Configure
+
+```yaml
+addons:
+  script_filters:
+    - name: "Repositories"
+      keyword: "repo"
+      command: "~/.config/raffi/scripts/github/repos.py"
+      args: ["--owners", "me,t,osp"]
+      env:
+        ALIAS_t: tektoncd
+        ALIAS_osp: openshift-pipelines
+      icon: "github"
+      action: "xdg-open {value}"
+      secondary_action: "copy"
+      cache_seconds: 300
+      warm_queries: [""]
+```
+
+`--owners` takes a comma separated list of accounts or aliases. `me` is the
+account `gh` is logged in as, and every other alias is an `ALIAS_<name>`
+variable in the filter's `env`, as `t` and `osp` are above. Each one is a
+Raffi view, so Ctrl+Tab switches between them and keeps what you typed. The
+first one is the default, `me` without `--owners`.
+
+```text
+repo                      your repositories, most recently pushed first
+repo raffi                the same, filtered by "raffi"
+repo tektoncd             the repositories of the tektoncd organization
+repo tektoncd pac         the same, filtered by "pac"
+repo chmouel/raffi        opens that repository
+```
+
+The first word is an account or an alias. A word that names one of the listed
+repositories, or the listed account itself, filters instead, and `me word`
+filters your repositories whatever the word is. The remaining words must all
+appear in a repository's description, topics, name, language or flags, which
+are shown with its stars and last push. Names answer to their initials too, so
+`t pac` finds `pipelines-as-code`, and name matches are listed before the rest.
+A filter that matches nothing says so instead of showing an empty list.
+
+Enter opens the selected repository and Ctrl+Enter copies its URL. The last
+row opens the account itself, and comes first instead when nothing matched; it
+exports `REPO_URL` and `REPO_OWNER`.
+Repository rows also export `REPO_NAME` (owner/name), `REPO_SSH` and
+`REPO_CLONE`, so a clone action can be:
+
+```yaml
+      secondary_action: 'test -n "$REPO_SSH" && cd ~/git && git clone "$REPO_SSH"'
+```
+
+Accounts already looked up as missing are remembered for a day in
+`~/.cache/raffi/github-repos/<host>/`, so filtering does not ask GitHub again
+for words that are not accounts. The entry's `dynamic_preview` can stay `false`:
+each row carries its own preview, with the description, stars, forks,
+visibility and topics.
+
+### Pages and action menus
+
+A row opens its repository. Two options point rows at something else.
+
+`--path` makes every row open a page of the repository, so one keyword per
+page gives single-key access:
+
+```yaml
+    - name: "Repository pull requests"
+      keyword: "rpr"
+      command: "~/.config/raffi/scripts/github/repos.py"
+      args: ["--owners", "me,t,osp", "--path", "pulls"]
+      icon: "github"
+      action: "xdg-open {value}"
+      secondary_action: "copy"
+```
+
+`--actions` adds an action menu to each row instead. Enter opens a list with
+the repository itself and the pages you name, and Enter on one of those opens
+it while Ctrl+Enter copies it. As Raffi gives each row one key, the menu takes
+the place of opening the repository directly.
+
+```yaml
+      args: ["--owners", "me,t,osp", "--actions", "pulls,issues,releases,actions"]
+```
+
+Pages are written by path: `pulls`, `issues`, `releases`, `actions`, `tags`,
+`branches`, `commits`, `discussions`, `wiki`, `security`, `settings`, `pulse`,
+`graphs/traffic`, `graphs/contributors`, or any other. `path:Label` sets the
+label, and the row subtitle shows the page `--path` points at. Both options
+also read `REPO_PATH` and `REPO_ACTIONS` from `env`.
+
+### Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `API_HOST` | `github.com` | GitHub host, for GitHub Enterprise |
+| `CACHE_REPOS` | `10m` | How long `gh` caches the repository list |
+| `REPO_PATH` | | Default for `--path` |
+| `REPO_ACTIONS` | | Default for `--actions` |
+| `CACHE_LOGIN` | `1h` | How long `gh` caches the logged in account |
+| `CACHE_MISSING` | `24h` | How long a word is remembered as not being an account |
+| `GITHUB_USER` | | Skip the lookup of the logged in account |
+
+`--limit` (default 500) caps how many repositories are listed per account.
+
+### Caching
+
+Four layers keep typing cheap:
+
+- Raffi caches each query and view's result for `cache_seconds` and shows it
+  at once while refreshing it in the background; `raffi --server` warms
+  `warm_queries` in every view.
+- `gh api --cache` holds each account's pages, and the logged in account is
+  kept in `login.json` beside the misses, so answering a keystroke starts no
+  request: about 100 ms for `repo tektoncd` in the warmed case.
+- Typed filters never reach GitHub. The listed account is fetched once per
+  cache window and filtered inside the script, so adding a letter costs a
+  process start, not a request.
+- Listing another account asks GitHub about that account only, plus one
+  one-repository check when the word is not one of the `--owners`.
+
+Ctrl+R, and the server's warming runs, set `RAFFI_REFRESH=1`, which skips the
+`gh` cache: an uncached page of 100 repositories takes one to three seconds,
+so `repo` against a large account is slower there. Words that are not accounts
+are remembered in `~/.cache/raffi/github-repos/<host>/missing.json` for
+`CACHE_MISSING`, which keeps a filter that looks like a login from costing a
+request per keystroke, and the logged in account is remembered for
+`CACHE_LOGIN` in `login.json` next to it.
+
 ## Tests
 
 ```bash
-cd scripts/github && python3 -m unittest test_pr
+cd scripts/github && python3 -m unittest test_pr test_repos
 ```

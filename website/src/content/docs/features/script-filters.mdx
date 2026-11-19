@@ -234,6 +234,73 @@ files. It refreshes every 20 seconds while a check is still running. See the
 script's [README](https://github.com/chmouel/raffi/blob/main/scripts/github/README.md)
 for all options.
 
+### GitHub repositories
+
+The [`scripts/github/repos.py`](https://github.com/chmouel/raffi/blob/main/scripts/github/repos.py)
+script lists the repositories of a GitHub account, yours by default or the one
+you name, using the [GitHub CLI](https://cli.github.com). Install it next to
+`pr.py`:
+
+```bash
+mkdir -p ~/.config/raffi/scripts/github
+cp scripts/github/repos.py ~/.config/raffi/scripts/github/repos.py
+chmod +x ~/.config/raffi/scripts/github/repos.py
+```
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Repositories"
+      keyword: "repo"
+      command: "~/.config/raffi/scripts/github/repos.py"
+      args: ["--owners", "me,tektoncd"]
+      env:
+        ALIAS_t: tektoncd
+      icon: "github"
+      action: "xdg-open {value}"
+      secondary_action: "copy"
+      cache_seconds: 300
+      warm_queries: [""]
+```
+
+```text
+repo                    your repositories, most recently pushed first
+repo tektoncd           the repositories of an organization or user
+repo tektoncd pac       the same, filtered by "pac"
+repo chmouel/raffi      opens that repository
+```
+
+The first word is an account or an alias: `me` is the account `gh` is logged
+in as, and other aliases are `ALIAS_<name>` variables in `env`, as `t` above. The accounts in `--owners` are views, so Ctrl+Tab
+switches between them and keeps what you typed. A word that names one of your
+repositories, or the listed account itself, filters instead, and `me word`
+always filters your repositories. The remaining words must all appear in a
+repository's description, topics, name, language or flags, and names answer to
+their initials, so `t pac` finds `pipelines-as-code`. Name matches come first,
+and a filter that matches nothing says so instead of showing an empty list.
+
+Enter opens the selected repository and Ctrl+Enter copies its URL; the last
+row opens the account itself (first when nothing matched) and exports
+`REPO_URL` and `REPO_OWNER`.
+Repository rows also export `REPO_NAME`, `REPO_SSH` and `REPO_CLONE`, and the
+preview shows the description, stars, forks, visibility and topics.
+
+A row opens its repository. Add `--path pulls` (or `issues`, `releases`,
+`actions`, `tags`, or another path) to make every row open that page instead,
+which gives one keyword per page single-key access; `--actions
+pulls,issues,releases` gives each row an action menu instead, opened with
+Enter, with Ctrl+Enter copying the chosen URL.
+
+Raffi's own `cache_seconds` shows each query's last result at once while
+refreshing it in the background, and `gh` caches every account's pages, so a
+keystroke starts no request: around 130 ms for your repositories and 100 ms for
+`repo tektoncd` once warm. Typed filters never reach GitHub, and listing
+another account asks only about that account. Ctrl+R skips the `gh` cache and
+pays one to three seconds per uncached page of 100 repositories. See the
+script's
+[README](https://github.com/chmouel/raffi/blob/main/scripts/github/README.md#repositories)
+for the settings.
+
 ### Web search with autocomplete
 
 The [`scripts/search/search.py`](https://github.com/chmouel/raffi/blob/main/scripts/search/search.py)

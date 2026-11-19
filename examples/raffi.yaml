@@ -239,6 +239,28 @@ addons:
     #   action: "xdg-open {value}"
     #   secondary_action: "copy"
 
+    # GitHub repositories of an account, yours by default. Install
+    # scripts/github/repos.py first. "repo tektoncd" lists an organization,
+    # "repo tektoncd pac" filters it, "repo owner/repo" opens one, and the
+    # accounts in --owners are views switched with Ctrl+Tab. "me" is the
+    # logged in account; ALIAS_<name> adds short names.
+    # See scripts/github/README.md for aliases and settings.
+    # - name: "Repositories"
+    #   keyword: "repo"
+    #   command: "~/.config/raffi/scripts/github/repos.py"
+    #   args: ["--owners", "me,t,osp"]
+    #   env:
+    #     ALIAS_t: tektoncd
+    #     ALIAS_osp: openshift-pipelines
+    #   # Enter lists the repository, its pull requests, issues and releases.
+    #   # Also available as "--path pulls" to make every row open that page.
+    #   # args: ["--owners", "me,t,osp", "--actions", "pulls,issues,releases"]
+    #   icon: "github"
+    #   action: "xdg-open {value}"
+    #   secondary_action: "copy"
+    #   cache_seconds: 300
+    #   warm_queries: [""]
+
   # text_snippets:
   #   - name: "Emails"
   #     keyword: "em"
