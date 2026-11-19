@@ -9,6 +9,7 @@ use evalexpr::{
 };
 use fuzzy_matcher::skim::SkimMatcherV2;
 
+use super::cache;
 use super::ranking::{score_document, PreparedQuery, ScoredMatch, SearchDocument};
 use super::state::CalculatorResult;
 use super::types::{InlineProvider, InlineResult, InlineRow, ScriptFilterItem};
@@ -391,19 +392,39 @@ pub(super) fn mru_bounds(map: &HashMap<String, MruEntry>) -> (u32, u64, u64) {
 }
 
 pub(super) fn save_mru_map(path: Option<&Path>, map: &HashMap<String, MruEntry>) {
+    save_mru_map_with(path, map, |path, content| Ok(fs::write(path, content)?));
+}
+
+/// Save an MRU map with a private, atomic write: the Script Filter usage cache
+/// keys on pick arguments, which can be private URLs or paths.
+pub(super) fn save_private_mru_map(path: Option<&Path>, map: &HashMap<String, MruEntry>) {
+    save_mru_map_with(path, map, |path, content| {
+        cache::write_private_bytes(path, content.as_bytes())
+    });
+}
+
+fn save_mru_map_with(
+    path: Option<&Path>,
+    map: &HashMap<String, MruEntry>,
+    write: impl FnOnce(&Path, &str) -> anyhow::Result<()>,
+) {
     crate::debug_log!("mru: saving {} entries to {path:?}", map.len());
-    if let Some(path) = path {
-        let mut entries: Vec<_> = map.iter().collect();
-        entries.sort_by_key(|b| std::cmp::Reverse(b.1.count));
-        let content = entries
-            .iter()
-            .map(|(desc, entry)| format!("{}|{}|{}", desc, entry.count, entry.last_used))
-            .collect::<Vec<_>>()
-            .join("\n");
-        if let Err(error) = fs::write(path, content) {
-            eprintln!("Warning: Failed to save MRU cache to {:?}: {}", path, error);
-        }
+    let Some(path) = path else {
+        return;
+    };
+    if let Err(error) = write(path, &mru_map_content(map)) {
+        eprintln!("Warning: Failed to save MRU cache to {:?}: {}", path, error);
     }
+}
+
+fn mru_map_content(map: &HashMap<String, MruEntry>) -> String {
+    let mut entries: Vec<_> = map.iter().collect();
+    entries.sort_by_key(|b| std::cmp::Reverse(b.1.count));
+    entries
+        .iter()
+        .map(|(desc, entry)| format!("{}|{}|{}", desc, entry.count, entry.last_used))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Compute a sort key for a config entry based on the active sort mode.
@@ -597,6 +618,37 @@ mod tests {
             &usage(&[(script_filter_usage_key("GitHub", "x"), 900)]),
         );
         assert_eq!(titles(&items), ["owner", "indented", "other"]);
+    }
+
+    #[test]
+    fn test_script_filter_usage_cache_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!(
+            "raffi-usage-private-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("script-filters.cache");
+        // An older cache written world-readable by `save_mru_map`.
+        std::fs::write(&path, "old|1|1").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        let map = usage(&[(script_filter_usage_key("GitHub", "https://private"), 7)]);
+        save_private_mru_map(Some(&path), &map);
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "pick arguments can be private");
+        let parsed = parse_mru_map(&std::fs::read_to_string(&path).unwrap());
+        assert_eq!(
+            parsed[&script_filter_usage_key("GitHub", "https://private")].last_used,
+            7
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

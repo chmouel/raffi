@@ -79,6 +79,20 @@ pub(crate) struct SnapshotTarget {
     pub path: PathBuf,
     pub ttl: Duration,
     pub keep: usize,
+    /// The run's claim on the path, `None` for a run nothing supersedes.
+    pub publication: Option<Publication>,
+}
+
+impl SnapshotTarget {
+    /// Publish `prepared` unless a later run owns the list. A target with a
+    /// publication checks the generation and renames under one lock, so an
+    /// older result can never land on top of a newer snapshot.
+    pub(crate) fn publish(&self, prepared: PreparedSnapshot) -> Result<()> {
+        match &self.publication {
+            Some(publication) => publication.publish(prepared),
+            None => prepared.publish(),
+        }
+    }
 }
 
 /// One cached script output plus its metadata.
@@ -315,6 +329,11 @@ pub(crate) struct ServerState {
     /// by a user never waits behind a background one, so several runs of one
     /// list can overlap and each must be remembered until it ends.
     forced: Mutex<HashMap<String, usize>>,
+    /// Publication generation of each list, bumped when a run a user waits on
+    /// starts. A run remembers the generation it started under and drops its
+    /// result once it has moved on, so a slow background run cannot overwrite
+    /// a newer snapshot. Always locked after `forced`.
+    generations: Mutex<HashMap<String, u64>>,
 }
 
 impl ServerState {
@@ -325,7 +344,25 @@ impl ServerState {
             status: Mutex::new(HashMap::new()),
             inflight: Mutex::new(HashSet::new()),
             forced: Mutex::new(HashMap::new()),
+            generations: Mutex::new(HashMap::new()),
         }
+    }
+
+    fn lock_generations(&self) -> std::sync::MutexGuard<'_, HashMap<String, u64>> {
+        self.generations
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
+
+    fn generation(&self, key: &str) -> u64 {
+        self.lock_generations().get(key).copied().unwrap_or(0)
+    }
+
+    fn next_generation(&self, key: &str) -> u64 {
+        let mut generations = self.lock_generations();
+        let generation = generations.entry(key.to_string()).or_insert(0);
+        *generation += 1;
+        *generation
     }
 
     fn source_status(&self) -> Vec<SourceStatus> {
@@ -382,25 +419,65 @@ impl ServerState {
         if forced.contains_key(&key) {
             return None;
         }
+        let generation = self.generation(&key);
         self.begin(&key).then(|| InFlight {
             state: self.clone(),
             key,
+            generation,
         })
     }
 
     /// Mark a list as being refreshed for a user who is waiting. Never
     /// refused, and it keeps background runs away until it is dropped.
     fn force(self: &Arc<Self>, key: String) -> Forced {
-        *self
+        let mut forced = self
             .forced
             .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .entry(key.clone())
-            .or_insert(0) += 1;
+            .unwrap_or_else(|error| error.into_inner());
+        *forced.entry(key.clone()).or_insert(0) += 1;
+        let generation = self.next_generation(&key);
+        drop(forced);
         Forced {
             state: self.clone(),
             key,
+            generation,
         }
+    }
+}
+
+/// A run's claim on a list snapshot: it may write the file only while the
+/// generation it started under is still the newest for that list.
+#[derive(Clone)]
+pub(crate) struct Publication {
+    state: Arc<ServerState>,
+    key: String,
+    generation: u64,
+}
+
+impl Publication {
+    fn is_current(&self) -> bool {
+        self.state.generation(&self.key) == self.generation
+    }
+
+    /// Publish `prepared` only while the generation this run started under is
+    /// still the newest for the list. The check and the rename hold the lock
+    /// that advancing a generation takes, so a run started later either
+    /// publishes before this one is refused or after it renamed: the newest
+    /// result always ends up in the file.
+    fn publish(&self, prepared: PreparedSnapshot) -> Result<()> {
+        let generations = self.state.lock_generations();
+        if generations.get(&self.key).copied().unwrap_or(0) != self.generation {
+            drop(generations);
+            prepared.discard();
+            return Ok(());
+        }
+        prepared.publish()
+    }
+}
+
+impl std::fmt::Debug for Publication {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Publication({}, {})", self.key, self.generation)
     }
 }
 
@@ -408,6 +485,19 @@ impl ServerState {
 struct Forced {
     state: Arc<ServerState>,
     key: String,
+    generation: u64,
+}
+
+impl Forced {
+    /// The claim this run publishes under: a later run for the same list
+    /// bumps the generation and takes the snapshot over.
+    fn publication(&self) -> Publication {
+        Publication {
+            state: self.state.clone(),
+            key: self.key.clone(),
+            generation: self.generation,
+        }
+    }
 }
 
 impl Drop for Forced {
@@ -430,6 +520,18 @@ impl Drop for Forced {
 struct InFlight {
     state: Arc<ServerState>,
     key: String,
+    generation: u64,
+}
+
+impl InFlight {
+    /// The claim this background run publishes under.
+    fn publication(&self) -> Publication {
+        Publication {
+            state: self.state.clone(),
+            key: self.key.clone(),
+            generation: self.generation,
+        }
+    }
 }
 
 impl Drop for InFlight {
@@ -585,11 +687,13 @@ pub(crate) fn list_target(
     config: &ScriptFilterConfig,
     query: &str,
     ttl: Duration,
+    publication: Option<Publication>,
 ) -> Option<SnapshotTarget> {
     Some(SnapshotTarget {
         path: list_path(&script_filter_list_key(config, query)).ok()?,
         ttl,
         keep: LIST_KEEP,
+        publication,
     })
 }
 
@@ -598,6 +702,7 @@ pub(crate) fn preview_target(request: &PreviewRequest, ttl: Duration) -> Option<
         path: preview_path(&script_filter_preview_key(request)).ok()?,
         ttl,
         keep: PREVIEW_KEEP,
+        publication: None,
     })
 }
 
@@ -650,7 +755,20 @@ pub(crate) fn write_private_json<T: Serialize>(path: &Path, value: &T) -> Result
     write_private_bytes(path, &bytes)
 }
 
-fn write_private_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
+/// Write `bytes` to `path` atomically, in a `0600` file: an older file's
+/// wider permissions go with the rename.
+pub(crate) fn write_private_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
+    let temp = write_private_temp(path, bytes)?;
+    if let Err(error) = fs::rename(&temp, path) {
+        let _ = fs::remove_file(&temp);
+        return Err(error.into());
+    }
+    Ok(())
+}
+
+/// Write `bytes` to a private `0600` temporary file next to `path`, and return
+/// its name: the caller renames it into place.
+fn write_private_temp(path: &Path, bytes: &[u8]) -> Result<PathBuf> {
     private_dir(path.parent().context("cache file has no parent")?)?;
     let temp = path.with_extension(format!(
         "tmp.{}.{}",
@@ -666,17 +784,48 @@ fn write_private_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
         file.write_all(bytes)?;
         file.sync_all()?;
     }
-    fs::rename(&temp, path)?;
-    Ok(())
+    Ok(temp)
 }
 
-pub(crate) fn write_snapshot_path(
+/// A snapshot serialized into a private temporary file, waiting for the
+/// rename that makes it visible at `path`.
+pub(crate) struct PreparedSnapshot {
+    path: PathBuf,
+    temp: PathBuf,
+    keep: usize,
+}
+
+impl PreparedSnapshot {
+    /// Rename the file into place and prune the directory. A caller that has
+    /// to keep a later write from being overtaken does this while holding the
+    /// lock that decides which run owns the list.
+    fn publish(self) -> Result<()> {
+        if let Err(error) = fs::rename(&self.temp, &self.path) {
+            let _ = fs::remove_file(&self.temp);
+            return Err(error.into());
+        }
+        if let Some(dir) = self.path.parent() {
+            prune_snapshots(dir, self.keep);
+        }
+        Ok(())
+    }
+
+    /// Drop the prepared file, leaving `path` as it was.
+    fn discard(self) {
+        let _ = fs::remove_file(&self.temp);
+    }
+}
+
+/// Serialize a snapshot into a private temporary file next to `path`. The
+/// write and its fsync happen here, outside any lock; only the rename that
+/// publishes it is short enough to hold one.
+pub(crate) fn prepare_snapshot_path(
     path: &Path,
     payload: &str,
     ttl: Duration,
     keep: usize,
     hint_secs: Option<u64>,
-) -> Result<()> {
+) -> Result<PreparedSnapshot> {
     let snapshot = Snapshot {
         version: SNAPSHOT_VERSION,
         fetched_at: now_secs(),
@@ -685,11 +834,22 @@ pub(crate) fn write_snapshot_path(
         hint_secs,
     };
     let bytes = serde_json::to_vec(&snapshot)?;
-    write_private_bytes(path, &bytes)?;
-    if let Some(dir) = path.parent() {
-        prune_snapshots(dir, keep);
-    }
-    Ok(())
+    Ok(PreparedSnapshot {
+        path: path.to_path_buf(),
+        temp: write_private_temp(path, &bytes)?,
+        keep,
+    })
+}
+
+/// Write a snapshot at once, for a caller whose writes nothing supersedes.
+pub(crate) fn write_snapshot_path(
+    path: &Path,
+    payload: &str,
+    ttl: Duration,
+    keep: usize,
+    hint_secs: Option<u64>,
+) -> Result<()> {
+    prepare_snapshot_path(path, payload, ttl, keep, hint_secs)?.publish()
 }
 
 fn prune_snapshots(dir: &Path, keep: usize) {
@@ -1021,7 +1181,8 @@ pub(crate) fn handle_request(state: &Arc<ServerState>, request: Request) -> Resp
             );
             // An F5 never waits for a background run, so it is registered
             // whether or not one is going on, and keeps the next one away.
-            let _forced = state.force(format!("list:{key}"));
+            let forced = state.force(format!("list:{key}"));
+            let publication = forced.publication();
             let result = logged(&format!("script filter {name} {query:?}"), || {
                 server_run(script_filters::run_script_filter(
                     &command,
@@ -1029,7 +1190,7 @@ pub(crate) fn handle_request(state: &Arc<ServerState>, request: Request) -> Resp
                     &env,
                     &query,
                     None,
-                    list_target_from_key(&key, ttl),
+                    list_target_from_key(&key, ttl, Some(publication)),
                     Some(SERVER_RUN_TIMEOUT),
                 ))
             });
@@ -1065,6 +1226,8 @@ pub(crate) fn handle_request(state: &Arc<ServerState>, request: Request) -> Resp
                 .then(|| state.hold(format!("list:{key}")))
                 .flatten();
             if let Some(held) = held {
+                let publication = held.publication();
+                let claim = publication.clone();
                 let state = state.clone();
                 std::thread::spawn(move || {
                     let result = server_run(script_filters::run_script_filter(
@@ -1073,10 +1236,14 @@ pub(crate) fn handle_request(state: &Arc<ServerState>, request: Request) -> Resp
                         &env,
                         &query,
                         None,
-                        list_target_from_key(&key, ttl),
+                        list_target_from_key(&key, ttl, Some(publication)),
                         Some(SERVER_RUN_TIMEOUT),
                     ));
-                    state.set_status("script-filters", result.err());
+                    // A run a user's refresh took over says nothing about the
+                    // list: it neither published nor is the latest word on it.
+                    if claim.is_current() {
+                        state.set_status("script-filters", result.err());
+                    }
                     drop(held);
                 });
             }
@@ -1426,11 +1593,16 @@ fn logged<T>(what: &str, refresh: impl FnOnce() -> Result<T, String>) -> Result<
     result
 }
 
-fn list_target_from_key(key: &str, ttl: Duration) -> Option<SnapshotTarget> {
+fn list_target_from_key(
+    key: &str,
+    ttl: Duration,
+    publication: Option<Publication>,
+) -> Option<SnapshotTarget> {
     Some(SnapshotTarget {
         path: list_path(key).ok()?,
         ttl,
         keep: LIST_KEEP,
+        publication,
     })
 }
 
@@ -1439,6 +1611,7 @@ fn preview_target_from_key(key: &str, ttl: Duration) -> Option<SnapshotTarget> {
         path: preview_path(key).ok()?,
         ttl,
         keep: PREVIEW_KEEP,
+        publication: None,
     })
 }
 
@@ -1616,8 +1789,8 @@ fn warm_script_filter(
         // Asked for by a user, so it runs even while a background run has it, as F5 does
         let refresh = |view| {
             let config = script_filters::view_config(config, view);
-            let _forced = state.force(format!("list:{}", script_filter_list_key(&config, query)));
-            run_list(&config, ttl, query)
+            let forced = state.force(format!("list:{}", script_filter_list_key(&config, query)));
+            run_list(&config, ttl, query, Some(forced.publication()))
         };
         // The default run names the other views, each warmed under its own key.
         let (views, asked) = match refresh(None) {
@@ -1671,19 +1844,27 @@ fn warm_run(
     still_due: &dyn Fn() -> bool,
 ) -> Run {
     let config = script_filters::view_config(config, view);
-    let Some(_held) = state.hold(format!("list:{}", script_filter_list_key(&config, query))) else {
+    let Some(held) = state.hold(format!("list:{}", script_filter_list_key(&config, query))) else {
         return Run::Skipped;
     };
     if !still_due() {
         return Run::Skipped;
     }
-    Run::Done(run_list(&config, ttl, query))
+    let publication = held.publication();
+    let result = run_list(&config, ttl, query, Some(publication.clone()));
+    // A run a user waited on took the list over, so it owns the snapshot:
+    // this one is neither the list's success nor its failure.
+    if !publication.is_current() {
+        return Run::Skipped;
+    }
+    Run::Done(result)
 }
 
 fn run_list(
     config: &ScriptFilterConfig,
     ttl: Duration,
     query: &str,
+    publication: Option<Publication>,
 ) -> Result<ScriptFilterResult, String> {
     let mut env = config.env.clone();
     env.insert("RAFFI_REFRESH".into(), "1".into());
@@ -1693,7 +1874,7 @@ fn run_list(
         &env,
         query,
         config.icon.clone(),
-        list_target(config, query, ttl),
+        list_target(config, query, ttl, publication),
         Some(SERVER_RUN_TIMEOUT),
     ))
 }
@@ -2264,6 +2445,144 @@ mod tests {
             state.hold("list:p".into()).is_some(),
             "released by unwinding"
         );
+    }
+
+    #[test]
+    fn a_run_superseded_by_a_later_one_keeps_the_later_snapshot() {
+        let dir = tempdir("publication");
+        let path = dir.join("list.json");
+        let state = Arc::new(ServerState::new(quiet_addons()));
+        let key = "list:taken";
+        let held = state.hold(key.to_string()).expect("free list");
+        let background = held.publication();
+        let run = |publication, title: &str| {
+            let target = SnapshotTarget {
+                path: path.clone(),
+                ttl: Duration::from_secs(60),
+                keep: 10,
+                publication: Some(publication),
+            };
+            script_filters::run_script_filter(
+                "sh",
+                &[
+                    "-c".into(),
+                    format!(r#"printf '{{"items":[{{"title":"{title}"}}]}}'"#),
+                ],
+                &HashMap::new(),
+                "",
+                None,
+                Some(target),
+                None,
+            )
+            .expect("the script ran")
+        };
+        let payload = || read_snapshot_path(&path).unwrap().payload;
+
+        run(background.clone(), "background");
+        assert!(
+            payload().contains("background"),
+            "a run still owns its list"
+        );
+
+        // An F5 starts while that run is going, and writes its own result.
+        let forced = state.force(key.to_string());
+        let forced_publication = forced.publication();
+        run(forced_publication.clone(), "forced");
+
+        // The background run finishes last, on data older than the F5's.
+        run(background, "stale");
+        assert!(payload().contains("forced"));
+        assert!(!payload().contains("stale"));
+
+        // Two F5s: the earlier one must not overwrite the later one either.
+        let later = state.force(key.to_string());
+        run(later.publication(), "later");
+        run(forced_publication, "earlier");
+        assert!(payload().contains("later"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_prepared_snapshot_cannot_overtake_one_published_meanwhile() {
+        let dir = tempdir("publication-race");
+        let path = dir.join("list.json");
+        let state = Arc::new(ServerState::new(quiet_addons()));
+        let key = "list:race";
+        let ttl = Duration::from_secs(60);
+        let target = |publication| SnapshotTarget {
+            path: path.clone(),
+            ttl,
+            keep: 10,
+            publication: Some(publication),
+        };
+        let held = state.hold(key.to_string()).expect("free list");
+        let payload = || read_snapshot_path(&path).unwrap().payload;
+
+        // A background run finishes its script and prepares its output.
+        let stale = prepare_snapshot_path(&path, r#"{"items":[{"title":"stale"}]}"#, ttl, 10, None)
+            .expect("prepared");
+
+        // An F5 starts, runs and publishes newer data while that file waits.
+        let forced = state.force(key.to_string());
+        target(forced.publication())
+            .publish(
+                prepare_snapshot_path(&path, r#"{"items":[{"title":"forced"}]}"#, ttl, 10, None)
+                    .expect("prepared"),
+            )
+            .expect("the forced run publishes");
+        assert!(payload().contains("forced"));
+
+        // Only now does the background run rename its file into place.
+        target(held.publication())
+            .publish(stale)
+            .expect("a superseded run is refused, not an error");
+        assert!(payload().contains("forced"), "the newer snapshot stands");
+        assert!(!payload().contains("stale"));
+
+        // The refused run cleans up the file it prepared.
+        let leftovers: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name())
+            .filter(|name| name != "list.json")
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_warm_run_taken_over_by_a_forced_one_is_no_attempt() {
+        let state = Arc::new(ServerState::new(quiet_addons()));
+        let mut config: ScriptFilterConfig =
+            serde_yaml::from_str("name: r\ncommand: sh\nkeyword: r\ncache_seconds: 60\n").unwrap();
+        config.args = vec!["-c".into(), r#"printf '{"items":[]}'"#.into()];
+        let key = format!("list:{}", script_filter_list_key(&config, "q"));
+        let plain = || true;
+        assert!(matches!(
+            warm_run(&state, &config, Duration::from_secs(60), None, "q", &plain),
+            Run::Done(Ok(_))
+        ));
+        // The user's refresh starts once the background run holds the list.
+        let forced = std::cell::RefCell::new(None);
+        let still_due = || {
+            forced
+                .borrow_mut()
+                .get_or_insert_with(|| state.force(key.clone()));
+            true
+        };
+        let outcome = warm_run(
+            &state,
+            &config,
+            Duration::from_secs(60),
+            None,
+            "q",
+            &still_due,
+        );
+        assert!(
+            matches!(outcome, Run::Skipped),
+            "the forced run owns the list now"
+        );
+        drop(forced.into_inner());
     }
 
     #[test]

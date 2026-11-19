@@ -128,6 +128,28 @@ pub(super) fn execute_script_filter(
     )
 }
 
+/// Put a run's output in its snapshot. The file is serialized and synced
+/// first, then handed to the target, which renames it only if no later run has
+/// taken the list over in the meantime.
+fn publish_snapshot(target: &SnapshotTarget, payload: &str, hint_secs: Option<u64>) {
+    let prepared = match cache::prepare_snapshot_path(
+        &target.path,
+        payload,
+        target.ttl,
+        target.keep,
+        hint_secs,
+    ) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            crate::debug_log!("script_filter: cannot write cache: {error}");
+            return;
+        }
+    };
+    if let Err(error) = target.publish(prepared) {
+        crate::debug_log!("script_filter: cannot write cache: {error}");
+    }
+}
+
 /// Run a script filter for `query` and parse its items. Blocking. With a
 /// `timeout` the script runs in its own process group, which is killed when
 /// the time is up.
@@ -160,15 +182,7 @@ pub(super) fn run_script_filter(
             match parse_script_filter_output(&stdout, default_icon) {
                 Ok(result) => {
                     if let Some(target) = cache.filter(|_| !result.not_stored) {
-                        if let Err(error) = cache::write_snapshot_path(
-                            &target.path,
-                            &stdout,
-                            target.ttl,
-                            target.keep,
-                            result.cache_hint,
-                        ) {
-                            crate::debug_log!("script_filter: cannot write cache: {error}");
-                        }
+                        publish_snapshot(&target, &stdout, result.cache_hint);
                     }
                     crate::debug_log!(
                         "script_filter: got {} items from {command:?}",
@@ -953,6 +967,7 @@ mod tests {
             path: path.to_path_buf(),
             ttl: std::time::Duration::from_secs(300),
             keep: 10,
+            publication: None,
         };
         super::run_script_filter(
             "sh",
@@ -1020,6 +1035,7 @@ mod tests {
                 path: path.clone(),
                 ttl: std::time::Duration::from_secs(60),
                 keep: 10,
+                publication: None,
             })
         };
 

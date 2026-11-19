@@ -53,8 +53,8 @@ use super::state::{
 };
 use super::support::{
     calculator_inline_result, load_history, load_mru_map, mru_bounds, mru_sort_key, record_mru_use,
-    save_history, save_last_query, save_mru_map, script_filter_usage_key, seed_script_filter_usage,
-    sort_script_filter_items, trim_mru_map, try_evaluate_math,
+    save_history, save_last_query, save_mru_map, save_private_mru_map, script_filter_usage_key,
+    seed_script_filter_usage, sort_script_filter_items, trim_mru_map, try_evaluate_math,
 };
 use super::system::system_entries;
 use super::types::{InlineProvider, ScriptFilterItem};
@@ -2724,7 +2724,7 @@ impl LauncherApp {
         if force_refresh {
             env.insert("RAFFI_REFRESH".into(), "1".into());
         }
-        let cache_target = cache_ttl.and_then(|ttl| cache::list_target(config, &query, ttl));
+        let cache_target = cache_ttl.and_then(|ttl| cache::list_target(config, &query, ttl, None));
         tasks.push(execute_script_filter(
             config.command.clone(),
             config.args.clone(),
@@ -4458,7 +4458,7 @@ impl LauncherApp {
         }
         trim_mru_map(&mut state.usage, SCRIPT_FILTER_USAGE_CAP);
         let path = state.usage_path.clone();
-        save_mru_map(path.as_deref(), &state.usage);
+        save_private_mru_map(path.as_deref(), &state.usage);
     }
 
     /// Identity of a Script Filter row: sorting moves rows around, so a
