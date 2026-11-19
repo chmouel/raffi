@@ -129,9 +129,9 @@ lowering `cache_max_seconds` takes effect on results already cached.
 `"seconds": 0` is for output that must not replace what is already cached, such
 as an error row. Raffi keeps the rows on screen and treats the run as a failed
 refresh, so F5 reports a failure. When nothing was cached yet the rows are
-shown, and they are not stored either way. The bundled GitHub scripts do this
-when `gh` is unavailable, so a network outage does not overwrite a good list
-for the rest of the freshness window.
+shown, and they are not stored either way. The main view hides them. The
+bundled GitHub scripts use this when `gh` is unavailable, so a network outage
+does not overwrite a good list.
 
 When a refresh fails while rows from the cache are on screen, whether the script
 exited with an error, printed invalid JSON, or answered `"seconds": 0`, the
@@ -142,6 +142,58 @@ Cached item lists and dynamic previews live under
 `$XDG_CACHE_HOME/raffi/script-filters/`. `raffi --refresh-cache` removes them.
 The cache keys include the command, arguments, environment and query, so
 changing the configuration starts from a clean entry.
+
+## Picking a row again
+
+Raffi can remember which rows you picked in a filter and list them first,
+most recently picked first. Rows you never picked keep the order your script
+printed, so the ranking only lifts what you actually used: open `tz paris`
+once and it is at the top the next time you enter the filter, whether or not
+you typed a query.
+
+This is off unless the script asks for it, because it reshuffles any list
+whose order means something, such as agents, pull requests or anything sorted
+latest first. A script enables it with a top-level `sort`:
+
+```json
+{ "sort": "usage", "items": [] }
+```
+
+`"usage"` is the only value that does anything, and the order your script
+printed is kept without it. The bundled `repos.py` sets it, since you go back
+to the same few repositories again and again.
+
+The user's config has the last word:
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Timezones"
+      keyword: "tz"
+      command: "batz"
+      args: ["-j"]
+      sort_by_usage: true  # even when the script does not ask for it
+    - name: "Review requests"
+      keyword: "prr"
+      command: "~/.config/raffi/scripts/github/pr.py"
+      sort_by_usage: false # never, whatever the script prints
+```
+
+Unset, `sort_by_usage` follows the script's `sort`. `true` always ranks by
+usage, and `false` always keeps the script's order.
+
+Picking a row inside a `children` list also counts for the row that listed it,
+so a repository opened from its pages moves up in the list above, and a child
+list is reordered only when the list that listed it is. A list with indented
+[tree rows](#tree-results) is never reordered, so groups stay under their
+headings. Rows with `valid: false` and rows without an `arg` are never
+lifted. Every valid pick is remembered, whatever the list on screen shows, so
+rows you picked before turning the ranking on are listed first too; only a
+filter with `sort_by_usage: false` records nothing. Picks the main view
+already lists count as well.
+
+Usage lives in `$XDG_CACHE_HOME/raffi/script-filters.cache`, keyed by the
+filter's `name` and the row's `arg`.
 
 ## Actions
 
@@ -200,13 +252,13 @@ A row can carry any number of extra actions, shown in its action menu:
 
 ```json
 {
-  "title": "raffi",
-  "arg": "https://github.com/chmouel/raffi",
-  "variables": { "REPO_SSH": "git@github.com:chmouel/raffi.git" },
+  "title": "repo",
+  "arg": "https://github.com/owner/repo",
+  "variables": { "REPO_SSH": "git@github.com:owner/repo.git" },
   "actions": [
-    { "title": "Pull requests", "arg": "https://github.com/chmouel/raffi/pulls" },
-    { "title": "Copy SSH URL", "arg": "git@github.com:chmouel/raffi.git", "action": "copy" },
-    { "title": "Clone", "action": "git clone \"$REPO_SSH\" ~/src/raffi" }
+    { "title": "Pull requests", "arg": "https://github.com/owner/repo/pulls" },
+    { "title": "Copy SSH URL", "arg": "git@github.com:owner/repo.git", "action": "copy" },
+    { "title": "Clone", "action": "git clone \"$REPO_SSH\" ~/src/repo" }
   ]
 }
 ```
@@ -361,8 +413,8 @@ for all options.
 ### GitHub repositories
 
 The [`scripts/github/repos.py`](https://github.com/chmouel/raffi/blob/main/scripts/github/repos.py)
-script lists the repositories of a GitHub account, yours by default or the one
-you name, using the [GitHub CLI](https://cli.github.com). Both GitHub scripts
+script lists the repositories of a GitHub account, yours by default or one you
+configure, using the [GitHub CLI](https://cli.github.com). Both GitHub scripts
 import `ghcommon.py`, so keep it beside whichever one you install:
 
 ```bash
@@ -377,9 +429,9 @@ addons:
     - name: "Repositories"
       keyword: "repo"
       command: "~/.config/raffi/scripts/github/repos.py"
-      args: ["--owners", "me,tektoncd"]
+      args: ["--owners", "me,acme"]
       env:
-        ALIAS_t: tektoncd
+        ALIAS_a: acme
       icon: "github"
       action: "xdg-open {value}"
       secondary_action: "copy"
@@ -388,19 +440,24 @@ addons:
 ```
 
 ```text
-repo                    your repositories, most recently pushed first
-repo tektoncd           the repositories of an organization or user
-repo tektoncd pac       the same, filtered by "pac"
-repo chmouel/raffi      opens that repository
+repo                    every --owners account mixed, most recently pushed first
+repo acme               the repositories of an account from --owners
+repo acme api           the same, filtered by "api"
+repo owner/repo         opens that repository
 ```
 
-The first word is an account or an alias: `me` is the account `gh` is logged
-in as, and other aliases are `ALIAS_<name>` variables in `env`, as `t` above. The accounts in `--owners` are views, so Ctrl+Tab
-switches between them and keeps what you typed. A word that names one of your
+The first word is an account from `--owners` or an alias: `me` is the account
+`gh` is logged in as, and other aliases are `ALIAS_<name>` variables in `env`,
+as `a` above. Any other word filters the current list. Add `--any-owner` to let
+the first word be any GitHub account, such as `repo some-org`. The accounts
+in `--owners` are views, so Ctrl+Tab switches between them and keeps what you
+typed. With more than one, the default All view mixes their repositories by
+last push and each row names its owner. Forks are listed after the other
+repositories. A word that names one of your
 repositories, or the listed account itself, filters instead, and `me word`
 always filters your repositories. The remaining words must all appear in a
 repository's description, topics, name, language or flags, and names answer to
-their initials, so `t pac` finds `pipelines-as-code`. Name matches come first,
+their initials, so `a gs` finds `go-server`. Name matches come first,
 and a filter that matches nothing says so instead of showing an empty list.
 
 Enter opens the selected repository and Ctrl+Enter copies its URL; the last
@@ -408,6 +465,11 @@ row opens the account itself (first when nothing matched) and exports
 `REPO_URL` and `REPO_OWNER`.
 Repository rows also export `REPO_NAME`, `REPO_SSH` and `REPO_CLONE`, and the
 preview shows the description, stars, forks, visibility and topics.
+
+The script prints `"sort": "usage"`, so the repositories you picked come first
+next time, as described in [Picking a row again](#picking-a-row-again). Pass
+`--no-usage-sort`, or set `USAGE_SORT=0` in the filter's `env`, to keep the
+order it prints instead.
 
 A row opens its repository. Add `--path pulls` (or `issues`, `releases`,
 `actions`, `tags`, or another path) to make every row open that page instead,
@@ -422,7 +484,7 @@ a Markdown link.
 Raffi's own `cache_seconds` shows each query's last result at once while
 refreshing it in the background, and `gh` caches every account's pages, so a
 keystroke starts no request: around 130 ms for your repositories and 100 ms for
-`repo tektoncd` once warm. Typed filters never reach GitHub, and listing
+`repo acme` once warm. Typed filters never reach GitHub, and listing
 another account asks only about that account. Ctrl+R skips the `gh` cache and
 pays one to three seconds per uncached page of 100 repositories. See the
 script's
@@ -644,6 +706,16 @@ Entries added to the action menu of every valid row, after the ones the row
 declares. Each has a `title` and an `action` that takes the same values as
 `action` and runs on the row's value, see [Custom actions](#custom-actions).
 
+**`sort_by_usage`** `boolean` (default: follows the script's `sort`)
+
+List the rows you already picked first, most recently picked first, as
+described in [Picking a row again](#picking-a-row-again). Rows never picked
+keep the script's order. Unset, it does that when the script prints
+`"sort": "usage"`; `true` always ranks by usage and `false` always keeps the
+order the script prints, whatever the script asks for. Picks are remembered
+whether or not the ranking is in effect, except with `false`, which also
+keeps nothing.
+
 **`cache_max_seconds`** `integer`
 
 Longest freshness a script may ask for with `"cache": {"seconds": N}`, when
@@ -691,9 +763,11 @@ addons:
 
 ## Output format
 
-The command prints a JSON object with an `items` list on its standard
-output, and optionally a [`cache`](#letting-the-script-choose) saying how long
-the list stays fresh. Anything it writes on standard error is ignored. When the command
+The command prints a JSON object with an `items` list on its standard output.
+Other top-level keys are optional: [`cache`](#letting-the-script-choose) says
+how long the list stays fresh, [`views`](#views) and `view` offer Ctrl+Tab
+views, and [`sort`](#picking-a-row-again) lists the rows you picked first.
+Anything it writes on standard error is ignored. When the command
 fails or prints something that is not valid JSON, the list stays empty, so
 try a script in a terminal first, such as `my-script -j "test query"`.
 
@@ -729,6 +803,7 @@ A fuller output:
 
 ```json
 {
+  "sort": "usage",
   "items": [
     {
       "title": "New York",

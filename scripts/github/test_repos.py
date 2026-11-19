@@ -97,7 +97,7 @@ def environment(**values):
     for key in saved:
         del os.environ[key]
     with patch.dict(
-        os.environ, {key: "" for key in ("RAFFI_VIEW", "GITHUB_USER")}
+        os.environ, {key: "" for key in ("RAFFI_VIEW", "GITHUB_USER", "USAGE_SORT")}
     ), patch.dict(os.environ, values):
         yield
 
@@ -168,7 +168,10 @@ class ResolveTests(ReposTestCase):
 
 
 class ListItemsTests(ReposTestCase):
+    """Typing any account, as --any-owner allows."""
+
     def list(self, query, view="", owners=("me",), **kwargs):
+        kwargs.setdefault("any_owner", True)
         env = {key: value for key, value in kwargs.items() if key.startswith("ALIAS_")}
         options = repos.Options(
             **{key: value for key, value in kwargs.items() if key not in env}
@@ -284,7 +287,9 @@ class ListItemsTests(ReposTestCase):
 
     def test_unknown_account_view_reports_an_error(self):
         with environment():
-            owner, items = repos.list_items("", "ghost", ["me"])
+            owner, items = repos.list_items(
+                "", "ghost", ["me"], repos.Options(any_owner=True)
+            )
         self.assertEqual(owner, "ghost")
         self.assertEqual(items[0]["title"], "Account not found")
         self.assertFalse(items[0]["valid"])
@@ -295,13 +300,150 @@ class ListItemsTests(ReposTestCase):
         ), patch("builtins.print") as printed:
             repos.main()
         output = json.loads(printed.call_args[0][0])
-        self.assertEqual([view["id"] for view in output["views"]], ["me", "tektoncd"])
-        self.assertEqual(output["view"], "me")
+        self.assertEqual(
+            [view["id"] for view in output["views"]], ["@all", "me", "tektoncd"]
+        )
+        self.assertEqual(output["view"], "@all")
+
+    def test_a_single_owner_has_no_all_view(self):
+        with environment(), patch("sys.argv", ["repos.py", "--owners", "me"]), patch(
+            "builtins.print"
+        ) as printed:
+            repos.main()
+        output = json.loads(printed.call_args[0][0])
+        self.assertEqual([view["id"] for view in output["views"]], ["me"])
+
+
+class OwnersOnlyTests(ReposTestCase):
+    """Without --any-owner only the configured accounts and aliases list."""
+
+    def list(self, query, view="", owners=("me",), **kwargs):
+        with environment(**kwargs):
+            return repos.list_items(query, view, list(owners))
+
+    def test_an_unconfigured_account_only_filters(self):
+        with patch.object(repos, "account_repos", wraps=repos.account_repos) as looked:
+            owner, items = self.list("tektoncd")
+        self.assertEqual(owner, "me")
+        self.assertEqual(
+            self.titles(items), ["me", "No repository matches 'tektoncd'"]
+        )
+        self.assertEqual([call.args[0] for call in looked.call_args_list], ["me"])
+
+    def test_a_configured_account_lists_it(self):
+        owner, items = self.list("tektoncd pipeline", owners=("me", "tektoncd"))
+        self.assertEqual(owner, "tektoncd")
+        self.assertEqual(self.titles(items), ["pipeline", "pipelines-as-code", "tektoncd"])
+
+    def test_an_alias_lists_its_account(self):
+        owner, _ = self.list("t pac", ALIAS_t="tektoncd")
+        self.assertEqual(owner, "tektoncd")
+
+    def test_an_unconfigured_view_falls_back_to_the_default(self):
+        owner, _ = self.list("", view="tektoncd")
+        self.assertEqual(owner, "me")
+
+    def test_a_configured_view_lists_its_account(self):
+        owner, _ = self.list("", view="tektoncd", owners=("me", "tektoncd"))
+        self.assertEqual(owner, "tektoncd")
+
+    def test_flag_and_environment(self):
+        for argv, env in ((["--any-owner"], {}), ([], {"ANY_OWNER": "1"})):
+            with environment(**env), patch(
+                "sys.argv", ["repos.py", *argv, "tektoncd"]
+            ), patch("builtins.print") as printed:
+                repos.main()
+            self.assertEqual(json.loads(printed.call_args[0][0])["view"], "tektoncd")
+        with environment(), patch("sys.argv", ["repos.py", "tektoncd"]), patch(
+            "builtins.print"
+        ) as printed:
+            repos.main()
+        self.assertEqual(json.loads(printed.call_args[0][0])["view"], "me")
+
+
+def pushed(name, year, **fields):
+    return repo(name, pushedAt=f"{year}-01-01T00:00:00Z", **fields)
+
+
+class AllViewTests(ReposTestCase):
+    """More than one --owners account mixes them in the default view."""
+
+    def list(self, query, view="", owners=("me", "tektoncd"), **env):
+        with environment(**env):
+            return repos.list_items(query, view, list(owners))
+
+    def mixed(self, accounts):
+        return patch.dict(ACCOUNTS, accounts)
+
+    def test_the_default_view_mixes_accounts_by_last_push(self):
+        accounts = {
+            "me": account("me", [pushed("new", 2024), pushed("old", 2020)]),
+            "tektoncd": account("tektoncd", [pushed("mid", 2022)]),
+        }
+        with self.mixed(accounts):
+            for view in ("", "@all"):
+                owner, items = self.list("", view=view)
+                self.assertEqual(owner, "@all")
+                self.assertEqual(self.titles(items), ["new", "mid", "old"])
+
+    def test_forks_come_after_other_repositories(self):
+        accounts = {
+            "me": account("me", [pushed("fork-a", 2024, isFork=True), pushed("mine", 2020)]),
+            "tektoncd": account(
+                "tektoncd", [pushed("fork-b", 2023, isFork=True), pushed("theirs", 2019)]
+            ),
+        }
+        with self.mixed(accounts):
+            _, items = self.list("")
+        self.assertEqual(self.titles(items), ["mine", "theirs", "fork-a", "fork-b"])
+
+    def test_forks_come_last_in_an_account_view_too(self):
+        accounts = {"me": account("me", [repo("fork", isFork=True), repo("mine")])}
+        with self.mixed(accounts):
+            _, items = self.list("", owners=("me",))
+        self.assertEqual(self.titles(items), ["mine", "fork", "me"])
+
+    def test_rows_name_their_owner(self):
+        accounts = {
+            "me": account("me", [repo("a", nameWithOwner="me/a")]),
+            "tektoncd": account("tektoncd", [repo("b", nameWithOwner="tektoncd/b")]),
+        }
+        with self.mixed(accounts):
+            _, items = self.list("")
+        owners = {
+            repos.ANSI.sub("", item["subtitle"]).split(" \u00b7 ")[0] for item in items
+        }
+        self.assertEqual(owners, {"me", "tektoncd"})
+
+    def test_a_filter_searches_every_account(self):
+        owner, items = self.list("pipeline")
+        self.assertEqual(owner, "@all")
+        self.assertEqual(
+            self.titles(items), ["pipelines", "pipeline", "pipelines-as-code"]
+        )
+
+    def test_a_typed_account_or_alias_lists_only_it(self):
+        owner, items = self.list("tektoncd trigger")
+        self.assertEqual(
+            (owner, self.titles(items)), ("tektoncd", ["triggers", "tektoncd"])
+        )
+        owner, items = self.list("me notes")
+        self.assertEqual((owner, self.titles(items)), ("me", ["notes", "me"]))
+
+    def test_an_account_view_lists_only_it(self):
+        owner, items = self.list("", view="tektoncd")
+        self.assertEqual(owner, "tektoncd")
+        self.assertEqual(len(items), 5)
+
+    def test_nothing_matching_says_so(self):
+        _, items = self.list("zzz")
+        self.assertEqual(len(items), 1)
+        self.assertFalse(items[0]["valid"])
 
 
 class MainTests(ReposTestCase):
-    def run_main(self, *argv):
-        with environment(), patch("sys.argv", ["repos.py", *argv]), patch(
+    def run_main(self, *argv, env=None):
+        with environment(**(env or {})), patch("sys.argv", ["repos.py", *argv]), patch(
             "builtins.print"
         ) as printed:
             self.assertEqual(repos.main(), 0)
@@ -341,6 +483,24 @@ class MainTests(ReposTestCase):
         with patch.object(repos, "CACHE_REPOS", "24h"):
             output = self.run_main("--owners", "me", "raffi")
         self.assertEqual(output["cache"], {"seconds": 86400})
+
+    def test_the_output_asks_for_the_picked_repositories_first(self):
+        output = self.run_main("--owners", "me", "raffi")
+        self.assertEqual(output["sort"], "usage")
+
+    def test_no_usage_sort_keeps_the_script_order(self):
+        for argv, env in ((["--no-usage-sort"], {}), ([], {"USAGE_SORT": "0"})):
+            output = self.run_main("--owners", "me", *argv, env=env)
+            self.assertNotIn("sort", output)
+            self.assertEqual(output["cache"], {"seconds": 600}, "the rest is unchanged")
+
+    def test_failure_rows_ask_for_no_sorting(self):
+        def offline(*args, **kwargs):
+            raise repos.GhError("offline")
+
+        with patch.object(repos, "graphql", offline):
+            output = self.run_main("--owners", "me", "raffi")
+        self.assertNotIn("sort", output)
 
     def test_github_errors_are_not_kept(self):
         def offline(*args, **kwargs):

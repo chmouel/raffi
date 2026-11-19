@@ -643,6 +643,13 @@ pub struct ScriptFilterConfig {
     /// `cache_seconds`).
     #[serde(default)]
     pub warm_interval_seconds: Option<u64>,
+    /// Rank the rows you already picked first, most recently picked first.
+    /// Unset follows the script's top-level `"sort": "usage"`, `true` always
+    /// ranks by usage, `false` always keeps the order the script prints. Rows
+    /// never picked stay where the script put them, and a list with indented
+    /// rows keeps its shape.
+    #[serde(default)]
+    pub sort_by_usage: Option<bool>,
 }
 
 impl ScriptFilterConfig {
@@ -658,6 +665,12 @@ impl ScriptFilterConfig {
         let ttl = self.cache_ttl()?;
         let raised = std::time::Duration::from_secs(self.cache_max_seconds.unwrap_or(0));
         Some(ttl.max(raised))
+    }
+
+    /// Whether rows the user picked are ranked first, given whether the
+    /// script asked for it with its `sort` hint.
+    pub fn sorts_by_usage(&self, script_asked: bool) -> bool {
+        self.sort_by_usage.unwrap_or(script_asked)
     }
 
     /// Interval between background warming runs, if any.

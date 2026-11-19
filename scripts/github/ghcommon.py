@@ -6,6 +6,7 @@ same directory as they are.
 """
 
 import json
+import math
 import os
 import re
 import subprocess
@@ -20,7 +21,11 @@ ICON = "github"
 TYPED_TIME = os.environ.get("TYPED_TIME") == "1"
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
-DURATION = re.compile(r"(\d+(?:\.\d+)?)([smhd])")
+DURATION = re.compile(r"([0-9]+(?:\.[0-9]*)?|\.[0-9]+)(ns|us|µs|μs|ms|[smhd])")
+DURATION_UNITS = {
+    "ns": 1e-9, "us": 1e-6, "µs": 1e-6, "μs": 1e-6, "ms": 1e-3,
+    "s": 1, "m": 60, "h": 3600, "d": 86400,
+}
 BOLD = "\033[1m"
 GREEN = "\033[32m"
 RED = "\033[31m"
@@ -126,12 +131,22 @@ def error_rows(title: str, message: str) -> ErrorRows:
 
 
 def seconds(duration: str, default: float = 600) -> float:
-    """A gh-style duration such as 10m or 1h, in seconds."""
-    match = DURATION.fullmatch(duration.strip())
-    if not match:
+    """A gh-style duration such as 10m or 2h30m, in seconds."""
+    duration = duration.strip().removeprefix("+")
+    if duration == "0":
+        return 0
+    if not duration:
         return default
-    units = {"s": 1, "m": 60, "h": 3600, "d": 86400}
-    return float(match.group(1)) * units[match.group(2)]
+    total = 0.0
+    end = 0
+    while end < len(duration):
+        match = DURATION.match(duration, end)
+        if not match:
+            return default
+        value, unit = match.groups()
+        total += float(value) * DURATION_UNITS[unit]
+        end = match.end()
+    return total if math.isfinite(total) else default
 
 
 def with_cache(
@@ -147,10 +162,16 @@ def with_cache(
     allows. Error rows ask not to be kept: Raffi then keeps the rows it already
     has and reports the failed refresh instead of replacing them.
     """
-    # Zero is how an error asks not to be kept, so a successful list never
-    # sends it, however short the gh window.
-    hint = 0 if isinstance(items, ErrorRows) else max(1, int(seconds(duration)))
-    cache: dict = {"seconds": hint}
-    if warm and hint:
+    if isinstance(items, ErrorRows):
+        return {**output, "cache": {"seconds": 0}, "items": items}
+
+    cache: dict = {}
+    window = seconds(duration, default=math.nan)
+    if math.isfinite(window):
+        cache["seconds"] = max(1, int(window))
+    if warm:
         cache["warm"] = list(warm)
-    return {**output, "cache": cache, "items": items}
+    result = {**output, "items": items}
+    if cache:
+        result["cache"] = cache
+    return result

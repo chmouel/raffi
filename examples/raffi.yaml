@@ -138,6 +138,8 @@ addons:
       # dynamic_preview: false # turn it off for this filter (default: true)
       # cache_seconds: 300     # Optional stale-while-revalidate cache; unset keeps side-effecting scripts uncached
       # warm_queries: [""]     # Queries the server warms periodically, in every view
+      # sort_by_usage: true    # List the rows you picked first; unset follows the
+      #                        # script's "sort": "usage", false always keeps its order
       # A script can also print "views" next to "items": Ctrl+Tab then switches
       # between them and passes the picked one in RAFFI_VIEW.
     # action/secondary_action accept two special keywords:
@@ -232,33 +234,35 @@ addons:
     #   warm_queries: [""]           # Queries the server warms while Raffi is closed, in every view
     #   warm_interval_seconds: 300   # Defaults to cache_seconds
     # One keyword per repository, the typed text only filters:
-    # - name: "Raffi Pull Requests"
-    #   keyword: "rafpr"
+    # - name: "Project Pull Requests"
+    #   keyword: "ppr"
     #   command: "~/.config/raffi/scripts/github/pr.py"
-    #   args: ["--repo", "chmouel/raffi"]
+    #   args: ["--repo", "owner/repo"]
     #   icon: "github"
     #   action: "xdg-open {value}"
     #   secondary_action: "copy"
 
     # GitHub repositories of an account, yours by default. Install
     # scripts/github/repos.py and ghcommon.py in the same directory first.
-    # "repo tektoncd" lists an organization,
-    # "repo tektoncd pac" filters it, "repo owner/repo" opens one, and the
-    # accounts in --owners are views switched with Ctrl+Tab. "me" is the
+    # "repo a" lists an organization from --owners or an alias,
+    # "repo a api" filters it, "repo owner/repo" opens one, and the
+    # accounts in --owners are views switched with Ctrl+Tab, after an All
+    # view that mixes them, forks last. Other words only
+    # filter; add "--any-owner" to let them name any GitHub account. "me" is the
     # logged in account; ALIAS_<name> adds short names.
     # See scripts/github/README.md for aliases and settings.
     # - name: "Repositories"
     #   keyword: "repo"
     #   command: "~/.config/raffi/scripts/github/repos.py"
-    #   args: ["--owners", "me,t,osp"]
+    #   args: ["--owners", "me,a,labs"]
     #   env:
-    #     ALIAS_t: tektoncd
-    #     ALIAS_osp: openshift-pipelines
+    #     ALIAS_a: acme
+    #     ALIAS_labs: acme-labs
     #   # Enter lists the repository and its pull requests, issues and
     #   # releases ("--pages"); Right opens the action menu with copy entries
     #   # and the actions below. "--actions pulls,issues" puts pages in that
     #   # menu instead and "--path pulls" makes every row open one page.
-    #   # args: ["--owners", "me,t,osp", "--pages", "pulls,issues,releases"]
+    #   # args: ["--owners", "me,a,labs", "--pages", "pulls,issues,releases"]
     #   actions:
     #     - title: "Clone"
     #       action: 'git clone "$REPO_SSH" ~/src/"$REPO_NAME"'

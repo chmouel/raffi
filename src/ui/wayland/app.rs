@@ -53,10 +53,11 @@ use super::state::{
 };
 use super::support::{
     calculator_inline_result, load_history, load_mru_map, mru_bounds, mru_sort_key, record_mru_use,
-    save_history, save_last_query, save_mru_map, try_evaluate_math,
+    save_history, save_last_query, save_mru_map, script_filter_usage_key, seed_script_filter_usage,
+    sort_script_filter_items, trim_mru_map, try_evaluate_math,
 };
 use super::system::system_entries;
-use super::types::InlineProvider;
+use super::types::{InlineProvider, ScriptFilterItem};
 use super::units::{try_parse_unit_conversion, units_inline_result};
 use super::vault::{
     Backend, EntryAction, Field, JobSettings, Op, OpKind, Outcome, PromptState, Report, Request,
@@ -65,7 +66,8 @@ use super::vault::{
 use super::world_clock::{current_time_inline_result, try_parse_time_query};
 use crate::secret::Secret;
 use crate::ui::{
-    get_mru_cache_path, get_snippet_mru_cache_path, get_vault_mru_cache_path, FontSizes,
+    get_mru_cache_path, get_recent_cache_path, get_script_filter_mru_cache_path,
+    get_snippet_mru_cache_path, get_vault_mru_cache_path, FontSizes,
 };
 use crate::{
     read_desktop_icon_map, read_icon_map, resolve_launcher_icon_path, AddonsConfig, RaffiConfig,
@@ -282,6 +284,8 @@ const PREVIEW_SCROLL_STEP: f32 = 120.0;
 /// Wait before running a Script Filter dynamic preview, so moving quickly
 /// through results does not start one process per row.
 const SCRIPT_FILTER_PREVIEW_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(80);
+/// Most picked rows the Script Filter usage cache keeps.
+const SCRIPT_FILTER_USAGE_CAP: usize = 2000;
 
 /// Look up the page preview of `tab` for `list`, unless one is running or
 /// already known.
@@ -1148,6 +1152,24 @@ impl LauncherApp {
             mru_path: snippet_mru_path,
             ..Default::default()
         };
+        let script_filter_mru_path = get_script_filter_mru_cache_path().ok();
+        let mut script_filter_usage = load_mru_map(script_filter_mru_path.as_deref());
+        // Picks already listed by the main view rank here too, so a filter
+        // whose usage map was never written still knows what was picked.
+        seed_script_filter_usage(
+            &mut script_filter_usage,
+            &addons
+                .script_filters
+                .iter()
+                .map(|filter| filter.name.clone())
+                .collect::<Vec<_>>(),
+            &super::recent::load(get_recent_cache_path().ok().as_deref()),
+        );
+        let script_filter = ScriptFilterState {
+            usage: script_filter_usage,
+            usage_path: script_filter_mru_path,
+            ..Default::default()
+        };
 
         let mut main_view = super::main_view::MainViewState::default();
         main_view.ordered_rows = (0..configs.len()).map(MainRowRef::Launcher).collect();
@@ -1178,7 +1200,7 @@ impl LauncherApp {
                 query_class: QueryClass::default(),
                 inline_result: None,
                 currency: CurrencyState::default(),
-                script_filter: ScriptFilterState::default(),
+                script_filter,
                 text_snippets,
                 hyprland: None,
                 deferred_action: Default::default(),
@@ -2676,9 +2698,14 @@ impl LauncherApp {
         self.script_filter.cached_at = cached_at;
         self.script_filter.refresh_failed = false;
 
-        if let Some(result) = cached {
+        if let Some(mut result) = cached {
             // Show the snapshot at once; a stale one refreshes underneath.
             self.script_filter.loading = false;
+            self.sort_script_filter_rows(
+                Some(config_index),
+                result.sort_by_usage,
+                &mut result.items,
+            );
             self.script_filter.adopt_views(&result);
             self.script_filter.results = Some(result);
             self.script_filter.loading_name = None;
@@ -4374,6 +4401,88 @@ impl LauncherApp {
         self.start_checked_copy(value)
     }
 
+    /// Rank the rows of `config_index` by when they were last picked, when
+    /// that filter asks for it. `script_asked` is the `sort` hint of the run
+    /// the rows came from.
+    fn sort_script_filter_rows(
+        &self,
+        config_index: Option<usize>,
+        script_asked: bool,
+        items: &mut [ScriptFilterItem],
+    ) {
+        let Some(config) = config_index.and_then(|index| self.addons.script_filters.get(index))
+        else {
+            return;
+        };
+        if config.sorts_by_usage(script_asked) {
+            sort_script_filter_items(items, &config.name, &self.script_filter.usage);
+        }
+    }
+
+    /// Note that the user picked `item`, and which top-level row it came from,
+    /// so both rise in a filter that ranks by usage. Every valid pick is worth
+    /// keeping, whatever the list on screen shows, so a filter that starts
+    /// ranking by usage later still knows the rows already picked.
+    fn record_script_filter_use(&mut self, item: &ScriptFilterItem) {
+        if !item.valid {
+            return;
+        }
+        let Some(arg) = item.arg.as_deref() else {
+            return;
+        };
+        let Some(config) = self
+            .script_filter
+            .config_index
+            .and_then(|index| self.addons.script_filters.get(index))
+        else {
+            return;
+        };
+        // A filter that never ranks by usage has nothing to remember.
+        if config.sort_by_usage == Some(false) {
+            return;
+        }
+        let name = config.name.clone();
+        let mut keys = vec![script_filter_usage_key(&name, arg)];
+        if let Some(ancestor) = self
+            .script_filter
+            .navigation
+            .first()
+            .and_then(|root| root.items.get(root.selection))
+            .and_then(|item| item.arg.as_deref())
+        {
+            keys.push(script_filter_usage_key(&name, ancestor));
+        }
+        let state = &mut self.script_filter;
+        for key in keys {
+            record_mru_use(&mut state.usage, key);
+        }
+        trim_mru_map(&mut state.usage, SCRIPT_FILTER_USAGE_CAP);
+        let path = state.usage_path.clone();
+        save_mru_map(path.as_deref(), &state.usage);
+    }
+
+    /// Identity of a Script Filter row: sorting moves rows around, so a
+    /// position alone does not name one.
+    fn script_filter_row_key(item: &ScriptFilterItem) -> String {
+        item.arg.clone().unwrap_or_else(|| item.title.clone())
+    }
+
+    /// Identity of the selected Script Filter row, when the rows it came from
+    /// are the ones an incoming result replaces.
+    fn selected_script_filter_row(&self) -> Option<String> {
+        if !self.script_filter.navigation.is_empty() {
+            // A child list is not the list a refresh of the filter replaces.
+            return None;
+        }
+        let index = self.selected_index.checked_sub(self.keyword_rows())?;
+        self.script_filter
+            .results
+            .as_ref()?
+            .items
+            .get(index)
+            .map(Self::script_filter_row_key)
+    }
+
     fn handle_script_filter_result(
         &mut self,
         generation: u64,
@@ -4392,11 +4501,30 @@ impl LauncherApp {
                 crate::debug_log!("script_filter: refresh not stored, keeping cached rows");
                 self.script_filter.refresh_failed = true;
             }
-            Ok(result) => {
+            Ok(mut result) => {
+                // Usage sorting can move the selected row, so keep the row
+                // itself rather than its index.
+                let selected = self.selected_script_filter_row();
+                self.sort_script_filter_rows(
+                    self.script_filter.config_index,
+                    result.sort_by_usage,
+                    &mut result.items,
+                );
                 self.script_filter.adopt_views(&result);
                 self.script_filter.results = Some(result);
                 self.script_filter.results_are_cached = false;
                 self.script_filter.refresh_failed = false;
+                if let Some(selected) = selected {
+                    let moved = self.script_filter.results.as_ref().and_then(|results| {
+                        results
+                            .items
+                            .iter()
+                            .position(|item| Self::script_filter_row_key(item) == selected)
+                    });
+                    if let Some(position) = moved {
+                        self.selected_index = self.keyword_rows() + position;
+                    }
+                }
                 // Indices from the old rows mean nothing once new rows land.
                 self.script_filter.previews.clear();
                 self.script_filter.bump_preview_generation();
@@ -4652,7 +4780,17 @@ impl LauncherApp {
                 return Task::none();
             }
             // A menu action runs on the row, it does not open its children.
-            if let Some(children) = item.children.filter(|_| menu_action.is_none()) {
+            if let Some(mut children) = item.children.filter(|_| menu_action.is_none()) {
+                let script_asked = self
+                    .script_filter
+                    .results
+                    .as_ref()
+                    .is_some_and(|results| results.sort_by_usage);
+                self.sort_script_filter_rows(
+                    self.script_filter.config_index,
+                    script_asked,
+                    &mut children,
+                );
                 self.script_filter
                     .navigation
                     .push(super::state::ScriptFilterNavigation {
@@ -4690,11 +4828,13 @@ impl LauncherApp {
         let mut pick = None;
         let mut addon_close = None;
         let mut force_close = false;
+        let mut used = None;
         if let Some(result) = &self.script_filter.results {
             if let Some(item) = result.items.get(index) {
                 if !item.valid {
                     return Task::none();
                 }
+                used = Some(item.clone());
                 if let Some(config) = self
                     .script_filter
                     .config_index
@@ -4730,6 +4870,9 @@ impl LauncherApp {
                     execute_action_with_env(act, value, &item.variables);
                 }
             }
+        }
+        if let Some(item) = &used {
+            self.record_script_filter_use(item);
         }
         if let Some(pick) = pick {
             self.record_recent(pick);

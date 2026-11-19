@@ -6,12 +6,14 @@
 //! capped by the user's config, and a failed refresh is retried with a
 //! backoff while the last good snapshot keeps being served.
 
-use std::cell::Cell;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
-use super::cache::{effective_ttl, parse_list, script_filter_list_key, Snapshot};
+use super::cache::{
+    effective_ttl, parse_list, script_filter_list_key, SnapshotStamp, SnapshotUpdate, MAX_STALE,
+};
 use super::script_filters::view_config;
 use super::state::ScriptFilterResult;
 use super::types::ScriptFilterView;
@@ -64,16 +66,6 @@ pub(super) struct TargetState {
     failures: u32,
     /// When a failed target may be tried again.
     retry_at: u64,
-}
-
-impl TargetState {
-    /// A snapshot newer than our last attempt came from somebody else (the UI,
-    /// F5), so earlier failures say nothing about the list any more.
-    fn observe(&mut self, fetched_at: Option<u64>) {
-        if fetched_at.is_some_and(|fetched| fetched > self.last_attempt) {
-            self.failures = 0;
-        }
-    }
 }
 
 /// Seconds to wait after the `failures`-th failure in a row.
@@ -138,13 +130,83 @@ pub(super) struct Report {
 }
 
 /// The views a default list names, and which one it is itself.
+#[derive(Clone, Default)]
 struct Offered {
-    /// Which snapshot this came from: its time and a digest of its payload,
-    /// since a rewrite within the same second keeps the time.
-    fingerprint: (u64, u64),
     default: Option<String>,
     views: Vec<ScriptFilterView>,
     warm: Vec<String>,
+}
+
+impl From<ScriptFilterResult> for Offered {
+    fn from(result: ScriptFilterResult) -> Self {
+        Self {
+            default: result
+                .view
+                .or_else(|| result.views.first().map(|view| view.id.clone())),
+            views: result.views,
+            warm: result.cache_warm,
+        }
+    }
+}
+
+struct SnapshotSummary {
+    fetched_at: u64,
+    hint_secs: Option<u64>,
+    offered: Option<Offered>,
+}
+
+#[derive(Default)]
+struct Target {
+    state: TargetState,
+    stamp: Option<SnapshotStamp>,
+    snapshot: Option<SnapshotSummary>,
+}
+
+impl Target {
+    fn snapshot(&self, now: u64) -> Option<&SnapshotSummary> {
+        self.snapshot
+            .as_ref()
+            .filter(|snapshot| now.saturating_sub(snapshot.fetched_at) < MAX_STALE.as_secs())
+    }
+
+    fn is_due(&mut self, pass: &Pass, key: &str, default_list: bool) -> bool {
+        let now = (pass.clock)();
+        match (pass.read)(key, self.stamp) {
+            SnapshotUpdate::Unchanged => {}
+            SnapshotUpdate::Missing => {
+                self.stamp = None;
+                self.snapshot = None;
+            }
+            SnapshotUpdate::Changed(stamp, snapshot) => {
+                self.stamp = Some(stamp);
+                self.snapshot = snapshot.map(|snapshot| SnapshotSummary {
+                    fetched_at: snapshot.fetched_at,
+                    hint_secs: snapshot.hint_secs,
+                    offered: if default_list {
+                        parse_list(&snapshot, pass.config.icon.clone()).map(Offered::from)
+                    } else {
+                        None
+                    },
+                });
+                // An F5 write can land while a failed attempt is still running
+                if self.snapshot(now).is_some() {
+                    self.state.failures = 0;
+                }
+            }
+        }
+        let snapshot = self.snapshot(now);
+        let interval = pass
+            .policy
+            .interval(snapshot.and_then(|list| list.hint_secs));
+        is_due(
+            now,
+            snapshot.map(|list| list.fetched_at),
+            interval,
+            pass.policy.floor,
+            jitter(key, interval),
+            &self.state,
+        )
+    }
 }
 
 /// The queries a script asked to have warmed that the config does not
@@ -171,21 +233,13 @@ struct Pass<'a> {
     clock: &'a dyn Fn() -> u64,
     config: &'a ScriptFilterConfig,
     policy: &'a Policy,
-    read: &'a dyn Fn(&str) -> Option<Snapshot>,
-}
-
-fn fingerprint(snapshot: &Snapshot) -> (u64, u64) {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    snapshot.payload.hash(&mut hasher);
-    (snapshot.fetched_at, hasher.finish())
+    read: &'a dyn Fn(&str, Option<SnapshotStamp>) -> SnapshotUpdate,
 }
 
 /// The scheduling state of one script filter's lists.
 #[derive(Default)]
 pub(super) struct Warmer {
-    targets: HashMap<String, TargetState>,
-    /// What each default list offers, with the snapshot it came from.
-    offered: HashMap<String, Offered>,
+    targets: HashMap<String, Target>,
     /// Lists seen during the pass under way. Anything not seen has been
     /// dropped by the script, and its state goes with it.
     seen: HashSet<String>,
@@ -200,7 +254,7 @@ impl Warmer {
         clock: &dyn Fn() -> u64,
         config: &ScriptFilterConfig,
         policy: &Policy,
-        read: &dyn Fn(&str) -> Option<Snapshot>,
+        read: &dyn Fn(&str, Option<SnapshotStamp>) -> SnapshotUpdate,
         run: &mut dyn FnMut(Option<&ScriptFilterView>, &str, StillDue) -> Run,
     ) -> Report {
         let pass = Pass {
@@ -221,7 +275,6 @@ impl Warmer {
         // A script that keeps changing what it asks for must not make the
         // server remember every name it ever used.
         self.targets.retain(|key, _| self.seen.contains(key));
-        self.offered.retain(|key, _| self.seen.contains(key));
         report
     }
 
@@ -234,45 +287,49 @@ impl Warmer {
         query: &str,
         report: &mut Report,
     ) -> Vec<String> {
-        let Pass {
-            clock,
-            config,
-            policy,
-            read,
-        } = *pass;
+        let config = pass.config;
         let default_key = script_filter_list_key(&view_config(config, None), query);
         let ran = self.visit(
-            clock,
+            pass,
             &default_key,
-            policy,
-            read,
             &mut |view, still_due| run(view, query, still_due),
             None,
         );
-        let default = match &ran {
-            Some(Ok(result)) => Some(result.clone()),
-            _ => None,
-        };
-        if let Some(outcome) = ran {
-            report.ran += 1;
-            if let Err(message) = outcome {
+        let fresh = match ran {
+            Some(Ok(result)) => {
+                report.ran += 1;
+                Some(Offered::from(result))
+            }
+            Some(Err(message)) => {
+                report.ran += 1;
                 report
                     .error
                     .get_or_insert(format!("{}: {message}", config.name));
+                None
             }
-        }
-        let (default_view, views, warm) = self.default_views(&default_key, default, config, read);
+            None => None,
+        };
+        let Offered {
+            default,
+            views,
+            warm,
+        } = fresh
+            .or_else(|| {
+                self.targets[&default_key]
+                    .snapshot((pass.clock)())?
+                    .offered
+                    .clone()
+            })
+            .unwrap_or_default();
         for view in views
             .iter()
-            .filter(|view| Some(&view.id) != default_view.as_ref())
+            .filter(|view| Some(&view.id) != default.as_ref())
             .take(MAX_WARM_VIEWS)
         {
             let key = script_filter_list_key(&view_config(config, Some(view)), query);
             let outcome = self.visit(
-                clock,
+                pass,
                 &key,
-                policy,
-                read,
                 &mut |view, still_due| run(view, query, still_due),
                 Some(view),
             );
@@ -293,52 +350,26 @@ impl Warmer {
     /// snapshot may have been refreshed since this one was read.
     fn visit(
         &mut self,
-        clock: &dyn Fn() -> u64,
+        pass: &Pass,
         key: &str,
-        policy: &Policy,
-        read: &dyn Fn(&str) -> Option<Snapshot>,
         run: &mut dyn FnMut(Option<&ScriptFilterView>, StillDue) -> Run,
         view: Option<&ScriptFilterView>,
     ) -> Option<Result<ScriptFilterResult, String>> {
         self.seen.insert(key.to_string());
-        let state = self.targets.entry(key.to_string()).or_default();
-        let due = |state: &TargetState| {
-            let snapshot = read(key);
-            let interval =
-                policy.interval(snapshot.as_ref().and_then(|snapshot| snapshot.hint_secs));
-            let fetched_at = snapshot.map(|snapshot| snapshot.fetched_at);
-            let mut state = *state;
-            state.observe(fetched_at);
-            let due = is_due(
-                clock(),
-                fetched_at,
-                interval,
-                policy.floor,
-                jitter(key, interval),
-                &state,
-            );
-            (due, state)
-        };
-        let (is_due_now, observed) = due(state);
-        *state = observed;
-        if !is_due_now {
+        let target = self.targets.entry(key.to_string()).or_default();
+        let default_list = view.is_none();
+        if !target.is_due(pass, key, default_list) {
             return None;
         }
-        // What the check saw once the run holds the list counts too.
-        let tracked = Cell::new(observed);
-        let still_due = || {
-            let (due_now, seen) = due(&tracked.get());
-            tracked.set(seen);
-            due_now
-        };
+        let tracked = RefCell::new(target);
+        let still_due = || tracked.borrow_mut().is_due(pass, key, default_list);
         let Run::Done(outcome) = run(view, &still_due) else {
-            *state = tracked.get();
             return None;
         };
-        *state = tracked.get();
+        let state = &mut tracked.into_inner().state;
         // Timed when the run ended, not when the pass began: an earlier slow
         // target must not eat into this one's backoff.
-        let ended = clock();
+        let ended = (pass.clock)();
         state.last_attempt = ended;
         match &outcome {
             Ok(_) => state.failures = 0,
@@ -349,67 +380,13 @@ impl Warmer {
         }
         Some(outcome)
     }
-
-    /// The default view and the views a query's default list offers: from the
-    /// run that just happened, or else from its snapshot on disk, which is
-    /// parsed once per snapshot.
-    fn default_views(
-        &mut self,
-        key: &str,
-        fresh: Option<ScriptFilterResult>,
-        config: &ScriptFilterConfig,
-        read: &dyn Fn(&str) -> Option<Snapshot>,
-    ) -> (Option<String>, Vec<ScriptFilterView>, Vec<String>) {
-        // What the run just printed serves this pass. It is not remembered:
-        // only the snapshot on disk is what the UI and later passes see.
-        self.seen.insert(key.to_string());
-        if let Some(result) = fresh {
-            return (default_view(&result), result.views, result.cache_warm);
-        }
-        let Some(snapshot) = read(key) else {
-            return (None, Vec::new(), Vec::new());
-        };
-        let fingerprint = fingerprint(&snapshot);
-        if let Some(offered) = self.offered.get(key) {
-            if offered.fingerprint == fingerprint {
-                return (
-                    offered.default.clone(),
-                    offered.views.clone(),
-                    offered.warm.clone(),
-                );
-            }
-        }
-        let Some(result) = parse_list(&snapshot, config.icon.clone()) else {
-            return (None, Vec::new(), Vec::new());
-        };
-        let offered = Offered {
-            fingerprint,
-            default: default_view(&result),
-            views: result.views,
-            warm: result.cache_warm,
-        };
-        let answer = (
-            offered.default.clone(),
-            offered.views.clone(),
-            offered.warm.clone(),
-        );
-        self.offered.insert(key.to_string(), offered);
-        answer
-    }
-}
-
-fn default_view(result: &ScriptFilterResult) -> Option<String> {
-    result
-        .view
-        .clone()
-        .or_else(|| result.views.first().map(|view| view.id.clone()))
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::cache::Snapshot;
     use super::*;
-    use crate::ui::wayland::cache::MAX_STALE;
-    use std::cell::{Cell, RefCell};
+    use std::cell::Cell;
 
     const NOW: u64 = 1_000_000;
 
@@ -565,20 +542,6 @@ mod tests {
     }
 
     #[test]
-    fn a_snapshot_written_by_someone_else_clears_the_failures() {
-        let mut state = TargetState {
-            last_attempt: NOW - 500,
-            failures: 4,
-            retry_at: NOW + 3_000,
-        };
-        state.observe(Some(NOW - 800));
-        assert_eq!(state.failures, 4, "an older snapshot says nothing");
-        state.observe(Some(NOW - 5));
-        assert_eq!(state.failures, 0);
-        assert!(!due(Some(NOW - 5), 86_400, 300, &state));
-    }
-
-    #[test]
     fn a_target_nobody_has_fetched_or_tried_is_due_at_once() {
         let idle = TargetState::default();
         assert!(is_due(100, None, 300, 300, 0, &idle));
@@ -614,12 +577,19 @@ mod tests {
     }
 
     type Script = Box<dyn FnMut(Option<&str>, &str) -> Run>;
+    type Snapshots = RefCell<HashMap<String, (SnapshotStamp, Snapshot)>>;
+
+    fn put_snapshot(snapshots: &Snapshots, key: &str, snapshot: Snapshot) {
+        let mut snapshots = snapshots.borrow_mut();
+        let revision = snapshots.get(key).map_or(1, |(stamp, _)| stamp.1 + 1);
+        snapshots.insert(key.into(), ((0, revision, 0, 0), snapshot));
+    }
 
     struct Fixture {
         config: ScriptFilterConfig,
         policy: Policy,
         clock: std::rc::Rc<Cell<u64>>,
-        snapshots: std::rc::Rc<RefCell<HashMap<String, Snapshot>>>,
+        snapshots: std::rc::Rc<Snapshots>,
         runs: RefCell<Vec<(Option<String>, String)>>,
         script: RefCell<Script>,
         /// Runs between the decision to refresh a list and the run holding it.
@@ -642,12 +612,16 @@ mod tests {
         fn store(&self, view: Option<&str>, query: &str, snapshot: Snapshot) {
             let view = view.map(view_of);
             let key = key(&self.config, view.as_ref(), query);
-            self.snapshots.borrow_mut().insert(key, snapshot);
+            put_snapshot(&self.snapshots, &key, snapshot);
         }
 
         fn tick(&self, warmer: &mut Warmer, now: u64) -> Report {
             self.clock.set(now);
-            let read = |key: &str| self.snapshots.borrow().get(key).cloned();
+            let read = |key: &str, known| match self.snapshots.borrow().get(key) {
+                Some((stamp, _)) if Some(*stamp) == known => SnapshotUpdate::Unchanged,
+                Some((stamp, snapshot)) => SnapshotUpdate::Changed(*stamp, Some(snapshot.clone())),
+                None => SnapshotUpdate::Missing,
+            };
             let clock = || self.clock.get();
             warmer.tick(
                 &clock,
@@ -758,7 +732,8 @@ mod tests {
         fixture.tick(&mut warmer, NOW);
         fixture.ran();
         let key = key(&fixture.config, None, "");
-        assert_eq!(warmer.offered[&key].views.len(), 2);
+        let summary = warmer.targets[&key].snapshot(NOW).unwrap();
+        assert_eq!(summary.offered.as_ref().unwrap().views.len(), 2);
         // The same snapshot answers from the memo, and the view is due again.
         fixture.tick(&mut warmer, NOW + 400);
         let ran: Vec<_> = fixture.ran().into_iter().map(|(view, _)| view).collect();
@@ -899,7 +874,7 @@ mod tests {
         let key = key(&fixture.config, None, "");
         *fixture.before_hold.borrow_mut() = Some(Box::new(move || {
             let fresh = snapshot(NOW, Some(86_400), r#"{"items":[]}"#);
-            snapshots.borrow_mut().insert(key.clone(), fresh);
+            put_snapshot(&snapshots, &key, fresh);
         }));
         let mut warmer = Warmer::default();
         let report = fixture.tick(&mut warmer, NOW);
@@ -993,6 +968,33 @@ mod tests {
     }
 
     #[test]
+    fn a_refresh_written_during_a_failed_run_overrides_backoff() {
+        let fixture = Fixture::new(&[""]);
+        fixture.store(
+            None,
+            "",
+            snapshot(NOW - 100_000, Some(86_400), r#"{"items":[]}"#),
+        );
+        let clock = fixture.clock.clone();
+        let snapshots = fixture.snapshots.clone();
+        let key = key(&fixture.config, None, "");
+        let target = key.clone();
+        *fixture.script.borrow_mut() = Box::new(move |_, _| {
+            let fresh = snapshot(NOW + 10, Some(86_400), r#"{"items":[]}"#);
+            put_snapshot(&snapshots, &key, fresh);
+            clock.set(NOW + 40);
+            Run::Done(Err("timed out".into()))
+        });
+        let mut warmer = Warmer::default();
+        assert!(fixture.tick(&mut warmer, NOW).error.is_some());
+        assert_eq!(fixture.ran().len(), 1);
+        assert_eq!(warmer.targets[&target].state.failures, 1);
+        fixture.tick(&mut warmer, NOW + 100);
+        assert!(fixture.ran().is_empty());
+        assert_eq!(warmer.targets[&target].state.failures, 0);
+    }
+
+    #[test]
     fn a_refresh_seen_after_taking_the_list_still_clears_the_failures() {
         let mut fixture = Fixture::new(&[""]);
         fixture.policy = policy(1, 1, 1);
@@ -1011,7 +1013,7 @@ mod tests {
         let key = key(&fixture.config, None, "");
         *fixture.before_hold.borrow_mut() = Some(Box::new(move || {
             let fresh = snapshot(retry, None, r#"{"items":[]}"#);
-            snapshots.borrow_mut().insert(key.clone(), fresh);
+            put_snapshot(&snapshots, &key, fresh);
             clock.set(retry + 1);
         }));
         fixture.tick(&mut warmer, retry);
@@ -1158,11 +1160,6 @@ mod tests {
                 warmer.targets.len() <= 1 + MAX_WARM_ADVERTISED,
                 "{}",
                 warmer.targets.len()
-            );
-            assert!(
-                warmer.offered.len() <= 1 + MAX_WARM_ADVERTISED,
-                "{}",
-                warmer.offered.len()
             );
         }
     }

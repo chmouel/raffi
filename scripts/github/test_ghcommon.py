@@ -128,14 +128,16 @@ class CacheContractTests(unittest.TestCase):
         self.assertEqual(ghcommon.seconds("1.5h"), 5400)
         self.assertEqual(ghcommon.seconds("90s"), 90)
         self.assertEqual(ghcommon.seconds("2d"), 172800)
+        self.assertEqual(ghcommon.seconds("2h30m"), 9000)
+        self.assertEqual(ghcommon.seconds("1s500ms"), 1.5)
 
     def test_unreadable_durations_fall_back(self):
         self.assertEqual(ghcommon.seconds("soon"), 600)
         self.assertEqual(ghcommon.seconds("", default=30), 30)
 
     def test_the_cache_window_becomes_the_hint(self):
-        output = ghcommon.with_cache({"view": "x"}, [{"title": "a"}], "24h")
-        self.assertEqual(output["cache"], {"seconds": 86400})
+        output = ghcommon.with_cache({"view": "x"}, [{"title": "a"}], "2h30m")
+        self.assertEqual(output["cache"], {"seconds": 9000})
         self.assertEqual(output["view"], "x")
         self.assertEqual(output["items"], [{"title": "a"}])
 
@@ -145,7 +147,7 @@ class CacheContractTests(unittest.TestCase):
         self.assertEqual(ghcommon.with_cache({}, rows, "24h")["cache"], {"seconds": 0})
 
     def test_a_successful_list_never_sends_the_error_sentinel(self):
-        for window in ("0s", "0.5s", "0m"):
+        for window in ("0", "0s", "0.5s", "0m"):
             output = ghcommon.with_cache({}, [{"title": "a"}], window)
             self.assertEqual(output["cache"], {"seconds": 1}, window)
 
@@ -153,6 +155,11 @@ class CacheContractTests(unittest.TestCase):
         output = ghcommon.with_cache({}, [], "10m", warm=("", "review"))
         self.assertEqual(output["cache"], {"seconds": 600, "warm": ["", "review"]})
         self.assertNotIn("warm", ghcommon.with_cache({}, [], "10m")["cache"])
+
+    def test_an_unreadable_duration_leaves_freshness_to_raffi(self):
+        self.assertNotIn("cache", ghcommon.with_cache({}, [], "2h invalid"))
+        output = ghcommon.with_cache({}, [], "invalid", warm=("review",))
+        self.assertEqual(output["cache"], {"warm": ["review"]})
 
     def test_an_error_never_asks_for_warming(self):
         rows = ghcommon.error_rows("GitHub error", "boom")

@@ -8,7 +8,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -43,9 +43,10 @@ const WARM_TICK: Duration = Duration::from_secs(30);
 const SERVER_RUN_TIMEOUT: Duration = Duration::from_secs(60);
 /// Protocol revision reported by `Status`; servers from before it existed
 /// report 0 and ignore `wait`. Revision 2 adds `clipboard_select`, revision
-/// 3 the `clipboard` status flag, revision 4 `clipboard_set`, revision 5 its
-/// `expires_in`.
-pub(crate) const PROTOCOL: u32 = 5;
+/// 3 the `clipboard` status flag, revision 4 `clipboard_set`, and revision 5
+/// its `expires_in`. Revision 6 preserves the cache on `cache.seconds: 0`.
+pub(crate) const PROTOCOL: u32 = 6;
+const CLIPBOARD_SET_PROTOCOL: u32 = 5;
 /// Upper bound on the formats one `clipboard set` request may carry.
 const MAX_SET_FORMATS: usize = 32;
 /// Largest single format a request may carry, whatever the configured image
@@ -604,6 +605,30 @@ pub(crate) fn read_list(key: &str) -> Option<Snapshot> {
     read_snapshot_path(&list_path(key).ok()?)
 }
 
+pub(super) type SnapshotStamp = (u64, u64, i64, i64);
+
+pub(super) enum SnapshotUpdate {
+    Missing,
+    Unchanged,
+    Changed(SnapshotStamp, Option<Snapshot>),
+}
+
+fn read_warm_snapshot_path(path: &Path, known: Option<SnapshotStamp>) -> Option<SnapshotUpdate> {
+    let stamp = |meta: fs::Metadata| (meta.dev(), meta.ino(), meta.ctime(), meta.ctime_nsec());
+    if Some(stamp(fs::metadata(path).ok()?)) == known {
+        return Some(SnapshotUpdate::Unchanged);
+    }
+    // Match the stamp to the open file in case a writer replaced the path
+    let mut file = fs::File::open(path).ok()?;
+    let actual = stamp(file.metadata().ok()?);
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    let snapshot = serde_json::from_slice::<Snapshot>(&bytes)
+        .ok()
+        .filter(|snapshot| snapshot.version == SNAPSHOT_VERSION);
+    Some(SnapshotUpdate::Changed(actual, snapshot))
+}
+
 pub(crate) fn read_preview(key: &str) -> Option<Snapshot> {
     read_snapshot_path(&preview_path(key).ok()?)
 }
@@ -853,7 +878,7 @@ pub(crate) fn clipboard_set(
     source: Option<String>,
 ) -> Result<SetOutcome, SetFailure> {
     match probe() {
-        Some(info) if info.protocol < PROTOCOL => {
+        Some(info) if info.protocol < CLIPBOARD_SET_PROTOCOL => {
             return Err(SetFailure::ServerOutdated(info.protocol))
         }
         Some(_) => {}
@@ -909,19 +934,40 @@ pub(crate) fn listening() -> bool {
     cache_socket_path().is_ok_and(|path| UnixStream::connect(path).is_ok())
 }
 
-/// Send waited refresh requests in order and report the first failure.
-/// Blocking: run it off the UI thread.
-pub(crate) fn refresh(requests: Vec<Request>) -> Result<(), CallError> {
-    let mut errors = Vec::new();
-    for request in &requests {
-        if let Response::Error { message, .. } = call(request, WAIT_TIMEOUT)? {
-            errors.push(message);
+#[derive(Debug, Clone)]
+pub(crate) struct RefreshOutcome {
+    pub result: Result<(), CallError>,
+    pub shown_refreshed: Option<bool>,
+}
+
+/// Run the shown list's request first, retaining its outcome if Refresh All
+/// fails on a different source. Blocking: run it off the UI thread.
+pub(crate) fn refresh(shown: Option<Request>, all: bool) -> RefreshOutcome {
+    let request = |request: &Request| match call(request, WAIT_TIMEOUT)? {
+        Response::Ok | Response::ScriptFilter { .. } => Ok(()),
+        Response::Error { message, .. } => Err(CallError::Failed(message)),
+        _ => Err(CallError::Failed(
+            "the Raffi server sent an unexpected reply".into(),
+        )),
+    };
+    let shown = shown.as_ref().map(request);
+    let shown_refreshed = shown.as_ref().map(Result::is_ok);
+    let result = shown.unwrap_or(Ok(()));
+    let result = if all && result != Err(CallError::Unreachable) {
+        match (result, request(&Request::RefreshAll)) {
+            (Err(CallError::Failed(shown)), Err(CallError::Failed(all))) => {
+                Err(CallError::Failed(format!("{shown}; {all}")))
+            }
+            (_, Err(CallError::Unreachable)) => Err(CallError::Unreachable),
+            (Err(error), _) | (_, Err(error)) => Err(error),
+            (Ok(()), Ok(())) => Ok(()),
         }
-    }
-    if errors.is_empty() {
-        Ok(())
     } else {
-        Err(CallError::Failed(errors.join("; ")))
+        result
+    };
+    RefreshOutcome {
+        result,
+        shown_refreshed,
     }
 }
 
@@ -1503,6 +1549,12 @@ fn warm_loop(state: Arc<ServerState>) {
         let mut warmers: HashMap<usize, Warmer> = HashMap::new();
         loop {
             let now = now_secs();
+            let read = |key: &str, known| {
+                list_path(key)
+                    .ok()
+                    .and_then(|path| read_warm_snapshot_path(&path, known))
+                    .unwrap_or(SnapshotUpdate::Missing)
+            };
             for (index, config) in state.addons.script_filters.iter().enumerate() {
                 if config.warm_queries.is_empty() {
                     continue;
@@ -1514,7 +1566,7 @@ fn warm_loop(state: Arc<ServerState>) {
                     &now_secs,
                     config,
                     &policy,
-                    &read_list,
+                    &read,
                     &mut |view, query, still_due| {
                         warm_run(&state, config, policy.ttl, view, query, still_due)
                     },
@@ -1560,11 +1612,16 @@ fn warm_script_filter(
     };
     let mut error = None;
     let mut ran = false;
-    let always = || true;
     let mut warm_query = |query: &str| -> Vec<String> {
+        // Asked for by a user, so it runs even while a background run has it, as F5 does
+        let refresh = |view| {
+            let config = script_filters::view_config(config, view);
+            let _forced = state.force(format!("list:{}", script_filter_list_key(&config, query)));
+            run_list(&config, ttl, query)
+        };
         // The default run names the other views, each warmed under its own key.
-        let (views, asked) = match warm_run(state, config, ttl, None, query, &always) {
-            Run::Done(Ok(result)) => {
+        let (views, asked) = match refresh(None) {
+            Ok(result) => {
                 ran = true;
                 let default = result
                     .view
@@ -1577,19 +1634,14 @@ fn warm_script_filter(
                     .collect();
                 (views, result.cache_warm)
             }
-            Run::Done(Err(message)) => {
-                ran = true;
+            Err(message) => {
                 error.get_or_insert(format!("{}: {message}", config.name));
                 (Vec::new(), Vec::new())
             }
-            Run::Skipped => (Vec::new(), Vec::new()),
         };
         for view in &views {
-            if let Run::Done(outcome) = warm_run(state, config, ttl, Some(view), query, &always) {
-                ran = true;
-                if let Err(message) = outcome {
-                    error.get_or_insert(format!("{} ({}): {message}", config.name, view.title));
-                }
+            if let Err(message) = refresh(Some(view)) {
+                error.get_or_insert(format!("{} ({}): {message}", config.name, view.title));
             }
         }
         asked
@@ -1601,7 +1653,7 @@ fn warm_script_filter(
     for query in advertised_queries(config, &asked) {
         warm_query(&query);
     }
-    if ran {
+    if ran || error.is_some() {
         state.set_status(&format!("script:{index}"), error.clone());
     }
     error.map_or(Ok(()), Err)
@@ -1625,17 +1677,25 @@ fn warm_run(
     if !still_due() {
         return Run::Skipped;
     }
+    Run::Done(run_list(&config, ttl, query))
+}
+
+fn run_list(
+    config: &ScriptFilterConfig,
+    ttl: Duration,
+    query: &str,
+) -> Result<ScriptFilterResult, String> {
     let mut env = config.env.clone();
     env.insert("RAFFI_REFRESH".into(), "1".into());
-    Run::Done(server_run(script_filters::run_script_filter(
+    server_run(script_filters::run_script_filter(
         &config.command,
         &config.args,
         &env,
         query,
         config.icon.clone(),
-        list_target(&config, query, ttl),
+        list_target(config, query, ttl),
         Some(SERVER_RUN_TIMEOUT),
-    )))
+    ))
 }
 
 fn warm_named(state: &Arc<ServerState>, source: &str) -> Result<(), String> {
@@ -1821,6 +1881,30 @@ mod tests {
         let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn warm_snapshot_reads_payload_only_when_the_file_changes() {
+        let dir = tempdir("warm-snapshot");
+        let path = dir.join("snapshot.json");
+        let write = |payload| {
+            write_snapshot_path(&path, payload, Duration::from_secs(300), 10, None).unwrap();
+        };
+        write(r#"{"items":[],"view":"a"}"#);
+        let Some(SnapshotUpdate::Changed(stamp, Some(_))) = read_warm_snapshot_path(&path, None)
+        else {
+            panic!("initial snapshot");
+        };
+        assert!(matches!(
+            read_warm_snapshot_path(&path, Some(stamp)),
+            Some(SnapshotUpdate::Unchanged)
+        ));
+        write(r#"{"items":[],"view":"b"}"#);
+        assert!(matches!(
+            read_warm_snapshot_path(&path, Some(stamp)),
+            Some(SnapshotUpdate::Changed(_, Some(snapshot))) if snapshot.payload.contains(r#""view":"b""#)
+        ));
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -2038,6 +2122,32 @@ mod tests {
             handle_request(&state, script("/nonexistent/raffi-script")),
             Response::Error { .. }
         ));
+    }
+
+    #[test]
+    fn refresh_all_runs_a_list_held_by_the_background_warmer() {
+        let mut addons = quiet_addons();
+        let config = ScriptFilterConfig {
+            name: "Repos".into(),
+            command: "sh".into(),
+            args: vec!["-c".into(), r#"echo '{"items":[]}'"#.into()],
+            keyword: "r".into(),
+            cache_seconds: Some(60),
+            warm_queries: vec!["".into()],
+            ..Default::default()
+        };
+        let key = script_filter_list_key(&config, "");
+        addons.script_filters.push(config);
+        let state = Arc::new(ServerState::new(addons));
+        let _held = state.hold(format!("list:{key}")).unwrap();
+        assert!(matches!(
+            handle_request(&state, Request::RefreshAll),
+            Response::Ok
+        ));
+        assert!(state
+            .source_status()
+            .iter()
+            .any(|status| status.source == "script:0" && status.error.is_none()));
     }
 
     fn snapshot_aged(age: u64, hint: Option<u64>) -> Snapshot {

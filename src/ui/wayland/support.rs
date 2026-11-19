@@ -11,7 +11,7 @@ use fuzzy_matcher::skim::SkimMatcherV2;
 
 use super::ranking::{score_document, PreparedQuery, ScoredMatch, SearchDocument};
 use super::state::CalculatorResult;
-use super::types::{InlineProvider, InlineResult, InlineRow};
+use super::types::{InlineProvider, InlineResult, InlineRow, ScriptFilterItem};
 use crate::ui::{get_history_cache_path, get_last_query_cache_path};
 use crate::{RaffiConfig, SortMode};
 
@@ -306,6 +306,76 @@ pub(super) fn record_mru_use(map: &mut HashMap<String, MruEntry>, key: String) {
         .unwrap_or(0);
 }
 
+/// Drop the entries used longest ago until `map` holds at most `cap` of them.
+pub(super) fn trim_mru_map(map: &mut HashMap<String, MruEntry>, cap: usize) {
+    if map.len() <= cap {
+        return;
+    }
+    let mut used: Vec<(u64, String)> = map
+        .iter()
+        .map(|(key, entry)| (entry.last_used, key.clone()))
+        .collect();
+    used.sort_by_key(|a| a.0);
+    for (_, key) in used.drain(..map.len() - cap) {
+        map.remove(&key);
+    }
+}
+
+/// Usage map key of one row: the script filter's name and the row's `arg`,
+/// JSON encoded so a name or arg holding `|` or a newline cannot break a
+/// line of the cache or collide with another row's key.
+pub(super) fn script_filter_usage_key(filter_name: &str, arg: &str) -> String {
+    serde_json::to_string(&(filter_name, arg)).expect("two strings always serialize")
+}
+
+/// Raise the usage of the rows `picks` names, so a filter ranks rows picked
+/// before its own usage map existed. Picks come from the main view's recent
+/// list, whose source is `script_filters.<filter name>`.
+pub(super) fn seed_script_filter_usage(
+    usage: &mut HashMap<String, MruEntry>,
+    filter_names: &[String],
+    picks: &[super::recent::RecentPick],
+) {
+    for pick in picks {
+        let Some(filter_name) = pick.source.strip_prefix("script_filters.") else {
+            continue;
+        };
+        if !filter_names.iter().any(|name| name == filter_name) {
+            continue;
+        }
+        let entry = usage
+            .entry(script_filter_usage_key(filter_name, &pick.key))
+            .or_insert(MruEntry {
+                count: 1,
+                last_used: 0,
+            });
+        entry.last_used = entry.last_used.max(pick.last_used);
+    }
+}
+
+/// Rank the rows `usage` knows by when they were picked, keeping the script's
+/// order for the rest: the sort is stable, so untouched rows and rows picked
+/// in the same second keep their place. A list with an indented row is a tree
+/// and keeps its shape.
+pub(super) fn sort_script_filter_items(
+    items: &mut [ScriptFilterItem],
+    filter_name: &str,
+    usage: &HashMap<String, MruEntry>,
+) {
+    if items.iter().any(|item| item.indent > 0) {
+        return;
+    }
+    items.sort_by_key(|item| {
+        let picked = item
+            .arg
+            .as_deref()
+            .filter(|_| item.valid)
+            .and_then(|arg| usage.get(&script_filter_usage_key(filter_name, arg)));
+        let last_used = picked.map_or(0, |entry| entry.last_used);
+        (picked.is_none(), std::cmp::Reverse(last_used))
+    });
+}
+
 /// Highest count, oldest non-zero timestamp and newest timestamp, as needed
 /// by `mru_sort_key`.
 pub(super) fn mru_bounds(map: &HashMap<String, MruEntry>) -> (u32, u64, u64) {
@@ -422,6 +492,145 @@ pub(super) fn save_last_query(query: &str) {
 mod tests {
     use super::*;
     use crate::RaffiConfig;
+
+    fn row(title: &str, arg: &str, indent: u32) -> ScriptFilterItem {
+        ScriptFilterItem {
+            actions: Vec::new(),
+            time: None,
+            children: None,
+            title: title.into(),
+            valid: true,
+            subtitle: None,
+            arg: Some(arg.into()),
+            indent,
+            icon: None,
+            preview: None,
+            variables: Default::default(),
+            quicklookurl: None,
+            text: None,
+        }
+    }
+
+    fn usage<S: AsRef<str>>(entries: &[(S, u64)]) -> HashMap<String, MruEntry> {
+        entries
+            .iter()
+            .map(|(key, last_used)| {
+                (
+                    key.as_ref().to_string(),
+                    MruEntry {
+                        count: 1,
+                        last_used: *last_used,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    fn titles(items: &[ScriptFilterItem]) -> Vec<&str> {
+        items.iter().map(|item| item.title.as_str()).collect()
+    }
+
+    #[test]
+    fn test_sort_script_filter_items_puts_the_last_picked_first() {
+        let mut items = vec![
+            row("one", "1", 0),
+            row("two", "2", 0),
+            row("three", "3", 0),
+            row("four", "4", 0),
+        ];
+        let usage = usage(&[
+            (script_filter_usage_key("GitHub", "1"), 300),
+            (script_filter_usage_key("GitHub", "4"), 500),
+            (script_filter_usage_key("Other", "2"), 900),
+        ]);
+        sort_script_filter_items(&mut items, "GitHub", &usage);
+        assert_eq!(titles(&items), ["four", "one", "two", "three"]);
+    }
+
+    #[test]
+    fn test_sort_script_filter_items_leaves_the_unpicked_rows_alone() {
+        let mut items = vec![row("a", "a", 0), row("b", "b", 0), row("c", "c", 0)];
+        sort_script_filter_items(
+            &mut items,
+            "GitHub",
+            &usage(&[(script_filter_usage_key("GitHub", "c"), 1)]),
+        );
+        assert_eq!(titles(&items), ["c", "a", "b"]);
+
+        let mut items = vec![row("a", "a", 0), row("b", "b", 0)];
+        sort_script_filter_items(&mut items, "GitHub", &HashMap::new());
+        assert_eq!(titles(&items), ["a", "b"], "nothing picked, no change");
+    }
+
+    #[test]
+    fn test_sort_script_filter_items_keeps_invalid_rows_in_place() {
+        let mut hidden = row("heading", "h", 0);
+        hidden.valid = false;
+        let mut items = vec![hidden, row("real", "r", 0)];
+        sort_script_filter_items(
+            &mut items,
+            "GitHub",
+            &usage(&[(script_filter_usage_key("GitHub", "h"), 900)]),
+        );
+        assert_eq!(titles(&items), ["heading", "real"]);
+
+        let mut items = vec![row("no arg", "", 0), row("real", "r", 0)];
+        items[0].arg = None;
+        sort_script_filter_items(
+            &mut items,
+            "GitHub",
+            &usage(&[(script_filter_usage_key("GitHub", ""), 900)]),
+        );
+        assert_eq!(titles(&items), ["no arg", "real"], "no arg, no boost");
+    }
+
+    #[test]
+    fn test_sort_script_filter_items_leaves_grouped_lists_alone() {
+        let mut items = vec![
+            row("owner", "o", 0),
+            row("indented", "i", 1),
+            row("other", "x", 0),
+        ];
+        sort_script_filter_items(
+            &mut items,
+            "GitHub",
+            &usage(&[(script_filter_usage_key("GitHub", "x"), 900)]),
+        );
+        assert_eq!(titles(&items), ["owner", "indented", "other"]);
+    }
+
+    #[test]
+    fn test_script_filter_usage_key_keeps_a_delimiter_collision_apart() {
+        assert_ne!(
+            script_filter_usage_key("A|B", "C"),
+            script_filter_usage_key("A", "B|C")
+        );
+    }
+
+    #[test]
+    fn test_script_filter_usage_key_survives_a_newline_round_trip() {
+        let key = script_filter_usage_key("GitHub", "first\nsecond\rthird");
+        let map = usage(&[(key.clone(), 7)]);
+        let path =
+            std::env::temp_dir().join(format!("raffi-usage-key-{}.cache", std::process::id()));
+        save_mru_map(Some(&path), &map);
+        let content = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(content.lines().count(), 1, "one key, one line: {content:?}");
+        let parsed = parse_mru_map(&content);
+        let entry = &parsed[&key];
+        assert_eq!((entry.count, entry.last_used), (1, 7));
+    }
+
+    #[test]
+    fn test_trim_mru_map_drops_the_least_recently_used() {
+        let mut map = usage(&[("old", 1), ("middle", 2), ("new", 3)]);
+        trim_mru_map(&mut map, 2);
+        assert!(!map.contains_key("old"));
+        assert_eq!(map.len(), 2);
+        trim_mru_map(&mut map, 2);
+        assert_eq!(map.len(), 2, "a map under the cap is left alone");
+    }
 
     #[test]
     fn test_word_prefix_match() {

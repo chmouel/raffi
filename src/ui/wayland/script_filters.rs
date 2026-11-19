@@ -31,6 +31,10 @@ struct ScriptFilterResponse {
     /// Kept raw so that a malformed hint never fails the whole list.
     #[serde(default)]
     cache: Option<Box<serde_json::value::RawValue>>,
+    /// `"usage"` asks for picked rows first; anything else, or nothing,
+    /// keeps the order the script prints.
+    #[serde(default)]
+    sort: Option<serde_json::Value>,
 }
 
 /// What a script said about caching its output.
@@ -87,6 +91,8 @@ pub(super) fn parse_script_filter_output(
                 cache_hint: hint.seconds,
                 not_stored: hint.seconds == Some(0),
                 cache_warm: hint.warm,
+                sort_by_usage: response.sort.as_ref().and_then(|sort| sort.as_str())
+                    == Some("usage"),
             }
         })
         .map_err(|error| format!("Invalid JSON: {}", error))
@@ -718,6 +724,7 @@ mod tests {
             cache_max_seconds: None,
             warm_queries: Vec::new(),
             warm_interval_seconds: None,
+            sort_by_usage: None,
             actions: Vec::new(),
         };
         let item = super::ScriptFilterItem {
@@ -894,6 +901,38 @@ mod tests {
         let result =
             parse_script_filter_output(r#"{"cache":{"seconds":5},"items":[]}"#, None).unwrap();
         assert!(!result.not_stored);
+    }
+
+    #[test]
+    fn test_parse_script_filter_output_with_a_usage_sort_hint() {
+        let asked =
+            parse_script_filter_output(r#"{"sort":"usage","items":[]}"#, None).expect("valid json");
+        assert!(asked.sort_by_usage);
+
+        for stdout in [
+            r#"{"items":[]}"#,
+            r#"{"sort":"alpha","items":[]}"#,
+            r#"{"sort":true,"items":[]}"#,
+            r#"{"sort":null,"items":[]}"#,
+        ] {
+            let result = parse_script_filter_output(stdout, None).expect("valid json");
+            assert!(!result.sort_by_usage, "{stdout} keeps the script order");
+        }
+    }
+
+    #[test]
+    fn test_snapshot_keeps_the_usage_sort_hint() {
+        let path = temp_snapshot_path("sort");
+        run_printing(
+            &path,
+            r#"{"sort":"usage","cache":{"seconds":300},"items":[{"title":"One"}]}"#,
+        );
+        let snapshot = super::cache::read_snapshot_path(&path).unwrap();
+        let result = super::cache::parse_list(&snapshot, None).expect("cached result parses");
+        assert!(
+            result.sort_by_usage,
+            "a cached payload is re-parsed, hint included"
+        );
     }
 
     fn temp_snapshot_path(name: &str) -> std::path::PathBuf {

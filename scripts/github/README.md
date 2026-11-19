@@ -161,7 +161,7 @@ Raffi asks for the preview by running the script again with `RAFFI_PREVIEW=1`
 and the pull request URL in `RAFFI_VALUE`. To try it by hand:
 
 ```bash
-RAFFI_PREVIEW=1 RAFFI_VALUE=https://github.com/chmouel/raffi/pull/1 \
+RAFFI_PREVIEW=1 RAFFI_VALUE=https://github.com/owner/repo/pull/1 \
   ~/.config/raffi/scripts/github/pr.py
 ```
 
@@ -195,10 +195,10 @@ addons:
     - name: "Repositories"
       keyword: "repo"
       command: "~/.config/raffi/scripts/github/repos.py"
-      args: ["--owners", "me,t,osp"]
+      args: ["--owners", "me,a,labs"]
       env:
-        ALIAS_t: tektoncd
-        ALIAS_osp: openshift-pipelines
+        ALIAS_a: acme
+        ALIAS_labs: acme-labs
       icon: "github"
       action: "xdg-open {value}"
       secondary_action: "copy"
@@ -208,29 +208,43 @@ addons:
 
 `--owners` takes a comma separated list of accounts or aliases. `me` is the
 account `gh` is logged in as, and every other alias is an `ALIAS_<name>`
-variable in the filter's `env`, as `t` and `osp` are above. Each one is a
-Raffi view, so Ctrl+Tab switches between them and keeps what you typed. The
-first one is the default, `me` without `--owners`.
+variable in the filter's `env`, as `a` and `labs` are above. Each one is a
+Raffi view, so Ctrl+Tab switches between them and keeps what you typed. With
+more than one account, the default view is All: the repositories of every
+account mixed together by last push, each row starting with its owner. Without
+`--owners` the only account is `me`.
 
 ```text
-repo                      your repositories, most recently pushed first
-repo raffi                the same, filtered by "raffi"
-repo tektoncd             the repositories of the tektoncd organization
-repo tektoncd pac         the same, filtered by "pac"
-repo chmouel/raffi        opens that repository
+repo                      every account's repositories, most recently pushed first
+repo cli                  the same, filtered by "cli"
+repo a                    the repositories of the acme organization
+repo acme api             the same, filtered by "api"
+repo owner/repo           opens that repository
 ```
 
-The first word is an account or an alias. A word that names one of the listed
+The first word is an account from `--owners` or an alias. Any other word
+filters the current list, so a typo never lists a stranger's repositories.
+Pass `--any-owner`, or set `ANY_OWNER=1`, to let the first word be any GitHub
+account, as in `repo some-org`. A word that names one of the listed
 repositories, or the listed account itself, filters instead, and `me word`
 filters your repositories whatever the word is. The remaining words must all
 appear in a repository's description, topics, name, language or flags, which
 are shown with its stars and last push. Names answer to their initials too, so
-`t pac` finds `pipelines-as-code`, and name matches are listed before the rest.
+`a gs` finds `go-server`, and name matches are listed before the rest.
+Forks come after every other repository, in all views.
 A filter that matches nothing says so instead of showing an empty list.
 
 Enter opens the selected repository and Ctrl+Enter copies its URL. The last
 row opens the account itself, and comes first instead when nothing matched; it
 exports `REPO_URL` and `REPO_OWNER`.
+
+The output asks Raffi to list the repositories you picked first, with a
+top-level `"sort": "usage"`, since you go back to the same few again and again.
+The rows you never picked keep the order the script prints. Pass
+`--no-usage-sort`, or set `USAGE_SORT=0` in the filter's `env`, to keep that
+order instead, and `sort_by_usage: false` in `raffi.yaml` does the same from
+the config side.
+
 Repository rows also export `REPO_NAME` (owner/name), `REPO_SSH` and
 `REPO_CLONE`, so a clone action can be:
 
@@ -255,7 +269,7 @@ page gives single-key access:
     - name: "Repository pull requests"
       keyword: "rpr"
       command: "~/.config/raffi/scripts/github/repos.py"
-      args: ["--owners", "me,t,osp", "--path", "pulls"]
+      args: ["--owners", "me,a,labs", "--path", "pulls"]
       icon: "github"
       action: "xdg-open {value}"
       secondary_action: "copy"
@@ -266,7 +280,7 @@ itself first, then the pages you name, with Enter opening one and Ctrl+Enter
 copying its URL. Escape goes back to the list.
 
 ```yaml
-      args: ["--owners", "me,t,osp", "--pages", "pulls,issues,releases,actions"]
+      args: ["--owners", "me,a,labs", "--pages", "pulls,issues,releases,actions"]
 ```
 
 `--actions` puts pages in the row's action menu instead, opened with Right at
@@ -304,7 +318,9 @@ also read `REPO_PATH`, `REPO_PAGES` and `REPO_ACTIONS` from `env`.
 | `REPO_PAGES` | | Default for `--pages` |
 | `REPO_ACTIONS` | | Default for `--actions` |
 | `CACHE_LOGIN` | `1h` | How long `gh` caches the logged in account |
-| `CACHE_MISSING` | `24h` | How long a word is remembered as not being an account |
+| `ANY_OWNER` | | `1` is the same as `--any-owner` |
+| `USAGE_SORT` | | `0` is the same as `--no-usage-sort` |
+| `CACHE_MISSING` | `24h` | How long a word is remembered as not being an account, with `--any-owner` |
 | `GITHUB_USER` | | Skip the lookup of the logged in account |
 
 `--limit` (default 500) caps how many repositories are listed per account.
@@ -318,7 +334,7 @@ Four layers keep typing cheap:
   `warm_queries` in every view.
 - `gh api --cache` holds each account's pages, and the logged in account is
   kept in `login.json` beside the misses, so answering a keystroke starts no
-  request: about 100 ms for `repo tektoncd` in the warmed case.
+  request: about 100 ms for `repo acme` in the warmed case.
 - Typed filters never reach GitHub. The listed account is fetched once per
   cache window and filtered inside the script, so adding a letter costs a
   process start, not a request.
@@ -357,7 +373,8 @@ refreshes the list you are looking at straight away.
 
 Ctrl+R, and the server's warming runs, set `RAFFI_REFRESH=1`, which skips the
 `gh` cache: an uncached page of 100 repositories takes one to three seconds,
-so `repo` against a large account is slower there. Words that are not accounts
+so `repo` against a large account is slower there. With `--any-owner`, words
+that are not accounts
 are remembered in `~/.cache/raffi/github-repos/<host>/missing.json` for
 `CACHE_MISSING`, which keeps a filter that looks like a login from costing a
 request per keystroke, and the logged in account is remembered for

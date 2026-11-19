@@ -3,9 +3,10 @@
 
 Lists the repositories of a GitHub account: yours by default, or the account
 you name or alias. The accounts given to --owners are Raffi views, switched
-with Ctrl+Tab and passed in RAFFI_VIEW. Typing an account or an alias in front
-of the query lists that account instead, and `owner/repo` opens one repository
-directly.
+with Ctrl+Tab and passed in RAFFI_VIEW; with more than one, the default All
+view mixes their repositories. Typing one of those accounts or an
+alias in front of the query lists that account instead, any GitHub account with
+--any-owner, and `owner/repo` opens one repository directly.
 """
 
 import argparse
@@ -13,6 +14,7 @@ import json
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import NamedTuple
 
@@ -85,6 +87,10 @@ def login_file() -> Path:
 # ALIAS_<name> variable in the filter's env.
 ALIASES = {"me": ""}
 
+# The view listing every --owners account together. Not a valid login, so it
+# never names an account.
+ALL_VIEW = "@all"
+
 OWNER = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}")
 REPO = re.compile(r"[\w.-]+/[\w.-]+")
 
@@ -143,6 +149,8 @@ class Options(NamedTuple):
     actions: tuple[tuple[str, str], ...] = ()
     # Pages Enter lists under each row before opening one, same pairs.
     pages: tuple[tuple[str, str], ...] = ()
+    # Whether a typed word may list any GitHub account, not only --owners.
+    any_owner: bool = False
 
 
 DEFAULTS = Options()
@@ -439,8 +447,8 @@ def with_menus(item: dict, name: str, options: Options) -> dict:
     return item
 
 
-def build_item(repo: dict, options: Options = DEFAULTS) -> dict:
-    details = []
+def build_item(repo: dict, options: Options = DEFAULTS, owner: bool = False) -> dict:
+    details = [repo["nameWithOwner"].split("/", 1)[0]] if owner else []
     if description := repo.get("description"):
         details.append(shorten(description))
     if language(repo):
@@ -548,10 +556,14 @@ def list_items(
     """The repositories for the query, and the account they come from.
 
     A first word that is a GitHub account lists that account, so `repo
-    tektoncd` and `repo tektoncd pac` both work. A word that names one of your
-    repositories, or the listed account itself, filters instead, and `me word`
-    filters it whatever the word is.
+    acme` and `repo acme api` both work. Without --any-owner only the
+    configured accounts and aliases are looked up. A word that names one of
+    your repositories, or the listed account itself, filters instead, and `me
+    word` filters it whatever the word is.
     """
+    all_view = len(owners) > 1 and view in ("", ALL_VIEW)
+    if not options.any_owner and not is_owner(view, owners):
+        view = ""
     owner, needle, direct, named_owner = resolve(query, view, owners)
     if direct:
         return owner, [repo_item(direct, options)]
@@ -560,11 +572,20 @@ def list_items(
     rest = rest.strip()
     same = word.casefold() == owner.casefold()
     # Look up the typed account before listing the current one, so `repo
-    # tektoncd` only asks GitHub about tektoncd.
-    if word and not named_owner and not same and (found := as_account(word, options.limit)):
-        declared = any(word.casefold() == name.casefold() for name in owners)
+    # acme` only asks GitHub about acme.
+    declared = is_owner(word, owners)
+    if (
+        word
+        and not named_owner
+        and not same
+        and (declared or options.any_owner)
+        and (found := as_account(word, options.limit))
+    ):
         if declared or not repo_named(owner, word):
             return found["login"], items_for(found, rest.casefold().split(), options)
+
+    if all_view and not named_owner and not same:
+        return ALL_VIEW, mixed_items(owners, needle.casefold().split(), options)
 
     account = account_repos(owner, options.limit)
     if not account:
@@ -574,6 +595,10 @@ def list_items(
     if same:
         return owner, items_for(account, rest.casefold().split(), options)
     return owner, items_for(account, needle.casefold().split(), options)
+
+
+def is_owner(word: str, owners: list[str]) -> bool:
+    return any(word.casefold() == name.casefold() for name in owners)
 
 
 def repo_named(owner: str, name: str) -> bool:
@@ -603,22 +628,55 @@ def no_match_item(account: dict, needle: str) -> dict:
     }
 
 
+def ranked(
+    repos: list[dict], words: list[str], options: Options, owner: bool = False
+) -> list[dict]:
+    """The repositories matching words, forks last.
+
+    Name matches come first, then initials, then anything shown or described;
+    each group keeps the most recently pushed order of repos.
+    """
+    found: dict[tuple[bool, int], list[dict]] = {}
+    for repo in repos:
+        item = build_item(repo, options, owner)
+        if (place := rank(repo, item, words)) is not None:
+            found.setdefault((bool(repo["isFork"]), place), []).append(item)
+    return [item for key in sorted(found) for item in found[key]]
+
+
+def mixed_items(owners: list[str], words: list[str], options: Options) -> list[dict]:
+    """The repositories of every account, by last push, each row naming its owner."""
+    names = list({name.casefold(): name for name in owners}.values())
+    # A refresh skips the gh cache, so fetch the accounts side by side.
+    with ThreadPoolExecutor(max_workers=len(names)) as pool:
+        fetched = list(pool.map(lambda name: account_repos(name, options.limit), names))
+    accounts = [found for found in fetched if found]
+    if not accounts:
+        listed = ", ".join(owners)
+        return error_rows("Account not found", f"No GitHub account among {listed}")
+    repos = sorted(
+        (repo for account in accounts for repo in account["repos"]),
+        key=lambda repo: repo.get("pushedAt") or "",
+        reverse=True,
+    )
+    if matches := ranked(repos, words, options, owner=True):
+        return matches
+    combined = {
+        "login": ", ".join(account["login"] for account in accounts),
+        "total": sum(account["total"] for account in accounts),
+    }
+    return [no_match_item(combined, " ".join(words))] if words else []
+
+
 def items_for(
     account: dict, words: list[str], options: Options = DEFAULTS
 ) -> list[dict]:
     """The account's repositories matching words, then the account itself.
 
-    Name matches come first, then initials, then anything shown or described;
-    each group keeps the most recently pushed order GitHub returned. The
-    account row comes last so it does not push real results down, but first
-    when nothing matched and it is the only row worth selecting.
+    The account row comes last so it does not push real results down, but
+    first when nothing matched and it is the only row worth selecting.
     """
-    found: dict[int, list[dict]] = {}
-    for repo in account["repos"]:
-        item = build_item(repo, options)
-        if (place := rank(repo, item, words)) is not None:
-            found.setdefault(place, []).append(item)
-    matches = [item for place in sorted(found) for item in found[place]]
+    matches = ranked(account["repos"], words, options)
     if not matches:
         items = [account_item(account)]
         if words:
@@ -655,6 +713,20 @@ def main(argv: list[str] | None = None) -> int:
         default=os.environ.get("REPO_PAGES", ""),
         help="pages Enter lists under each row, same syntax as --actions",
     )
+    parser.add_argument(
+        "--no-usage-sort",
+        action="store_true",
+        default=os.environ.get("USAGE_SORT") == "0",
+        help="keep the script's order instead of asking Raffi to list the "
+        "repositories you picked first",
+    )
+    parser.add_argument(
+        "--any-owner",
+        action="store_true",
+        default=os.environ.get("ANY_OWNER") == "1",
+        help="let a typed word list any GitHub account, not only --owners "
+        "and aliases",
+    )
     parser.add_argument("query", nargs="*", help="text typed after the Raffi keyword")
     args = parser.parse_args(argv)
     query = " ".join(args.query).strip()
@@ -663,6 +735,7 @@ def main(argv: list[str] | None = None) -> int:
         path=args.path.strip().strip("/"),
         actions=parse_actions(args.actions),
         pages=parse_actions(args.pages),
+        any_owner=args.any_owner,
     )
 
     # No views here: Raffi would replace the ones it knows with this single
@@ -682,10 +755,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     views = [{"id": name, "title": name} for name in owners]
-    if all(entry["id"] != owner for entry in views):
+    if len(owners) > 1:
+        views.insert(0, {"id": ALL_VIEW, "title": "All"})
+    if owner != ALL_VIEW and all(entry["id"] != owner for entry in views):
         views.append({"id": owner, "title": owner})
-    output = with_cache({"views": views, "view": owner}, items, CACHE_REPOS)
-    print(json.dumps(output, ensure_ascii=False))
+    output = {"views": views, "view": owner}
+    if not args.no_usage_sort:
+        output["sort"] = "usage"
+    print(json.dumps(with_cache(output, items, CACHE_REPOS), ensure_ascii=False))
     return 0
 
 

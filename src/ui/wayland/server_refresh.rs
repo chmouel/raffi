@@ -8,7 +8,7 @@ use std::sync::Arc;
 use iced::Task;
 
 use super::browser_data::off_thread;
-use super::cache::{self, CallError, Request, ServerInfo};
+use super::cache::{self, CallError, RefreshOutcome, Request, ServerInfo};
 use super::command_list::CommandListAddon;
 use super::slack::View;
 use super::state::LauncherApp;
@@ -272,18 +272,6 @@ impl LauncherApp {
             }),
             None => None,
         };
-        let mut requests = Vec::new();
-        // RefreshAll only warms the configured queries, not the shown one.
-        if let Some(Target::ScriptFilter { index, query, .. }) = &target {
-            let view = self.script_filter.active_view();
-            requests.extend(
-                self.addons
-                    .script_filters
-                    .get(*index)
-                    .map(|config| super::script_filters::view_config(config, view))
-                    .and_then(|config| cache::script_filter_refresh_request(&config, query)),
-            );
-        }
         let source = match backed {
             Some(Backed::Slack) => match self.slack.view {
                 Some(View::Home) => Some("slack:home"),
@@ -294,25 +282,34 @@ impl LauncherApp {
             Some(Backed::BrowserHistory) => Some("browser_history"),
             _ => None,
         };
-        if all {
-            requests.push(Request::RefreshAll);
-        } else if let Some(source) = source {
-            requests.push(Request::RefreshSource {
+        // Refresh All only covers the configured and advertised script queries
+        let shown = match &target {
+            Some(Target::ScriptFilter { index, query, .. }) => {
+                let view = self.script_filter.active_view();
+                self.addons
+                    .script_filters
+                    .get(*index)
+                    .map(|config| super::script_filters::view_config(config, view))
+                    .and_then(|config| cache::script_filter_refresh_request(&config, query))
+            }
+            _ if !all => source.map(|source| Request::RefreshSource {
                 source: source.into(),
                 wait: true,
-            });
-        }
+            }),
+            _ => None,
+        };
         self.server.token = self.server.token.wrapping_add(1);
         let token = self.server.token;
         self.server.pending = Some(Pending { token, target });
         self.server.notice = None;
         Task::perform(
-            off_thread(move || cache::refresh(requests)),
+            off_thread(move || cache::refresh(shown, all)),
             move |result| {
                 Message::ServerRefreshDone(
                     token,
-                    result.unwrap_or_else(|| {
-                        Err(CallError::Failed("the refresh stopped unexpectedly".into()))
+                    result.unwrap_or_else(|| RefreshOutcome {
+                        result: Err(CallError::Failed("the refresh stopped unexpectedly".into())),
+                        shown_refreshed: None,
                     }),
                 )
             },
@@ -322,7 +319,7 @@ impl LauncherApp {
     pub(super) fn handle_server_refresh_done(
         &mut self,
         token: u64,
-        result: Result<(), CallError>,
+        outcome: RefreshOutcome,
     ) -> Task<Message> {
         if self
             .server
@@ -337,8 +334,16 @@ impl LauncherApp {
             .pending
             .take()
             .and_then(|pending| pending.target);
-        if let Err(error) = result {
-            // The rows on screen came from the cache and could not be refreshed.
+        let shown_refreshed = outcome.shown_refreshed.unwrap_or(outcome.result.is_ok());
+        self.server.notice = Some(match outcome.result {
+            Ok(()) => Notice::Refreshed,
+            Err(CallError::Unreachable) => {
+                self.server.info = None;
+                Notice::Unreachable
+            }
+            Err(CallError::Failed(message)) => Notice::Failed(message),
+        });
+        if !shown_refreshed {
             if let Some(Target::ScriptFilter {
                 index,
                 query,
@@ -349,16 +354,8 @@ impl LauncherApp {
                     self.script_filter.refresh_failed = self.script_filter.results_are_cached;
                 }
             }
-            self.server.notice = Some(match error {
-                CallError::Unreachable => {
-                    self.server.info = None;
-                    Notice::Unreachable
-                }
-                CallError::Failed(message) => Notice::Failed(message),
-            });
             return Task::none();
         }
-        self.server.notice = Some(Notice::Refreshed);
         // A load started meanwhile brings rows at least as fresh.
         let idle = |app: &Self, addon, session| {
             app.command_list.addon == Some(addon)

@@ -51,6 +51,8 @@ fn test_app_with_fallbacks(addons: AddonsConfig, fallback_paths: Vec<String>) ->
     // Keep the user's snippet usage cache out of tests, both ways.
     app.text_snippets.mru_map.clear();
     app.text_snippets.mru_path = None;
+    app.script_filter.usage.clear();
+    app.script_filter.usage_path = None;
     app.vault.usage.clear();
     app.vault.usage_path = None;
     app.program_exists = |_| true;
@@ -293,6 +295,16 @@ fn test_a_good_refresh_or_a_new_query_clears_the_cached_hint() {
     assert_eq!(cache_hint_text(&app), None, "leaving the filter forgets it");
 }
 
+fn server_refresh_done(token: u64, result: Result<(), super::cache::CallError>) -> Message {
+    Message::ServerRefreshDone(
+        token,
+        super::cache::RefreshOutcome {
+            result,
+            shown_refreshed: None,
+        },
+    )
+}
+
 /// A cached list of a filter whose F5 goes through the server.
 fn f5_cached_app() -> LauncherApp {
     let mut app = cached_rows_app();
@@ -316,7 +328,7 @@ fn test_a_failed_f5_says_how_old_the_cached_rows_are() {
     let _ = app.update(Message::ServerRefresh(false));
     let token = app.server.token;
     assert_eq!(cache_hint_text(&app), None);
-    let _ = app.update(Message::ServerRefreshDone(
+    let _ = app.update(server_refresh_done(
         token,
         Err(super::cache::CallError::Failed("offline".into())),
     ));
@@ -332,11 +344,30 @@ fn test_a_failed_f5_for_rows_that_are_gone_marks_nothing() {
     let _ = app.update(Message::ServerRefresh(false));
     let token = app.server.token;
     app.script_filter.generation += 1;
-    let _ = app.update(Message::ServerRefreshDone(
+    let _ = app.update(server_refresh_done(
         token,
         Err(super::cache::CallError::Failed("offline".into())),
     ));
     assert_eq!(cache_hint_text(&app), None);
+}
+
+#[test]
+fn test_refresh_all_reloads_a_successful_filter_even_if_another_source_fails() {
+    let mut app = f5_cached_app();
+    let _ = app.update(Message::ScriptFilterResult(7, Err("offline".into())));
+    assert!(app.cache_hint().is_some());
+    let _ = app.update(Message::ServerRefresh(true));
+    let generation = app.script_filter.generation;
+    let _ = app.update(Message::ServerRefreshDone(
+        app.server.token,
+        super::cache::RefreshOutcome {
+            result: Err(super::cache::CallError::Failed("Slack is offline".into())),
+            shown_refreshed: Some(true),
+        },
+    ));
+    assert_ne!(app.script_filter.generation, generation);
+    assert!(app.cache_hint().is_none());
+    assert!(server_hint_labels(&app).contains(&"server: Slack is offline".to_string()));
 }
 
 #[test]
@@ -356,7 +387,7 @@ fn test_a_good_f5_clears_the_hint_even_inside_a_child_list() {
             search_query: "ag ".into(),
             selection: 0,
         });
-    let _ = app.update(Message::ServerRefreshDone(token, Ok(())));
+    let _ = app.update(server_refresh_done(token, Ok(())));
     assert_eq!(cache_hint_text(&app), None);
 }
 
@@ -3454,6 +3485,271 @@ fn test_script_filter_navigation_refreshes_root() {
     assert!(app.script_filter.loading);
     assert!(app.script_filter.preview_force_refresh);
     assert!(!tasks.is_empty());
+}
+
+/// Usage map key of a row of the `Agents` filter these tests use.
+fn usage_key(arg: &str) -> String {
+    super::support::script_filter_usage_key("Agents", arg)
+}
+
+/// An app whose filter output answers `script_asked` for `"sort": "usage"`,
+/// with the usage of each `arg` already recorded.
+fn usage_app(
+    rows: Vec<ScriptFilterItem>,
+    usage: &[(&str, u64)],
+    sort_by_usage: Option<bool>,
+    script_asked: bool,
+) -> LauncherApp {
+    let mut app = actions_app(Vec::new());
+    app.addons.script_filters[0].sort_by_usage = sort_by_usage;
+    for (arg, last_used) in usage {
+        app.script_filter.usage.insert(
+            usage_key(arg),
+            super::support::MruEntry {
+                count: 1,
+                last_used: *last_used,
+            },
+        );
+    }
+    let generation = app.script_filter.generation;
+    let _ = app.update(Message::ScriptFilterResult(
+        generation,
+        Ok(ScriptFilterResult {
+            items: rows,
+            sort_by_usage: script_asked,
+            ..Default::default()
+        }),
+    ));
+    app
+}
+
+fn script_filter_titles(app: &LauncherApp) -> Vec<String> {
+    app.script_filter
+        .results
+        .as_ref()
+        .map(|results| {
+            results
+                .items
+                .iter()
+                .map(|item| item.title.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn picked_rows() -> Vec<ScriptFilterItem> {
+    vec![plain_item("Alpha"), plain_item("Beta")]
+}
+
+fn picked_usage() -> [(&'static str, u64); 1] {
+    [("Beta-arg", 500)]
+}
+
+#[test]
+fn test_script_filter_rows_ranked_by_usage_when_the_script_asks() {
+    let app = usage_app(
+        vec![
+            plain_item("Alpha"),
+            plain_item("Beta"),
+            plain_item("Gamma"),
+            plain_item("Delta"),
+        ],
+        &[("Alpha-arg", 300), ("Delta-arg", 500)],
+        None,
+        true,
+    );
+    assert_eq!(
+        script_filter_titles(&app),
+        ["Delta", "Alpha", "Beta", "Gamma"],
+        "picked rows come first, most recent first, the rest keep the script order"
+    );
+}
+
+#[test]
+fn test_script_filter_picks_are_recorded_without_a_sort_hint() {
+    let mut app = usage_app(picked_rows(), &picked_usage(), None, false);
+    assert_eq!(
+        script_filter_titles(&app),
+        ["Alpha", "Beta"],
+        "no hint, no reordering"
+    );
+
+    let _ = app.handle_script_filter_selected(1);
+    let entry = &app.script_filter.usage[&usage_key("Beta-arg")];
+    assert_eq!(
+        entry.count, 2,
+        "a pick on a list that kept the script order is still recorded"
+    );
+    assert!(
+        entry.last_used > 500,
+        "the pick is dated now, not the old use"
+    );
+
+    let generation = app.script_filter.generation;
+    let _ = app.update(Message::ScriptFilterResult(
+        generation,
+        Ok(ScriptFilterResult {
+            items: picked_rows(),
+            sort_by_usage: true,
+            ..Default::default()
+        }),
+    ));
+    assert_eq!(
+        script_filter_titles(&app),
+        ["Beta", "Alpha"],
+        "the recorded pick ranks once a list asks for usage sorting"
+    );
+}
+
+#[test]
+fn test_script_filter_usage_is_seeded_from_recent_picks() {
+    let mut usage = std::collections::HashMap::new();
+    usage.insert(
+        usage_key("Alpha-arg"),
+        super::support::MruEntry {
+            count: 3,
+            last_used: 900,
+        },
+    );
+    let mut older = recent_pick("script_filters.Agents", "Beta-arg");
+    older.last_used = 500;
+    let mut newer = recent_pick("script_filters.Agents", "Gamma-arg");
+    newer.last_used = 700;
+    let mut other_filter = recent_pick("script_filters.Unknown", "Alpha-arg");
+    other_filter.last_used = 9_999;
+    let mut not_a_filter = recent_pick("windows", "Alpha-arg");
+    not_a_filter.last_used = 8_888;
+    super::support::seed_script_filter_usage(
+        &mut usage,
+        &["Agents".to_string()],
+        &[newer, older, other_filter, not_a_filter],
+    );
+    let entry = |arg: &str| usage.get(&usage_key(arg)).map(|e| e.last_used);
+    assert_eq!(entry("Beta-arg"), Some(500));
+    assert_eq!(entry("Gamma-arg"), Some(700));
+    assert_eq!(
+        entry("Alpha-arg"),
+        Some(900),
+        "a newer recorded use keeps its time, and only this filter's picks count"
+    );
+    assert_eq!(usage.len(), 3);
+}
+
+#[test]
+fn test_script_filter_recent_picks_rank_rows_before_any_pick() {
+    let mut usage = std::collections::HashMap::new();
+    let mut pick = recent_pick("script_filters.Agents", "Beta-arg");
+    pick.last_used = 500;
+    super::support::seed_script_filter_usage(&mut usage, &["Agents".to_string()], &[pick]);
+    let mut app = usage_app(picked_rows(), &[], None, true);
+    app.script_filter.usage = usage;
+    let generation = app.script_filter.generation;
+    let _ = app.update(Message::ScriptFilterResult(
+        generation,
+        Ok(ScriptFilterResult {
+            items: picked_rows(),
+            sort_by_usage: true,
+            ..Default::default()
+        }),
+    ));
+    assert_eq!(script_filter_titles(&app), ["Beta", "Alpha"]);
+}
+
+#[test]
+fn test_script_filter_usage_ranking_can_be_turned_off_and_on() {
+    let app = usage_app(picked_rows(), &picked_usage(), Some(false), true);
+    assert_eq!(
+        script_filter_titles(&app),
+        ["Alpha", "Beta"],
+        "config false overrides the script's hint"
+    );
+
+    let app = usage_app(picked_rows(), &picked_usage(), Some(true), false);
+    assert_eq!(
+        script_filter_titles(&app),
+        ["Beta", "Alpha"],
+        "config true sorts without a hint"
+    );
+
+    let mut app = usage_app(picked_rows(), &[], Some(false), true);
+    let _ = app.handle_script_filter_selected(1);
+    assert!(
+        app.script_filter.usage.is_empty(),
+        "a filter set to never rank by usage records nothing"
+    );
+}
+
+#[test]
+fn test_script_filter_usage_ranking_leaves_grouped_lists_alone() {
+    let mut heading = plain_item("owner");
+    heading.valid = false;
+    let mut indented = plain_item("repo");
+    indented.indent = 1;
+    let app = usage_app(
+        vec![heading, indented, plain_item("other")],
+        &[("other-arg", 500)],
+        None,
+        true,
+    );
+    assert_eq!(script_filter_titles(&app), ["owner", "repo", "other"]);
+}
+
+#[test]
+fn test_script_filter_child_pick_also_boosts_its_top_level_row() {
+    let mut parent = plain_item("Repo");
+    parent.children = Some(vec![plain_item("Pages")]);
+    let mut app = usage_app(vec![parent, plain_item("Other")], &[], None, true);
+    let _ = app.handle_script_filter_selected(0);
+    assert_eq!(script_filter_titles(&app), ["Pages"]);
+    let _ = app.handle_script_filter_selected(0);
+    assert!(app
+        .script_filter
+        .usage
+        .contains_key(&usage_key("Pages-arg")));
+    assert!(
+        app.script_filter.usage.contains_key(&usage_key("Repo-arg")),
+        "the row the child list was opened from rises too"
+    );
+
+    let generation = app.script_filter.generation;
+    let _ = app.update(Message::ScriptFilterResult(
+        generation,
+        Ok(ScriptFilterResult {
+            items: vec![plain_item("Other"), plain_item("Repo")],
+            sort_by_usage: true,
+            ..Default::default()
+        }),
+    ));
+    assert_eq!(script_filter_titles(&app), ["Repo", "Other"]);
+}
+
+#[test]
+fn test_script_filter_refresh_keeps_the_selected_row_after_a_kept_open_pick() {
+    let mut app = usage_app(picked_rows(), &[], None, true);
+    app.addons.script_filters[0].close_on_action = Some(false);
+    assert_eq!(script_filter_titles(&app), ["Alpha", "Beta"]);
+    app.selected_index = app.keyword_rows() + 1;
+    let _ = app.handle_script_filter_selected(1);
+    assert!(
+        app.script_filter.usage.contains_key(&usage_key("Beta-arg")),
+        "picking Beta records its use and Raffi stays open"
+    );
+
+    let generation = app.script_filter.generation;
+    let _ = app.update(Message::ScriptFilterResult(
+        generation,
+        Ok(ScriptFilterResult {
+            items: picked_rows(),
+            sort_by_usage: true,
+            ..Default::default()
+        }),
+    ));
+    assert_eq!(script_filter_titles(&app), ["Beta", "Alpha"]);
+    assert_eq!(
+        app.selected_index - app.keyword_rows(),
+        0,
+        "the selection follows Beta to the row it moved to"
+    );
 }
 
 #[test]
@@ -13355,10 +13651,10 @@ fn test_f5_refreshes_slack_through_server_and_keeps_rows_on_failure() {
     // A second F5 while the server works is ignored.
     assert_eq!(app.update(Message::ServerRefresh(false)).units(), 0);
     // A reply for another refresh is ignored.
-    let _ = app.update(Message::ServerRefreshDone(token + 1, Ok(())));
+    let _ = app.update(server_refresh_done(token + 1, Ok(())));
     assert!(app.server.pending.is_some());
 
-    let _ = app.update(Message::ServerRefreshDone(
+    let _ = app.update(server_refresh_done(
         token,
         Err(super::cache::CallError::Failed("token revoked".into())),
     ));
@@ -13370,7 +13666,7 @@ fn test_f5_refreshes_slack_through_server_and_keeps_rows_on_failure() {
     );
 
     let _ = app.update(Message::ServerRefresh(false));
-    let _ = app.update(Message::ServerRefreshDone(
+    let _ = app.update(server_refresh_done(
         app.server.token,
         Err(super::cache::CallError::Unreachable),
     ));
@@ -13400,7 +13696,7 @@ fn test_server_refresh_leaves_a_pending_load_alone() {
     ] {
         assert!(app.update(Message::ServerRefresh(all)).units() > 0);
         assert_eq!(app.command_list.generation, generation);
-        let _ = app.update(Message::ServerRefreshDone(app.server.token, result));
+        let _ = app.update(server_refresh_done(app.server.token, result));
         assert!(app.command_list.loading);
         assert_eq!(app.command_list.generation, generation);
     }
@@ -13427,7 +13723,7 @@ fn test_f5_on_browser_history_survives_a_filter_change() {
     let _ = app.update(Message::BrowserHistorySearchDue(session, generation));
     assert_eq!(command_list_titles(&app), ["Raffi"]);
 
-    let task = app.update(Message::ServerRefreshDone(app.server.token, Ok(())));
+    let task = app.update(server_refresh_done(app.server.token, Ok(())));
     assert!(task.units() > 0, "the fresh snapshot is read again");
     let key = app.browser_history.active_group().unwrap().key.clone();
     let _ = app.update(Message::ServerHistoryReloaded(
@@ -13471,7 +13767,7 @@ fn test_ctrl_shift_f5_refreshes_everything_from_any_view() {
     );
     assert!(app.update(Message::ServerRefresh(true)).units() > 0);
     let token = app.server.token;
-    let _ = app.update(Message::ServerRefreshDone(token, Ok(())));
+    let _ = app.update(server_refresh_done(token, Ok(())));
     assert_eq!(server_hint_labels(&app), vec!["server refreshed"]);
     assert!(server_hint_labels(&app)
         .iter()
@@ -13507,6 +13803,22 @@ fn test_f5_needs_a_current_server() {
 }
 
 #[test]
+fn test_script_filter_refresh_requires_the_cache_preserving_protocol() {
+    let mut app = f5_cached_app();
+    let _ = app.update(Message::CacheServerStatus(Some(super::cache::ServerInfo {
+        protocol: 5,
+        config_digest: super::cache::addons_digest(&app.addons),
+    })));
+    assert!(!app.offers_f5());
+    assert_eq!(app.update(Message::ServerRefresh(false)).units(), 0);
+    assert_eq!(app.update(Message::ServerRefresh(true)).units(), 0);
+    assert_eq!(
+        server_hint_labels(&app),
+        vec!["server outdated, restart it"]
+    );
+}
+
+#[test]
 fn test_f5_reloads_cached_script_filter_unless_query_moved_on() {
     let mut addons = AddonsConfig::default();
     addons.script_filters.push(ScriptFilterConfig {
@@ -13534,7 +13846,7 @@ fn test_f5_reloads_cached_script_filter_unless_query_moved_on() {
     assert_eq!(server_hint_labels(&app), vec!["F5 server refresh"]);
     assert!(app.update(Message::ServerRefresh(false)).units() > 0);
     let generation = app.script_filter.generation;
-    let _ = app.update(Message::ServerRefreshDone(app.server.token, Ok(())));
+    let _ = app.update(server_refresh_done(app.server.token, Ok(())));
     assert_ne!(
         app.script_filter.generation, generation,
         "the script filter reloads once the server is done"
@@ -13543,7 +13855,7 @@ fn test_f5_reloads_cached_script_filter_unless_query_moved_on() {
     let _ = app.update(Message::ServerRefresh(false));
     let _ = app.update(Message::SearchChanged("gh iced".into()));
     let generation = app.script_filter.generation;
-    let _ = app.update(Message::ServerRefreshDone(app.server.token, Ok(())));
+    let _ = app.update(server_refresh_done(app.server.token, Ok(())));
     assert_eq!(
         app.script_filter.generation, generation,
         "a refresh for an older query does not reload the new one"

@@ -308,13 +308,16 @@ the rename keep working.
   `cache_seconds`, it shows `F5 server refresh` instead: F5 asks the
   server to fetch that source again, waits for it, and reloads the list
   from the new snapshot. Ctrl+Shift+F5 does the same for every source the
-  server caches, from any view, and has no footer hint.
+  server caches, from any view, and has no footer hint. It runs script-filter
+  lists even when a background refresh already has them, as F5 does. A
+  successfully refreshed script filter on screen still reloads if another
+  source fails.
 
   The footer warns `server config differs, restart it` when the server
   was started with a different addons configuration, and
-  `server outdated, restart it` when it comes from an older Raffi. F5 is
-  disabled in the second case. If the server stops while Raffi is open,
-  F5 shows `server not reachable`.
+  `server outdated, restart it` when the server cannot safely refresh cached
+  lists. Both shortcuts require a restart in the second case. If the server
+  stops while Raffi is open, F5 shows `server not reachable`.
 
   The server prints a line to its output each time F5 or Ctrl+Shift+F5
   asks for a refresh, then another with how long it took or why it failed:

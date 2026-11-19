@@ -107,6 +107,11 @@ pub(super) struct ScriptFilterState {
     pub displayed_view: Option<String>,
     /// View the script shows when run without `RAFFI_VIEW`.
     pub default_view: Option<String>,
+    /// Usage of the picked rows, by filter name and `arg`, seeded from the
+    /// main view's recent picks at startup.
+    pub usage: HashMap<String, super::support::MruEntry>,
+    /// Where `usage` is saved; `None` keeps usage in memory only.
+    pub usage_path: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone)]

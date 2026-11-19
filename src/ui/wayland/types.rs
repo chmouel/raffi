@@ -416,6 +416,9 @@ pub(crate) struct ScriptFilterResult {
     pub not_stored: bool,
     /// Queries the script says are worth keeping fresh in the background.
     pub cache_warm: Vec<String>,
+    /// The script asked for picked rows first with a top-level
+    /// `"sort": "usage"`.
+    pub sort_by_usage: bool,
 }
 
 /// A file or directory entry for the file browser addon.
@@ -736,7 +739,7 @@ pub(crate) enum Message {
     /// server.
     ServerRefresh(bool),
     /// The server finished the refresh with this token.
-    ServerRefreshDone(u64, std::result::Result<(), super::cache::CallError>),
+    ServerRefreshDone(u64, super::cache::RefreshOutcome),
     /// Browser history read again after a server refresh: list session, group key.
     ServerHistoryReloaded(
         u64,
