@@ -386,6 +386,7 @@ fn test_a_good_f5_clears_the_hint_even_inside_a_child_list() {
             query: String::new(),
             search_query: "ag ".into(),
             selection: 0,
+            lazy_parent: None,
         });
     let _ = app.update(server_refresh_done(token, Ok(())));
     assert_eq!(cache_hint_text(&app), None);
@@ -616,6 +617,7 @@ fn test_preview_script_filter_reads_virtual_file_with_zero_reported_size() {
             actions: Vec::new(),
             time: None,
             children: None,
+            children_lazy: false,
             title: "CPU info".into(),
             valid: true,
             subtitle: None,
@@ -3205,6 +3207,7 @@ fn test_preview_script_filter_precedence() {
                 actions: Vec::new(),
                 time: None,
                 children: None,
+                children_lazy: false,
                 title: "Item 1".into(),
                 valid: true,
                 subtitle: Some("Fallback subtitle".into()),
@@ -3225,6 +3228,7 @@ fn test_preview_script_filter_precedence() {
                 actions: Vec::new(),
                 time: None,
                 children: None,
+                children_lazy: false,
                 title: "Item 2".into(),
                 valid: true,
                 subtitle: Some("Fallback subtitle".into()),
@@ -3278,6 +3282,7 @@ fn test_preview_script_filter_decodes_file_url_paths() {
         actions: Vec::new(),
         time: None,
         children: None,
+        children_lazy: false,
         title: "File".into(),
         valid: true,
         subtitle: None,
@@ -3346,6 +3351,7 @@ fn plain_item(title: &str) -> ScriptFilterItem {
         actions: Vec::new(),
         time: None,
         children: None,
+        children_lazy: false,
         title: title.into(),
         valid: true,
         subtitle: None,
@@ -3415,6 +3421,178 @@ fn test_script_filter_nested_back_preserves_unfiltered_siblings() {
         .map(|item| item.title.as_str())
         .collect();
     assert_eq!(titles, ["Alpha", "Beta"]);
+}
+
+fn lazy_children_app() -> LauncherApp {
+    let mut lazy = plain_item("Pull requests");
+    lazy.children_lazy = true;
+    lazy.variables.insert("REPO".into(), "owner/raffi".into());
+    let mut app = dynamic_preview_app(vec![plain_item("Other"), lazy]);
+    app.search_query = "ag raffi".into();
+    app.query_class = classify_query(&app.search_query, &app.addons);
+    app.script_filter.query = "raffi".into();
+    app
+}
+
+#[test]
+fn test_lazy_children_load_cache_filter_and_back() {
+    let mut app = lazy_children_app();
+    let parent = app.script_filter.results.as_ref().unwrap().items[1].clone();
+    let key = super::types::LazyChildrenKey::new(0, None, &parent);
+
+    // Expanding a lazy row pushes navigation and starts loading.
+    let _ = app.handle_script_filter_selected(1);
+    assert!(app.script_filter.loading);
+    assert_eq!(
+        app.script_filter.loading_name.as_deref(),
+        Some("Pull requests")
+    );
+    assert_eq!(app.script_filter.navigation.len(), 1);
+    assert_eq!(app.search_query, "ag ");
+    let gen_loading = app.script_filter.generation;
+
+    // A second Enter while loading is ignored.
+    let _ = app.handle_script_filter_selected(0);
+    assert_eq!(app.script_filter.generation, gen_loading);
+
+    // Typing while loading preserves loading state and remembers the filter.
+    let _ = app.update(Message::SearchChanged("ag fix".into()));
+    assert!(app.script_filter.loading);
+    assert_eq!(app.script_filter.query, "fix");
+
+    // Results arrive: filtered by typed query, cached in session cache.
+    let _ = app.update(Message::ScriptFilterChildrenResult(
+        gen_loading,
+        key.clone(),
+        Ok(ScriptFilterResult {
+            items: vec![plain_item("Fix bug"), plain_item("Add feature")],
+            ..Default::default()
+        }),
+    ));
+    assert!(!app.script_filter.loading);
+    assert_eq!(app.script_filter.navigation_items.len(), 2);
+    let visible: Vec<_> = app
+        .script_filter
+        .results
+        .as_ref()
+        .unwrap()
+        .items
+        .iter()
+        .map(|i| i.title.as_str())
+        .collect();
+    assert_eq!(visible, ["Fix bug"]);
+
+    // Escape goes back and restores parent list, query, and selection.
+    let _ = app.update(Message::Cancel);
+    assert!(app.script_filter.navigation.is_empty());
+    assert_eq!(app.selected_index, app.keyword_rows() + 1);
+    assert_eq!(app.search_query, "ag raffi");
+
+    // Re-expanding the same row hits session cache immediately without loading.
+    let _ = app.handle_script_filter_selected(1);
+    assert!(!app.script_filter.loading);
+    assert_eq!(app.script_filter.results.as_ref().unwrap().items.len(), 2);
+}
+
+#[test]
+fn test_lazy_children_escape_while_loading_drops_stale_result() {
+    let mut app = lazy_children_app();
+    let parent = app.script_filter.results.as_ref().unwrap().items[1].clone();
+    let key = super::types::LazyChildrenKey::new(0, None, &parent);
+
+    let _ = app.handle_script_filter_selected(1);
+    let stale_gen = app.script_filter.generation;
+    assert!(app.script_filter.loading);
+
+    let _ = app.update(Message::Cancel);
+    assert!(!app.script_filter.loading);
+    assert!(app.script_filter.navigation.is_empty());
+    assert_eq!(app.script_filter.results.as_ref().unwrap().items.len(), 2);
+
+    // Late arrival for the cancelled load must be ignored.
+    let _ = app.update(Message::ScriptFilterChildrenResult(
+        stale_gen,
+        key,
+        Ok(ScriptFilterResult {
+            items: vec![plain_item("Stale PR")],
+            ..Default::default()
+        }),
+    ));
+    assert_eq!(
+        app.script_filter.results.as_ref().unwrap().items[1].title,
+        "Pull requests"
+    );
+}
+
+#[test]
+fn test_lazy_children_empty_and_error_rows_and_ctrl_r_refresh() {
+    let mut app = lazy_children_app();
+    let parent = app.script_filter.results.as_ref().unwrap().items[1].clone();
+    let key = super::types::LazyChildrenKey::new(0, None, &parent);
+
+    // Error shows a non-valid status row and is not cached.
+    let _ = app.handle_script_filter_selected(1);
+    let gen1 = app.script_filter.generation;
+    let _ = app.update(Message::ScriptFilterChildrenResult(
+        gen1,
+        key.clone(),
+        Err("timed out".into()),
+    ));
+    assert!(!app.script_filter.loading);
+    assert!(!app.script_filter.lazy_children_cache.contains_key(&key));
+    let items = &app.script_filter.results.as_ref().unwrap().items;
+    assert_eq!(items.len(), 1);
+    assert!(!items[0].valid);
+    assert!(items[0].title.contains("timed out"));
+
+    // Ctrl+R inside the lazy child list retries without leaving the child list.
+    let _ = app.handle_refresh();
+    assert!(app.script_filter.loading);
+    assert_eq!(app.script_filter.navigation.len(), 1);
+    let gen2 = app.script_filter.generation;
+
+    // A second Ctrl+R while already loading does not restart.
+    let _ = app.handle_refresh();
+    assert_eq!(app.script_filter.generation, gen2);
+
+    // Empty result shows a non-valid "No items" row.
+    let _ = app.update(Message::ScriptFilterChildrenResult(
+        gen2,
+        key.clone(),
+        Ok(ScriptFilterResult {
+            items: Vec::new(),
+            not_stored: true,
+            ..Default::default()
+        }),
+    ));
+    assert!(!app.script_filter.loading);
+    assert!(!app.script_filter.lazy_children_cache.contains_key(&key));
+    let items = &app.script_filter.results.as_ref().unwrap().items;
+    assert_eq!(items.len(), 1);
+    assert!(!items[0].valid);
+    assert_eq!(items[0].title, "No items");
+}
+
+#[test]
+fn test_lazy_children_inline_children_take_precedence() {
+    let mut item = plain_item("Hybrid");
+    item.children = Some(vec![plain_item("Inline child")]);
+    item.children_lazy = true;
+    let mut app = dynamic_preview_app(vec![item]);
+
+    let _ = app.handle_script_filter_selected(0);
+    assert!(!app.script_filter.loading);
+    assert_eq!(
+        app.script_filter.results.as_ref().unwrap().items[0].title,
+        "Inline child"
+    );
+    assert!(app
+        .script_filter
+        .navigation
+        .last()
+        .unwrap()
+        .lazy_parent
+        .is_none());
 }
 
 #[test]
@@ -10414,6 +10592,7 @@ fn test_main_view_script_filter_waits_for_min_length_and_drops_stale_runs() {
             actions: Vec::new(),
             time: None,
             children: None,
+            children_lazy: false,
             title: title.into(),
             valid: true,
             subtitle: None,
@@ -10493,6 +10672,7 @@ fn test_main_view_late_rows_keep_the_selection() {
             actions: Vec::new(),
             time: None,
             children: None,
+            children_lazy: false,
             title: format!("mail issue {index}"),
             valid: true,
             subtitle: None,
@@ -10598,6 +10778,7 @@ fn issue_items(count: usize) -> ScriptFilterResult {
                 actions: Vec::new(),
                 time: None,
                 children: None,
+                children_lazy: false,
                 title: format!("issue {index}"),
                 valid: true,
                 subtitle: None,
@@ -12803,6 +12984,7 @@ fn test_main_view_keep_open_preserves_query_and_selection() {
                 actions: Vec::new(),
                 time: None,
                 children: None,
+                children_lazy: false,
                 title: "mail bug".into(),
                 valid: true,
                 subtitle: None,

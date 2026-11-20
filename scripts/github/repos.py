@@ -9,22 +9,18 @@ alias in front of the query lists that account instead, any GitHub account with
 --any-owner, and `owner/repo` opens one repository directly.
 
 The pull requests and issues pages of a repository are live menus when --pages
-or --actions name them: their children are the repository's open pull requests
-or issues, fetched ahead of time by a detached run of this script.
+or --actions name them: their children are fetched on demand when expanded
+(RAFFI_CHILDREN=1).
 """
 
 import argparse
-import fcntl
 import json
-import math
 import os
 import re
-import subprocess
 import sys
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 from pathlib import Path
 from typing import NamedTuple
 
@@ -68,45 +64,6 @@ def env_int(name: str, default: int) -> int:
 
 # How many rows a live menu shows by default.
 LIVE_ITEMS = env_int("LIVE_ITEMS", 20)
-# How many repositories one batch of a background run fetches.
-LIVE_PREFETCH = env_int("LIVE_PREFETCH", 20)
-# How long one detached run may spend draining the queue, as 120s or 2m.
-LIVE_BUDGET = os.environ.get("LIVE_BUDGET", "120s")
-# How long Raffi may keep a list whose live menus are still filling.
-LIVE_RETRY = os.environ.get("LIVE_RETRY", "1m")
-# How long a failed live fetch is remembered, for the row it left loading.
-LIVE_ERRORS = os.environ.get("LIVE_ERRORS", "1h")
-# How many rows of each list the fetch asks GitHub for: --live-items raises it,
-# so a larger menu is not capped by LIVE_ITEMS.
-FETCH_ITEMS = LIVE_ITEMS
-# How many tries a queue edit makes for its short lock, and how long it waits
-# between them: a draw and a detached run can write the queue at the same time.
-EDIT_ATTEMPTS = 4
-EDIT_PAUSE = 0.02
-# How many failed live fetches errors.json keeps, the oldest dropped first.
-LIVE_ERRORS_CAP = 200
-# How much of errors.json is read: a longer file is junk past this. The
-# writer keeps its own file well under it, so what it wrote always parses,
-# and a payload it cut short is read again up to four times this.
-ERRORS_BYTES = 64 * 1024
-# How long a failure message a row shows may be, and how far from now its
-# timestamp may sit before it is treated as nonsense rather than recent: at
-# most ERRORS_TIME_MAX seconds old, and no more than ERRORS_TIME_SKEW ahead,
-# so a future date cannot pass for a failure of a moment ago.
-ERROR_TEXT_LIMIT = 120
-# A record of one owner/repo, as GitHub names them: anything else in the file
-# is junk, and a key long enough to fill it belongs to nobody.
-ERROR_NAME_LIMIT = 200
-ERRORS_TIME_MAX = 10**11
-ERRORS_TIME_SKEW = 300
-# Escape sequences and control characters a failure can carry from gh, which
-# would otherwise reach Rafi's output, or swallow the text after them.
-ESCAPES = re.compile(
-    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\|$)"
-    r"|\x1b\[[0-?]*[ -/]*[@-~]"
-    r"|\x1b[@-Z\\-_]"
-)
-CONTROLS = re.compile(r"[\x00-\x1f\x7f-\x9f\ud800-\udfff]")
 
 # Paths listing GitHub state instead of linking a static page.
 LIVE_PATHS = ("pulls", "issues")
@@ -150,35 +107,6 @@ def missing_file() -> Path:
 def login_file() -> Path:
     return CACHE_DIR / "login.json"
 
-
-def live_file(name: str) -> Path:
-    """The live pull request and issue cache of one owner/repo."""
-    return CACHE_DIR / "live" / f"{name.replace('/', '__')}.json"
-
-
-def queue_file() -> Path:
-    """The owner/repo names still waiting for a background live fetch."""
-    return CACHE_DIR / "live" / "queue.json"
-
-
-def errors_file() -> Path:
-    """The recent live fetch failures, by owner/repo name."""
-    return CACHE_DIR / "live" / "errors.json"
-
-
-def errors_lock_file() -> Path:
-    """The lock a read-modify-write of errors.json holds, briefly."""
-    return CACHE_DIR / "errors.lock"
-
-
-def lock_file() -> Path:
-    """The lock one detached run holds, so two runs never drain at once."""
-    return CACHE_DIR / "live.lock"
-
-
-def edit_lock_file() -> Path:
-    """The lock every read-modify-write of the queue file holds, briefly."""
-    return CACHE_DIR / "queue.lock"
 
 # Short names accepted in front of the query, and as --owners entries. "me"
 # stands for the account gh is logged in as; any other alias comes from an
@@ -397,44 +325,8 @@ def remember_miss(name: str) -> None:
     write_cache(missing_file(), entries)
 
 
-# Repositories whose live cache needs a fetch, in the order they were drawn.
-PENDING: list[str] = []
-# Repository existence answers of this run, so a Ctrl+R rebuild resolves the
-# owners the first pass did.
+# Repository existence answers of this run.
 NAMED: dict[tuple[str, str], bool] = {}
-
-
-def note_pending(name: str) -> None:
-    """Remember that name needs a live fetch, once and in order."""
-    if name not in PENDING:
-        PENDING.append(name)
-
-
-def live_stale(entry: dict) -> bool:
-    """Whether a cached live entry is missing, old, or asks for fewer rows.
-
-    A bigger cache than the fetch asks for is enough: a menu showing 20 rows
-    need not refetch a 50-row cache, or two views would undo each other.
-    """
-    first = entry.get("first") if isinstance(entry, dict) else None
-    return (
-        not entry
-        or not fresh(entry.get("at"), CACHE_LIVE)
-        or not isinstance(first, int)
-        or first < FETCH_ITEMS
-    )
-
-
-def live_entry(name: str) -> dict:
-    """The cached live lists of a repository, queuing a fetch when stale.
-
-    Ctrl+R queues every drawn repository, so its rows are live even when the
-    cache is younger than CACHE_LIVE.
-    """
-    entry = read_cache(live_file(name))
-    if ghcommon.REFRESH or live_stale(entry):
-        note_pending(name)
-    return entry
 
 
 def live_section(section: dict | None) -> dict:
@@ -446,581 +338,17 @@ def live_section(section: dict | None) -> dict:
     }
 
 
-def error_name(value: object) -> str | None:
-    """A recorded failure's owner/repo key, or None for junk and giants."""
-    if not isinstance(value, str) or len(value) > ERROR_NAME_LIMIT:
-        return None
-    return value if REPO.fullmatch(value) else None
-
-
-def error_time(value: object, now: float) -> float | None:
-    """A timestamp a failure record may keep, or None for junk and nonsense."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    # A huge int would overflow the float conversion, and a huge float or an
-    # infinity would keep passing for recent however old it is.
-    if isinstance(value, int) and abs(value) > ERRORS_TIME_MAX:
-        return None
-    at = float(value)
-    if not math.isfinite(at) or at < now - ERRORS_TIME_MAX:
-        return None
-    if at > now + ERRORS_TIME_SKEW:
-        return None
-    return at
-
-
-def clean_message(text: str) -> str:
-    """One short plain line of text, escape sequences and controls aside.
-
-    The escapes go before the first line is taken and before the cap, so a
-    sequence cut in half cannot make Rafi swallow the text after it.
-    """
-    text = ESCAPES.sub("", text).strip()
-    line = text.splitlines()[0].strip() if text else ""
-    return CONTROLS.sub("", line)[:ERROR_TEXT_LIMIT].strip()
-
-
-def error_text(error: BaseException) -> str:
-    """The first line of a failure, short enough for a row subtitle."""
-    return clean_message(str(error)) or error.__class__.__name__
-
-
-def read_errors() -> dict[str, dict]:
-    """The recent live fetch failures, junk and expired entries aside.
-
-    The file is read at most ERRORS_BYTES, and every timestamp is checked
-    before the age arithmetic sees it, so a corrupt or hostile file can
-    neither raise through a menu nor pass for a recent failure forever. A
-    payload cut short by that bound is read again, whole, up to four times
-    it: one of our own writer's is only cut when a bound moves under it.
-    """
-    try:
-        with errors_file().open("rb") as stream:
-            try:
-                data = json.loads(stream.read(ERRORS_BYTES))
-            except ValueError:
-                stream.seek(0)
-                data = json.loads(stream.read(4 * ERRORS_BYTES))
-    except (OSError, ValueError, RecursionError):
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    now = time.time()
-    window = seconds(LIVE_ERRORS, default=3600)
-    found: dict[str, dict] = {}
-    for name, entry in data.items():
-        if not error_name(name) or not isinstance(entry, dict):
-            continue
-        error = entry.get("error")
-        message = clean_message(error) if isinstance(error, str) else ""
-        at = error_time(entry.get("at"), now)
-        if at is None or not message or now - at >= window:
-            continue
-        found[name] = {"at": at, "error": message}
-    return found
-
-
-# The failures the draw in progress shows, read once and dropped by a fetch or
-# a new run: a cold page asks for them once per row, preview and placeholder.
-ERRORS: dict[str, dict] | None = None
-
-
-def error_snapshot() -> dict[str, dict]:
-    """The recorded failures of this draw, read at most once."""
-    global ERRORS
-    if ERRORS is None:
-        ERRORS = read_errors()
-    return ERRORS
-
-
-def reload_errors() -> None:
-    """Drop the snapshot, for a draw that follows a fetch of this process."""
-    global ERRORS
-    ERRORS = None
-
-
-def fit_errors(entries: dict[str, dict]) -> dict[str, dict]:
-    """The newest failures that keep errors.json inside what is read of it.
-
-    A reader stops at ERRORS_BYTES, and json.loads of the cut short payload
-    would lose every record at once, so the writer stays under half of that:
-    the oldest entries go first, whatever order they came in. A record too
-    big to fit with any other is dropped rather than written, so the file the
-    writer leaves is always one the reader can parse.
-    """
-    budget = ERRORS_BYTES // 2
-    kept = sorted(entries.items(), key=lambda item: item[1].get("at") or 0)
-    sizes = [len(json.dumps({name: entry})) - 2 for name, entry in kept]
-    total = 2 + sum(sizes) + 2 * max(len(kept) - 1, 0)
-    while total > budget and kept:
-        total -= sizes.pop(0) + 2
-        kept.pop(0)
-    return dict(kept)
-
-
-def remember_error(name: str, error: BaseException) -> None:
-    """Record that the live fetch of name failed, for the row to show.
-
-    The error lock serializes the read-modify-write of errors.json, so two
-    fetchers of one run, or a success clearing one name while another fails,
-    do not overwrite each other's record. It guards that file only, not the
-    fetch it describes; when the lock stays busy the record is skipped, which
-    costs one hint and never a lost update under the lock.
-    """
-    entry = {"at": time.time(), "error": error_text(error)}
-    if not error_name(name):
-        return
-    with errors_lock() as locked:
-        if not locked:
-            return
-        entries = read_errors()
-        entries[name] = entry
-        newest = sorted(entries.items(), key=lambda item: item[1]["at"])
-        write_cache(errors_file(), fit_errors(dict(newest[-LIVE_ERRORS_CAP:])))
-        reload_errors()
-
-
-def forget_error(name: str) -> None:
-    """Drop the recorded failure of name, its fetch having worked.
-
-    It holds the error lock across its read and its write as remember_error
-    does, and skips the drop when the lock stays busy: the hint then lingers
-    for a while, and no update is lost.
-    """
-    with errors_lock() as locked:
-        if not locked:
-            return
-        entries = read_errors()
-        if entries.pop(name, None) is None:
-            return
-        write_cache(errors_file(), fit_errors(entries))
-        reload_errors()
-
-
-def live_error(name: str) -> dict | None:
-    """The recorded failure of name's last live fetch, when it is recent."""
-    return error_snapshot().get(name)
-
-
-def fetch_live(name: str) -> None:
-    """Fetch a repository's open pull requests and issues into its cache.
-
-    A failure is recorded for the row that would otherwise say it is loading
-    forever, and raised again so the other fetches of the run go on. The
-    cache is published strictly, so a cache that could not be written is a
-    failure too, never a success that clears the record.
-    """
+def fetch_live(name: str, first: int = LIVE_ITEMS) -> dict:
+    """Fetch a repository's open pull requests and issues."""
     owner, _, repo = name.partition("/")
-    try:
-        data = graphql(
-            LIVE_QUERY, cache=CACHE_LIVE, owner=owner, name=repo, first=FETCH_ITEMS
-        )
-        found = data.get("repository") or {}
-        write_cache(
-            live_file(name),
-            {
-                "at": time.time(),
-                "first": FETCH_ITEMS,
-                "pull_requests": live_section(found.get("pullRequests")),
-                "issues": live_section(found.get("issues")),
-            },
-            strict=True,
-        )
-    except (GhError, OSError) as error:
-        remember_error(name, error)
-        raise
-    forget_error(name)
-
-
-def fetch_quietly(name: str) -> None:
-    """Fetch one repository, letting the others of the run go on."""
-    try:
-        fetch_live(name)
-    except (GhError, OSError):
-        pass
-
-
-def fetch_batch(names: list[str]) -> None:
-    """Fetch names side by side, four at a time."""
-    if not names:
-        return
-    try:
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            list(pool.map(fetch_quietly, names))
-    finally:
-        # A draw after the fetch, such as a Ctrl+R rebuild, sees its records.
-        reload_errors()
-
-
-class Entry(NamedTuple):
-    """One queued owner/repo: when it joined the queue, and if Ctrl+R forced it.
-
-    A forced name is fetched even when its cache is still fresh, until a batch
-    takes it.
-    """
-
-    name: str
-    gen: int
-    force: bool
-
-
-class Queue(NamedTuple):
-    """What queue.json holds: the queued entries, and the last generation.
-
-    gen is the highest generation handed out so far. Every add or re-force
-    writes its entry at a newer one, so an acknowledgement naming an older
-    generation leaves later intent queued.
-    """
-
-    entries: list[Entry]
-    gen: int = 0
-
-    @property
-    def names(self) -> list[str]:
-        """The queued owner/repo names, in the order they were drawn."""
-        return [entry.name for entry in self.entries]
-
-    @property
-    def force(self) -> list[str]:
-        """The queued names Ctrl+R asked for again."""
-        return [entry.name for entry in self.entries if entry.force]
-
-
-def texts(value: object) -> list[str]:
-    """The strings of a JSON list, so junk in a cache file reads as empty."""
-    if not isinstance(value, list):
-        return []
-    return [entry for entry in value if isinstance(entry, str)]
-
-
-def queue_entries(data: object) -> list[Entry]:
-    """The entries of a queue payload, in whichever shape it was written.
-
-    The current shape nests them, each with its generation; two older ones
-    still read, a bare list of names and {"names": [...], "force": [...]},
-    and their entries count as generation 0.
-    """
-    if isinstance(data, list):
-        return [Entry(name, 0, False) for name in texts(data)]
-    if not isinstance(data, dict):
-        return []
-    if isinstance(data.get("entries"), list):
-        entries = []
-        for entry in data["entries"]:
-            if not isinstance(entry, dict):
-                continue
-            name, gen = entry.get("name"), entry.get("gen")
-            if isinstance(name, str) and isinstance(gen, int):
-                entries.append(Entry(name, gen, bool(entry.get("force"))))
-        return entries
-    forced = set(texts(data.get("force")))
-    return [Entry(name, 0, name in forced) for name in texts(data.get("names"))]
-
-
-def read_queue() -> Queue:
-    """The owner/repo names waiting for a fetch, in the order they were drawn.
-
-    The file is {"gen": N, "entries": [{"name", "gen", "force"}]}: every
-    entry at the generation it was added or forced at, and N the counter they
-    come from. The counter never falls below an entry's generation, so a
-    later add always outranks an older acknowledgement.
-    """
-    try:
-        data = json.loads(queue_file().read_text())
-    except (OSError, ValueError):
-        data = []
-    entries = queue_entries(data)
-    counter = data.get("gen") if isinstance(data, dict) else 0
-    gen = counter if isinstance(counter, int) else 0
-    return Queue(entries=entries, gen=max([gen] + [entry.gen for entry in entries]))
-
-
-def save_queue(queue: Queue) -> None:
-    """Replace the queue file, entries and counter written together."""
-    write_cache(
-        queue_file(),
-        {
-            "gen": queue.gen,
-            "entries": [
-                {"name": entry.name, "gen": entry.gen, "force": entry.force}
-                for entry in queue.entries
-            ],
-        },
+    data = graphql(
+        LIVE_QUERY, cache=CACHE_LIVE, owner=owner, name=repo, first=max(1, first)
     )
-
-
-def write_queue(names: list[str], force: list[str] = ()) -> None:
-    """Replace the queue file with a whole new one, generation 0 for all.
-
-    Tests and one-off resets use this to seed a known queue. The forced names
-    ride along with the others, and starting the counter over is what a fresh
-    set of names wants: no acknowledgement read before it can drop them,
-    since nothing is in flight when a queue is seeded from scratch.
-    """
-    forced = set(force)
-    save_queue(Queue([Entry(name, 0, name in forced) for name in names], 0))
-
-
-@contextmanager
-def file_lock(path: Path, attempts: int = 1):
-    """Hold an exclusive lock on path, or yield False when it stays taken.
-
-    The writes these locks guard are short, so a busy one is retried a few
-    times, briefly, before the caller gives up its turn.
-    """
-    try:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        handle = path.open("w")
-    except OSError:
-        yield False
-        return
-    try:
-        locked = False
-        for attempt in range(max(attempts, 1)):
-            try:
-                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError:
-                if attempt + 1 == attempts:
-                    break
-                time.sleep(EDIT_PAUSE)
-                continue
-            locked = True
-            break
-        yield locked
-    finally:
-        # Closing the file, not an unlock here, is what frees the lock.
-        handle.close()
-
-
-def drain_lock():
-    """The lock one detached run holds for its whole drain."""
-    return file_lock(lock_file())
-
-
-def edit_lock():
-    """The lock a read-modify-write of the queue file holds, for a moment."""
-    return file_lock(edit_lock_file(), attempts=EDIT_ATTEMPTS)
-
-
-def errors_lock():
-    """The lock a read-modify-write of errors.json holds, for a moment."""
-    return file_lock(errors_lock_file(), attempts=EDIT_ATTEMPTS)
-
-
-def queue_pending(
-    names: list[str], refresh: bool = False, force: int | None = None
-) -> bool:
-    """Add the names a draw needs to the queue the next run drains.
-
-    A name whose cache is still fresh is left out, unless refresh asks for it
-    again as Ctrl+R does: those names go first, being the rows on screen, and
-    are marked forced so a batch fetches them whatever their cache says. force
-    caps how many of the leading names are forced, all of them by default;
-    the others are ordinary queued work. Only the queue's short edit lock is
-    taken, never a drain, so a key press answers while a detached run fetches.
-
-    True once the queue is written, False when the lock stayed busy after a
-    few tries: a refresh the user asked for must then be fetched by the
-    caller, while ordinary work is queued by the next draw again.
-    """
-    wanted = list(dict.fromkeys(names))
-    if not refresh:
-        wanted = [name for name in wanted if live_stale(read_cache(live_file(name)))]
-    if not wanted:
-        return True
-    forced = len(wanted) if force is None else max(force, 0)
-    if not refresh:
-        forced = 0
-    with edit_lock() as locked:
-        if not locked:
-            return False
-        queued = read_queue()
-        added_names = set(wanted)
-        kept = [entry for entry in queued.entries if entry.name not in added_names]
-        gen = queued.gen + 1
-        added = [Entry(name, gen, at < forced) for at, name in enumerate(wanted)]
-        save_queue(Queue(added + kept if refresh else kept + added, gen))
-    return True
-
-
-class Batch(NamedTuple):
-    """The names one fetch takes on, and the generation it read them at."""
-
-    names: list[str]
-    gen: int
-
-
-def next_batch(size: int) -> Batch:
-    """The next queued names worth fetching, left in the queue.
-
-    The names stay queued until the batch is acknowledged, so a run killed
-    while fetching loses nothing: the next run takes them again. A name
-    Ctrl+R forced is fetched whatever its cache says; the others are skipped
-    when their cache is fresh, from another run or from the caller of this
-    one, so the queue never fills with work already done. The batch carries
-    the queue generation it was read at, which is what a later
-    acknowledgement is measured against.
-    """
-    queued = read_queue()
-    wanted = [
-        entry
-        for entry in queued.entries
-        if entry.force or live_stale(read_cache(live_file(entry.name)))
-    ]
-    return Batch([entry.name for entry in wanted[: max(size, 0)]], queued.gen)
-
-
-def ack_batch(batch: Batch) -> bool:
-    """Drop the fetched entries, and the force markers they used, from the queue.
-
-    True once the queue is updated. Only entries as old as the batch go: a
-    name queued or forced again while the batch was fetching carries a newer
-    generation and keeps its new intent. A failed fetch is acknowledged all
-    the same, so it is not forced over and over: another Ctrl+R marks it again.
-    """
-    if not batch.names:
-        return True
-    done = set(batch.names)
-    with edit_lock() as locked:
-        if not locked:
-            return False
-        queued = read_queue()
-        kept = [
-            entry
-            for entry in queued.entries
-            if entry.name not in done or entry.gen > batch.gen
-        ]
-        save_queue(Queue(kept, queued.gen))
-    return True
-
-
-def prune_queue() -> None:
-    """Drop the queued names whose cache went fresh while they waited.
-
-    A batch passes over a name another run just fetched; dropping it here is
-    what keeps the queue from growing with work already done. A forced name
-    stays, being a row Ctrl+R asked for again.
-    """
-    with edit_lock() as locked:
-        if not locked:
-            return
-        queued = read_queue()
-        kept = [
-            entry
-            for entry in queued.entries
-            if entry.force or live_stale(read_cache(live_file(entry.name)))
-        ]
-        if len(kept) == len(queued.entries):
-            return
-        save_queue(Queue(kept, queued.gen))
-
-
-def drain_queue(batches: int | None = None) -> None:
-    """Fetch the queued repositories a batch at a time, until done or out of time.
-
-    One detached run goes on in batches of LIVE_PREFETCH until the queue is
-    empty or LIVE_BUDGET is spent, so a long list fills over a few runs instead
-    of the same first rows over and over. batches stops after that many, which
-    is how Ctrl+R loads one batch and leaves the rest to the background.
-    """
-    deadline = time.monotonic() + seconds(LIVE_BUDGET, default=120)
-    done = 0
-    while (batch := next_batch(LIVE_PREFETCH)).names:
-        fetch_batch(batch.names)
-        if not ack_batch(batch):
-            # Retrying a batch the queue still holds would spin, so leave the
-            # rest of it to the next run.
-            return
-        done += 1
-        if (batches is not None and done >= batches) or time.monotonic() >= deadline:
-            return
-    prune_queue()
-
-
-def load_pending() -> None:
-    """Fetch one batch of the queue for a Ctrl+R that has to list its rows.
-
-    The rest stays queued for the background run. The drain lock is left
-    alone, and the edit lock is held for the acknowledgement only, so the key
-    press answers even while a detached run is fetching.
-    """
-    drain_queue(batches=1)
-
-
-def start_prefetch() -> None:
-    """Run this script detached to drain the queue, so Raffi gets its children."""
-    try:
-        subprocess.Popen(
-            [
-                sys.executable,
-                str(Path(__file__).resolve()),
-                "--prefetch",
-                "--live-items",
-                str(FETCH_ITEMS),
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-    except OSError:
-        pass
-
-
-def run_prefetch() -> int:
-    """The --prefetch run: drain the queue, unless another run is draining."""
-    with drain_lock() as locked:
-        if locked:
-            drain_queue()
-    return 0
-
-
-def build_with_live(build, options: Options):
-    """Build the output, again after a Ctrl+R fetched the pending live lists.
-
-    build returns the owner and items pair main() prints, so the children are
-    attached to the rows that were drawn, in their order.
-    """
-    PENDING.clear()
-    drawn = build()
-    attach_children(drawn[1], options)
-    if not ghcommon.REFRESH or not PENDING:
-        return drawn
-    # Ctrl+R forces the batch it drains, not every row it drew: the rest of
-    # the drawn rows join the queue as ordinary work, fetched in the
-    # background once their cache goes stale.
-    force = max(LIVE_PREFETCH, 0)
-    if not queue_pending(PENDING, refresh=True, force=force):
-        # The edit lock stayed busy, so the queue cannot carry the refresh the
-        # user asked for: fetch it here instead, so the rows still arrive.
-        fetch_batch(PENDING[:force])
-    load_pending()
-    # The second pass reads what the fetch just cached, so it must not skip
-    # that cache the way RAFFI_REFRESH makes every other request do.
-    saved = ghcommon.REFRESH
-    ghcommon.REFRESH = False
-    try:
-        # PENDING then holds what the second pass still misses, which is what
-        # the freshness hint main() prints is about.
-        PENDING.clear()
-        drawn = build()
-        attach_children(drawn[1], options)
-    finally:
-        ghcommon.REFRESH = saved
-    return drawn
-
-
-def cache_window() -> str:
-    """How long Raffi may keep the list, as a gh-style duration.
-
-    Raffi serves its snapshot of a query without running the script again, so
-    a list drawn while the queue is still filling asks for a short window: its
-    loading rows would otherwise outlive CACHE_REPOS. Seconds: 0 would read as
-    a failed refresh, so the window never drops below one second.
-    """
-    if not PENDING:
-        return CACHE_REPOS
-    window = min(seconds(CACHE_REPOS, default=600), seconds(LIVE_RETRY, default=60))
-    return f"{max(1, int(window))}s"
+    found = data.get("repository") or {}
+    return {
+        "pull_requests": live_section(found.get("pullRequests")),
+        "issues": live_section(found.get("issues")),
+    }
 
 
 ACCOUNTS: dict[str, dict | None] = {}
@@ -1241,53 +569,13 @@ def live_paths(options: Options) -> tuple[tuple[str, str], ...]:
     return tuple(found.items())
 
 
-def live_placeholder(name: str, label: str) -> dict:
-    """The row a live menu shows before its first fetch lands."""
-    failure = live_error(name)
-    if failure:
-        subtitle = f"failed: {failure['error']} \u00b7 Ctrl+R retries it"
-        text = (
-            f"The last fetch of the open {label.lower()} of {name} failed: "
-            f"{failure['error']}\nPress Ctrl+R to retry it."
-        )
-    else:
-        subtitle = "loading in the background \u00b7 Ctrl+R loads it now"
-        text = (
-            f"The open {label.lower()} of {name} are being fetched in "
-            "the background, and they show up the next time the script "
-            "runs.\nPress Ctrl+R to load them now."
-        )
-    return {
-        "title": label,
-        "subtitle": subtitle,
-        "valid": False,
-        "preview": {
-            "title": label,
-            "text": text,
-            "dynamic": False,
-        },
-    }
-
-
-def live_preview(label: str, url: str, name: str, loaded: bool) -> dict:
-    """What the preview says about a live menu, before or after its fetch."""
+def live_preview(label: str, url: str, name: str) -> dict:
+    """What the preview says about a live menu."""
     pages = label.lower()
-    if loaded:
-        text = (
-            f"Enter lists the open {pages} of {name}.\n"
-            f"Right \u2192 Copy URL copies {url}; Open on GitHub opens it."
-        )
-    elif failure := live_error(name):
-        text = (
-            f"The last fetch of the open {pages} of {name} failed: "
-            f"{failure['error']}\nCtrl+R retries it; they show up once a "
-            "fetch works."
-        )
-    else:
-        text = (
-            f"The open {pages} of {name} are loading in the background.\n"
-            "They show up the next time the script runs; Ctrl+R loads them now."
-        )
+    text = (
+        f"Enter lists the open {pages} of {name}.\n"
+        f"Right \u2192 Copy URL copies {url}; Open on GitHub opens it."
+    )
     return {
         "title": label,
         "subtitle": url,
@@ -1377,55 +665,51 @@ def issue_leaf(name: str, issue: dict, variables: dict) -> dict:
     return item
 
 
-def live_blank(entry: dict, path: str) -> bool:
-    """Whether a settled live cache fetched no row for path.
-
-    Settled means fresh and fetched with the rows asked for: a stale or short
-    entry, and a Ctrl+R, keep the menu they are about to refill. Only the rows
-    decide otherwise, so a count that disagrees with them never hides one.
-    """
-    if ghcommon.REFRESH or live_stale(entry):
-        return False
-    section = entry.get(LIVE_KEYS[path]) or {}
-    return not section.get("nodes")
-
-
 def live_menu(name: str, path: str, label: str, options: Options) -> dict:
-    """A page of a repository whose children are its open rows, live.
-
-    A fresh list with no rows leaves the plain page link a --no-live run
-    draws, so an empty menu is not two rows of nothing.
-    """
+    """A page of a repository whose open rows are fetched lazily on Enter."""
+    del options
     url = page_url(name, path)
-    variables = repo_variables({"nameWithOwner": name, "url": page_url(name, "")})
-    entry = live_entry(name)
-    if live_blank(entry, path):
-        return link_leaf(name, url, label, variables, label)
-    child = {
+    variables = {
+        **repo_variables({"nameWithOwner": name, "url": page_url(name, "")}),
+        "LIVE_PATH": path,
+        "LIVE_LABEL": label,
+    }
+    return {
         "title": label,
         "subtitle": f"open {url}",
         "arg": url,
         "variables": variables,
         "actions": [{"title": "Open on GitHub", "arg": url}]
         + copy_actions(url, f"{label} \u00b7 {name}"),
-        "preview": live_preview(label, url, name, bool(entry)),
+        "preview": live_preview(label, url, name),
+        "children_lazy": True,
     }
+
+
+def live_children(options: Options) -> dict:
+    """Answer RAFFI_CHILDREN=1 for a live pull requests or issues row."""
+    name = os.environ.get("REPO_NAME", "").strip()
+    path = os.environ.get("LIVE_PATH", "").strip()
+    label = os.environ.get("LIVE_LABEL") or PAGES.get(path, path.title())
+    if not name or path not in LIVE_PATHS:
+        return {"items": [], "cache": {"seconds": 0}}
+    url = page_url(name, path)
+    variables = repo_variables({"nameWithOwner": name, "url": page_url(name, "")})
     whole_page = link_leaf(
         name, url, f"All {label.lower()} on GitHub", variables, label
     )
-    if not entry:
-        child["children"] = [live_placeholder(name, label), whole_page]
-        return child
+    try:
+        entry = fetch_live(name, options.live_items)
+    except GhError as error:
+        return {
+            "items": error_rows("GitHub error", str(error)) + [whole_page],
+            "cache": {"seconds": 0},
+        }
     section = entry.get(LIVE_KEYS[path]) or {}
     nodes = (section.get("nodes") or [])[: max(options.live_items, 0)]
     build = pr_leaf if path == "pulls" else issue_leaf
-    total = section.get("totalCount") or 0
-    child["title"] = f"{label} \u00b7 {total}"
-    child["subtitle"] = f"{total} open \u00b7 {name}"
-    child["children"] = [
-        build(name, node, variables) for node in nodes if node
-    ] + [whole_page]
-    return child
+    items = [build(name, node, variables) for node in nodes if node] + [whole_page]
+    return with_cache({}, items, CACHE_LIVE)
 
 
 def page_children(name: str, options: Options) -> list[dict]:
@@ -1799,16 +1083,9 @@ def main(argv: list[str] | None = None) -> int:
         help="link the pull requests and issues pages instead of listing "
         "the open ones",
     )
-    parser.add_argument("--prefetch", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("query", nargs="*", help="text typed after the Raffi keyword")
     args = parser.parse_args(argv)
-    PENDING.clear()
     NAMED.clear()
-    reload_errors()
-    global FETCH_ITEMS
-    FETCH_ITEMS = max(1, args.live_items)
-    if args.prefetch:
-        return run_prefetch()
     query = " ".join(args.query).strip()
     options = Options(
         limit=args.limit,
@@ -1820,37 +1097,29 @@ def main(argv: list[str] | None = None) -> int:
         live_items=args.live_items,
     )
 
+    if os.environ.get("RAFFI_CHILDREN") == "1":
+        print(json.dumps(live_children(options), ensure_ascii=False))
+        return 0
+
     # No views here: Raffi would replace the ones it knows with this single
     # row, losing the view Ctrl+Tab switched to.
     if direct := direct_repository(query):
-        _, items = build_with_live(
-            lambda: (None, [repo_item(direct, options)]), options
-        )
-        window = cache_window()
-        if not ghcommon.REFRESH:
-            queue_pending(PENDING)
-            if PENDING:
-                start_prefetch()
-        print(json.dumps(with_cache({}, items, window), ensure_ascii=False))
+        items = [repo_item(direct, options)]
+        attach_children(items, options)
+        print(json.dumps(with_cache({}, items, CACHE_REPOS), ensure_ascii=False))
         return 0
 
     try:
         owners = [alias_target(word) or word for word in args.owners.split(",") if word]
         owners = owners or [login()]
         view = os.environ.get("RAFFI_VIEW", "")
-        owner, items = build_with_live(
-            lambda: list_items(query, view, owners, options), options
-        )
+        owner, items = list_items(query, view, owners, options)
+        attach_children(items, options)
     except GhError as error:
         items = error_rows("GitHub error", str(error))
         print(json.dumps(with_cache({}, items, CACHE_REPOS), ensure_ascii=False))
         return 0
 
-    window = cache_window()
-    if not ghcommon.REFRESH:
-        queue_pending(PENDING)
-        if PENDING:
-            start_prefetch()
     views = [{"id": name, "title": name} for name in owners]
     if len(owners) > 1:
         views.insert(0, {"id": ALL_VIEW, "title": "All"})
@@ -1859,7 +1128,7 @@ def main(argv: list[str] | None = None) -> int:
     output = {"views": views, "view": owner}
     if not args.no_usage_sort:
         output["sort"] = "usage"
-    print(json.dumps(with_cache(output, items, window), ensure_ascii=False))
+    print(json.dumps(with_cache(output, items, CACHE_REPOS), ensure_ascii=False))
     return 0
 
 

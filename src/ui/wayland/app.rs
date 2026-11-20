@@ -36,8 +36,9 @@ use super::pass::PassContext;
 use super::preview::image_mime_type;
 use super::recent::{RecentPick, StoredItem};
 use super::script_filters::{
-    execute_script_filter, execute_script_filter_preview, parse_preview_response,
-    parse_script_filter_output, schedule_script_filter_preview, view_config, PreviewRequest,
+    execute_script_filter, execute_script_filter_children, execute_script_filter_preview,
+    parse_preview_response, parse_script_filter_output, schedule_script_filter_preview,
+    view_config, ChildrenRequest, PreviewRequest,
 };
 use super::secret_io::{SecretError, SystemRunner};
 use super::snippets::{
@@ -45,11 +46,12 @@ use super::snippets::{
     missing_clipboard, read_snippet_dir, read_snippet_file, read_snippet_markdown, snippet_mru_key,
 };
 use super::state::{
-    CachedRate, ClipboardData, ClipboardState, CurrencyConversion, CurrencyConversionRequest,
-    CurrencyResult, CurrencyState, DevtoolsState, EmojiEntry, EmojiState, FallbackAction,
-    FileBrowserState, HistoryState, KeywordSuggestion, LauncherApp, Message, MultiCurrencyRequest,
-    MultiCurrencyResult, PendingSelection, ResolvedFallback, ScriptFilterResult, ScriptFilterState,
-    SharedSelection, TextSnippetState, ViewState, WebSearchActiveState, WebSearchState,
+    CachedLazyChildren, CachedRate, ClipboardData, ClipboardState, CurrencyConversion,
+    CurrencyConversionRequest, CurrencyResult, CurrencyState, DevtoolsState, EmojiEntry,
+    EmojiState, FallbackAction, FileBrowserState, HistoryState, KeywordSuggestion, LauncherApp,
+    Message, MultiCurrencyRequest, MultiCurrencyResult, PendingSelection, ResolvedFallback,
+    ScriptFilterResult, ScriptFilterState, SharedSelection, TextSnippetState, ViewState,
+    WebSearchActiveState, WebSearchState,
 };
 use super::support::{
     calculator_inline_result, load_history, load_mru_map, mru_bounds, mru_sort_key, record_mru_use,
@@ -57,7 +59,7 @@ use super::support::{
     seed_script_filter_usage, sort_script_filter_items, trim_mru_map, try_evaluate_math,
 };
 use super::system::system_entries;
-use super::types::{InlineProvider, ScriptFilterItem};
+use super::types::{InlineProvider, LazyChildrenKey, ScriptFilterItem};
 use super::units::{try_parse_unit_conversion, units_inline_result};
 use super::vault::{
     Backend, EntryAction, Field, JobSettings, Op, OpKind, Outcome, PromptState, Report, Request,
@@ -1650,6 +1652,8 @@ impl LauncherApp {
                     self.search_query = navigation.search_query;
                     self.query_class = classify_query(&self.search_query, &self.addons);
                     self.script_filter.generation = self.script_filter.generation.wrapping_add(1);
+                    self.script_filter.loading = false;
+                    self.script_filter.loading_name = None;
                     self.script_filter.previews.clear();
                     self.selected_index = self.keyword_rows() + navigation.selection;
                     self.file_browser.cached_preview = None;
@@ -1721,6 +1725,9 @@ impl LauncherApp {
             }
             Message::ScriptFilterResult(generation, result) => {
                 self.handle_script_filter_result(generation, result)
+            }
+            Message::ScriptFilterChildrenResult(generation, cache_key, result) => {
+                self.handle_script_filter_children_result(generation, cache_key, result)
             }
             Message::ScriptFilterItemSelected(index) => self.handle_script_filter_selected(index),
             Message::ScriptFilterPreviewDue(generation, index) => {
@@ -2048,6 +2055,14 @@ impl LauncherApp {
             }
         }
         if let Some(index) = self.script_filter.config_index {
+            if let Some(parent) = self
+                .script_filter
+                .navigation
+                .last()
+                .and_then(|nav| nav.lazy_parent.clone())
+            {
+                return self.refresh_lazy_children(index, parent);
+            }
             let query = self.script_filter.query.clone();
             let mut tasks = Vec::new();
             self.handle_script_filter_query(index, query, true, &mut tasks);
@@ -2615,31 +2630,22 @@ impl LauncherApp {
                     self.query_class = classify_query(&self.search_query, &self.addons);
                 }
             }
+            if force_refresh {
+                self.script_filter
+                    .lazy_children_cache
+                    .retain(|key, _| key.config_index != config_index);
+            }
             self.script_filter.navigation.clear();
             self.script_filter.navigation_items.clear();
         }
         if !self.script_filter.navigation.is_empty() {
             self.script_filter.query = query.clone();
-            let needle = query.to_lowercase();
+            if self.script_filter.loading {
+                return;
+            }
             if let Some(result) = self.script_filter.results.as_mut() {
-                result.items = self
-                    .script_filter
-                    .navigation_items
-                    .iter()
-                    .filter(|item| {
-                        needle.is_empty()
-                            || item.title.to_lowercase().contains(&needle)
-                            || item
-                                .subtitle
-                                .as_deref()
-                                .is_some_and(|s| s.to_lowercase().contains(&needle))
-                            || item
-                                .arg
-                                .as_deref()
-                                .is_some_and(|s| s.to_lowercase().contains(&needle))
-                    })
-                    .cloned()
-                    .collect();
+                result.items =
+                    filter_script_filter_items(&self.script_filter.navigation_items, &query);
             }
             self.script_filter.loading = false;
             self.script_filter.previews.clear();
@@ -4566,6 +4572,192 @@ impl LauncherApp {
         self.request_script_filter_preview()
     }
 
+    fn open_lazy_children(&mut self, index: usize, item: ScriptFilterItem) -> Task<Message> {
+        let Some(config_index) = self.script_filter.config_index else {
+            return Task::none();
+        };
+        let parent_query = self.script_filter.query.clone();
+        self.script_filter
+            .navigation
+            .push(super::state::ScriptFilterNavigation {
+                items: self
+                    .script_filter
+                    .results
+                    .as_ref()
+                    .map(|result| result.items.clone())
+                    .unwrap_or_default(),
+                unfiltered_items: self.script_filter.navigation_items.clone(),
+                query: parent_query.clone(),
+                search_query: self.search_query.clone(),
+                selection: index,
+                lazy_parent: Some(item.clone()),
+            });
+        self.script_filter.query.clear();
+        if let Some(config) = self.addons.script_filters.get(config_index) {
+            self.search_query = format!("{} ", config.keyword);
+            self.query_class = classify_query(&self.search_query, &self.addons);
+        }
+        self.start_lazy_children_fetch(config_index, item, parent_query, false)
+    }
+
+    fn refresh_lazy_children(
+        &mut self,
+        config_index: usize,
+        parent: ScriptFilterItem,
+    ) -> Task<Message> {
+        if self.script_filter.loading {
+            return Task::none();
+        }
+        let parent_query = self
+            .script_filter
+            .navigation
+            .last()
+            .map(|nav| nav.query.clone())
+            .unwrap_or_default();
+        self.script_filter.preview_force_refresh = true;
+        self.start_lazy_children_fetch(config_index, parent, parent_query, true)
+    }
+
+    fn start_lazy_children_fetch(
+        &mut self,
+        config_index: usize,
+        item: ScriptFilterItem,
+        parent_query: String,
+        force_refresh: bool,
+    ) -> Task<Message> {
+        let Some(config) = self.addons.script_filters.get(config_index) else {
+            return Task::none();
+        };
+        let view = self.script_filter.active_view().cloned();
+        let view_id = view.as_ref().map(|v| v.id.clone());
+        let cache_key = LazyChildrenKey::new(config_index, view_id, &item);
+
+        self.script_filter.generation = self.script_filter.generation.wrapping_add(1);
+        let generation = self.script_filter.generation;
+        self.script_filter.previews.clear();
+        self.script_filter.bump_preview_generation();
+        self.selected_index = self.keyword_rows();
+        self.file_browser.cached_preview = None;
+
+        if !force_refresh {
+            if let Some(cached) = self.script_filter.lazy_children_cache.get(&cache_key) {
+                if cached.is_fresh() {
+                    let items = cached.items.clone();
+                    self.script_filter.loading = false;
+                    self.script_filter.loading_name = None;
+                    self.apply_lazy_children_items(items, false);
+                    return Task::batch([
+                        focus(self.view.search_input_id.clone()),
+                        self.snap_to_selection(),
+                        self.request_script_filter_preview(),
+                    ]);
+                }
+            }
+        }
+
+        if let Some(result) = self.script_filter.results.as_mut() {
+            result.items.clear();
+        }
+        self.script_filter.navigation_items.clear();
+        self.script_filter.loading = true;
+        self.script_filter.loading_name = Some(super::ansi::strip_ansi(&item.title));
+
+        let config = view_config(config, view.as_ref());
+        let mut request = ChildrenRequest::new(&config, &parent_query, &item, force_refresh);
+        request.env.extend(self.view.theme.command_env());
+        Task::batch([
+            focus(self.view.search_input_id.clone()),
+            execute_script_filter_children(request, generation, cache_key),
+        ])
+    }
+
+    fn apply_lazy_children_items(
+        &mut self,
+        mut items: Vec<ScriptFilterItem>,
+        child_asked_sort: bool,
+    ) {
+        if items.is_empty() {
+            let empty = ScriptFilterItem::status_row(
+                "No items",
+                "Press Escape to go back or Ctrl+R to retry",
+            );
+            self.script_filter.navigation_items = vec![empty.clone()];
+            if let Some(result) = self.script_filter.results.as_mut() {
+                result.items = vec![empty];
+            }
+        } else {
+            let parent_asked = self
+                .script_filter
+                .results
+                .as_ref()
+                .is_some_and(|results| results.sort_by_usage);
+            self.sort_script_filter_rows(
+                self.script_filter.config_index,
+                parent_asked || child_asked_sort,
+                &mut items,
+            );
+            self.script_filter.navigation_items = items;
+            if let Some(result) = self.script_filter.results.as_mut() {
+                result.items = filter_script_filter_items(
+                    &self.script_filter.navigation_items,
+                    &self.script_filter.query,
+                );
+            }
+        }
+        self.script_filter.previews.clear();
+        self.script_filter.bump_preview_generation();
+        self.selected_index = self.keyword_rows();
+        self.file_browser.cached_preview = None;
+        self.refresh_file_preview_cache();
+    }
+
+    fn handle_script_filter_children_result(
+        &mut self,
+        generation: u64,
+        cache_key: LazyChildrenKey,
+        result: std::result::Result<ScriptFilterResult, String>,
+    ) -> Task<Message> {
+        if generation != self.script_filter.generation {
+            return Task::none();
+        }
+        self.script_filter.loading = false;
+        self.script_filter.loading_name = None;
+        match result {
+            Ok(sf_result) => {
+                if !sf_result.not_stored {
+                    self.script_filter.lazy_children_cache.insert(
+                        cache_key,
+                        CachedLazyChildren {
+                            items: sf_result.items.clone(),
+                            fetched_at: std::time::Instant::now(),
+                            ttl: sf_result.cache_hint.map(std::time::Duration::from_secs),
+                        },
+                    );
+                }
+                self.apply_lazy_children_items(sf_result.items, sf_result.sort_by_usage);
+            }
+            Err(error) => {
+                let row = ScriptFilterItem::status_row(
+                    format!("Failed to load: {error}"),
+                    "Press Escape to go back or Ctrl+R to retry",
+                );
+                self.script_filter.navigation_items = vec![row.clone()];
+                if let Some(res) = self.script_filter.results.as_mut() {
+                    res.items = vec![row];
+                }
+                self.script_filter.previews.clear();
+                self.script_filter.bump_preview_generation();
+                self.selected_index = self.keyword_rows();
+                self.file_browser.cached_preview = None;
+                self.refresh_file_preview_cache();
+            }
+        }
+        Task::batch([
+            self.snap_to_selection(),
+            self.request_script_filter_preview(),
+        ])
+    }
+
     /// Index of the selected Script Filter result when it should get a
     /// dynamic preview.
     pub(super) fn dynamic_preview_target(&self) -> Option<usize> {
@@ -4778,6 +4970,9 @@ impl LauncherApp {
     }
 
     pub(super) fn handle_script_filter_selected(&mut self, index: usize) -> Task<Message> {
+        if self.script_filter.loading {
+            return Task::none();
+        }
         let menu_action = self.menu_script_action.take();
         if let Some(chosen) = &menu_action {
             // A refresh may have replaced the row since the menu opened.
@@ -4801,49 +4996,55 @@ impl LauncherApp {
                 return Task::none();
             }
             // A menu action runs on the row, it does not open its children.
-            if let Some(mut children) = item.children.filter(|_| menu_action.is_none()) {
-                let script_asked = self
-                    .script_filter
-                    .results
-                    .as_ref()
-                    .is_some_and(|results| results.sort_by_usage);
-                self.sort_script_filter_rows(
-                    self.script_filter.config_index,
-                    script_asked,
-                    &mut children,
-                );
-                self.script_filter
-                    .navigation
-                    .push(super::state::ScriptFilterNavigation {
-                        items: self.script_filter.results.as_ref().unwrap().items.clone(),
-                        unfiltered_items: self.script_filter.navigation_items.clone(),
-                        query: self.script_filter.query.clone(),
-                        search_query: self.search_query.clone(),
-                        selection: index,
-                    });
-                if let Some(result) = self.script_filter.results.as_mut() {
-                    result.items = children.clone();
+            if menu_action.is_none() {
+                if let Some(mut children) = item.children {
+                    let script_asked = self
+                        .script_filter
+                        .results
+                        .as_ref()
+                        .is_some_and(|results| results.sort_by_usage);
+                    self.sort_script_filter_rows(
+                        self.script_filter.config_index,
+                        script_asked,
+                        &mut children,
+                    );
+                    self.script_filter
+                        .navigation
+                        .push(super::state::ScriptFilterNavigation {
+                            items: self.script_filter.results.as_ref().unwrap().items.clone(),
+                            unfiltered_items: self.script_filter.navigation_items.clone(),
+                            query: self.script_filter.query.clone(),
+                            search_query: self.search_query.clone(),
+                            selection: index,
+                            lazy_parent: None,
+                        });
+                    if let Some(result) = self.script_filter.results.as_mut() {
+                        result.items = children.clone();
+                    }
+                    self.script_filter.navigation_items = children;
+                    self.script_filter.query.clear();
+                    if let Some(config) = self
+                        .script_filter
+                        .config_index
+                        .and_then(|index| self.addons.script_filters.get(index))
+                    {
+                        self.search_query = format!("{} ", config.keyword);
+                        self.query_class = classify_query(&self.search_query, &self.addons);
+                    }
+                    self.script_filter.generation = self.script_filter.generation.wrapping_add(1);
+                    self.script_filter.previews.clear();
+                    self.selected_index = self.keyword_rows();
+                    self.file_browser.cached_preview = None;
+                    self.refresh_file_preview_cache();
+                    return Task::batch([
+                        focus(self.view.search_input_id.clone()),
+                        self.snap_to_selection(),
+                        self.request_script_filter_preview(),
+                    ]);
                 }
-                self.script_filter.navigation_items = children;
-                self.script_filter.query.clear();
-                if let Some(config) = self
-                    .script_filter
-                    .config_index
-                    .and_then(|index| self.addons.script_filters.get(index))
-                {
-                    self.search_query = format!("{} ", config.keyword);
-                    self.query_class = classify_query(&self.search_query, &self.addons);
+                if item.children_lazy {
+                    return self.open_lazy_children(index, item);
                 }
-                self.script_filter.generation = self.script_filter.generation.wrapping_add(1);
-                self.script_filter.previews.clear();
-                self.selected_index = self.keyword_rows();
-                self.file_browser.cached_preview = None;
-                self.refresh_file_preview_cache();
-                return Task::batch([
-                    focus(self.view.search_input_id.clone()),
-                    self.snap_to_selection(),
-                    self.request_script_filter_preview(),
-                ]);
             }
         }
         let mut pick = None;
@@ -4869,7 +5070,7 @@ impl LauncherApp {
                     recent.item = Some(StoredItem::of(item, result.default_icon.as_deref()));
                     pick = Some(recent);
                 }
-                if menu_action.is_some() && item.children.is_some() {
+                if menu_action.is_some() && item.has_children() {
                     // Recent picks cannot keep a row's children.
                     pick = None;
                 }
@@ -6532,4 +6733,24 @@ pub(super) fn reveal_offset(top: f32, height: f32, offset: f32, viewport: f32) -
     } else {
         None
     }
+}
+
+fn filter_script_filter_items(items: &[ScriptFilterItem], query: &str) -> Vec<ScriptFilterItem> {
+    let needle = query.to_lowercase();
+    items
+        .iter()
+        .filter(|item| {
+            needle.is_empty()
+                || item.title.to_lowercase().contains(&needle)
+                || item
+                    .subtitle
+                    .as_deref()
+                    .is_some_and(|s| s.to_lowercase().contains(&needle))
+                || item
+                    .arg
+                    .as_deref()
+                    .is_some_and(|s| s.to_lowercase().contains(&needle))
+        })
+        .cloned()
+        .collect()
 }

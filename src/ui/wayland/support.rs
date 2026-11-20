@@ -519,6 +519,7 @@ mod tests {
             actions: Vec::new(),
             time: None,
             children: None,
+            children_lazy: false,
             title: title.into(),
             valid: true,
             subtitle: None,

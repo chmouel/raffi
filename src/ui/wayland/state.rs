@@ -115,6 +115,22 @@ pub(super) struct ScriptFilterState {
     pub usage: HashMap<String, super::support::MruEntry>,
     /// Where `usage` is saved; `None` keeps usage in memory only.
     pub usage_path: Option<std::path::PathBuf>,
+    /// Lazily loaded children cached in memory for the session (or for the
+    /// response's `cache` TTL when given).
+    pub lazy_children_cache: HashMap<super::types::LazyChildrenKey, CachedLazyChildren>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct CachedLazyChildren {
+    pub items: Vec<super::types::ScriptFilterItem>,
+    pub fetched_at: std::time::Instant,
+    pub ttl: Option<std::time::Duration>,
+}
+
+impl CachedLazyChildren {
+    pub fn is_fresh(&self) -> bool {
+        self.ttl.is_none_or(|ttl| self.fetched_at.elapsed() < ttl)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -124,6 +140,9 @@ pub(super) struct ScriptFilterNavigation {
     pub query: String,
     pub search_query: String,
     pub selection: usize,
+    /// Parent row when the active child list was fetched lazily via
+    /// `RAFFI_CHILDREN=1`, so Ctrl+R refreshes just this child list.
+    pub lazy_parent: Option<super::types::ScriptFilterItem>,
 }
 
 impl ScriptFilterState {

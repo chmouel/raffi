@@ -11,11 +11,14 @@ use serde::Deserialize;
 use super::cache::{self, SnapshotTarget};
 use super::state::{Message, ScriptFilterResult};
 use super::types::{
-    PreparedPreview, RawPreviewSpec, ScriptFilterItem, ScriptFilterPreviewError, ScriptFilterView,
+    LazyChildrenKey, PreparedPreview, RawPreviewSpec, ScriptFilterItem, ScriptFilterPreviewError,
+    ScriptFilterView,
 };
 
 /// Longest a `RAFFI_PREVIEW=1` run may take before it is killed.
 const PREVIEW_TIMEOUT: Duration = Duration::from_secs(3);
+/// Longest a `RAFFI_CHILDREN=1` run may take before it is killed.
+const CHILDREN_TIMEOUT: Duration = Duration::from_secs(10);
 /// Largest list output accepted from a time-limited run.
 const MAX_LIST_OUTPUT: usize = 64 * 1024 * 1024;
 /// Largest preview output accepted, enough for a base64 screenshot.
@@ -320,6 +323,82 @@ pub(super) fn execute_script_filter_preview(
     )
 }
 
+/// Everything needed to fetch a row's children lazily with `RAFFI_CHILDREN=1`.
+#[derive(Debug, Clone)]
+pub(super) struct ChildrenRequest {
+    pub command: String,
+    pub args: Vec<String>,
+    pub query: String,
+    pub env: HashMap<String, String>,
+    pub default_icon: Option<String>,
+}
+
+impl ChildrenRequest {
+    /// Environment for a lazy children run: the config `env`, then the item
+    /// `variables`, then the `RAFFI_*` protocol variables.
+    pub fn new(
+        config: &crate::ScriptFilterConfig,
+        query: &str,
+        item: &ScriptFilterItem,
+        force_refresh: bool,
+    ) -> Self {
+        let mut env = config.env.clone();
+        env.extend(item.variables.clone());
+        let value = item.arg.clone().unwrap_or_else(|| item.title.clone());
+        env.insert("RAFFI_CHILDREN".into(), "1".into());
+        env.insert("RAFFI_VALUE".into(), value);
+        env.insert("RAFFI_TITLE".into(), super::ansi::strip_ansi(&item.title));
+        env.insert("RAFFI_QUERY".into(), query.to_string());
+        if force_refresh {
+            env.insert("RAFFI_REFRESH".into(), "1".into());
+        }
+        Self {
+            command: config.command.clone(),
+            args: config.args.clone(),
+            query: query.to_string(),
+            env,
+            default_icon: config.icon.clone(),
+        }
+    }
+
+    pub(super) fn run(self) -> Result<ScriptFilterResult, String> {
+        crate::debug_log!(
+            "script_filter: children command={:?} value={:?}",
+            self.command,
+            self.env.get("RAFFI_VALUE")
+        );
+        run_script_filter(
+            &self.command,
+            &self.args,
+            &self.env,
+            &self.query,
+            self.default_icon,
+            None,
+            Some(CHILDREN_TIMEOUT),
+        )
+    }
+}
+
+/// Run the lazy children command on a worker thread.
+pub(super) fn execute_script_filter_children(
+    request: ChildrenRequest,
+    generation: u64,
+    cache_key: LazyChildrenKey,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            let (sender, receiver) = iced::futures::channel::oneshot::channel();
+            std::thread::spawn(move || {
+                let _ = sender.send(request.run());
+            });
+            receiver
+                .await
+                .unwrap_or_else(|_| Err("children worker stopped".into()))
+        },
+        move |result| Message::ScriptFilterChildrenResult(generation, cache_key, result),
+    )
+}
+
 /// Sleep for `delay`, waking every 100 ms to stop early once `live` no longer
 /// holds `generation`.
 fn sleep_unless_superseded(delay: Duration, generation: u64, live: &AtomicU64) {
@@ -430,6 +509,7 @@ mod tests {
             actions: Vec::new(),
             time: None,
             children: None,
+            children_lazy: false,
             title: "Agent".into(),
             valid: true,
             subtitle: None,
@@ -746,6 +826,7 @@ mod tests {
             actions: Vec::new(),
             time: None,
             children: None,
+            children_lazy: false,
             title: "\u{1b}[32mAgent\u{1b}[0m".into(),
             valid: true,
             subtitle: None,
@@ -1074,5 +1155,73 @@ mod tests {
         assert!(snapshot.payload.contains("\"title\":\"ok\""));
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_parse_children_lazy_field() {
+        let result = super::parse_script_filter_output(
+            r#"{"items":[{"title":"Lazy","children_lazy":true},{"title":"Plain"}]}"#,
+            None,
+        )
+        .unwrap();
+        assert!(result.items[0].children_lazy);
+        assert!(result.items[0].has_children());
+        assert!(!result.items[1].children_lazy);
+        assert!(!result.items[1].has_children());
+    }
+
+    #[test]
+    fn test_children_request_env_and_run() {
+        let mut config_env = std::collections::HashMap::new();
+        config_env.insert("SHARED".into(), "from-config".into());
+        config_env.insert("ONLY_CONFIG".into(), "yes".into());
+        let config = crate::ScriptFilterConfig {
+            name: "Repos".into(),
+            keyword: "r".into(),
+            command: "sh".into(),
+            args: vec![
+                "-c".into(),
+                r#"[ "$RAFFI_CHILDREN" = 1 ] && printf '{"items":[{"title":"%s|%s|%s|%s|%s|%s"}],"cache":45}' "$RAFFI_VALUE" "$RAFFI_TITLE" "$RAFFI_QUERY" "$SHARED" "$ONLY_CONFIG" "$RAFFI_REFRESH""#.into(),
+                "sh".into(),
+            ],
+            env: config_env,
+            ..Default::default()
+        };
+        let mut variables = std::collections::HashMap::new();
+        variables.insert("SHARED".into(), "from-item".into());
+        let item = super::ScriptFilterItem {
+            title: "\x1b[32mPull requests\x1b[0m".into(),
+            time: None,
+            actions: Vec::new(),
+            children: None,
+            children_lazy: true,
+            valid: true,
+            subtitle: None,
+            arg: Some("owner/repo#pulls".into()),
+            icon: None,
+            indent: 0,
+            preview: None,
+            variables,
+            quicklookurl: None,
+            text: None,
+        };
+
+        let request = super::ChildrenRequest::new(&config, "raffi", &item, true);
+        assert_eq!(
+            request.env.get("RAFFI_CHILDREN").map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            request.env.get("RAFFI_REFRESH").map(String::as_str),
+            Some("1")
+        );
+
+        let result = request.run().unwrap();
+        assert_eq!(result.cache_hint, Some(45));
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(
+            result.items[0].title,
+            "owner/repo#pulls|Pull requests|raffi|from-item|yes|1"
+        );
     }
 }

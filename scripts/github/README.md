@@ -318,67 +318,16 @@ and when it was last updated. It exports `PR_URL`, `PR_REPO`, `PR_NUMBER` and
 for `pr.py` work on it. An issue row shows its author and its first three
 labels, and exports `ISSUE_URL`, `ISSUE_REPO` and `ISSUE_NUMBER`.
 
-Raffi needs the rows inline in the JSON, so they are fetched ahead of time.
-Each draw queues the repositories whose live cache is missing, older than
-`CACHE_LIVE`, or fetched with fewer rows than `--live-items` asks for, in the
-order the rows are listed. The queue lives in
-`~/.cache/raffi/github-repos/<host>/live/queue.json` and is a JSON object
-holding `"gen": N` and `"entries": [{"name", "gen", "force"}]`, where
-each entry carries the queue generation it was added or forced at. A detached
-run of this script started after the first draw drains it: it takes `LIVE_PREFETCH` repositories
-at a time, four fetched side by side, and moves on to the next batch until the
-queue is empty or `LIVE_BUDGET` (default 120 seconds) of wall-clock time is
-spent, then exits printing nothing. Whatever is left waits for the next run,
-so a long list fills in the background over a few batches instead of fetching
-the same first rows over and over. A batch's names stay in the queue until it
-is fetched, so a run killed mid-batch loses none of them: the next run takes
-them again.
+`Pull requests` and `Issues` set `children_lazy: true`, so pressing Enter
+runs `repos.py` with `RAFFI_CHILDREN=1` to fetch that repository's open pull
+requests or issues on demand. Raffi caches the expanded list in memory for
+`CACHE_LIVE` (default `10m`), and `gh` caches the GraphQL response for the
+same window. Pressing Ctrl+R inside the expanded list sends `RAFFI_REFRESH=1`
+to bypass both caches and fetch fresh rows from GitHub. On a GitHub error, the
+menu shows the error row followed by the `All … on GitHub` link so it is never
+a dead end.
 
-Two locks keep this safe without ever blocking a keystroke. `live.lock` says
-which run is draining, and that run holds it for as long as it fetches;
-`queue.lock` guards every read-modify-write of `queue.json`, and is held for
-one write at a time. A draw only ever waits for that short write. A queue file
-from an older version, either a bare JSON list of names or one holding
-`"names"` and `"force"` lists, still reads: its names are queued, none of
-them forced.
-
-A batch is acknowledged with the generation it was read at and drops only the
-entries as old as itself, so a name a draw re-queued or Ctrl+R forced while
-the batch was fetching keeps its new intent and is fetched again. That is what
-keeps a refresh from being erased by the batch that happened to run first.
-
-Until its fetch lands, a menu holds one row saying it is loading, followed by
-the `All … on GitHub` row, so it is never a dead end; the real rows show up
-the next time the script runs, since Raffi keeps the snapshot it was given. A
-fetch that keeps failing says why in that row (`failed: …`) instead of
-loading forever: the failure is kept in `live/errors.json` beside the caches
-for `LIVE_ERRORS` (default `1h`). A list still filling asks Raffi to keep it
-for `LIVE_RETRY` (default `1m`) instead of `CACHE_REPOS`, so Raffi runs the
-script again soon and shows the filled menus, where a day-long window would
-have kept the loading rows for a day. A cache from an earlier fetch keeps
-being listed however old it is.
-
-Ctrl+R drains one batch of the queue before answering, so one key press shows
-the real rows of the repositories it reaches and leaves the rest queued for
-the background run. It also bypasses the result Raffi cached, so the rows it
-redraws are the ones the fetch just wrote. It refreshes one batch: the first
-`LIVE_PREFETCH` rows it drew are marked forced in the queue, so the batch
-fetches them however fresh their cache is, and the other rows it drew are
-queued as ordinary background work, which is only fetched once stale. That
-keeps a Ctrl+R on a long list to one batch of GraphQL points instead of one
-per row. The marker goes as soon as the batch is acknowledged, and pressing
-Ctrl+R again marks it again. Ctrl+R takes only `queue.lock`, so it answers
-while a detached run is fetching rather than waiting for it; if that lock is
-still busy after a few tries and the marker cannot be written at all, the
-script fetches the batch itself rather than lose the refresh.
-
-`--live-items` (default 20) caps how many rows a menu lists and how many rows
-of each pull request or issue list the fetch asks GitHub for, so `--live-items
-50` shows up to 50 rows and asks for 50; a cache holding more rows than the
-request asks for is not fetched again merely because of it, and one holding
-fewer is. `LIVE_PREFETCH` (default 20) is the batch size
-of a background run, and `LIVE_BUDGET` how long one run may take before it
-leaves the rest to the next.
+`--live-items` (default 20) caps how many rows a live menu asks GitHub for.
 
 Pass `--no-live`, or set `LIVE=0`, to keep linking the two pages as before.
 
@@ -403,12 +352,8 @@ also read `REPO_PATH`, `REPO_PAGES` and `REPO_ACTIONS` from `env`.
 |----------|---------|-------------|
 | `API_HOST` | `github.com` | GitHub host, for GitHub Enterprise |
 | `CACHE_REPOS` | `10m` | How long `gh` caches the repository list |
-| `CACHE_LIVE` | `10m` | How long the live pull requests and issues are kept before a background fetch |
-| `LIVE_ITEMS` | `20` | How many rows a live menu lists, and how many the fetch asks for; `--live-items` sets both |
-| `LIVE_PREFETCH` | `20` | How many repositories one batch of a background fetch takes on |
-| `LIVE_BUDGET` | `120s` | How long one detached fetch may spend draining the queue, as `120s` or `2m` |
-| `LIVE_RETRY` | `1m` | How long Raffi may keep a list whose live menus are still filling, at most `CACHE_REPOS` |
-| `LIVE_ERRORS` | `1h` | How long a failed live fetch is remembered, shown in the row it left loading |
+| `CACHE_LIVE` | `10m` | How long the live pull requests and issues are cached |
+| `LIVE_ITEMS` | `20` | How many rows a live menu asks GitHub for; `--live-items` sets this |
 | `LIVE` | | `0` is the same as `--no-live` |
 | `TYPED_TIME` | | Same as for pull requests, for the `pushed` time |
 | `REPO_PATH` | | Default for `--path` |

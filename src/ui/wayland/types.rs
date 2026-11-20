@@ -339,6 +339,10 @@ pub(crate) struct ScriptFilterItem {
     /// Optional child list opened when this item is selected.
     #[serde(default)]
     pub children: Option<Vec<ScriptFilterItem>>,
+    /// Ask the script for this item's children when selected (`RAFFI_CHILDREN=1`),
+    /// instead of returning them inline. Ignored when `children` is present.
+    #[serde(default)]
+    pub children_lazy: bool,
     #[serde(default = "crate::default_true")]
     pub valid: bool,
     pub subtitle: Option<String>,
@@ -362,6 +366,60 @@ pub(crate) struct ScriptFilterItem {
     /// Optional Alfred `text` object (`copy` and `largetype`).
     #[serde(default)]
     pub text: Option<ScriptFilterItemText>,
+}
+
+impl ScriptFilterItem {
+    /// True when Enter opens a child list (inline or lazily fetched).
+    pub fn has_children(&self) -> bool {
+        self.children.is_some() || self.children_lazy
+    }
+
+    /// Non-selectable row used for empty or failed lazy-children loads.
+    pub fn status_row(title: impl Into<String>, subtitle: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            time: None,
+            actions: Vec::new(),
+            children: None,
+            children_lazy: false,
+            valid: false,
+            subtitle: Some(subtitle.into()),
+            arg: None,
+            icon: None,
+            indent: 0,
+            preview: None,
+            variables: std::collections::HashMap::new(),
+            quicklookurl: None,
+            text: None,
+        }
+    }
+}
+
+/// Session cache key for a lazily expanded Script Filter row.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct LazyChildrenKey {
+    pub config_index: usize,
+    pub view: Option<String>,
+    pub value: String,
+    pub variables: Vec<(String, String)>,
+}
+
+impl LazyChildrenKey {
+    pub fn new(config_index: usize, view: Option<String>, item: &ScriptFilterItem) -> Self {
+        let mut variables: Vec<(String, String)> = item
+            .variables
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        variables.sort();
+        let value = item.arg.clone().unwrap_or_else(|| item.title.clone());
+        Self {
+            config_index,
+            view,
+            value,
+            variables,
+        }
+    }
 }
 
 /// Latest dynamic preview state of one Script Filter result item.
@@ -540,6 +598,12 @@ pub(crate) enum Message {
     ),
     MultiCurrencyResultCopied(usize),
     ScriptFilterResult(u64, std::result::Result<ScriptFilterResult, String>),
+    /// Output of a `RAFFI_CHILDREN=1` run for this generation and cache key.
+    ScriptFilterChildrenResult(
+        u64,
+        LazyChildrenKey,
+        std::result::Result<ScriptFilterResult, String>,
+    ),
     ScriptFilterItemSelected(usize),
     /// Time to run the dynamic preview of this result item for this
     /// preview generation (after the debounce or refresh delay).
