@@ -819,6 +819,50 @@ class ActionTests(ReposTestCase):
         # Enter still means "list the pages", so the row's own arg stays.
         self.assertEqual(item["arg"], "https://github.com/owner/raffi")
 
+    def test_a_page_link_carries_a_compact_preview(self):
+        item = repos.build_item(
+            repo("raffi"),
+            self.options(pages=(("tags", "Tags"), ("releases", "Releases"))),
+        )
+        leaf = item["children"][2]
+        url = "https://github.com/owner/raffi/releases"
+        self.assertEqual(leaf["title"], "Releases")
+        self.assertEqual(leaf["arg"], url)
+        self.assertEqual(leaf["subtitle"], url)
+        self.assertEqual(leaf["variables"]["REPO_NAME"], "owner/raffi")
+        self.assertEqual(
+            leaf["preview"],
+            {
+                "text": f"Enter opens {url}\nCtrl+Enter copies it.",
+                "icon": repos.ICON,
+                "dynamic": False,
+            },
+        )
+        self.assertEqual(
+            self.titles_of(leaf["actions"]), ["Copy URL", "Copy Markdown link"]
+        )
+        self.assertEqual(leaf["actions"][0]["arg"], url)
+        self.assertEqual(
+            leaf["actions"][1]["arg"], f"[Releases \u00b7 owner/raffi]({url})"
+        )
+
+    def test_the_repository_link_carries_a_compact_preview(self):
+        item = repos.build_item(
+            repo("raffi"), self.options(pages=(("tags", "Tags"),))
+        )
+        leaf = item["children"][0]
+        url = "https://github.com/owner/raffi"
+        self.assertEqual(leaf["title"], "Open owner/raffi")
+        self.assertEqual(
+            leaf["preview"],
+            {
+                "text": f"Enter opens {url}\nCtrl+Enter copies it.",
+                "icon": repos.ICON,
+                "dynamic": False,
+            },
+        )
+        self.assertEqual(leaf["actions"][1]["arg"], f"[owner/raffi]({url})")
+
     def test_pages_carry_their_own_context_menu(self):
         item = repos.build_item(
             repo("raffi"), self.options(pages=(("pulls", "Pull requests"),))
@@ -972,6 +1016,65 @@ class LiveMenuTests(ReposTestCase):
         self.assertEqual(
             [entry["title"] for entry in children[2]["children"][-1]["actions"]],
             ["Copy URL", "Copy Markdown link"],
+        )
+
+    def test_link_rows_keep_their_titles_and_markdown_labels(self):
+        self.write_live()
+        children = self.pages_item(
+            pages=(("pulls", "Pull requests"), ("tags", "Tags"))
+        )["children"]
+        self.assertEqual(
+            [child["title"] for child in children],
+            ["Open owner/raffi", "Pull requests \u00b7 34", "Tags"],
+        )
+        links = [children[0], children[2], children[1]["children"][-1]]
+        self.assertEqual(
+            [leaf["title"] for leaf in links],
+            ["Open owner/raffi", "Tags", "All pull requests on GitHub"],
+        )
+        self.assertEqual(
+            [leaf["actions"][-1]["arg"] for leaf in links],
+            [
+                "[owner/raffi](https://github.com/owner/raffi)",
+                "[Tags \u00b7 owner/raffi](https://github.com/owner/raffi/tags)",
+                (
+                    "[Pull requests \u00b7 owner/raffi]"
+                    "(https://github.com/owner/raffi/pulls)"
+                ),
+            ],
+        )
+        # A plain string preview would make Raffi re-run the script for a row
+        # that gains nothing, so every link opts out of dynamic previews
+        for leaf in links:
+            self.assertEqual(
+                leaf["preview"],
+                {
+                    "text": f"Enter opens {leaf['arg']}\nCtrl+Enter copies it.",
+                    "icon": repos.ICON,
+                    "dynamic": False,
+                },
+            )
+
+    def test_live_menus_and_their_rows_keep_a_preview_object(self):
+        self.write_live()
+        pulls = self.pages_item()["children"][1]
+        for item in (pulls, pulls["children"][0]):
+            for key in ("title", "subtitle", "icon", "text"):
+                self.assertIn(key, item["preview"])
+
+    def test_a_cold_live_menu_still_ends_with_a_plain_link(self):
+        leaf = self.pages_item()["children"][1]["children"][-1]
+        self.assertEqual(leaf["title"], "All pull requests on GitHub")
+        self.assertEqual(
+            leaf["preview"],
+            {
+                "text": (
+                    "Enter opens https://github.com/owner/raffi/pulls\n"
+                    "Ctrl+Enter copies it."
+                ),
+                "icon": repos.ICON,
+                "dynamic": False,
+            },
         )
 
     def test_a_cold_cache_shows_a_placeholder_and_the_whole_page(self):

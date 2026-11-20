@@ -989,20 +989,25 @@ def row_actions(name: str, options: Options) -> list[dict]:
     return pages + copy_actions(page_url(name, ""), name, clone=True)
 
 
-def plain_child(name: str, path: str, label: str, variables: dict) -> dict:
-    """A page of a repository that Enter opens straight away."""
-    url = page_url(name, path)
+def link_leaf(
+    name: str, url: str, title: str, variables: dict, page: str = ""
+) -> dict:
+    """A link row of a repository: Enter opens url.
+
+    The row says all there is to say about a plain link, so the preview
+    repeats none of it and opts out of dynamic previews, which would only
+    re-run this script for nothing. page labels its Markdown link, and is
+    empty for the repository itself.
+    """
     return {
-        "title": label,
+        "title": title,
         "subtitle": url,
         "arg": url,
         "variables": variables,
-        "actions": copy_actions(url, f"{label} \u00b7 {name}" if path else name),
+        "actions": copy_actions(url, f"{page} \u00b7 {name}" if page else name),
         "preview": {
-            "title": label,
-            "subtitle": url,
-            "icon": ICON,
             "text": f"Enter opens {url}\nCtrl+Enter copies it.",
+            "icon": ICON,
             "dynamic": False,
         },
     }
@@ -1137,27 +1142,6 @@ def issue_leaf(name: str, issue: dict, variables: dict) -> dict:
     return item
 
 
-def all_rows_leaf(
-    name: str, label: str, url: str, variables: dict
-) -> dict:
-    """The last row of a live menu: the whole page, on GitHub."""
-    title = f"All {label.lower()} on GitHub"
-    return {
-        "title": title,
-        "subtitle": url,
-        "arg": url,
-        "variables": variables,
-        "actions": copy_actions(url, f"{label} \u00b7 {name}"),
-        "preview": {
-            "title": title,
-            "subtitle": url,
-            "icon": ICON,
-            "text": f"Enter opens {url}\nCtrl+Enter copies it.",
-            "dynamic": False,
-        },
-    }
-
-
 def live_menu(name: str, path: str, label: str, options: Options) -> dict:
     """A page of a repository whose children are its open rows, live."""
     url = page_url(name, path)
@@ -1172,10 +1156,11 @@ def live_menu(name: str, path: str, label: str, options: Options) -> dict:
         + copy_actions(url, f"{label} \u00b7 {name}"),
         "preview": live_preview(label, url, name, bool(entry)),
     }
+    whole_page = link_leaf(
+        name, url, f"All {label.lower()} on GitHub", variables, label
+    )
     if not entry:
-        child["children"] = [live_placeholder(name, label)] + [
-            all_rows_leaf(name, label, url, variables)
-        ]
+        child["children"] = [live_placeholder(name, label), whole_page]
         return child
     section = entry.get(LIVE_KEYS[path]) or {}
     nodes = (section.get("nodes") or [])[: max(options.live_items, 0)]
@@ -1185,7 +1170,7 @@ def live_menu(name: str, path: str, label: str, options: Options) -> dict:
     child["subtitle"] = f"{total} open \u00b7 {name}"
     child["children"] = [
         build(name, node, variables) for node in nodes if node
-    ] + [all_rows_leaf(name, label, url, variables)]
+    ] + [whole_page]
     return child
 
 
@@ -1196,13 +1181,15 @@ def page_children(name: str, options: Options) -> list[dict]:
     names is listed after the --pages ones.
     """
     variables = repo_variables({"nameWithOwner": name, "url": page_url(name, "")})
-    children = [plain_child(name, "", f"Open {name}", variables)]
+    children = [link_leaf(name, page_url(name, ""), f"Open {name}", variables)]
     listed = {path for path, _ in options.pages}
     for path, label in options.pages:
         if options.live and path in LIVE_PATHS:
             children.append(live_menu(name, path, label, options))
         else:
-            children.append(plain_child(name, path, label, variables))
+            children.append(
+                link_leaf(name, page_url(name, path), label, variables, label)
+            )
     for path, label in live_paths(options):
         if path not in listed:
             children.append(live_menu(name, path, label, options))
