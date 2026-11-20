@@ -284,13 +284,99 @@ copying its URL. Escape goes back to the list.
 ```
 
 `--actions` puts pages in the row's action menu instead, opened with Right at
-the end of the query or a right-click, so Enter keeps opening the repository.
-The two combine. Both need a Raffi that supports `actions` on script filter
-items for the menu, and `--pages` works on older ones.
+the end of the query or a right-click, so Enter keeps opening the repository,
+unless a `pulls` or `issues` page is named: those are live menus (below), so
+naming one gives the row children too, as `--pages` would. Pass `--no-live` to
+keep the plain links and Enter opening the repository.
+The two options combine. Both need a Raffi that supports `actions` on script
+filter items for the menu, and `--pages` works on older ones.
 
 Every row also has copy entries in its action menu: the URL, a Markdown link,
 the SSH and HTTPS clone URLs and `owner/name` for repositories, and the URL and
 a Markdown link for each page listed by `--pages`.
+
+#### Live pull requests and issues
+
+`pulls` and `issues` are live pages: rather than a link, each becomes a menu
+whose children are the repository's open pull requests, or open issues, newest
+updated first, with the `All … on GitHub` row last. Its title carries the
+total count (`Pull requests · 34`) and its subtitle names the repository.
+Enter on a row opens that pull request or issue and Ctrl+Enter copies its URL,
+and the last row, `All pull requests on GitHub` or `All issues on GitHub`,
+opens the page itself.
+
+The `"sort": "usage"` below still applies: Raffi floats the rows you picked
+first, inside a menu too, so the newest-updated order above holds between the
+rows you never picked. Pass `--no-usage-sort`, or `USAGE_SORT=0`, to keep the
+emitted order throughout.
+
+A pull request row shows its number and title, its author, whether it is a
+draft, its review decision (`approved`, `changes requested`, `review required`)
+and when it was last updated. It exports `PR_URL`, `PR_REPO`, `PR_NUMBER` and
+`PR_BRANCH` on top of the repository's `REPO_*` variables, so actions written
+for `pr.py` work on it. An issue row shows its author and its first three
+labels, and exports `ISSUE_URL`, `ISSUE_REPO` and `ISSUE_NUMBER`.
+
+Raffi needs the rows inline in the JSON, so they are fetched ahead of time.
+Each draw queues the repositories whose live cache is missing, older than
+`CACHE_LIVE`, or fetched with fewer rows than `--live-items` asks for, in the
+order the rows are listed. The queue lives in
+`~/.cache/raffi/github-repos/<host>/live/queue.json` and is a JSON object
+holding `"gen": N` and `"entries": [{"name", "gen", "force"}]`, where
+each entry carries the queue generation it was added or forced at. A detached
+run of this script started after the first draw drains it: it takes `LIVE_PREFETCH` repositories
+at a time, four fetched side by side, and moves on to the next batch until the
+queue is empty or `LIVE_BUDGET` (default 120 seconds) of wall-clock time is
+spent, then exits printing nothing. Whatever is left waits for the next run,
+so a long list fills in the background over a few batches instead of fetching
+the same first rows over and over. A batch's names stay in the queue until it
+is fetched, so a run killed mid-batch loses none of them: the next run takes
+them again.
+
+Two locks keep this safe without ever blocking a keystroke. `live.lock` says
+which run is draining, and that run holds it for as long as it fetches;
+`queue.lock` guards every read-modify-write of `queue.json`, and is held for
+one write at a time. A draw only ever waits for that short write. A queue file
+from an older version, either a bare JSON list of names or one holding
+`"names"` and `"force"` lists, still reads: its names are queued, none of
+them forced.
+
+A batch is acknowledged with the generation it was read at and drops only the
+entries as old as itself, so a name a draw re-queued or Ctrl+R forced while
+the batch was fetching keeps its new intent and is fetched again. That is what
+keeps a refresh from being erased by the batch that happened to run first.
+
+Until its fetch lands, a menu holds one row saying it is loading, followed by
+the `All … on GitHub` row, so it is never a dead end; the real rows show up
+the next time the script runs, since Raffi keeps the snapshot it was given. A
+list still filling asks Raffi to keep it for `LIVE_RETRY` (default `1m`)
+instead of `CACHE_REPOS`, so Raffi runs the script again soon and shows the
+filled menus, where a day-long window would have kept the loading rows for a
+day. A cache from an earlier fetch keeps being listed however old it is.
+
+Ctrl+R drains one batch of the queue before answering, so one key press shows
+the real rows of the repositories it reaches and leaves the rest queued for
+the background run. It also bypasses the result Raffi cached, so the rows it
+redraws are the ones the fetch just wrote. It refreshes one batch: the first
+`LIVE_PREFETCH` rows it drew are marked forced in the queue, so the batch
+fetches them however fresh their cache is, and the other rows it drew are
+queued as ordinary background work, which is only fetched once stale. That
+keeps a Ctrl+R on a long list to one batch of GraphQL points instead of one
+per row. The marker goes as soon as the batch is acknowledged, and pressing
+Ctrl+R again marks it again. Ctrl+R takes only `queue.lock`, so it answers
+while a detached run is fetching rather than waiting for it; if that lock is
+still busy after a few tries and the marker cannot be written at all, the
+script fetches the batch itself rather than lose the refresh.
+
+`--live-items` (default 20) caps how many rows a menu lists and how many rows
+of each pull request or issue list the fetch asks GitHub for, so `--live-items
+50` shows up to 50 rows and asks for 50; a cache holding more rows than the
+request asks for is not fetched again merely because of it, and one holding
+fewer is. `LIVE_PREFETCH` (default 20) is the batch size
+of a background run, and `LIVE_BUDGET` how long one run may take before it
+leaves the rest to the next.
+
+Pass `--no-live`, or set `LIVE=0`, to keep linking the two pages as before.
 
 The filter's own `actions` in `raffi.yaml` add entries a script cannot know,
 such as cloning with the row's `$REPO_SSH`:
@@ -313,6 +399,12 @@ also read `REPO_PATH`, `REPO_PAGES` and `REPO_ACTIONS` from `env`.
 |----------|---------|-------------|
 | `API_HOST` | `github.com` | GitHub host, for GitHub Enterprise |
 | `CACHE_REPOS` | `10m` | How long `gh` caches the repository list |
+| `CACHE_LIVE` | `10m` | How long the live pull requests and issues are kept before a background fetch |
+| `LIVE_ITEMS` | `20` | How many rows a live menu lists, and how many the fetch asks for; `--live-items` sets both |
+| `LIVE_PREFETCH` | `20` | How many repositories one batch of a background fetch takes on |
+| `LIVE_BUDGET` | `120s` | How long one detached fetch may spend draining the queue, as `120s` or `2m` |
+| `LIVE_RETRY` | `1m` | How long Raffi may keep a list whose live menus are still filling, at most `CACHE_REPOS` |
+| `LIVE` | | `0` is the same as `--no-live` |
 | `TYPED_TIME` | | Same as for pull requests, for the `pushed` time |
 | `REPO_PATH` | | Default for `--path` |
 | `REPO_PAGES` | | Default for `--pages` |
@@ -378,7 +470,11 @@ that are not accounts
 are remembered in `~/.cache/raffi/github-repos/<host>/missing.json` for
 `CACHE_MISSING`, which keeps a filter that looks like a login from costing a
 request per keystroke, and the logged in account is remembered for
-`CACHE_LOGIN` in `login.json` next to it.
+`CACHE_LOGIN` in `login.json` next to it. The open pull requests and issues of
+each repository are kept in `~/.cache/raffi/github-repos/<host>/live/`, one
+JSON file per repository, written by the background fetches and reused for
+`CACHE_LIVE`; `queue.json` in the same directory lists the repositories still
+waiting for one.
 
 ## Layout
 
@@ -386,7 +482,7 @@ request per keystroke, and the logged in account is remembered for
 |------|-------|
 | `ghcommon.py` | Running `gh`, GraphQL through its cache (`RAFFI_REFRESH` bypasses it), error rows, relative dates and terminal colours |
 | `pr.py` | Pull request queries, rows, markdown rendering and the live preview |
-| `repos.py` | Repository listing, account and alias resolution, filtering, pages and action menus |
+| `repos.py` | Repository listing, account and alias resolution, filtering, pages, action menus and the live pull request and issue menus |
 
 New GitHub scripts should import from `ghcommon.py` rather than copy it.
 `test_ghcommon.py` covers the shared parts, so the other two test files only

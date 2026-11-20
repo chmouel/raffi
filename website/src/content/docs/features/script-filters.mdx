@@ -479,9 +479,39 @@ which gives one keyword per page single-key access. `--pages
 pulls,issues,releases` makes Enter list those pages under the repository
 (Enter opens one, Ctrl+Enter copies it), and `--actions` puts pages in the
 row's [action menu](#custom-actions) instead, so Enter still opens the
-repository. Every row also has copy entries there: the URL, a Markdown link,
-the clone URLs and `owner/name`, and the pages of `--pages` have the URL and
-a Markdown link.
+repository, except for `pulls` and `issues`, which are live menus (below) and
+give the row children whichever option names them. Every row also has copy
+entries there: the URL, a Markdown link, the clone URLs and `owner/name`, and
+the pages of `--pages` have the URL and a Markdown link.
+
+`pulls` and `issues` are live: instead of a link, each is a menu listing the
+repository's open pull requests, or open issues, newest updated first, with the
+`All … on GitHub` row last and the total count in its title. A pull request row
+shows its author, draft state, review decision and age and exports `PR_URL`,
+`PR_REPO`, `PR_NUMBER` and `PR_BRANCH` for actions written for the pull
+request script; an issue row shows its author and labels and exports
+`ISSUE_URL`, `ISSUE_REPO` and `ISSUE_NUMBER`. Titles are shown in full. Raffi
+needs those rows inline, so each draw queues the repositories whose live cache
+is missing or old, and a detached run of the script fills them in the
+background, `LIVE_PREFETCH` repositories per batch (default 20), until the
+queue is empty or its `LIVE_BUDGET` (default 120 seconds) is spent. A
+repository drawn for the first time shows a row saying it is loading, and the
+rows appear the next time the script runs. A list that is still filling is
+handed to Raffi with a short `LIVE_RETRY` freshness (default `1m`, never more
+than `CACHE_REPOS`), so Raffi runs the script again soon and shows the filled
+menus instead of keeping the loading rows for the whole `CACHE_REPOS` window.
+Ctrl+R bypasses Raffi's cached snapshot and refreshes one batch of the rows it
+can see, leaving the rest of them as ordinary background work: the first
+`LIVE_PREFETCH` drawn repositories are fetched even when their live cache is
+still fresh, so a forced refresh shows what changed since the last fetch, and
+the others are queued like any stale cache. `--live-items` sets both how many
+rows a menu shows and how
+many of each list the fetch asks GitHub for, and `--no-live`, or `LIVE=0`,
+keeps the plain links.
+
+The `"sort": "usage"` below applies inside a menu too: Raffi floats the rows
+you picked first, so the newest-updated order holds between the rows you never
+picked. `--no-usage-sort`, or `USAGE_SORT=0`, keeps the emitted order.
 
 Raffi's own `cache_seconds` shows each query's last result at once while
 refreshing it in the background, and `gh` caches every account's pages, so a
