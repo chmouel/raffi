@@ -12,20 +12,19 @@ import scriptFilterActionsScreenshot from '../../../assets/screenshots/script-fi
 import herdrTreeScreenshot from '../../../assets/screenshots/herdr-tree.png';
 import herdrStatusScreenshot from '../../../assets/screenshots/herdr-status.png';
 
-A script filter runs a command of yours when you type its keyword, passes it
-what you type after the keyword, and lists the items it prints. The command
-prints JSON in a subset of the
-[Alfred Script Filter format](https://www.alfredapp.com/help/workflows/inputs/script-filter/json/),
-so any language works, and Raffi adds a few extensions of its own: tree-style
-indentation, informational rows and rich previews. Use it to bring in APIs,
-bookmarks, databases or any script that can print a list.
+A script filter turns any command into a live Raffi search source. When you
+type its keyword followed by a space, Raffi runs the command with the rest of
+your query and displays the JSON items it prints. The format follows a subset of
+[Alfred's Script Filter JSON](https://www.alfredapp.com/help/workflows/inputs/script-filter/json/),
+extended with tree indentation, relative timestamps, nested and lazily loaded
+children, custom action menus, views, and rich previews.
 
 <Image src={scriptFilterTzScreenshot} alt="Script filter timezone converter example" width={800} />
 
 ## Quick start
 
-This filter uses [batz](https://github.com/chmouel/batzconverter) to convert
-times between timezones:
+This entry wires [batz](https://github.com/chmouel/batzconverter) to the `tz`
+keyword:
 
 ```yaml raffi.yaml
 addons:
@@ -37,748 +36,110 @@ addons:
       icon: "clock"
 ```
 
-Type `tz` followed by a space, then a place, such as `tz new york`. Raffi runs
-`batz -j "new york"` and lists the items it prints. Press Enter to copy the
-selected item.
-
-Until you type the space after the keyword, Raffi keeps searching the main
-list and shows a row describing the filter; Enter or Tab on that row enters
-it. The command runs again each time the text after the keyword changes.
-
-## Caching slow filters
-
-A filter that calls a slow API, such as
-[the GitHub pull request script](#github-pull-requests), can opt into a
-private stale-while-revalidate cache. Set `cache_seconds` to show the last
-result for a query immediately while a fresh run happens in the background.
-Without it, nothing is cached, so a script with side effects never runs from
-the cache.
-
-```yaml raffi.yaml
-addons:
-  script_filters:
-    - name: "Pull Requests"
-      keyword: "pr"
-      command: "~/.config/raffi/scripts/github/pr.py"
-      icon: "github"
-      cache_seconds: 300
-      warm_queries: [""]
-      warm_interval_seconds: 300
-```
-
-`warm_queries` are run periodically by
-[`raffi --server`](../../reference/cli-options/#cache-management),
-in every [view](#views) the script offers (up to 16 besides the default), so these queries are
-already fresh when Raffi opens. A list is refreshed once its result has
-outlived its freshness, which is `cache_seconds` unless the script
-[asked for more](#letting-the-script-choose), and never more often than
-`warm_interval_seconds`, which defaults to `cache_seconds`. Each list is
-scheduled on its own from the snapshot on disk, so restarting the server does
-not refresh what is still fresh, and a short jitter spreads lists that were
-created together. A run is killed after 60 seconds, and only one background run of a list goes on at a time; a refresh you ask for with F5 never waits for one.
-
-When a refresh fails, or the script answers `"seconds": 0`, the server keeps
-the last good result and tries again after a minute, then two, doubling up to
-an hour, however long the freshness window is. Pressing Ctrl+R runs the script again with
-`RAFFI_REFRESH=1` in its environment, which the bundled GitHub script uses to
-bypass the `gh` CLI cache and fetch live state. When the server is
-running, F5 asks it to do the same refresh and Raffi reads the new snapshot
-it writes.
-
-### Letting the script choose
-
-The script knows how fast its data changes, so it can say how long its output
-stays fresh with a top-level `cache`:
-
-```json
-{ "cache": { "seconds": 86400 }, "items": [] }
-```
-
-A bare number works too. The user's config keeps the last word:
-
-| Script says | Result |
-|-------------|--------|
-| nothing | `cache_seconds`, as without this feature |
-| less than `cache_seconds` | the smaller value: a script can always ask for less caching |
-| more than `cache_seconds` | the larger value, up to `cache_max_seconds` and never past seven days |
-| `0` | this output is not kept |
-
-```yaml raffi.yaml
-      cache_seconds: 300       # turns caching on, and the default freshness
-      cache_max_seconds: 86400 # how far a script may raise it
-```
-
-The script can also name queries worth keeping fresh, next to the ones in
-`warm_queries`:
-
-```json
-{ "cache": { "seconds": 86400, "warm": ["review", "assigned"] }, "items": [] }
-```
-
-Those come from the output of the queries you list in `warm_queries`, which
-stay the starting point: the server never runs a filter by itself unless
-you named a query. At most four extra queries of 64 characters each are
-warmed, in every [view](#views) their output offers; text with control
-characters is ignored, and the extra queries' own `warm` lists are not
-followed. They are refreshed on the same schedule as the others, and a name the script stops listing is forgotten, so a list that keeps changing only adds the extra queries of each refresh of the listed query.
-
-A script cannot turn caching on: without `cache_seconds` nothing is cached and
-the hint is ignored. The limits are applied when a snapshot is read, so
-lowering `cache_max_seconds` takes effect on results already cached.
-
-`"seconds": 0` is for output that must not replace what is already cached, such
-as an error row. Raffi keeps the rows on screen and treats the run as a failed
-refresh, so F5 reports a failure. When nothing was cached yet the rows are
-shown, and they are not stored either way. The main view hides them. The
-bundled GitHub scripts use this when `gh` is unavailable, so a network outage
-does not overwrite a good list.
-
-When a refresh fails while rows from the cache are on screen, whether the script
-exited with an error, printed invalid JSON, or answered `"seconds": 0`, the
-footer says how old they are: `cached 3h ago · refresh failed`. It goes away
-when a refresh succeeds, the query changes, or you leave the filter.
-
-Cached item lists and dynamic previews live under
-`$XDG_CACHE_HOME/raffi/script-filters/`. `raffi --refresh-cache` removes them.
-The cache keys include the command, arguments, environment and query, so
-changing the configuration starts from a clean entry.
-
-## Picking a row again
-
-Raffi can remember which rows you picked in a filter and list them first,
-most recently picked first. Rows you never picked keep the order your script
-printed, so the ranking only lifts what you actually used: open `tz paris`
-once and it is at the top the next time you enter the filter, whether or not
-you typed a query.
-
-This is off unless the script asks for it, because it reshuffles any list
-whose order means something, such as agents, pull requests or anything sorted
-latest first. A script enables it with a top-level `sort`:
-
-```json
-{ "sort": "usage", "items": [] }
-```
-
-`"usage"` is the only value that does anything, and the order your script
-printed is kept without it. The bundled `repos.py` sets it, since you go back
-to the same few repositories again and again.
-
-The user's config has the last word:
-
-```yaml raffi.yaml
-addons:
-  script_filters:
-    - name: "Timezones"
-      keyword: "tz"
-      command: "batz"
-      args: ["-j"]
-      sort_by_usage: true  # even when the script does not ask for it
-    - name: "Review requests"
-      keyword: "prr"
-      command: "~/.config/raffi/scripts/github/pr.py"
-      sort_by_usage: false # never, whatever the script prints
-```
-
-Unset, `sort_by_usage` follows the script's `sort`. `true` always ranks by
-usage, and `false` always keeps the script's order. This ranks the filter's
-own list; the main view keeps script-filter results in the order the script
-prints.
-
-Picking a row inside a `children` list also counts for the row that listed it,
-so a repository opened from its pages moves up in the list above, and a child
-list is reordered only when the list that listed it is. A list with indented
-[tree rows](#tree-results) is never reordered, so groups stay under their
-headings. Rows with `valid: false` and rows without an `arg` are never
-lifted. Every valid pick is remembered, whatever the list on screen shows, so
-rows you picked before turning the ranking on are listed first too; only a
-filter with `sort_by_usage: false` records nothing. Picks the main view
-already lists count as well.
-
-Usage lives in `$XDG_CACHE_HOME/raffi/script-filters.cache`, keyed by the
-filter's `name` and the row's `arg`.
-
-## Actions
-
-| Key        | Action                                                    |
-|------------|-----------------------------------------------------------|
-| Enter      | Open an item's children, or run `action` on a leaf item   |
-| Ctrl+Enter | Run `secondary_action`, or `action` when it is not set    |
-| Up / Down  | Move through the results                                  |
-| Escape     | Return to the parent list, or close Raffi at the top level|
-
-Actions use the item's `arg`, or its title when it has no `arg`. An action is
-one of:
-
-- `copy`, the default, to copy the value with `wl-copy`, `xclip` or `xsel`
-- `insert`, to close Raffi and type the value into the focused app with
-  `wtype` or `ydotool`
-- any other text, run with `sh -c` after replacing `{value}` with the value
-
-Press Right at the end of the query, or right-click a row, to open its
-action menu. It lists Enter and Ctrl+Enter, then the
-[custom actions](#custom-actions) the row declares and those of the filter's
-[`actions`](#configuration). Choosing one runs it on that row without leaving
-the list.
-
-An item with `children` opens those items when you press Enter or click it.
-Type to filter the current child list by title, subtitle or `arg`; Raffi does
-not rerun the script while filtering inside it. Press Escape to return to the
-parent list with its query and selection restored. Children can themselves have
-children.
-
-The value is also exported as `$RAFFI_VALUE`, and so are the item's
-[`variables`](#item-fields), so a script can pass structured data to its
-actions:
-
-```yaml raffi.yaml
-addons:
-  script_filters:
-    - name: "Bookmarks"
-      keyword: "bm"
-      command: "my-bookmark-script"
-      args: ["--json"]
-      icon: "bookmark"
-      action: "copy"                       # Enter: copy the URL
-      secondary_action: "xdg-open {value}" # Ctrl+Enter: open it
-```
-
-`{value}` is pasted into the command as raw text, so quotes or `$(...)` in it
-are read by the shell. Prefer `"$RAFFI_VALUE"` when the value comes from
-somewhere you do not control.
-
-## Custom actions
-
-A row can carry any number of extra actions, shown in its action menu:
-
-<Image src={scriptFilterActionsScreenshot} alt="Action menu of a repository row listing its pull requests, issues and releases" width={800} />
-
-```json
-{
-  "title": "repo",
-  "arg": "https://github.com/owner/repo",
-  "variables": { "REPO_SSH": "git@github.com:owner/repo.git" },
-  "actions": [
-    { "title": "Pull requests", "arg": "https://github.com/owner/repo/pulls" },
-    { "title": "Copy SSH URL", "arg": "git@github.com:owner/repo.git", "action": "copy" },
-    { "title": "Clone", "action": "git clone \"$REPO_SSH\" ~/src/repo" }
-  ]
-}
-```
-
-**`title`** is the label, and typing in the menu filters on it. **`arg`** is
-the value for `{value}` and `$RAFFI_VALUE`, the row's own value when missing.
-**`variables`** are exported on top of the row's `variables`. **`action``
-takes the same values as the filter's [`action`](#configuration), and
-defaults to it: `copy`, `insert` or a shell command.
-
-An action runs like Enter does, so `close_on_action` applies and `insert`
-closes Raffi. It never opens the row's `children`, and no recent pick is
-recorded for a row that has some. Rows with `valid: false` offer none. If a
-refresh replaces the row while the menu is open, the action does nothing.
-
-<Aside type="caution">
-An item's `action` is run with `sh -c`, whatever the filter's own `action` is.
-Anything a script prints from an untrusted source must stay out of `action`
-strings, and shell examples should read `"$VAR"` instead of pasting `{value}`.
-Results are cached with `cache_seconds`, actions included.
-</Aside>
-
-The filter can add the same entries to every row with `actions`, a list of
-`title` and `action` pairs listed after the row's own:
-
-```yaml raffi.yaml
-addons:
-  script_filters:
-    - name: "Repositories"
-      keyword: "repo"
-      command: "~/.config/raffi/scripts/github/repos.py"
-      action: "xdg-open {value}"
-      actions:
-        - title: "Clone"
-          action: 'git clone "$REPO_SSH" ~/src/"$REPO_NAME"'
-```
-
-## Examples
-
-### Google Contacts
-
-<Image src={scriptFilterContactsScreenshot} alt="Contact fields with the first field selected and the child search cleared" width={800} />
-
-The [`scripts/google-contacts/contacts.py`](https://github.com/chmouel/raffi/blob/main/scripts/google-contacts/contacts.py)
-filter lists saved contacts, searches their details, and shows contact
-information and photos in the preview. Enter a contact to see its fields;
-Enter a field to copy it. Escape returns to the previous list. Install it:
-
-```bash
-mkdir -p ~/.config/raffi/scripts/google-contacts
-cp scripts/google-contacts/contacts.py ~/.config/raffi/scripts/google-contacts/contacts.py
-chmod +x ~/.config/raffi/scripts/google-contacts/contacts.py
-```
-
-Enable People API in a Google Cloud project and create an OAuth client of type
-Desktop app. Store the downloaded client JSON in `pass` (default entry
-`google/raffi-contacts`), then run
-`~/.config/raffi/scripts/google-contacts/contacts.py --authorize --pass-entry google/raffi-contacts`.
-The command opens browser consent and writes the refresh token back to that
-entry. Only the read-only contacts permission is requested. Set
-`GOOGLE_CONTACTS_PASS_ENTRY` in the filter `env` to use another entry.
-Alternatively, set `args: ["--pass-entry", "google/agenda-credentials"]`;
-use that same `--pass-entry` option for direct script runs.
-
-```yaml raffi.yaml
-addons:
-  script_filters:
-    - name: "Google Contacts"
-      keyword: "contacts"
-      command: "~/.config/raffi/scripts/google-contacts/contacts.py"
-      icon: "contact-new"
-      action: "copy"
-      close_on_action: false
-      dynamic_preview: false
-```
-
-Contact data and downloaded photos are cached separately for each pass entry
-under `$XDG_CACHE_HOME/raffi/google-contacts/<entry-hash>/`. Contact data is
-reused for five minutes. Ctrl+R refreshes from Google; a temporary API failure
-keeps showing that entry's cached list.
-Missing photos download in the background without delaying results. Each
-worker stops after 30 seconds; later runs retry any remaining photos. Empty,
-oversized, or detectably incomplete responses are not cached. Failure to start
-the optional worker does not prevent contact results. Run the filter again to
-pick up newly cached photos.
-
-Script filter items may include a `children` list of ordinary items. Selecting
-a valid parent opens its children with an empty search, and Escape restores
-its parent list, query, and selection. Typing searches the current children
-locally; selecting a leaf uses the filter's configured action. Ctrl+R leaves
-child navigation and refreshes the root list using its original query.
-Switching filters or views also leaves child navigation.
-
-### GitHub pull requests
-
-<Image src={scriptFilterPrScreenshot} alt="GitHub PR browser" width={800} />
-
-The [`scripts/github/pr.py`](https://github.com/chmouel/raffi/blob/main/scripts/github/pr.py)
-script lists open pull requests with their CI status, review decision,
-conflicts, unresolved threads and size, using the
-[GitHub CLI](https://cli.github.com). Install it:
-
-```bash
-mkdir -p ~/.config/raffi/scripts/github
-cp scripts/github/pr.py scripts/github/ghcommon.py ~/.config/raffi/scripts/github/
-chmod +x ~/.config/raffi/scripts/github/pr.py
-```
-
-`ghcommon.py` holds what both GitHub scripts share and must stay in the same
-directory as the script. A symlink to the checked-out script works too.
-
-```yaml raffi.yaml
-addons:
-  script_filters:
-    - name: "Pull Requests"
-      keyword: "pr"
-      command: "~/.config/raffi/scripts/github/pr.py"
-      icon: "github"
-      action: "xdg-open {value}"
-      secondary_action: "copy"
-```
-
-```text
-pr                   your open pull requests across all repositories
-pr review            pull requests waiting for your review (also: assigned, involved)
-pr owner/repo login  open pull requests of owner/repo matching "login"
-```
-
-Ctrl+Tab switches between your pull requests, review requests, assigned and
-involved without retyping the query.
-
-Enter opens the pull request in the browser and Ctrl+Enter copies its URL.
-When results span several owners (organizations or user accounts), they are
-grouped under owner headings that cannot be selected, with the pull requests
-indented beneath. Results from a single owner, or from a fixed `owner/repo`
-query, stay flat.
-
-Add `args: ["--repo", "owner/repo"]` to give a repository its own keyword,
-and `ALIAS_<name>` variables in `env` for short repository names. Each row
-exports `PR_URL`, `PR_REPO`, `PR_NUMBER` and `PR_BRANCH` to the actions.
-
-Each pull request shows the avatar of its repository owner, or of its author
-when every listed pull request comes from the same repository, cached under
-`~/.cache/raffi/github-avatars/`. With the preview pane open, the selected
-pull request shows its branches, each reviewer's verdict, merge state,
-unresolved threads, checks, the issues it closes, its description with the
-markdown rendered in colour, the latest comments from people and the changed
-files. It refreshes every 20 seconds while a check is still running. See the
-script's [README](https://github.com/chmouel/raffi/blob/main/scripts/github/README.md)
-for all options.
-
-### GitHub repositories
-
-The [`scripts/github/repos.py`](https://github.com/chmouel/raffi/blob/main/scripts/github/repos.py)
-script lists the repositories of a GitHub account, yours by default or one you
-configure, using the [GitHub CLI](https://cli.github.com). Both GitHub scripts
-import `ghcommon.py`, so keep it beside whichever one you install:
-
-```bash
-mkdir -p ~/.config/raffi/scripts/github
-cp scripts/github/repos.py scripts/github/ghcommon.py ~/.config/raffi/scripts/github/
-chmod +x ~/.config/raffi/scripts/github/repos.py
-```
-
-```yaml raffi.yaml
-addons:
-  script_filters:
-    - name: "Repositories"
-      keyword: "repo"
-      command: "~/.config/raffi/scripts/github/repos.py"
-      args: ["--owners", "me,acme"]
-      env:
-        ALIAS_a: acme
-      icon: "github"
-      action: "xdg-open {value}"
-      secondary_action: "copy"
-      cache_seconds: 300
-      warm_queries: [""]
-```
-
-```text
-repo                    every --owners account mixed, most recently pushed first
-repo acme               the repositories of an account from --owners
-repo acme api           the same, filtered by "api"
-repo owner/repo         opens that repository
-```
-
-The first word is an account from `--owners` or an alias: `me` is the account
-`gh` is logged in as, and other aliases are `ALIAS_<name>` variables in `env`,
-as `a` above. Any other word filters the current list. Add `--any-owner` to let
-the first word be any GitHub account, such as `repo some-org`. The accounts
-in `--owners` are views, so Ctrl+Tab switches between them and keeps what you
-typed. With more than one, the default All view mixes their repositories by
-last push and each row names its owner. Forks are listed after the other
-repositories. A word that names one of your
-repositories, or the listed account itself, filters instead, and `me word`
-always filters your repositories. The remaining words must all appear in a
-repository's description, topics, name, language or flags, and names answer to
-their initials, so `a gs` finds `go-server`. Name matches come first,
-and a filter that matches nothing says so instead of showing an empty list.
-
-Enter opens the selected repository and Ctrl+Enter copies its URL; the last
-row opens the account itself (first when nothing matched) and exports
-`REPO_URL` and `REPO_OWNER`.
-Repository rows also export `REPO_NAME`, `REPO_SSH` and `REPO_CLONE`, and the
-preview shows the description, stars, forks, visibility and topics.
-
-The script prints `"sort": "usage"`, so the repositories you picked come first
-next time, as described in [Picking a row again](#picking-a-row-again). Pass
-`--no-usage-sort`, or set `USAGE_SORT=0` in the filter's `env`, to keep the
-order it prints instead.
-
-A row opens its repository. Add `--path pulls` (or `issues`, `releases`,
-`actions`, `tags`, or another path) to make every row open that page instead,
-which gives one keyword per page single-key access. `--pages
-pulls,issues,releases` makes Enter list those pages under the repository
-(Enter opens one, Ctrl+Enter copies it), and `--actions` puts pages in the
-row's [action menu](#custom-actions) instead, so Enter still opens the
-repository, except for `pulls` and `issues`, which are live menus (below) and
-give the row children whichever option names them. Every row also has copy
-entries there: the URL, a Markdown link, the clone URLs and `owner/name`, and
-the pages of `--pages` have the URL and a Markdown link.
-
-`pulls` and `issues` are live: instead of a link, each is a menu listing the
-repository's open pull requests, or open issues, newest updated first, with the
-`All … on GitHub` row last and the total count in its title. A pull request row
-shows its author, draft state, review decision and age and exports `PR_URL`,
-`PR_REPO`, `PR_NUMBER` and `PR_BRANCH` for actions written for the pull
-request script; an issue row shows its author and labels and exports
-`ISSUE_URL`, `ISSUE_REPO` and `ISSUE_NUMBER`. Titles are shown in full. Raffi
-needs those rows inline, so each draw queues the repositories whose live cache
-is missing or old, and a detached run of the script fills them in the
-background, `LIVE_PREFETCH` repositories per batch (default 20), until the
-queue is empty or its `LIVE_BUDGET` (default 120 seconds) is spent. A
-repository drawn for the first time shows a row saying it is loading, and the
-rows appear the next time the script runs. A fetch that keeps failing says why
-in that row (`failed: …`) instead of loading forever, the failure being kept
-in `live/errors.json` for `LIVE_ERRORS` (default `1h`). A list that is still
-filling is handed to Raffi with a short `LIVE_RETRY` freshness (default `1m`,
-never more than `CACHE_REPOS`), so Raffi runs the script again soon and shows
-the filled menus instead of keeping the loading rows for the whole
-`CACHE_REPOS` window.
-Ctrl+R bypasses Raffi's cached snapshot and refreshes one batch of the rows it
-can see, leaving the rest of them as ordinary background work: the first
-`LIVE_PREFETCH` drawn repositories are fetched even when their live cache is
-still fresh, so a forced refresh shows what changed since the last fetch, and
-the others are queued like any stale cache. `--live-items` sets both how many
-rows a menu shows and how
-many of each list the fetch asks GitHub for, and `--no-live`, or `LIVE=0`,
-keeps the plain links. A list whose settled cache holds no row is not a menu
-at all: it shows that same plain link to the page.
-
-The `"sort": "usage"` below applies inside a menu too: Raffi floats the rows
-you picked first, so the newest-updated order holds between the rows you never
-picked. `--no-usage-sort`, or `USAGE_SORT=0`, keeps the emitted order.
-
-Raffi's own `cache_seconds` shows each query's last result at once while
-refreshing it in the background, and `gh` caches every account's pages, so a
-keystroke starts no request: around 130 ms for your repositories and 100 ms for
-`repo acme` once warm. Typed filters never reach GitHub, and listing
-another account asks only about that account. Ctrl+R skips the `gh` cache and
-pays one to three seconds per uncached page of 100 repositories. See the
-script's
-[README](https://github.com/chmouel/raffi/blob/main/scripts/github/README.md#repositories)
-for the settings.
-
-### Web search with autocomplete
-
-The [`scripts/search/search.py`](https://github.com/chmouel/raffi/blob/main/scripts/search/search.py)
-script shows live DuckDuckGo autocomplete suggestions and opens the result in
-the search engine of your choice: `google`, `duckduckgo`, `bing` or `brave`.
-Install it:
-
-```bash
-mkdir -p ~/.config/raffi/scripts/search
-cp scripts/search/search.py ~/.config/raffi/scripts/search/search.py
-chmod +x ~/.config/raffi/scripts/search/search.py
-```
-
-Then add one entry per engine:
-
-```yaml raffi.yaml
-addons:
-  script_filters:
-    - name: "Search DuckDuckGo"
-      keyword: "ddg"
-      command: "~/.config/raffi/scripts/search/search.py"
-      args: ["duckduckgo"]
-      icon: "web-browser"
-      action: "xdg-open {value}"
-      secondary_action: "copy"
-
-    - name: "Search Google"
-      keyword: "sg"
-      command: "~/.config/raffi/scripts/search/search.py"
-      args: ["google"]
-      icon: "google"
-      action: "xdg-open {value}"
-      secondary_action: "copy"
-```
-
-Typing `ddg rust async` lists the query itself first, which opens a
-DuckDuckGo search, then the autocomplete suggestions. Enter opens the
-selected one in the browser and Ctrl+Enter copies its URL. With the preview
-pane open, a suggestion shows its DuckDuckGo Instant Answer (summary, source
-link and image) when there is one. The suggestions need no API key; on a
-timeout or network error the script only shows the query.
-
-The [`web_searches`](../web-search/) addon opens a URL directly, without
-suggestions. Use it for instant access and this script when you want live
-suggestions.
-
-### Herdr sessions
-
-The [Herdr filter script](https://github.com/chmouel/raffi/tree/main/scripts/herdr)
-browses a [Herdr](https://herdr.dev) session as an indented
-[tree](#tree-results) of workspaces, tabs and panes. A tab with a single pane,
-shells included, appears once as the tab row and keeps its terminal preview;
-tabs with several panes list them underneath. The query matches tab and pane
-details and keeps the ancestors of each match. Select a workspace or a tab to
-focus it, or an agent pane to focus the agent.
-
-<Image src={herdrTreeScreenshot} alt="Herdr demo workspace tree with connected session and pane rows and the selected split session's details" width={800} />
-
-Install the script and its icons, and copy the icon directory again when
-upgrading, license notices included:
-
-```bash
-mkdir -p ~/.config/raffi/scripts/herdr
-cp scripts/herdr/herdr_filter.py ~/.config/raffi/scripts/herdr/herdr_filter.py
-cp -R scripts/herdr/icons ~/.config/raffi/scripts/herdr/
-chmod +x ~/.config/raffi/scripts/herdr/herdr_filter.py
-```
-
-Every item exports `HERDR_KIND` (`workspace`, `tab`, `agent` or `pane`) and
-`HERDR_FOCUS`, the id to focus, so one action handles every kind:
-
-```yaml raffi.yaml
-addons:
-  script_filters:
-    - name: "Herdr"
-      keyword: "herdr"
-      command: "~/.config/raffi/scripts/herdr/herdr_filter.py"
-      icon: "utilities-terminal"
-      env:
-        HERDR_ICON_SET: color
-      action: >-
-        case "$HERDR_KIND" in
-          workspace) herdr workspace focus "$HERDR_FOCUS" ;;
-          tab) herdr tab focus "$HERDR_FOCUS" ;;
-          agent) herdr agent focus "$HERDR_FOCUS" ;;
-          *) herdr tab focus "$HERDR_FOCUS" ;;
-        esac
-```
-
-The default `color` icons tell workspaces, sessions, shells and agents apart,
-and preview headers use them too. Set `HERDR_ICON_SET` to `mono-dark` (pale
-marks for dark themes) or `mono-light` (dark marks for light themes) for
-monochrome icons. No icon font is needed.
-
-<Image src={herdrStatusScreenshot} alt="Herdr demo agents grouped under Working, Waiting and Idle, with terminal output for the selected agent" width={800} />
-
-For an agent status tree, set `HERDR_VIEW: status` in `env` or add
-`args: ["--status"]`. Agents from every workspace are grouped under Working,
-Waiting (Herdr's `blocked`), Idle, Done and Unknown, and empty groups are
-hidden. Each agent appears once, agents in split tabs included, with its
-workspace in the subtitle. Plain shells stay in the workspace view. Group
-headings show their counts and a summary preview but have no action, while
-agent rows keep their focus action and terminal preview. Search `waiting` or
-`blocked` to find the agents that need you. The workspace tree stays the
-default (`HERDR_VIEW: workspace` or `--tree`). Whichever one you configure,
-Ctrl+Tab switches between Workspaces, Status and Agents.
-
-For a flat list of recognised agents only, add `args: ["--agents"]` and focus
-them directly:
-
-```yaml raffi.yaml
-addons:
-  script_filters:
-    - name: "Herdr Agents"
-      keyword: "hagents"
-      command: "~/.config/raffi/scripts/herdr/herdr_filter.py"
-      args: ["--agents"]
-      icon: "utilities-terminal"
-      action: 'herdr agent focus "$HERDR_FOCUS"'
-```
-
-To raise the terminal window before focusing, start the action with the line
-for your compositor, changing `kitty` to your terminal's class or app id:
-
-```sh
-# Hyprland
-hyprctl dispatch focuswindow class:kitty;
-# Sway
-swaymsg '[app_id="kitty"] focus';
-# niri (needs jq)
-id=$(niri msg -j windows | jq -r '.[] | select(.app_id == "kitty") | .id' | head -n1);
-[ -z "$id" ] || niri msg action focus-window --id "$id";
-```
-
-For example, on Hyprland:
-
-```yaml
-action: >-
-  hyprctl dispatch focuswindow class:kitty;
-  case "$HERDR_KIND" in
-    workspace) herdr workspace focus "$HERDR_FOCUS" ;;
-    tab) herdr tab focus "$HERDR_FOCUS" ;;
-    agent) herdr agent focus "$HERDR_FOCUS" ;;
-    *) herdr tab focus "$HERDR_FOCUS" ;;
-  esac
-```
-
-With the preview pane open, the selected row shows a live preview refreshed
-every 2 seconds: agent panes show their status, directory and recent
-terminal output, tabs show their pane list (and the terminal of single-pane
-tabs), and workspaces show their tab list and active tab. See the script's
-[README](https://github.com/chmouel/raffi/blob/main/scripts/herdr/README.md)
-for more.
-
-### In the main list
-
-A script filter listed in
-[`general.main_view`](../../configuration/main-list/#choosing-what-it-shows)
-as `script_filters."<name>"` also runs without its keyword: its first five
-items show in the main list each time you pause typing, once the query is at
-least `min_query_length` long. It can also be one of the
-[fallbacks](../../configuration/main-list/#fallbacks) shown at the bottom of
-every search.
+Type `tz new york` to run `batz -j "new york"`. Raffi displays the returned
+items and copies the selected value when you press Enter.
+
+Typing `tz` without a trailing space keeps you in the main list, where Raffi
+offers a row to enter the filter with Enter or Tab. Once inside the filter,
+Raffi re-runs the command whenever the query text changes.
 
 ## Configuration
 
-Script filters are a list under `addons.script_filters`, one entry per
+Define script filters as a list under `addons.script_filters`, one entry per
 keyword.
 
 **`name`** `string` (required)
 
-Name shown while the command runs, and used to refer to the filter in
-`main_view`, `fallbacks` and `-o addons.script_filters.<name>.<key>=...`.
+Display name shown while the command runs. Also identifies the filter in
+`general.main_view`, `general.fallbacks`, and
+`-o addons.script_filters.<name>.<key>=...`.
 
 **`keyword`** `string` (required)
 
-Text that enters the filter. Type it followed by a space: `tz ` enters the
-filter while `tz` keeps searching the main list. When sources share a
-keyword, the first script filter with it wins, and script filters come
-before text snippets, web searches and the other addons.
+Trigger word for the filter. You enter the filter by typing the keyword
+followed by a space. If two sources share a keyword, the first script filter
+wins; script filters take precedence over text snippets, web searches, and
+built-in addons.
 
 **`command`** `string` (required)
 
-Program to run. It is started directly, without a shell, with `args` and
-then the text typed after the keyword as its last argument (empty when
-nothing is typed). A leading `~/` and `${VAR}` references are expanded.
+Executable to run. Raffi invokes it directly without a shell, passing `args`
+followed by the query text as the final argument (an empty string if nothing
+follows the space). Leading `~/` and `${VAR}` references are expanded.
 
 **`args`** `list of strings` (default: `[]`)
 
-Arguments passed before the query. They are passed as written, so use a full
-path rather than `~`.
+Static arguments passed before the query. Values are passed verbatim, so write
+full paths instead of `~`.
 
 **`icon`** `string`
 
-Icon name or image path for items without an icon of their own. A leading
+Fallback icon theme name or image path for items that omit `icon`. Leading
 `~/` and `${VAR}` references are expanded.
 
 **`action`** `string` (default: `copy`)
 
-What Enter does with the selected item: `copy`, `insert`, or a shell command,
-as described in [Actions](#actions). A leading `~/` and `${VAR}` references
-are expanded when the config loads, so write `$VAR` without braces for the
-variables an item exports.
+Action run on Enter: `copy`, `insert`, or a shell command. Leading `~/` and
+`${VAR}` references are expanded when Raffi loads the config, so reference
+item-exported environment variables as `$VAR` without braces.
 
 **`secondary_action`** `string` (default: same as `action`)
 
-What Ctrl+Enter does. It takes the same values as `action` and is expanded
-the same way.
+Action run on Ctrl+Enter, using the same syntax and expansion rules as
+`action`.
 
 **`actions`** `list of objects` (default: `[]`)
 
-Entries added to the action menu of every valid row, after the ones the row
-declares. Each has a `title` and an `action` that takes the same values as
-`action` and runs on the row's value, see [Custom actions](#custom-actions).
-
-**`sort_by_usage`** `boolean` (default: follows the script's `sort`)
-
-List the rows you already picked first, most recently picked first, as
-described in [Picking a row again](#picking-a-row-again). Rows never picked
-keep the script's order. Unset, it does that when the script prints
-`"sort": "usage"`; `true` always ranks by usage and `false` always keeps the
-order the script prints, whatever the script asks for. Picks are remembered
-whether or not the ranking is in effect, except with `false`, which also
-keeps nothing.
-
-**`cache_max_seconds`** `integer`
-
-Longest freshness a script may ask for with `"cache": {"seconds": N}`, when
-that is more than `cache_seconds`. It never turns caching on and never lowers
-`cache_seconds`, see [Letting the script choose](#letting-the-script-choose).
+Extra entries appended to every valid row's action menu after the row's own
+[custom actions](#custom-actions). Each entry takes a `title` and an `action`.
 
 **`env`** `map of strings` (default: `{}`)
 
-Environment variables passed to the command, including its
-[preview](#dynamic-previews) runs. They are not passed to actions.
+Environment variables exported to the script during list,
+[preview](#dynamic-previews), and [lazy children](#nested-lists-and-lazy-children)
+runs. They are not exported to actions.
 
 **`min_query_length`** `integer` (default: `0`)
 
-Number of characters to type after the keyword before the command runs.
-Until then the list is empty and a row says how many more characters to
-type. Useful for scripts that are slow or return too much on short queries.
+Minimum number of characters required after the keyword before Raffi runs the
+command. Until then, Raffi displays a prompt showing how many characters
+remain.
+
+**`sort_by_usage`** `boolean` (default: follows the script's `sort`)
+
+Controls [usage-based sorting](#sorting-by-usage). When unset, Raffi sorts by
+usage only if the script prints `"sort": "usage"`. Set to `true` to always
+lift picked rows, or `false` to preserve script order and stop recording picks.
+
+**`cache_seconds`** `integer`
+
+Enables the private [stale-while-revalidate cache](#caching) and sets the
+default freshness window in seconds. Omitting it disables caching completely.
+
+**`cache_max_seconds`** `integer`
+
+Upper bound in seconds when a script requests a longer freshness window via
+`"cache": {"seconds": N}`. Never enables caching on its own and never lowers
+`cache_seconds`.
+
+**`warm_queries`** `list of strings` (default: `[]`)
+
+Queries refreshed in the background by `raffi --server`.
+
+**`warm_interval_seconds`** `integer` (default: `cache_seconds`)
+
+Minimum interval between background refreshes for `warm_queries`.
 
 **`dynamic_preview`** `boolean` (default: `true`)
 
-Run the command again for the selected item to fill the preview pane, as
-described in [Dynamic previews](#dynamic-previews). Set it to `false` to
-only use the items' `preview` field.
+Re-runs the command with `RAFFI_PREVIEW=1` for the selected row when the
+preview pane is open. Set to `false` to rely strictly on each item's static
+`preview` field.
 
 **`close_on_action`** `boolean` (default: `true`)
 
-Close Raffi after running an action. When unset, `general.close_on_action`
-applies. `insert` always closes Raffi first.
+Closes Raffi after running an action. Falls back to `general.close_on_action`
+when unset. The `insert` action always closes Raffi.
 
 ```yaml raffi.yaml
 addons:
@@ -797,15 +158,156 @@ addons:
       close_on_action: false
 ```
 
+### Including a filter in the main list
+
+Add `script_filters."<name>"` to
+[`general.main_view`](../../configuration/main-list/#choosing-what-it-shows) to
+run the filter without typing its keyword. Raffi displays its first five
+results in the main list after you pause typing, provided the query meets
+`min_query_length`. You can also add a filter to
+[`general.fallbacks`](../../configuration/main-list/#fallbacks) to show it at
+the bottom of every search.
+
+## Actions and navigation
+
+| Key | Behavior |
+|---|---|
+| Enter | Open a row's children, or run `action` on a leaf row |
+| Ctrl+Enter | Run `secondary_action`, or `action` if unset |
+| Right / right-click | Open the row's action menu |
+| Up / Down | Move selection |
+| Ctrl+Tab / Ctrl+Shift+Tab | Switch between [views](#views) |
+| Ctrl+R | Refresh the current list with `RAFFI_REFRESH=1` |
+| Escape | Return to the parent list, or close Raffi at the top level |
+
+Actions operate on the item's `arg`, falling back to `title` if `arg` is
+absent. Three action forms are supported:
+
+- `copy` (the default) copies the value with `wl-copy`, `xclip`, or `xsel`.
+- `insert` closes Raffi and types the value into the focused window with
+  `wtype` or `ydotool`.
+- Any other string runs through `sh -c` with `{value}` substituted.
+
+Raffi also exports the selected value as `$RAFFI_VALUE`, along with every key
+from the item's `variables` map:
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Bookmarks"
+      keyword: "bm"
+      command: "my-bookmark-script"
+      args: ["--json"]
+      icon: "bookmark"
+      action: "copy"
+      secondary_action: 'xdg-open "$RAFFI_VALUE"'
+```
+
+Because `{value}` is interpolated as raw text before the shell parses the
+command, quotes or `$(...)` inside an item's value can execute arbitrary shell
+syntax. Quote `"$RAFFI_VALUE"` instead whenever item data comes from an
+external source.
+
+### Custom actions
+
+Press Right at the end of the query, or right-click any valid row, to open its
+action menu. The menu lists Enter, Ctrl+Enter, the row's own `actions`, and
+finally the filter's configured `actions`.
+
+<Image src={scriptFilterActionsScreenshot} alt="Action menu of a repository row listing its pull requests, issues and releases" width={800} />
+
+```json
+{
+  "title": "repo",
+  "arg": "https://github.com/owner/repo",
+  "variables": { "REPO_SSH": "git@github.com:owner/repo.git" },
+  "actions": [
+    { "title": "Pull requests", "arg": "https://github.com/owner/repo/pulls" },
+    { "title": "Copy SSH URL", "arg": "git@github.com:owner/repo.git", "action": "copy" },
+    { "title": "Clone", "action": "git clone \"$REPO_SSH\" ~/src/repo" }
+  ]
+}
+```
+
+Each entry accepts four fields:
+
+- `title` sets the menu label and is matched when you type inside the menu.
+- `arg` overrides `{value}` and `$RAFFI_VALUE` for this action; defaults to
+  the row's value.
+- `variables` merges on top of the row's `variables`.
+- `action` accepts `copy`, `insert`, or a shell command; defaults to the
+  filter's `action`.
+
+Running a menu action respects `close_on_action`, never opens the row's
+children, and skips recording a recent pick if the row has children. Rows with
+`valid: false` have no action menu. If a background refresh replaces the row
+while the menu is open, choosing an entry does nothing.
+
+<Aside type="caution">
+Item-defined `action` commands always run through `sh -c`, regardless of the
+filter's own `action`. Keep untrusted text out of `action` strings and read
+quoted `"$VAR"` environment variables instead of interpolating `{value}`. Note
+that cached results (`cache_seconds`) store row actions as well.
+</Aside>
+
+To add the same menu entries to every row in a filter, configure `actions` in
+`raffi.yaml`:
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Repositories"
+      keyword: "repo"
+      command: "~/.config/raffi/scripts/github/repos.py"
+      action: "xdg-open {value}"
+      actions:
+        - title: "Clone"
+          action: 'git clone "$REPO_SSH" ~/src/"$REPO_NAME"'
+```
+
+### Nested lists and lazy children
+
+A row can open a nested list on Enter instead of running an action. Raffi
+supports two ways to supply child rows:
+
+1. Inline `children`: embed a list of child items directly on the parent row.
+   Use this when the child data is already in memory (such as contact fields or
+   local search hits).
+2. On-demand `children_lazy: true`: defer loading until the user presses Enter
+   on the row. Use this for API-backed lists where fetching children upfront
+   for every row would be slow or wasteful.
+
+When you open a child list, Raffi clears the search bar so typing filters the
+current children locally by `title`, `subtitle`, or `arg` without re-running
+the script. Press Escape to return to the parent list with its previous query
+and selection intact. Child items can themselves have inline or lazy children.
+
+When a row has `children_lazy: true` (and no inline `children`), pressing Enter
+re-runs the filter command with `RAFFI_CHILDREN=1` and the same environment
+contract as [dynamic previews](#dynamic-previews): `RAFFI_VALUE`,
+`RAFFI_TITLE`, `RAFFI_QUERY`, the filter's `env`, the active view's
+`variables`, the row's `variables`, and theme variables. The script prints a
+standard `{"items": [...]}` payload.
+
+- Raffi caches the expanded list in memory for the session, or for the
+  response's top-level `cache` duration (`"cache": 0` disables caching).
+- Pressing Ctrl+R inside an inline child list exits navigation and refreshes
+  the root query. Pressing Ctrl+R inside a lazily loaded child list stays in
+  that list and re-runs `RAFFI_CHILDREN=1` with `RAFFI_REFRESH=1`.
+- Pressing Escape while a lazy load is in flight cancels it and restores the
+  parent list.
+- Empty responses and errors display a non-selectable status row (`No items` or
+  `Failed to load: ...`) so Escape and Ctrl+R remain available.
+- Lazy children runs are killed after 10 seconds.
+
 ## Output format
 
-The command prints a JSON object with an `items` list on its standard output.
-Other top-level keys are optional: [`cache`](#letting-the-script-choose) says
-how long the list stays fresh, [`views`](#views) and `view` offer Ctrl+Tab
-views, and [`sort`](#picking-a-row-again) lists the rows you picked first.
-Anything it writes on standard error is ignored. When the command
-fails or prints something that is not valid JSON, the list stays empty, so
-try a script in a terminal first, such as `my-script -j "test query"`.
+Your script writes a JSON object containing an `items` array to standard
+output. Optional top-level keys are [`cache`](#script-controlled-freshness),
+[`views`](#views), `view`, and [`sort`](#sorting-by-usage). Standard error is
+ignored. If the command exits non-zero or prints invalid JSON, Raffi shows an
+empty list, so test scripts directly in a terminal first (for example,
+`my-script -j "test query"`).
 
 A minimal script:
 
@@ -832,83 +334,61 @@ addons:
     - name: "My Filter"
       keyword: "mf"
       command: "~/bin/my-filter.py"
-      action: "xdg-open {value}"
+      action: 'xdg-open "$RAFFI_VALUE"'
 ```
 
-A fuller output:
+A fuller response with sorting and nested children:
 
 ```json
 {
   "sort": "usage",
   "items": [
     {
-      "title": "New York",
-      "subtitle": "EST (UTC-5), 14:30",
-      "arg": "America/New_York",
-      "icon": { "path": "/usr/share/icons/clock.png" }
-    },
-    {
-      "title": "London",
-      "subtitle": "GMT (UTC+0), 19:30",
-      "arg": "Europe/London"
-    }
-  ]
-}
-```
-
-Add a `children` list to make an item open a nested list instead of running an
-action. Each child uses the same item fields, including `children` for deeper
-levels:
-
-```json
-{
-  "items": [
-    {
       "title": "Alice",
+      "subtitle": "Engineering",
       "children": [
         { "title": "Email", "arg": "alice@example.com" },
         { "title": "Phone", "arg": "+1 555 0100" }
       ]
+    },
+    {
+      "title": "Pull requests",
+      "arg": "https://github.com/owner/repo/pulls",
+      "variables": { "REPO_NAME": "owner/repo", "LIVE_PATH": "pulls" },
+      "children_lazy": true
     }
   ]
 }
 ```
 
-Press Enter on Alice to browse her contact methods. Enter on a child without
-`children` runs the configured action; Escape goes back one level.
-
-Raffi lists the items in the order the script prints them. Filtering and
-sorting are the script's job.
+Raffi preserves the order your script prints unless usage sorting is active.
+Filtering the top-level list is the script's responsibility.
 
 ### Item fields
 
 **`title`** `string` (required)
 
-Main text of the row. [ANSI colours](#colours) are supported.
-
-**`children`** `list of items`
-
-Optional nested items. Enter or clicking the parent opens this list; the parent
-does not run an action. Child items use the same fields as top-level items.
+Primary row text. Supports [ANSI colours](#colours).
 
 **`subtitle`** `string`
 
-Second line of the row, with ANSI colours too.
+Secondary line under the title. Supports ANSI colours.
 
 **`arg`** `string`
 
-Value the actions use. The title is used when it is missing.
+Value passed to actions and exported as `RAFFI_VALUE`. Falls back to `title`
+when omitted.
 
 **`icon.path`** `string`
 
-Absolute path to a PNG or SVG icon. Without it, the filter's `icon` is used.
+Absolute path to a PNG or SVG icon. Falls back to the filter's `icon`.
 
-**`time`** `string`, `integer` or `object`
+**`time`** `string`, `integer`, or `object`
 
-A moment, shown after the subtitle as how long ago it was, such as `pushed 3h
-ago`, and in the preview as a row with the date in your time zone. Because
-Raffi works the text out when it draws the row, it stays true while a cached
-list is served, which text baked into `subtitle` does not.
+Timestamp rendered as a live relative age after the subtitle (such as
+`pushed 3h ago`) and as a formatted local date in the preview pane. Computing
+the relative text at draw time keeps cached lists accurate without baking stale
+ages into `subtitle`.
 
 ```json
 { "title": "raffi", "subtitle": "Rust", "time": "2026-11-19T05:10:04Z" }
@@ -916,53 +396,58 @@ list is served, which text baked into `subtitle` does not.
 { "title": "raffi", "time": { "at": "2026-11-19T05:10:04Z", "label": "pushed" } }
 ```
 
-`at` is RFC 3339 text or integer Unix seconds. The optional `label` goes in
-front (`pushed 3h ago`) and names the preview row; control characters are
-removed and it is cut at 32 characters. A time that does not fit, or lies more
-than a century from now, is ignored and never fails the list. Times within a
-minute either way read `just now`, a later one reads `in 2d`, and units are
-whole minutes, hours, days (30 days make a month) and years, rounded down.
-While a row with a `time` is visible, Raffi redraws every 30 seconds. A Raffi
-without this field shows the item without it, so a script that needs the text
-on those should keep sending it in the subtitle.
+`at` accepts an RFC 3339 string or integer Unix seconds. The optional `label`
+prefixes the relative age (`pushed 3h ago`) and titles the preview metadata
+row; control characters are stripped and labels are truncated to 32
+characters. Invalid timestamps or dates more than a century away are ignored
+without failing the list. Times within a minute read `just now`, future times
+read `in 2d`, and durations round down to whole minutes, hours, days (30-day
+months), and years. Raffi redraws visible `time` rows every 30 seconds.
+
+**`children`** `list of items`
+
+Inline nested items opened on Enter or click. Child items support the full set
+of item fields.
+
+**`children_lazy`** `boolean` (default: `false`)
+
+Defers loading child items until the row is expanded, triggering a
+`RAFFI_CHILDREN=1` run. Ignored if `children` is present.
 
 **`actions`** `list of objects`
 
-Custom entries of the row's action menu, see [Custom actions](#custom-actions).
+Row-specific entries for the action menu. See [Custom actions](#custom-actions).
 
 **`valid`** `boolean` (default: `true`)
 
-Set it to `false` for informational rows or headings. They can be selected
-to read their preview, but Enter, Ctrl+Enter and clicks do nothing and do
-not close Raffi. These rows are not recorded as recent picks and do not
-count as results for `--select-1`.
+Set to `false` for non-actionable rows such as headings or status messages.
+They remain focusable for reading previews, but ignore Enter, Ctrl+Enter,
+clicks, recent-pick tracking, and `--select-1`.
 
 **`indent`** `integer` (default: `0`)
 
-Raffi extension, ignored by Alfred: the tree level of the item. See
+Tree nesting depth (Raffi extension, ignored by Alfred). See
 [Tree results](#tree-results).
 
 **`preview`** `string` or `object`
 
-What the preview pane shows for the item: multiline text with ANSI colours,
-a local file or image path, or a [preview object](#preview-object). Add
-`"dynamic": false` to a preview object to keep that item out of
-[dynamic previews](#dynamic-previews).
+Static preview content: ANSI-coloured text, a local file or image path, or a
+[preview object](#preview-object). Set `"dynamic": false` on a preview object
+to exempt that row from [dynamic preview](#dynamic-previews) runs.
 
 **`variables`** `map of strings`
 
-Alfred variables. Each one is exported as an environment variable to the
-preview run and to the `action` and `secondary_action` commands, so the
-script can pass data along without packing it into `arg`.
+Key-value pairs exported as environment variables to dynamic preview runs,
+lazy children runs, and shell actions.
 
 **`quicklookurl`** `string`
 
-Alfred QuickLook URL or local file path (`file://`, `/path` or `~/path`).
-Local files and images show in the preview pane.
+Alfred QuickLook URL or local file path (`file://`, `/path`, or `~/path`).
+Local files and images render in the preview pane.
 
 **`text.largetype`** `string`
 
-Alfred large-type text, shown in the preview pane when `preview` is not set.
+Fallback preview text shown when `preview` is omitted.
 
 **`text.copy`** `string`
 
@@ -970,12 +455,12 @@ Alfred copy text, shown in the preview pane.
 
 ### Colours
 
-Titles, subtitles and preview text understand ANSI escape codes: 16, 256
-and 24-bit colours, plus bold, dim, italic and underline. The 16 basic
-colours come from the [theme's palette](../themes/#terminal-colours). Other
-escape sequences, such as cursor movement or terminal hyperlinks, are
-removed, and tabs are expanded to 8 columns, so output captured from tools
-like `bat` or `eza` displays cleanly.
+Titles, subtitles, and preview text support 16-colour, 256-colour, and 24-bit
+ANSI SGR sequences, plus bold, dim, italic, and underline. The 16 standard
+colours map to your [theme's terminal palette](../themes/#terminal-colours).
+Cursor movement, terminal hyperlinks, and other non-colour escape sequences are
+stripped, and tabs expand to 8 columns, so output from tools like `bat` or
+`eza` renders cleanly.
 
 ```json
 {
@@ -988,14 +473,11 @@ like `bat` or `eza` displays cleanly.
 }
 ```
 
-The [GitHub pull requests](#github-pull-requests) script uses colours for
-the CI state of each pull request.
-
 ### Tree results
 
-`indent` shifts a row further right for each level and draws connector
-guides, so a script can return a hierarchy, such as the
-[Herdr](#herdr-sessions) workspace, tab and pane tree:
+Setting `indent` shifts rows right by level and draws vertical and branch
+connector guides, suitable for hierarchies like the [Herdr](#herdr-sessions)
+workspace tree:
 
 ```json
 {
@@ -1008,24 +490,19 @@ guides, so a script can return a hierarchy, such as the
 }
 ```
 
-Print parents before their children and keep each subtree together. A row's
-parent is the nearest row above it with a smaller `indent`; skipped levels do
-not add rows. A row without a parent keeps its offset but draws no branch.
-Offsets stop growing after ten levels, while deeper rows keep their
-relationships; connections that would overlap at that limit are left out.
-Guides only link rows that are shown, and stop at the edge of a source,
-including results cut short in the main list.
-
-The script still does the filtering: it receives the query and can return
-only the matching rows plus their ancestors.
+Emit parents before their children and keep each subtree contiguous. Each row
+attaches to the nearest preceding row with a smaller `indent`. Skipped levels
+do not synthesize placeholder rows, and orphaned rows keep their indentation
+without drawing a branch. Visual indentation caps at ten levels while
+preserving parent-child relationships; overlapping connectors beyond that depth
+are omitted. Guides span only visible rows and stop at source boundaries.
 
 ### Views
 
-A script with several ways of listing its items, such as the
-[GitHub](#github-pull-requests) review requests or the [Herdr](#herdr-sessions)
-status tree, can offer them as views. Ctrl+Tab then switches to the next view
-and Ctrl+Shift+Tab to the previous one, keeping what you typed, and the footer
-shows the view you are on. Add a `views` list next to `items`:
+Scripts that offer multiple perspectives on their data (such as GitHub pull
+request categories or Herdr workspace vs. status views) can declare a top-level
+`views` array. Ctrl+Tab and Ctrl+Shift+Tab cycle through them while preserving
+your typed query, and the footer shows the active view.
 
 ```json
 {
@@ -1038,44 +515,40 @@ shows the view you are on. Add a `views` list next to `items`:
 }
 ```
 
-Each view has an `id`, a `title` for the footer (the `id` when missing) and
-optional `variables`, which are set on top of the filter's `env`, overriding
-entries with the same name. Raffi first runs the command as usual, and `view` names
-the view the script opened on; without it, the first one in the list is
-assumed. After a switch, Raffi runs the command again with the view's
-`variables` and `RAFFI_VIEW` set to its `id` in the environment, and preview
-runs get them too. Switching back to the view it opened on runs the command
-without `RAFFI_VIEW` again, and each time you enter the filter it starts
-there.
+Each view defines an `id`, a footer `title` (defaults to `id`), and optional
+`variables` overlaid onto the filter's `env`. On the initial run, Raffi calls
+the script without `RAFFI_VIEW` and reads `view` (or the first entry in
+`views`) as the default. After switching views, Raffi re-runs the command with
+`RAFFI_VIEW=<id>` and the view's `variables` exported; dynamic preview and lazy
+children runs inherit them too. Returning to the default view omits
+`RAFFI_VIEW` again.
 
-Every view is cached under its own key, and the server warms each
-`warm_queries` entry in every view. A script that prints no `views` works as
-before, and Raffi versions without views ignore the extra fields.
+Each view is cached separately, and `raffi --server` warms `warm_queries`
+across every declared view (up to 16 besides the default).
 
 ## Dynamic previews
 
-When the preview pane is open (Ctrl+P), Raffi runs the command again for the
-selected item and shows the preview object it prints. The command, args and
-query are the same as for the item list, with these environment variables
-added:
+When the preview pane is open (Ctrl+P) and `dynamic_preview` is enabled, Raffi
+re-runs the filter command for the selected row after you stop moving through
+the list. The command receives the same `args` and query as a list run, plus
+the filter's `env`, the active view's `variables`, the item's `variables`, and
+these protocol variables:
 
 | Variable | Value |
-|----------|-------|
+|---|---|
 | `RAFFI_PREVIEW` | `1` |
-| `RAFFI_VALUE` | the item's `arg`, or its title |
-| `RAFFI_TITLE` | the item's title without ANSI codes |
-| `RAFFI_QUERY` | the text typed after the keyword |
-| `RAFFI_PREVIEW_WIDTH`, `RAFFI_PREVIEW_HEIGHT` | preview pane size in pixels |
-| `RAFFI_THEME`, `RAFFI_THEME_MODE`, `RAFFI_THEME_FG`, ... | the current theme, see [Terminal Colours](../themes/#terminal-colours) |
+| `RAFFI_VALUE` | Item's `arg`, or its `title` |
+| `RAFFI_TITLE` | Item's `title` with ANSI codes stripped |
+| `RAFFI_QUERY` | Query text after the keyword |
+| `RAFFI_PREVIEW_WIDTH`, `RAFFI_PREVIEW_HEIGHT` | Preview pane dimensions in pixels |
+| `RAFFI_THEME`, `RAFFI_THEME_MODE`, `RAFFI_THEME_FG`, ... | Active theme values, see [Terminal Colours](../themes/#terminal-colours) |
 
-The filter's `env` and the item's `variables` are exported too. The run waits
-until you stop moving through the list, is killed after 3 seconds, and its
-output is capped at 8 MiB.
-
-A script supports this by checking `RAFFI_PREVIEW` before building its list:
+Preview runs time out after 3 seconds and cap stdout at 8 MiB. Check
+`RAFFI_PREVIEW` at the top of your script before running list logic:
 
 ```python
-import json, os
+import json
+import os
 
 if os.environ.get("RAFFI_PREVIEW") == "1":
     value = os.environ["RAFFI_VALUE"]
@@ -1084,24 +557,21 @@ if os.environ.get("RAFFI_PREVIEW") == "1":
 ```
 
 <Aside type="caution">
-Previews run the command again, so a command that changes something each time
-it runs (sends a request with side effects, writes state) must check
-`RAFFI_PREVIEW` first, or the filter needs `dynamic_preview: false`.
+Because previews re-invoke the filter command, any script with side effects
+must check `RAFFI_PREVIEW` first or disable dynamic previews with
+`dynamic_preview: false`.
 </Aside>
 
-Scripts that ignore `RAFFI_PREVIEW` keep working. Raffi waits for the first
-preview run of a filter to answer before starting another. Any JSON object
-without an `items` key is a preview object, so `{}` is an empty preview. If
-the first run fails, times out, or prints something other than a preview
-object (the usual `{"items": [...]}`, or text that is not JSON), Raffi stops
-asking that filter for the rest of the session and uses the items' `preview`
-field.
+Scripts that do not implement `RAFFI_PREVIEW` require no changes. Raffi probes
+a filter once per session, waiting for that first preview run before starting
+another. Any JSON object without an `items` key counts as a preview (`{}` is an
+empty preview). If the probe fails, times out, prints a normal `{"items": ...}`
+list, or prints non-JSON output, Raffi disables dynamic previews for that
+filter for the rest of the session and falls back to static `preview` fields.
 
-Once a filter has printed a preview object, even one Raffi cannot read (such
-as a field with the wrong type), errors are shown instead: a failed run
-(non-zero exit or timeout) or an unreadable preview object keeps the last
-preview on screen, adds a `Preview` row with the error, and is retried the
-next time the item is selected.
+Once a filter has returned a preview object, later failures (non-zero exit,
+timeout, or malformed preview fields) keep the previous preview visible, add an
+error row under `Preview`, and retry the next time that row is selected.
 
 ### Preview object
 
@@ -1125,31 +595,431 @@ Every field is optional:
 }
 ```
 
-`title`, `subtitle` and `badge` replace the header of the preview pane.
+- `title`, `subtitle`, and `badge` replace the preview header.
+- `icon` accepts an icon theme name, image path, or emoji.
+- `text` renders body text with 16, 256, and 24-bit ANSI colours.
+- `image` accepts a local path, `{"path": "..."}`, or `{"base64": "..."}`
+  (raw base64 or a `data:image/...;base64,` URL). Size generated images with
+  `RAFFI_PREVIEW_WIDTH` and `RAFFI_PREVIEW_HEIGHT`.
+- `sections` renders an ordered sequence of blocks: `text` (`content` and
+  optional `heading`), `image` (`path` or `base64`), and `file` (`path`,
+  rendered with the file browser viewer for text, images, and directories).
+  Setting `sections` overrides `text` and `image`; an empty list clears the
+  body. Without `sections`, `image` appears above `text`. Omitting all three
+  preserves the item's static body while updating header and metadata.
+- `metadata` adds `[label, value]` rows above Raffi's Enter and Ctrl+Enter
+  action rows.
+- `refresh` re-runs the preview every N seconds while the row stays selected
+  (clamped to `0.5`..`3600`). `file` sections re-read from disk on each tick.
 
-`icon` is an icon theme name, an image path or an emoji.
+The same JSON structure works as an item's static `preview` field, where
+`refresh` is ignored and `"dynamic": false` opts the row out of dynamic
+previews.
 
-`text` is the body text, with ANSI colours (16, 256 and 24-bit).
+## Caching
 
-`image` is a local image path, `{"path": "..."}` or `{"base64": "..."}`.
-Base64 data may also be a `data:image/...;base64,` URL. Use
-`RAFFI_PREVIEW_WIDTH` and `RAFFI_PREVIEW_HEIGHT` to size generated images.
+Filters that talk to slow APIs can opt into a private stale-while-revalidate
+cache by setting `cache_seconds`. Raffi displays the last cached result
+immediately while refreshing in the background. Without `cache_seconds`,
+nothing is cached.
 
-`sections` is a list of body blocks, shown in order. A `text` block takes
-`content` and an optional `heading`, an `image` block takes `path` or
-`base64`, and a `file` block takes a `path` shown with the same viewer as the
-file browser (text, images, directories). When `sections` is set, `text` and
-`image` are ignored, and an empty list clears the body. Without it the image
-comes first, then the text. A preview with no `sections`, `text` or `image`
-keeps the item's own preview body and only changes the header and metadata.
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Pull Requests"
+      keyword: "pr"
+      command: "~/.config/raffi/scripts/github/pr.py"
+      icon: "github"
+      cache_seconds: 300
+      warm_queries: [""]
+      warm_interval_seconds: 300
+```
 
-`metadata` is a list of `[label, value]` rows shown above Raffi's own Enter
-and Ctrl+Enter rows.
+When [`raffi --server`](../../reference/cli-options/#cache-management) is
+running, it refreshes each entry in `warm_queries` across all declared views
+once a snapshot outlives its freshness window (and never more often than
+`warm_interval_seconds`). Each snapshot is scheduled from its timestamp on disk
+with light jitter, so restarting the server does not re-fetch fresh data.
+Background runs time out after 60 seconds, and at most one runs per list at a
+time. Failed refreshes keep the last good snapshot and retry with exponential
+backoff from 1 minute up to 1 hour.
 
-`refresh` is the number of seconds after which Raffi asks again while the
-item stays selected, between 0.5 and 3600. Use it for live data such as logs
-or progress. A `file` section is read again on every refresh.
+Press Ctrl+R to bypass the cache and run the script with `RAFFI_REFRESH=1`
+(which the bundled GitHub scripts use to skip `gh`'s own cache). Press F5 when
+`raffi --server` is running to trigger that refresh in the server immediately.
 
-The same object can be an item's static `preview` field, where `refresh` has
-no effect. Add `"dynamic": false` to it to keep that item out of the dynamic
-preview runs.
+Cached lists and previews live under `$XDG_CACHE_HOME/raffi/script-filters/`,
+keyed by command, arguments, environment, view, and query. Run
+`raffi --refresh-cache` to clear them.
+
+### Script-controlled freshness
+
+A script can override its cache duration with a top-level `cache` field (either
+an object or a bare integer):
+
+```json
+{ "cache": { "seconds": 86400, "warm": ["review", "assigned"] }, "items": [] }
+```
+
+Your config still bounds what the script can ask for:
+
+| Script `cache.seconds` | Effective freshness |
+|---|---|
+| Omitted | `cache_seconds` |
+| Lower than `cache_seconds` | Script's value |
+| Higher than `cache_seconds` | Script's value, capped at `cache_max_seconds` and 7 days |
+| `0` | Not stored; treated as a failed refresh if cached rows exist |
+
+```yaml raffi.yaml
+      cache_seconds: 300
+      cache_max_seconds: 86400
+```
+
+A script cannot turn caching on when `cache_seconds` is unset. Bounds are
+checked on read, so lowering `cache_max_seconds` applies to existing snapshots
+immediately.
+
+Returning `"seconds": 0` protects cached lists from transient errors: Raffi
+keeps showing the cached rows, marks the footer with
+`cached 3h ago · refresh failed`, and hides error rows in the main view. If no
+snapshot exists yet, Raffi displays the returned error rows without saving
+them.
+
+The optional `warm` array lets a warmed query nominate up to four additional
+queries (at most 64 characters each, without control characters) for
+`raffi --server` to keep warm in every view. Server warming still starts strictly
+from your configured `warm_queries`; extra queries are not followed
+recursively, and any query dropped by a later refresh stops being warmed.
+
+## Sorting by usage
+
+Raffi can float previously picked rows to the top of a filter (most recently
+picked first) while leaving untouched rows in the script's original order.
+
+Usage sorting is off by default so time-ordered lists (such as pull requests or
+agent statuses) stay in order. A script opts in with a top-level `sort` key:
+
+```json
+{ "sort": "usage", "items": [] }
+```
+
+Override a script's preference per filter in `raffi.yaml`:
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Timezones"
+      keyword: "tz"
+      command: "batz"
+      args: ["-j"]
+      sort_by_usage: true
+    - name: "Review requests"
+      keyword: "prr"
+      command: "~/.config/raffi/scripts/github/pr.py"
+      sort_by_usage: false
+```
+
+- Picking a row inside a `children` or `children_lazy` list also credits its
+  parent row.
+- Indented [tree lists](#tree-results), rows with `valid: false`, and rows
+  without an `arg` are never reordered.
+- Main-view script filter results keep the script's order, though picks made
+  from the main view still count toward usage.
+- Picks are recorded whenever `sort_by_usage` is not `false` and stored in
+  `$XDG_CACHE_HOME/raffi/script-filters.cache`, keyed by filter `name` and row
+  `arg`.
+
+## Bundled scripts
+
+### Google Contacts
+
+<Image src={scriptFilterContactsScreenshot} alt="Contact fields with the first field selected and the child search cleared" width={800} />
+
+[`scripts/google-contacts/contacts.py`](https://github.com/chmouel/raffi/blob/main/scripts/google-contacts/contacts.py)
+searches your Google Contacts and puts each contact's email addresses, phone
+numbers, and details into inline `children`. Press Enter on a contact to open
+its fields, Enter on a field to copy it, and Escape to return.
+
+Install the script:
+
+```bash
+mkdir -p ~/.config/raffi/scripts/google-contacts
+cp scripts/google-contacts/contacts.py ~/.config/raffi/scripts/google-contacts/contacts.py
+chmod +x ~/.config/raffi/scripts/google-contacts/contacts.py
+```
+
+Enable the People API in a Google Cloud project, create a Desktop app OAuth
+client, store its JSON in `pass` (default `google/raffi-contacts`), and run:
+
+```bash
+~/.config/raffi/scripts/google-contacts/contacts.py --authorize --pass-entry google/raffi-contacts
+```
+
+This opens browser consent for read-only contacts access and writes the refresh
+token back into that `pass` entry. Use `GOOGLE_CONTACTS_PASS_ENTRY` in `env` or
+`args: ["--pass-entry", "..."]` to select another entry.
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Google Contacts"
+      keyword: "contacts"
+      command: "~/.config/raffi/scripts/google-contacts/contacts.py"
+      icon: "contact-new"
+      action: "copy"
+      close_on_action: false
+      dynamic_preview: false
+```
+
+Contacts and photos are cached per `pass` entry under
+`$XDG_CACHE_HOME/raffi/google-contacts/<entry-hash>/`. Contact data stays fresh
+for five minutes; Ctrl+R refreshes from Google while keeping cached rows on API
+errors. Missing photos download in a background worker (capped at 30 seconds
+per run) and appear on subsequent runs.
+
+### GitHub pull requests
+
+<Image src={scriptFilterPrScreenshot} alt="GitHub PR browser" width={800} />
+
+[`scripts/github/pr.py`](https://github.com/chmouel/raffi/blob/main/scripts/github/pr.py)
+lists open pull requests with CI status, review decision, merge conflicts,
+unresolved threads, and diff size using the [GitHub CLI](https://cli.github.com).
+Both GitHub scripts import `ghcommon.py`, so keep it in the same directory:
+
+```bash
+mkdir -p ~/.config/raffi/scripts/github
+cp scripts/github/pr.py scripts/github/ghcommon.py ~/.config/raffi/scripts/github/
+chmod +x ~/.config/raffi/scripts/github/pr.py
+```
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Pull Requests"
+      keyword: "pr"
+      command: "~/.config/raffi/scripts/github/pr.py"
+      icon: "github"
+      action: 'xdg-open "$RAFFI_VALUE"'
+      secondary_action: "copy"
+```
+
+```text
+pr                   your open pull requests across all repositories
+pr review            pull requests waiting for your review (also: assigned, involved)
+pr owner/repo login  open pull requests of owner/repo matching "login"
+```
+
+Ctrl+Tab switches between your pull requests, review requests, assigned, and
+involved without clearing your query. Results spanning multiple owners group
+under non-selectable owner headings; single-owner or `owner/repo` lists stay
+flat.
+
+Pass `args: ["--repo", "owner/repo"]` to dedicate a keyword to one repository,
+and set `ALIAS_<name>` variables in `env` for short repository aliases. Each
+row exports `PR_URL`, `PR_REPO`, `PR_NUMBER`, and `PR_BRANCH`.
+
+Owner or author avatars are cached under `~/.cache/raffi/github-avatars/`. The
+dynamic preview renders branches, reviewer verdicts, merge state, unresolved
+threads, CI checks, linked issues, coloured markdown description, recent human
+comments, and changed files, refreshing every 20 seconds while checks are still
+running. See the
+[GitHub scripts README](https://github.com/chmouel/raffi/blob/main/scripts/github/README.md)
+for all options.
+
+### GitHub repositories
+
+[`scripts/github/repos.py`](https://github.com/chmouel/raffi/blob/main/scripts/github/repos.py)
+lists repositories across your GitHub account and any configured organizations
+using the [GitHub CLI](https://cli.github.com). Keep `ghcommon.py` alongside
+it:
+
+```bash
+mkdir -p ~/.config/raffi/scripts/github
+cp scripts/github/repos.py scripts/github/ghcommon.py ~/.config/raffi/scripts/github/
+chmod +x ~/.config/raffi/scripts/github/repos.py
+```
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Repositories"
+      keyword: "repo"
+      command: "~/.config/raffi/scripts/github/repos.py"
+      args: ["--owners", "me,acme", "--pages", "pulls,issues,releases,actions"]
+      env:
+        ALIAS_a: acme
+      icon: "github"
+      action: 'xdg-open "$RAFFI_VALUE"'
+      secondary_action: "copy"
+      cache_seconds: 86400
+      warm_queries: [""]
+```
+
+```text
+repo                    all --owners accounts mixed, most recently pushed first
+repo acme               repositories of an account from --owners
+repo acme api           same, filtered by "api"
+repo owner/repo         open that repository directly
+```
+
+The first word selects an account from `--owners` or an alias (`me` resolves to
+the logged-in `gh` user; `ALIAS_<name>` defines custom aliases). Pass
+`--any-owner` to allow querying any GitHub account. Configured `--owners`
+accounts become Ctrl+Tab views; with more than one, the default `All` view
+merges them by last push, labels each row with its owner, and places forks
+after source repositories. Remaining words match repository name, initials
+(`a gs` finds `go-server`), description, topics, language, and flags.
+
+Rows export `REPO_URL`, `REPO_OWNER`, `REPO_NAME`, `REPO_SSH`, and `REPO_CLONE`,
+and the script prints `"sort": "usage"` (disable with `--no-usage-sort` or
+`USAGE_SORT=0`). The final row opens the account itself.
+
+Page options control what Enter and the action menu open:
+
+- `--path <page>` makes Enter open a specific page (such as `pulls` or
+  `releases`) instead of the repository root.
+- `--pages pulls,issues,releases` makes Enter open a child list of those pages
+  under the repository.
+- `--actions pulls,issues,releases` puts pages in the row's action menu
+  instead, except `pulls` and `issues`, which remain live menus.
+
+When `pulls` or `issues` is enabled (and `--no-live` / `LIVE=0` is not set),
+each entry sets `children_lazy: true`. Pressing Enter runs `repos.py` with
+`RAFFI_CHILDREN=1` to fetch that repository's open pull requests or issues on
+demand, newest updated first, followed by an `All … on GitHub` link. Pull
+request rows export `PR_URL`, `PR_REPO`, `PR_NUMBER`, and `PR_BRANCH`; issue
+rows export `ISSUE_URL`, `ISSUE_REPO`, and `ISSUE_NUMBER`. Raffi caches the
+expanded list for `CACHE_LIVE` (default `10m`), Ctrl+R inside the list fetches
+live data, and `--live-items` (default 20) sets how many rows to request.
+
+Because `gh` caches repository pages locally, warm queries answer in roughly
+100 to 130 ms and typed filters make no network requests. See the
+[GitHub scripts README](https://github.com/chmouel/raffi/blob/main/scripts/github/README.md#repositories)
+for all settings.
+
+### Web search with autocomplete
+
+[`scripts/search/search.py`](https://github.com/chmouel/raffi/blob/main/scripts/search/search.py)
+fetches DuckDuckGo autocomplete suggestions (no API key needed) and opens your
+selection in `google`, `duckduckgo`, `bing`, or `brave`:
+
+```bash
+mkdir -p ~/.config/raffi/scripts/search
+cp scripts/search/search.py ~/.config/raffi/scripts/search/search.py
+chmod +x ~/.config/raffi/scripts/search/search.py
+```
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Search DuckDuckGo"
+      keyword: "ddg"
+      command: "~/.config/raffi/scripts/search/search.py"
+      args: ["duckduckgo"]
+      icon: "web-browser"
+      action: 'xdg-open "$RAFFI_VALUE"'
+      secondary_action: "copy"
+
+    - name: "Search Google"
+      keyword: "sg"
+      command: "~/.config/raffi/scripts/search/search.py"
+      args: ["google"]
+      icon: "google"
+      action: 'xdg-open "$RAFFI_VALUE"'
+      secondary_action: "copy"
+```
+
+The first row searches your exact query; suggestions follow below. The preview
+pane displays DuckDuckGo Instant Answers (summary, source link, and image) when
+available. On a network error or timeout, the script falls back to the raw
+query row. Use the built-in [`web_searches`](../web-search/) addon when you
+want direct URL templates without live suggestions.
+
+### Herdr sessions
+
+The [Herdr script filter](https://github.com/chmouel/raffi/tree/main/scripts/herdr)
+displays a [Herdr](https://herdr.dev) session as an indented
+[tree](#tree-results) of workspaces, tabs, and panes. Single-pane tabs collapse
+into one row with their terminal preview attached; split tabs list their panes
+underneath. Queries match tab and pane details while preserving matching
+ancestors.
+
+<Image src={herdrTreeScreenshot} alt="Herdr demo workspace tree with connected session and pane rows and the selected split session's details" width={800} />
+
+Copy both the script and its `icons` directory (including license notices when
+upgrading):
+
+```bash
+mkdir -p ~/.config/raffi/scripts/herdr
+cp scripts/herdr/herdr_filter.py ~/.config/raffi/scripts/herdr/herdr_filter.py
+cp -R scripts/herdr/icons ~/.config/raffi/scripts/herdr/
+chmod +x ~/.config/raffi/scripts/herdr/herdr_filter.py
+```
+
+Each row exports `HERDR_KIND` (`workspace`, `tab`, `agent`, or `pane`) and
+`HERDR_FOCUS`:
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Herdr"
+      keyword: "herdr"
+      command: "~/.config/raffi/scripts/herdr/herdr_filter.py"
+      icon: "utilities-terminal"
+      env:
+        HERDR_ICON_SET: color
+      action: >-
+        case "$HERDR_KIND" in
+          workspace) herdr workspace focus "$HERDR_FOCUS" ;;
+          tab) herdr tab focus "$HERDR_FOCUS" ;;
+          agent) herdr agent focus "$HERDR_FOCUS" ;;
+          *) herdr tab focus "$HERDR_FOCUS" ;;
+        esac
+```
+
+Set `HERDR_ICON_SET` to `color` (default), `mono-dark`, or `mono-light`. No
+icon font is required.
+
+<Image src={herdrStatusScreenshot} alt="Herdr demo agents grouped under Working, Waiting and Idle, with terminal output for the selected agent" width={800} />
+
+Three views are available via Ctrl+Tab (`Workspaces`, `Status`, and `Agents`):
+
+- `HERDR_VIEW: workspace` (`--tree`, default) shows the full workspace, tab,
+  and pane tree.
+- `HERDR_VIEW: status` (`--status`) groups agents across all workspaces under
+  `Working`, `Waiting` (Herdr's `blocked`), `Idle`, `Done`, and `Unknown`,
+  hiding empty groups. Group headings are non-selectable; search `waiting` or
+  `blocked` to jump straight to agents needing input.
+- `args: ["--agents"]` shows a flat list of recognized agents only.
+
+```yaml raffi.yaml
+addons:
+  script_filters:
+    - name: "Herdr Agents"
+      keyword: "hagents"
+      command: "~/.config/raffi/scripts/herdr/herdr_filter.py"
+      args: ["--agents"]
+      icon: "utilities-terminal"
+      action: 'herdr agent focus "$HERDR_FOCUS"'
+```
+
+To raise your terminal window before focusing a Herdr target, prepend your
+compositor's focus command (replacing `kitty` with your terminal's class or app
+id):
+
+```sh
+# Hyprland
+hyprctl dispatch focuswindow class:kitty;
+# Sway
+swaymsg '[app_id="kitty"] focus';
+# niri (requires jq)
+id=$(niri msg -j windows | jq -r '.[] | select(.app_id == "kitty") | .id' | head -n1);
+[ -z "$id" ] || niri msg action focus-window --id "$id";
+```
+
+With the preview pane open, Raffi refreshes the selected row every 2 seconds:
+agent panes show status, directory, and recent terminal output; tabs list their
+panes (or terminal output for single-pane tabs); workspaces list their tabs and
+active tab. See the
+[Herdr script README](https://github.com/chmouel/raffi/blob/main/scripts/herdr/README.md)
+for details.
