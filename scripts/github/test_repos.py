@@ -3,6 +3,7 @@ import io
 import json
 import os
 import tempfile
+import threading
 import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -203,6 +204,7 @@ SETTLED = {
     "LIVE_PREFETCH": 20,
     "LIVE_BUDGET": "120s",
     "LIVE_RETRY": "1m",
+    "LIVE_ERRORS": "1h",
     "CACHE_LIVE": "10m",
 }
 
@@ -212,6 +214,7 @@ class ReposTestCase(unittest.TestCase):
         repos.ACCOUNTS.clear()
         repos.PENDING.clear()
         repos.NAMED.clear()
+        repos.reload_errors()
         for name, value in SETTLED.items():
             self.addCleanup(setattr, repos, name, getattr(repos, name))
             setattr(repos, name, value)
@@ -1627,6 +1630,485 @@ class LiveMenuTests(ReposTestCase):
         )
         row = self.pages_item()["children"][2]["children"][0]
         self.assertEqual(row["title"], f"#2 {long}")
+
+
+class LiveErrorTests(ReposTestCase):
+    """A live fetch that keeps failing says why instead of loading forever."""
+
+    def failing(self, query, cache=None, timeout=30, **variables):
+        raise repos.GhError("API rate limit exceeded")
+
+    def record(self, message):
+        def failing(query, cache=None, timeout=30, **variables):
+            raise repos.GhError(message)
+
+        with patch.object(repos, "graphql", failing):
+            repos.fetch_quietly("owner/raffi")
+
+    def test_a_failing_fetch_records_its_message_and_time(self):
+        before = time.time()
+        with patch.object(repos, "graphql", self.failing):
+            repos.fetch_quietly("owner/raffi")
+        entry = repos.read_errors()["owner/raffi"]
+        self.assertEqual(entry["error"], "API rate limit exceeded")
+        # The timestamp is what LIVE_ERRORS expires the record on.
+        self.assertGreaterEqual(entry["at"], before)
+        self.assertLessEqual(entry["at"], time.time())
+
+    def test_a_later_success_clears_the_record(self):
+        with patch.object(repos, "graphql", self.failing):
+            repos.fetch_quietly("owner/raffi")
+        self.assertIn("owner/raffi", repos.read_errors())
+        repos.fetch_quietly("owner/raffi")
+        self.assertEqual(repos.read_errors(), {})
+
+    def test_a_failure_is_kept_to_one_short_line(self):
+        self.record("boom " * 40 + "\nsecond line")
+        error = repos.read_errors()["owner/raffi"]["error"]
+        self.assertNotIn("second line", error)
+        self.assertLessEqual(len(error), 120)
+
+    def test_the_cold_placeholder_carries_the_failure(self):
+        self.record("gh: Not Found (HTTP 404)")
+        pulls = self.pages_item()["children"][1]
+        placeholder = pulls["children"][0]
+        self.assertEqual(
+            placeholder["subtitle"],
+            "failed: gh: Not Found (HTTP 404) \u00b7 Ctrl+R retries it",
+        )
+        self.assertFalse(placeholder["valid"])
+        self.assertIn("gh: Not Found (HTTP 404)", placeholder["preview"]["text"])
+        self.assertIn("Ctrl+R", placeholder["preview"]["text"])
+        # The menu is still no dead end.
+        self.assertEqual(
+            pulls["children"][-1]["title"], "All pull requests on GitHub"
+        )
+        self.assertIn("gh: Not Found (HTTP 404)", pulls["preview"]["text"])
+
+    def test_another_repository_keeps_the_loading_wording(self):
+        self.record("gh: Not Found (HTTP 404)")
+        pages = self.options(pages=(("pulls", "Pull requests"),))
+        notes = repos.build_item(repo("notes"), pages)["children"][1]
+        self.assertEqual(
+            notes["children"][0]["subtitle"],
+            "loading in the background \u00b7 Ctrl+R loads it now",
+        )
+        self.assertIn("loading in the background", notes["preview"]["text"])
+
+    def test_a_menu_with_cached_rows_is_unaffected(self):
+        self.record("gh: Not Found (HTTP 404)")
+        self.write_live()
+        pulls = self.pages_item()["children"][1]
+        self.assertEqual(pulls["title"], "Pull requests \u00b7 34")
+        self.assertEqual(pulls["children"][0]["title"], "#412 Add clipboard view")
+        for row in (pulls, *pulls["children"]):
+            self.assertNotIn("Not Found", json.dumps(row))
+
+    def test_an_expired_failure_is_ignored(self):
+        repos.write_cache(
+            repos.errors_file(), {"owner/raffi": {"at": 0.0, "error": "gone"}}
+        )
+        self.assertEqual(repos.read_errors(), {})
+        placeholder = self.pages_item()["children"][1]["children"][0]
+        self.assertEqual(
+            placeholder["subtitle"],
+            "loading in the background \u00b7 Ctrl+R loads it now",
+        )
+
+    def test_a_corrupt_errors_file_is_ignored_without_raising(self):
+        repos.errors_file().parent.mkdir(parents=True, exist_ok=True)
+        junk = (
+            "not json",
+            "[]",
+            json.dumps({"owner/raffi": "boom"}),
+            json.dumps({"owner/raffi": {"at": "soon", "error": 3}}),
+            json.dumps({"owner/raffi": {"at": True, "error": "boom"}}),
+        )
+        for payload in junk:
+            repos.errors_file().write_text(payload)
+            self.assertEqual(repos.read_errors(), {}, payload)
+            # A working list stays a working list.
+            placeholder = self.pages_item()["children"][1]["children"][0]
+            self.assertEqual(
+                placeholder["subtitle"],
+                "loading in the background \u00b7 Ctrl+R loads it now",
+            )
+
+    def test_a_failure_is_recorded_over_a_corrupt_file_too(self):
+        repos.errors_file().parent.mkdir(parents=True, exist_ok=True)
+        repos.errors_file().write_text("not json")
+        self.record("gh: Not Found (HTTP 404)")
+        self.assertEqual(
+            repos.read_errors()["owner/raffi"]["error"], "gh: Not Found (HTTP 404)"
+        )
+
+    def test_the_file_stays_bounded_when_many_names_fail(self):
+        with patch.object(repos, "LIVE_ERRORS_CAP", 5), patch.object(
+            repos, "graphql", self.failing
+        ):
+            for number in range(8):
+                repos.fetch_quietly(f"owner/r{number}")
+        entries = repos.read_cache(repos.errors_file())
+        self.assertEqual(len(entries), 5)
+        # The oldest failures made room for the newest ones.
+        self.assertIn("owner/r7", entries)
+        self.assertNotIn("owner/r0", entries)
+
+    def test_many_long_failures_stay_readable(self):
+        # The byte bound is not what trims a map that fits: every record of a
+        # file inside it reads back, none lost to the read trimming the write.
+        message = "\U0001f600" * 120
+        with patch.object(repos, "ERRORS_BYTES", 512 * 1024):
+            for number in range(50):
+                repos.remember_error(f"owner/r{number}", repos.GhError(message))
+            self.assertEqual(len(repos.read_errors()), 50)
+
+    def test_the_write_bound_keeps_the_file_parseable(self):
+        # A file past ERRORS_BYTES reads as junk and loses every record at
+        # once, so the writer has to stay well inside it however long a
+        # failure message is.
+        message = "\U0001f600" * 120
+        for number in range(80):
+            repos.remember_error(f"owner/r{number}", repos.GhError(message))
+        payload = repos.errors_file().read_bytes()
+        self.assertLess(len(payload), repos.ERRORS_BYTES)
+        entries = json.loads(payload)
+        self.assertIsInstance(entries, dict)
+        # Trimmed by bytes, not reset to the one record still on disk.
+        self.assertGreater(len(entries), 1)
+        self.assertIn("owner/r79", entries)
+        self.assertNotIn("owner/r0", entries)
+        self.assertEqual(len(repos.read_errors()), len(entries))
+
+    def test_a_key_that_is_not_a_repository_is_ignored(self):
+        now = time.time()
+        repos.write_cache(
+            repos.errors_file(),
+            {
+                "not a repo": {"at": now, "error": "boom"},
+                "": {"at": now, "error": "boom"},
+                "owner/real": {"at": now, "error": "boom"},
+            },
+        )
+        self.assertEqual(list(repos.read_errors()), ["owner/real"])
+        repos.remember_error("not a repo", repos.GhError("boom"))
+        self.assertEqual(list(repos.read_errors()), ["owner/real"])
+
+    def test_a_record_too_big_to_fit_is_never_written(self):
+        # A foreign key big enough to fill the file on its own must not be
+        # republished by our writer: the file has to stay parseable.
+        now = time.time()
+        repos.write_cache(
+            repos.errors_file(),
+            {"owner/" + "\U0001f600" * 60000: {"at": now + 5, "error": "boom"}},
+        )
+        repos.remember_error("owner/new", repos.GhError("boom"))
+        payload = repos.errors_file().read_bytes()
+        self.assertLess(len(payload), repos.ERRORS_BYTES)
+        self.assertEqual(list(json.loads(payload)), ["owner/new"])
+
+    def test_an_unsorted_file_evicts_the_oldest_not_the_first(self):
+        # forget_error rewrites whatever order the file had, so the byte bound
+        # has to rank by time rather than trust the file's order.
+        now = time.time()
+        entries = {
+            f"owner/new{number}": {"at": now - number, "error": "z" * 120}
+            for number in range(5)
+        }
+        entries.update(
+            {
+                f"owner/old{number}": {"at": now - 4000 - number, "error": "z" * 120}
+                for number in range(200)
+            }
+        )
+        repos.write_cache(repos.errors_file(), entries)
+        repos.forget_error("owner/new0")
+        after = repos.read_errors()
+        self.assertTrue(all(f"owner/new{number}" in after for number in range(1, 5)))
+        self.assertLess(len(after), len(entries))
+        self.assertNotIn("owner/old199", after)
+
+    def test_a_record_past_the_write_bound_keeps_the_newest_ones(self):
+        # Crossing the bound must cost the furthest records, never all but the
+        # one being written.
+        message = "\U0001f600" * 120
+        for number in range(40):
+            repos.remember_error(f"owner/r{number}", repos.GhError(message))
+        kept = len(repos.read_errors())
+        repos.remember_error("owner/last", repos.GhError(message))
+        found = repos.read_errors()
+        self.assertGreater(len(found), 1)
+        self.assertGreaterEqual(len(found), kept - 1)
+        self.assertIn("owner/last", found)
+        self.assertNotIn("owner/r0", found)
+
+    def test_an_oversized_file_of_ours_is_read_again(self):
+        # A payload that stops inside the file parses as nothing, so a record
+        # past the read bound would read as no failures at all; the read takes
+        # the whole file again instead, keeping what it holds.
+        record = json.dumps({"owner/raffi": {"at": time.time(), "error": "boom"}})
+        repos.errors_file().parent.mkdir(parents=True, exist_ok=True)
+        repos.errors_file().write_text(" " * (2 * repos.ERRORS_BYTES) + record)
+        self.assertEqual(repos.read_errors()["owner/raffi"]["error"], "boom")
+
+    def test_a_hostile_file_past_the_retry_read_is_best_effort(self):
+        record = json.dumps({"owner/raffi": {"at": time.time(), "error": "boom"}})
+        repos.errors_file().parent.mkdir(parents=True, exist_ok=True)
+        # Past four times ERRORS_BYTES the tail is junk, so nothing is parsed
+        # and nothing raises; a menu still draws.
+        repos.errors_file().write_text(record + "x" * (5 * repos.ERRORS_BYTES))
+        self.assertEqual(repos.read_errors(), {})
+        self.assert_serializable(self.pages_item())
+
+    def test_two_concurrent_failures_both_survive(self):
+        # The lock keeps one read-modify-write from overwriting the other.
+        errors = {}
+        with patch.object(repos, "EDIT_PAUSE", 0), patch.object(
+            repos, "EDIT_ATTEMPTS", 100
+        ):
+            for round in range(10):
+                pair = {
+                    f"owner/a{round}": "first",
+                    f"owner/b{round}": "second",
+                }
+                errors.update(pair)
+                start = threading.Barrier(len(pair))
+
+                def record(name, message, start=start):
+                    start.wait()
+                    repos.remember_error(name, repos.GhError(message))
+
+                with ThreadPoolExecutor(max_workers=len(pair)) as pool:
+                    futures = [
+                        pool.submit(record, *entry) for entry in pair.items()
+                    ]
+                    for future in futures:
+                        future.result()
+        found = repos.read_errors()
+        self.assertEqual(
+            {name: entry["error"] for name, entry in found.items()}, errors
+        )
+
+    def test_a_success_does_not_resurrect_a_cleared_failure(self):
+        # A forget racing a remember of another name keeps only the new one.
+        # A forget that finds the lock busy skips by design, so clear once
+        # more before asking whether the record came back.
+        with patch.object(repos, "EDIT_PAUSE", 0), patch.object(
+            repos, "EDIT_ATTEMPTS", 100
+        ):
+            for round in range(10):
+                gone, other = f"owner/gone{round}", f"owner/other{round}"
+                repos.remember_error(gone, repos.GhError("old"))
+                start = threading.Barrier(2)
+
+                def clear(gone=gone, start=start):
+                    start.wait()
+                    repos.forget_error(gone)
+
+                def add(other=other, start=start):
+                    start.wait()
+                    repos.remember_error(other, repos.GhError("new"))
+
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    futures = [pool.submit(clear), pool.submit(add)]
+                    for future in futures:
+                        future.result()
+                repos.forget_error(gone)
+                found = repos.read_errors()
+                self.assertNotIn(gone, found, round)
+                self.assertEqual(found[other]["error"], "new", round)
+
+    def test_a_busy_error_lock_skips_the_record(self):
+        repos.write_cache(
+            repos.errors_file(), {"owner/old": {"at": time.time(), "error": "kept"}}
+        )
+        repos.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        with open(repos.errors_lock_file(), "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with patch.object(repos, "EDIT_PAUSE", 0), patch.object(
+                repos, "EDIT_ATTEMPTS", 1
+            ):
+                # A busy lock costs the hint, never the file or the caller.
+                repos.remember_error("owner/raffi", repos.GhError("boom"))
+        found = repos.read_errors()
+        self.assertNotIn("owner/raffi", found)
+        self.assertEqual(found["owner/old"]["error"], "kept")
+        # Free again, the record lands.
+        repos.remember_error("owner/raffi", repos.GhError("boom"))
+        self.assertIn("owner/raffi", repos.read_errors())
+
+    def test_a_deeply_nested_file_does_not_raise(self):
+        repos.errors_file().parent.mkdir(parents=True, exist_ok=True)
+        # Deep enough that json.loads raises RecursionError, which the read
+        # has to swallow like any other junk.
+        repos.errors_file().write_text("[" * 60000 + "]" * 60000)
+        with patch.object(repos, "ERRORS_BYTES", 256 * 1024):
+            self.assertEqual(repos.read_errors(), {})
+            item = self.pages_item()
+            self.assertEqual(
+                item["children"][1]["children"][0]["subtitle"],
+                "loading in the background \u00b7 Ctrl+R loads it now",
+            )
+            self.assert_serializable(item)
+
+    def test_an_impossible_timestamp_is_not_recent(self):
+        repos.errors_file().parent.mkdir(parents=True, exist_ok=True)
+        for at in ("1e999", "1e300", "-1e300", str(10**400)):
+            repos.errors_file().write_text(
+                f'{{"owner/raffi": {{"at": {at}, "error": "boom"}}}}'
+            )
+            self.assertEqual(repos.read_errors(), {}, at)
+        item = self.pages_item()
+        self.assertEqual(
+            item["children"][1]["children"][0]["subtitle"],
+            "loading in the background \u00b7 Ctrl+R loads it now",
+        )
+        self.assert_serializable(item)
+
+    def test_a_future_timestamp_is_not_a_recent_failure(self):
+        # An age bound alone is symmetric by accident: a date far ahead gives
+        # a huge negative age and would pass for a failure of a moment ago.
+        repos.errors_file().parent.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        for ahead in (86400, 100 * 365 * 86400, 3000 * 365 * 86400):
+            repos.errors_file().write_text(
+                json.dumps({"owner/raffi": {"at": now + ahead, "error": "boom"}})
+            )
+            self.assertEqual(repos.read_errors(), {}, ahead)
+            self.assertIsNone(repos.error_time(now + ahead, now), ahead)
+        # A clock a few seconds ahead is still a failure of a moment ago.
+        repos.errors_file().write_text(
+            json.dumps({"owner/raffi": {"at": now + 5, "error": "boom"}})
+        )
+        self.assertEqual(repos.read_errors()["owner/raffi"]["error"], "boom")
+        self.assertEqual(repos.error_time(now + 5, now), now + 5)
+
+    def test_an_oversized_file_is_read_bounded(self):
+        repos.errors_file().parent.mkdir(parents=True, exist_ok=True)
+        record = json.dumps({"owner/raffi": {"at": time.time(), "error": "boom"}})
+        # The record at the head of a big file still reads.
+        repos.errors_file().write_text(record + " " * (2 * repos.ERRORS_BYTES))
+        self.assertEqual(repos.read_errors()["owner/raffi"]["error"], "boom")
+        # Past the cap nothing is parsed, so a huge tail cannot be read in.
+        with patch.object(repos, "ERRORS_BYTES", 8):
+            self.assertEqual(repos.read_errors(), {})
+        self.assert_serializable(self.pages_item())
+
+    def test_a_lone_surrogate_leaves_the_output_encodable(self):
+        repos.write_cache(
+            repos.errors_file(),
+            {"owner/raffi": {"at": time.time(), "error": "boom \ud800 tail"}},
+        )
+        found = repos.read_errors()["owner/raffi"]["error"]
+        self.assertNotIn("\ud800", found)
+        placeholder = self.pages_item()["children"][1]["children"][0]
+        self.assert_serializable(placeholder)
+        self.assertIn("boom", placeholder["subtitle"])
+
+    def test_controls_do_not_swallow_the_retry_hint(self):
+        message = (
+            "x" * 100
+            + "\x1b[31m"
+            + "y" * 10
+            + "\x1b]8;;https://example.invalid/a\x07"
+            + "boom"
+        )
+        repos.write_cache(
+            repos.errors_file(),
+            {"owner/raffi": {"at": time.time(), "error": message}},
+        )
+        placeholder = self.pages_item()["children"][1]["children"][0]
+        # Stripped before the cap, so the hint after the message survives.
+        self.assertEqual(
+            placeholder["subtitle"],
+            "failed: " + "x" * 100 + "y" * 10 + "boom \u00b7 Ctrl+R retries it",
+        )
+        self.assertNotIn("\x1b", placeholder["subtitle"])
+        self.assertNotIn("\x07", placeholder["subtitle"])
+        self.assert_serializable(placeholder)
+
+    def test_a_cache_that_cannot_be_written_is_a_failure(self):
+        self.record("gh: Not Found (HTTP 404)")
+        # The temporary file cannot be renamed over a directory, so the live
+        # cache never lands: that is a failure, not a success clearing one.
+        repos.live_file("owner/raffi").mkdir()
+        repos.fetch_quietly("owner/raffi")
+        found = repos.read_errors()
+        self.assertIn("owner/raffi", found)
+        self.assertNotEqual(found["owner/raffi"]["error"], "")
+
+    def test_a_cold_page_reads_the_error_file_once(self):
+        self.record("gh: Not Found (HTTP 404)")
+        repos.reload_errors()
+        reads = []
+        real = repos.read_errors
+
+        def counting():
+            reads.append(True)
+            return real()
+
+        with patch.object(repos, "read_errors", counting):
+            for number in range(4):
+                item = repos.build_item(
+                    repo(f"r{number}"),
+                    self.options(pages=(("pulls", "Pull requests"),)),
+                )
+                self.assertFalse(item["children"][1]["children"][0]["valid"])
+        # Preview and placeholder share one snapshot, not one read each.
+        self.assertEqual(len(reads), 1)
+
+    def test_a_ctrl_r_rebuild_shows_the_failure_it_records(self):
+        def failing_live(query, cache=None, timeout=30, **variables):
+            if "pullRequests" in query:
+                raise repos.GhError("API rate limit exceeded")
+            return graphql(query, cache=cache, timeout=timeout, **variables)
+
+        with patch.object(repos, "graphql", failing_live), patch.object(
+            repos.ghcommon, "REFRESH", True
+        ):
+            output = self.run_main("--pages", "pulls", "me", "raffi")
+        placeholder = output["items"][0]["children"][1]["children"][0]
+        self.assertEqual(
+            placeholder["subtitle"],
+            "failed: API rate limit exceeded \u00b7 Ctrl+R retries it",
+        )
+
+    def test_a_new_run_reads_the_errors_again(self):
+        # A draw caches a snapshot; the next run must not keep serving it.
+        self.pages_item()
+        repos.write_cache(
+            repos.errors_file(),
+            {"owner/raffi": {"at": time.time(), "error": "gone wrong"}},
+        )
+        output = self.run_main("--pages", "pulls", "me", "raffi")
+        placeholder = output["items"][0]["children"][1]["children"][0]
+        self.assertIn("failed: gone wrong", placeholder["subtitle"])
+
+    def assert_serializable(self, item):
+        """Rafi prints with ensure_ascii=False, which a lone surrogate breaks."""
+        self.assertTrue(json.dumps(item, ensure_ascii=False).encode("utf-8"))
+
+    def run_main(self, *argv, env=None):
+        with environment(**(env or {})), patch(
+            "sys.argv", ["repos.py", *argv]
+        ), patch("builtins.print") as printed:
+            self.assertEqual(repos.main(), 0)
+        return json.loads(printed.call_args[0][0])
+
+    def write_live(self, at=None):
+        repos.write_cache(
+            repos.live_file("owner/raffi"),
+            {
+                "at": time.time() if at is None else at,
+                "first": repos.FETCH_ITEMS,
+                "pull_requests": LIVE["owner/raffi"]["pullRequests"],
+                "issues": LIVE["owner/raffi"]["issues"],
+            },
+        )
+
+    def pages_item(self, **kwargs):
+        kwargs.setdefault("pages", (("pulls", "Pull requests"),))
+        return repos.build_item(repo("raffi"), self.options(**kwargs))
 
 
 class QueueTests(ReposTestCase):

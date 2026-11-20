@@ -496,10 +496,13 @@ is missing or old, and a detached run of the script fills them in the
 background, `LIVE_PREFETCH` repositories per batch (default 20), until the
 queue is empty or its `LIVE_BUDGET` (default 120 seconds) is spent. A
 repository drawn for the first time shows a row saying it is loading, and the
-rows appear the next time the script runs. A list that is still filling is
-handed to Raffi with a short `LIVE_RETRY` freshness (default `1m`, never more
-than `CACHE_REPOS`), so Raffi runs the script again soon and shows the filled
-menus instead of keeping the loading rows for the whole `CACHE_REPOS` window.
+rows appear the next time the script runs. A fetch that keeps failing says why
+in that row (`failed: …`) instead of loading forever, the failure being kept
+in `live/errors.json` for `LIVE_ERRORS` (default `1h`). A list that is still
+filling is handed to Raffi with a short `LIVE_RETRY` freshness (default `1m`,
+never more than `CACHE_REPOS`), so Raffi runs the script again soon and shows
+the filled menus instead of keeping the loading rows for the whole
+`CACHE_REPOS` window.
 Ctrl+R bypasses Raffi's cached snapshot and refreshes one batch of the rows it
 can see, leaving the rest of them as ordinary background work: the first
 `LIVE_PREFETCH` drawn repositories are fetched even when their live cache is

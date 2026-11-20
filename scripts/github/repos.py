@@ -16,6 +16,7 @@ or issues, fetched ahead of time by a detached run of this script.
 import argparse
 import fcntl
 import json
+import math
 import os
 import re
 import subprocess
@@ -73,6 +74,8 @@ LIVE_PREFETCH = env_int("LIVE_PREFETCH", 20)
 LIVE_BUDGET = os.environ.get("LIVE_BUDGET", "120s")
 # How long Raffi may keep a list whose live menus are still filling.
 LIVE_RETRY = os.environ.get("LIVE_RETRY", "1m")
+# How long a failed live fetch is remembered, for the row it left loading.
+LIVE_ERRORS = os.environ.get("LIVE_ERRORS", "1h")
 # How many rows of each list the fetch asks GitHub for: --live-items raises it,
 # so a larger menu is not capped by LIVE_ITEMS.
 FETCH_ITEMS = LIVE_ITEMS
@@ -80,6 +83,30 @@ FETCH_ITEMS = LIVE_ITEMS
 # between them: a draw and a detached run can write the queue at the same time.
 EDIT_ATTEMPTS = 4
 EDIT_PAUSE = 0.02
+# How many failed live fetches errors.json keeps, the oldest dropped first.
+LIVE_ERRORS_CAP = 200
+# How much of errors.json is read: a longer file is junk past this. The
+# writer keeps its own file well under it, so what it wrote always parses,
+# and a payload it cut short is read again up to four times this.
+ERRORS_BYTES = 64 * 1024
+# How long a failure message a row shows may be, and how far from now its
+# timestamp may sit before it is treated as nonsense rather than recent: at
+# most ERRORS_TIME_MAX seconds old, and no more than ERRORS_TIME_SKEW ahead,
+# so a future date cannot pass for a failure of a moment ago.
+ERROR_TEXT_LIMIT = 120
+# A record of one owner/repo, as GitHub names them: anything else in the file
+# is junk, and a key long enough to fill it belongs to nobody.
+ERROR_NAME_LIMIT = 200
+ERRORS_TIME_MAX = 10**11
+ERRORS_TIME_SKEW = 300
+# Escape sequences and control characters a failure can carry from gh, which
+# would otherwise reach Rafi's output, or swallow the text after them.
+ESCAPES = re.compile(
+    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\|$)"
+    r"|\x1b\[[0-?]*[ -/]*[@-~]"
+    r"|\x1b[@-Z\\-_]"
+)
+CONTROLS = re.compile(r"[\x00-\x1f\x7f-\x9f\ud800-\udfff]")
 
 # Paths listing GitHub state instead of linking a static page.
 LIVE_PATHS = ("pulls", "issues")
@@ -132,6 +159,16 @@ def live_file(name: str) -> Path:
 def queue_file() -> Path:
     """The owner/repo names still waiting for a background live fetch."""
     return CACHE_DIR / "live" / "queue.json"
+
+
+def errors_file() -> Path:
+    """The recent live fetch failures, by owner/repo name."""
+    return CACHE_DIR / "live" / "errors.json"
+
+
+def errors_lock_file() -> Path:
+    """The lock a read-modify-write of errors.json holds, briefly."""
+    return CACHE_DIR / "errors.lock"
 
 
 def lock_file() -> Path:
@@ -313,12 +350,14 @@ def read_cache(file: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def write_cache(file: Path, data: object) -> None:
+def write_cache(file: Path, data: object, strict: bool = False) -> None:
     """Write data to file so a reader never sees half of it.
 
     Each write gets a temporary file of its own: a background fetch and a
     Ctrl+R, or two threads of one run, can write the same file at once, and a
     shared name would let one truncate the file the other is renaming.
+    strict re-raises an OSError instead of dropping the write, for a caller
+    that has to know the file it publishes landed.
     """
     partial = None
     try:
@@ -331,7 +370,8 @@ def write_cache(file: Path, data: object) -> None:
         Path(partial).replace(file)
         partial = None
     except OSError:
-        pass
+        if strict:
+            raise
     finally:
         if partial:
             Path(partial).unlink(missing_ok=True)
@@ -406,22 +446,190 @@ def live_section(section: dict | None) -> dict:
     }
 
 
+def error_name(value: object) -> str | None:
+    """A recorded failure's owner/repo key, or None for junk and giants."""
+    if not isinstance(value, str) or len(value) > ERROR_NAME_LIMIT:
+        return None
+    return value if REPO.fullmatch(value) else None
+
+
+def error_time(value: object, now: float) -> float | None:
+    """A timestamp a failure record may keep, or None for junk and nonsense."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    # A huge int would overflow the float conversion, and a huge float or an
+    # infinity would keep passing for recent however old it is.
+    if isinstance(value, int) and abs(value) > ERRORS_TIME_MAX:
+        return None
+    at = float(value)
+    if not math.isfinite(at) or at < now - ERRORS_TIME_MAX:
+        return None
+    if at > now + ERRORS_TIME_SKEW:
+        return None
+    return at
+
+
+def clean_message(text: str) -> str:
+    """One short plain line of text, escape sequences and controls aside.
+
+    The escapes go before the first line is taken and before the cap, so a
+    sequence cut in half cannot make Rafi swallow the text after it.
+    """
+    text = ESCAPES.sub("", text).strip()
+    line = text.splitlines()[0].strip() if text else ""
+    return CONTROLS.sub("", line)[:ERROR_TEXT_LIMIT].strip()
+
+
+def error_text(error: BaseException) -> str:
+    """The first line of a failure, short enough for a row subtitle."""
+    return clean_message(str(error)) or error.__class__.__name__
+
+
+def read_errors() -> dict[str, dict]:
+    """The recent live fetch failures, junk and expired entries aside.
+
+    The file is read at most ERRORS_BYTES, and every timestamp is checked
+    before the age arithmetic sees it, so a corrupt or hostile file can
+    neither raise through a menu nor pass for a recent failure forever. A
+    payload cut short by that bound is read again, whole, up to four times
+    it: one of our own writer's is only cut when a bound moves under it.
+    """
+    try:
+        with errors_file().open("rb") as stream:
+            try:
+                data = json.loads(stream.read(ERRORS_BYTES))
+            except ValueError:
+                stream.seek(0)
+                data = json.loads(stream.read(4 * ERRORS_BYTES))
+    except (OSError, ValueError, RecursionError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    now = time.time()
+    window = seconds(LIVE_ERRORS, default=3600)
+    found: dict[str, dict] = {}
+    for name, entry in data.items():
+        if not error_name(name) or not isinstance(entry, dict):
+            continue
+        error = entry.get("error")
+        message = clean_message(error) if isinstance(error, str) else ""
+        at = error_time(entry.get("at"), now)
+        if at is None or not message or now - at >= window:
+            continue
+        found[name] = {"at": at, "error": message}
+    return found
+
+
+# The failures the draw in progress shows, read once and dropped by a fetch or
+# a new run: a cold page asks for them once per row, preview and placeholder.
+ERRORS: dict[str, dict] | None = None
+
+
+def error_snapshot() -> dict[str, dict]:
+    """The recorded failures of this draw, read at most once."""
+    global ERRORS
+    if ERRORS is None:
+        ERRORS = read_errors()
+    return ERRORS
+
+
+def reload_errors() -> None:
+    """Drop the snapshot, for a draw that follows a fetch of this process."""
+    global ERRORS
+    ERRORS = None
+
+
+def fit_errors(entries: dict[str, dict]) -> dict[str, dict]:
+    """The newest failures that keep errors.json inside what is read of it.
+
+    A reader stops at ERRORS_BYTES, and json.loads of the cut short payload
+    would lose every record at once, so the writer stays under half of that:
+    the oldest entries go first, whatever order they came in. A record too
+    big to fit with any other is dropped rather than written, so the file the
+    writer leaves is always one the reader can parse.
+    """
+    budget = ERRORS_BYTES // 2
+    kept = sorted(entries.items(), key=lambda item: item[1].get("at") or 0)
+    sizes = [len(json.dumps({name: entry})) - 2 for name, entry in kept]
+    total = 2 + sum(sizes) + 2 * max(len(kept) - 1, 0)
+    while total > budget and kept:
+        total -= sizes.pop(0) + 2
+        kept.pop(0)
+    return dict(kept)
+
+
+def remember_error(name: str, error: BaseException) -> None:
+    """Record that the live fetch of name failed, for the row to show.
+
+    The error lock serializes the read-modify-write of errors.json, so two
+    fetchers of one run, or a success clearing one name while another fails,
+    do not overwrite each other's record. It guards that file only, not the
+    fetch it describes; when the lock stays busy the record is skipped, which
+    costs one hint and never a lost update under the lock.
+    """
+    entry = {"at": time.time(), "error": error_text(error)}
+    if not error_name(name):
+        return
+    with errors_lock() as locked:
+        if not locked:
+            return
+        entries = read_errors()
+        entries[name] = entry
+        newest = sorted(entries.items(), key=lambda item: item[1]["at"])
+        write_cache(errors_file(), fit_errors(dict(newest[-LIVE_ERRORS_CAP:])))
+        reload_errors()
+
+
+def forget_error(name: str) -> None:
+    """Drop the recorded failure of name, its fetch having worked.
+
+    It holds the error lock across its read and its write as remember_error
+    does, and skips the drop when the lock stays busy: the hint then lingers
+    for a while, and no update is lost.
+    """
+    with errors_lock() as locked:
+        if not locked:
+            return
+        entries = read_errors()
+        if entries.pop(name, None) is None:
+            return
+        write_cache(errors_file(), fit_errors(entries))
+        reload_errors()
+
+
+def live_error(name: str) -> dict | None:
+    """The recorded failure of name's last live fetch, when it is recent."""
+    return error_snapshot().get(name)
+
+
 def fetch_live(name: str) -> None:
-    """Fetch a repository's open pull requests and issues into its cache."""
+    """Fetch a repository's open pull requests and issues into its cache.
+
+    A failure is recorded for the row that would otherwise say it is loading
+    forever, and raised again so the other fetches of the run go on. The
+    cache is published strictly, so a cache that could not be written is a
+    failure too, never a success that clears the record.
+    """
     owner, _, repo = name.partition("/")
-    data = graphql(
-        LIVE_QUERY, cache=CACHE_LIVE, owner=owner, name=repo, first=FETCH_ITEMS
-    )
-    found = data.get("repository") or {}
-    write_cache(
-        live_file(name),
-        {
-            "at": time.time(),
-            "first": FETCH_ITEMS,
-            "pull_requests": live_section(found.get("pullRequests")),
-            "issues": live_section(found.get("issues")),
-        },
-    )
+    try:
+        data = graphql(
+            LIVE_QUERY, cache=CACHE_LIVE, owner=owner, name=repo, first=FETCH_ITEMS
+        )
+        found = data.get("repository") or {}
+        write_cache(
+            live_file(name),
+            {
+                "at": time.time(),
+                "first": FETCH_ITEMS,
+                "pull_requests": live_section(found.get("pullRequests")),
+                "issues": live_section(found.get("issues")),
+            },
+            strict=True,
+        )
+    except (GhError, OSError) as error:
+        remember_error(name, error)
+        raise
+    forget_error(name)
 
 
 def fetch_quietly(name: str) -> None:
@@ -436,8 +644,12 @@ def fetch_batch(names: list[str]) -> None:
     """Fetch names side by side, four at a time."""
     if not names:
         return
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        list(pool.map(fetch_quietly, names))
+    try:
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(fetch_quietly, names))
+    finally:
+        # A draw after the fetch, such as a Ctrl+R rebuild, sees its records.
+        reload_errors()
 
 
 class Entry(NamedTuple):
@@ -588,6 +800,11 @@ def drain_lock():
 def edit_lock():
     """The lock a read-modify-write of the queue file holds, for a moment."""
     return file_lock(edit_lock_file(), attempts=EDIT_ATTEMPTS)
+
+
+def errors_lock():
+    """The lock a read-modify-write of errors.json holds, for a moment."""
+    return file_lock(errors_lock_file(), attempts=EDIT_ATTEMPTS)
 
 
 def queue_pending(
@@ -1026,15 +1243,27 @@ def live_paths(options: Options) -> tuple[tuple[str, str], ...]:
 
 def live_placeholder(name: str, label: str) -> dict:
     """The row a live menu shows before its first fetch lands."""
+    failure = live_error(name)
+    if failure:
+        subtitle = f"failed: {failure['error']} \u00b7 Ctrl+R retries it"
+        text = (
+            f"The last fetch of the open {label.lower()} of {name} failed: "
+            f"{failure['error']}\nPress Ctrl+R to retry it."
+        )
+    else:
+        subtitle = "loading in the background \u00b7 Ctrl+R loads it now"
+        text = (
+            f"The open {label.lower()} of {name} are being fetched in "
+            "the background, and they show up the next time the script "
+            "runs.\nPress Ctrl+R to load them now."
+        )
     return {
         "title": label,
-        "subtitle": "loading in the background \u00b7 Ctrl+R loads it now",
+        "subtitle": subtitle,
         "valid": False,
         "preview": {
             "title": label,
-            "text": f"The open {label.lower()} of {name} are being fetched in "
-            "the background, and they show up the next time the script "
-            "runs.\nPress Ctrl+R to load them now.",
+            "text": text,
             "dynamic": False,
         },
     }
@@ -1047,6 +1276,12 @@ def live_preview(label: str, url: str, name: str, loaded: bool) -> dict:
         text = (
             f"Enter lists the open {pages} of {name}.\n"
             f"Right \u2192 Copy URL copies {url}; Open on GitHub opens it."
+        )
+    elif failure := live_error(name):
+        text = (
+            f"The last fetch of the open {pages} of {name} failed: "
+            f"{failure['error']}\nCtrl+R retries it; they show up once a "
+            "fetch works."
         )
     else:
         text = (
@@ -1569,6 +1804,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     PENDING.clear()
     NAMED.clear()
+    reload_errors()
     global FETCH_ITEMS
     FETCH_ITEMS = max(1, args.live_items)
     if args.prefetch:

@@ -350,10 +350,13 @@ keeps a refresh from being erased by the batch that happened to run first.
 Until its fetch lands, a menu holds one row saying it is loading, followed by
 the `All … on GitHub` row, so it is never a dead end; the real rows show up
 the next time the script runs, since Raffi keeps the snapshot it was given. A
-list still filling asks Raffi to keep it for `LIVE_RETRY` (default `1m`)
-instead of `CACHE_REPOS`, so Raffi runs the script again soon and shows the
-filled menus, where a day-long window would have kept the loading rows for a
-day. A cache from an earlier fetch keeps being listed however old it is.
+fetch that keeps failing says why in that row (`failed: …`) instead of
+loading forever: the failure is kept in `live/errors.json` beside the caches
+for `LIVE_ERRORS` (default `1h`). A list still filling asks Raffi to keep it
+for `LIVE_RETRY` (default `1m`) instead of `CACHE_REPOS`, so Raffi runs the
+script again soon and shows the filled menus, where a day-long window would
+have kept the loading rows for a day. A cache from an earlier fetch keeps
+being listed however old it is.
 
 Ctrl+R drains one batch of the queue before answering, so one key press shows
 the real rows of the repositories it reaches and leaves the rest queued for
@@ -405,6 +408,7 @@ also read `REPO_PATH`, `REPO_PAGES` and `REPO_ACTIONS` from `env`.
 | `LIVE_PREFETCH` | `20` | How many repositories one batch of a background fetch takes on |
 | `LIVE_BUDGET` | `120s` | How long one detached fetch may spend draining the queue, as `120s` or `2m` |
 | `LIVE_RETRY` | `1m` | How long Raffi may keep a list whose live menus are still filling, at most `CACHE_REPOS` |
+| `LIVE_ERRORS` | `1h` | How long a failed live fetch is remembered, shown in the row it left loading |
 | `LIVE` | | `0` is the same as `--no-live` |
 | `TYPED_TIME` | | Same as for pull requests, for the `pushed` time |
 | `REPO_PATH` | | Default for `--path` |
