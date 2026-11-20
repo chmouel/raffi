@@ -1142,11 +1142,30 @@ def issue_leaf(name: str, issue: dict, variables: dict) -> dict:
     return item
 
 
+def live_blank(entry: dict, path: str) -> bool:
+    """Whether a settled live cache fetched no row for path.
+
+    Settled means fresh and fetched with the rows asked for: a stale or short
+    entry, and a Ctrl+R, keep the menu they are about to refill. Only the rows
+    decide otherwise, so a count that disagrees with them never hides one.
+    """
+    if ghcommon.REFRESH or live_stale(entry):
+        return False
+    section = entry.get(LIVE_KEYS[path]) or {}
+    return not section.get("nodes")
+
+
 def live_menu(name: str, path: str, label: str, options: Options) -> dict:
-    """A page of a repository whose children are its open rows, live."""
+    """A page of a repository whose children are its open rows, live.
+
+    A fresh list with no rows leaves the plain page link a --no-live run
+    draws, so an empty menu is not two rows of nothing.
+    """
     url = page_url(name, path)
     variables = repo_variables({"nameWithOwner": name, "url": page_url(name, "")})
     entry = live_entry(name)
+    if live_blank(entry, path):
+        return link_leaf(name, url, label, variables, label)
     child = {
         "title": label,
         "subtitle": f"open {url}",

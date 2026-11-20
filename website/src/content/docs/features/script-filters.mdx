@@ -507,7 +507,8 @@ still fresh, so a forced refresh shows what changed since the last fetch, and
 the others are queued like any stale cache. `--live-items` sets both how many
 rows a menu shows and how
 many of each list the fetch asks GitHub for, and `--no-live`, or `LIVE=0`,
-keeps the plain links.
+keeps the plain links. A list whose settled cache holds no row is not a menu
+at all: it shows that same plain link to the page.
 
 The `"sort": "usage"` below applies inside a menu too: Raffi floats the rows
 you picked first, so the newest-updated order holds between the rows you never

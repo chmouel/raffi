@@ -1090,6 +1090,92 @@ class LiveMenuTests(ReposTestCase):
         self.assertEqual(repos.PENDING, ["owner/raffi"])
         self.assertEqual(self.prefetched, [])
 
+    def test_a_freshly_empty_list_is_the_plain_page_link(self):
+        self.write_live(
+            pulls={"totalCount": 0, "nodes": []},
+            issues={"totalCount": 0, "nodes": []},
+        )
+        children = self.pages_item()["children"]
+        self.assertEqual(
+            [child["title"] for child in children],
+            ["Open owner/raffi", "Pull requests", "Issues"],
+        )
+        # The row Raffi shows is the one a --no-live run draws: no menu, no
+        # count, the same page URL, variables and copy actions.
+        self.assertEqual(children[1], self.pages_item(live=False)["children"][1])
+        self.assertNotIn("children", children[1])
+        self.assertEqual(children[1]["arg"], "https://github.com/owner/raffi/pulls")
+        self.assertEqual(children[2], self.pages_item(live=False)["children"][2])
+
+    def test_only_the_empty_list_collapses(self):
+        self.write_live(
+            pulls={"totalCount": 0, "nodes": []},
+            issues={
+                "totalCount": 3,
+                "nodes": [live_issue("owner/raffi", 388, "Crash on empty config")],
+            },
+        )
+        pulls, issues = self.pages_item()["children"][1:]
+        self.assertEqual(pulls["title"], "Pull requests")
+        self.assertNotIn("children", pulls)
+        self.assertEqual(issues["title"], "Issues \u00b7 3")
+        self.assertEqual(issues["children"][0]["title"], "#388 Crash on empty config")
+
+    def test_a_collapsed_list_queues_no_fetch(self):
+        self.write_live(
+            pulls={"totalCount": 0, "nodes": []},
+            issues={"totalCount": 0, "nodes": []},
+        )
+        self.pages_item()
+        self.assertEqual(repos.PENDING, [])
+        self.assertEqual(self.queued(), [])
+
+    def test_a_count_whose_first_page_is_empty_collapses(self):
+        # Nothing to list even though the count says otherwise.
+        self.write_live(pulls={"totalCount": 3, "nodes": []})
+        self.assertNotIn("children", self.pages_item()["children"][1])
+
+    def test_a_missing_section_collapses(self):
+        self.write_live(pulls={})
+        self.assertNotIn("children", self.pages_item()["children"][1])
+
+    def test_ctrl_r_keeps_the_menu_of_a_freshly_empty_list(self):
+        self.write_live(
+            pulls={"totalCount": 0, "nodes": []},
+            issues={"totalCount": 0, "nodes": []},
+        )
+        with patch.object(repos.ghcommon, "REFRESH", True):
+            pulls = self.pages_item()["children"][1]
+        self.assertEqual(pulls["title"], "Pull requests \u00b7 0")
+        self.assertEqual(repos.PENDING, ["owner/raffi"])
+
+    def test_a_stale_empty_cache_still_shows_its_menus(self):
+        self.write_live(
+            at=0.0,
+            pulls={"totalCount": 0, "nodes": []},
+            issues={"totalCount": 0, "nodes": []},
+        )
+        pulls = self.pages_item()["children"][1]
+        self.assertEqual(pulls["title"], "Pull requests \u00b7 0")
+        self.assertEqual(
+            pulls["children"][-1]["title"], "All pull requests on GitHub"
+        )
+        self.assertEqual(repos.PENDING, ["owner/raffi"])
+
+    def test_an_empty_cache_asking_for_fewer_rows_still_shows_its_menu(self):
+        # A cache that a bigger --live-items would fetch again is not settled.
+        self.write_live(first=1, pulls={"totalCount": 0, "nodes": []})
+        self.assertEqual(
+            self.pages_item()["children"][1]["title"], "Pull requests \u00b7 0"
+        )
+
+    def test_a_cold_cache_keeps_its_menu_with_the_loading_row(self):
+        pulls = self.pages_item()["children"][1]
+        self.assertEqual(
+            [leaf["title"] for leaf in pulls["children"]],
+            ["Pull requests", "All pull requests on GitHub"],
+        )
+
     def test_the_rows_are_read_back_from_the_cache(self):
         self.write_live()
         fetched = []

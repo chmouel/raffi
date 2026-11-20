@@ -303,7 +303,8 @@ updated first, with the `All … on GitHub` row last. Its title carries the
 total count (`Pull requests · 34`) and its subtitle names the repository.
 Enter on a row opens that pull request or issue and Ctrl+Enter copies its URL,
 and the last row, `All pull requests on GitHub` or `All issues on GitHub`,
-opens the page itself.
+opens the page itself. A list whose settled cache holds no row is not a menu
+at all: it shows the plain link to that page that `--no-live` draws.
 
 The `"sort": "usage"` below still applies: Raffi floats the rows you picked
 first, inside a menu too, so the newest-updated order above holds between the
