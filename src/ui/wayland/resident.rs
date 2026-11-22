@@ -316,6 +316,11 @@ struct Opened {
     window: window::Id,
     app: LauncherApp,
     job: Job,
+    /// The window exists: an open arriving earlier waits instead of closing
+    /// a window not there yet.
+    shown: bool,
+    /// An open already asked the window to close.
+    closing: bool,
 }
 
 enum Stage {
@@ -327,7 +332,8 @@ enum Stage {
 
 struct Daemon {
     stage: Stage,
-    /// Opens that came while the last window was finishing.
+    /// Opens waiting for the window to show or for the last one to finish,
+    /// taken one at a time.
     queue: VecDeque<Job>,
     next_id: u64,
 }
@@ -340,6 +346,7 @@ enum HostMessage {
     App(u64, Message),
     CloseRequested(window::Id),
     Closed(window::Id),
+    Shown(u64),
     Finished(u64),
 }
 
@@ -357,6 +364,11 @@ impl Daemon {
 
     fn update(&mut self, message: HostMessage) -> Task<HostMessage> {
         match message {
+            // Opens are taken in order: one arriving behind others waits.
+            HostMessage::Job(job) if !self.queue.is_empty() => {
+                self.queue.push_back(*job);
+                Task::none()
+            }
             HostMessage::Job(job) => self.receive(*job),
             HostMessage::App(id, message) => match &mut self.stage {
                 Stage::Open(opened) if opened.id == id => {
@@ -366,29 +378,43 @@ impl Daemon {
             },
             HostMessage::CloseRequested(window) => self.close(window),
             HostMessage::Closed(window) => self.closed(window),
+            HostMessage::Shown(id) => match &mut self.stage {
+                Stage::Open(opened) if opened.id == id => {
+                    opened.shown = true;
+                    self.next_queued()
+                }
+                _ => Task::none(),
+            },
             HostMessage::Finished(id) => {
                 if !matches!(self.stage, Stage::Finishing(finishing) if finishing == id) {
                     return Task::none();
                 }
                 self.stage = Stage::Idle;
                 crate::process::set_served_env(None);
-                let queued: Vec<Job> = self.queue.drain(..).collect();
-                Task::batch(queued.into_iter().map(|job| self.receive(job)))
+                self.next_queued()
             }
         }
     }
 
-    /// Open the window, close the one showing (toggle), or wait for the last
-    /// one to finish.
+    fn next_queued(&mut self) -> Task<HostMessage> {
+        match self.queue.pop_front() {
+            Some(job) => self.receive(job),
+            None => Task::none(),
+        }
+    }
+
+    /// Open the window, close the one showing (toggle), or wait until the
+    /// window shows or the last one finishes.
     fn receive(&mut self, job: Job) -> Task<HostMessage> {
         match &mut self.stage {
             Stage::Idle => self.open(job),
-            Stage::Open(opened) => {
+            Stage::Open(opened) if opened.shown && !opened.closing => {
                 let _ = job.reply.send(Response::Toggled);
+                opened.closing = true;
                 let id = opened.id;
                 opened.app.update(Message::CloseWindow).map(app_message(id))
             }
-            Stage::Finishing(_) => {
+            _ => {
                 self.queue.push_back(job);
                 Task::none()
             }
@@ -409,14 +435,19 @@ impl Daemon {
             window,
             app,
             job,
+            shown: false,
+            closing: false,
         }));
-        opening.discard().chain(boot.map(app_message(id)))
+        opening
+            .map(move |_| HostMessage::Shown(id))
+            .chain(boot.map(app_message(id)))
     }
 
     /// The compositor asked to close the window: close it as Escape does.
     fn close(&mut self, window: window::Id) -> Task<HostMessage> {
         match &mut self.stage {
             Stage::Open(opened) if opened.window == window => {
+                opened.closing = true;
                 let id = opened.id;
                 opened.app.update(Message::CloseWindow).map(app_message(id))
             }
