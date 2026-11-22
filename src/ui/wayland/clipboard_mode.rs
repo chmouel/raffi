@@ -182,7 +182,17 @@ impl LauncherApp {
                 if let Some(seen) = ocr_seen {
                     record_ocr_revision(&history, &seen);
                 }
-                history.list_page("", 0, &query, kind, min_chars, &exclude?, cancel)
+                let started = std::time::Instant::now();
+                let page = history.list_page("", 0, &query, kind, min_chars, &exclude?, cancel);
+                if let Ok(page) = &page {
+                    crate::debug_log!(
+                        "clipboard: listed {} of {} entries in {} ms",
+                        page.items.len(),
+                        page.total,
+                        started.elapsed().as_millis()
+                    );
+                }
+                page
             },
             move |result| Message::ClipboardPage(generation, result),
         )
