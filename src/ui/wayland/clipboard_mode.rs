@@ -137,6 +137,7 @@ impl LauncherApp {
             state.active = true;
         }
         state.query = query;
+        state.shown = 0;
         state.follow = None;
         state.restarts = 0;
         tasks.push(self.start_clipboard_scan());
@@ -410,6 +411,7 @@ impl LauncherApp {
         self.follow_clipboard_selection();
         let state = &mut self.clipboard;
         state.view = state.view.cycle(backwards);
+        state.shown = 0;
         state.restarts = 0;
         state.error = None;
         self.start_clipboard_scan()

@@ -5956,6 +5956,38 @@ fn test_png(width: u32, height: u32) -> Vec<u8> {
 }
 
 #[test]
+fn test_clipboard_renders_a_growing_window_of_rows() {
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip ");
+    let items: Vec<_> = (0..250)
+        .map(|row| clip(row, &format!("id{row}"), "text"))
+        .collect();
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page("id0", 250, 250, items)),
+    ));
+    assert_eq!(app.total_items(), 250, "navigation still counts every row");
+    let rendered = |app: &LauncherApp| app.clipboard.rendered_rows(app.selected_clipboard_item());
+    assert_eq!(rendered(&app), 100);
+
+    // Selecting past the window renders up to the selected row.
+    app.selected_index = app.clipboard_offset() + 249;
+    assert_eq!(rendered(&app), 250);
+    app.selected_index = app.clipboard_offset();
+
+    let _ = app.update(Message::ListScrolled(0.5));
+    assert_eq!(rendered(&app), 100);
+    let _ = app.update(Message::ListScrolled(0.95));
+    assert_eq!(rendered(&app), 200);
+    let _ = app.update(Message::ListScrolled(0.95));
+    let _ = app.update(Message::ListScrolled(0.95));
+    assert_eq!(rendered(&app), 250);
+
+    let _ = app.update(Message::SearchChanged("clip t".into()));
+    assert_eq!(app.clipboard.shown, 0, "a new query starts from one chunk");
+}
+
+#[test]
 fn test_clipboard_ocr_refresh_discards_inflight_preview() {
     let mut app = test_app(clipboard_addons());
     let generation = open_clipboard(&mut app, "clip query");

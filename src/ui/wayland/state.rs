@@ -458,9 +458,39 @@ pub(super) struct ClipboardState {
     pub ocr_text_only: Option<String>,
     /// An action is running; further activations are ignored.
     pub pending: bool,
+    /// Rows the list renders, grown by scrolling to the bottom. Laying out
+    /// every row of a long history makes opening the browser slow.
+    pub shown: usize,
 }
 
+/// Clipboard rows rendered at first, and added each time the list is
+/// scrolled to its end.
+pub(super) const CLIPBOARD_ROW_CHUNK: usize = 100;
+
 impl ClipboardState {
+    /// How many of `items` the list renders: at least `shown` and always
+    /// past the selected item at `selected`, so keyboard moves never land on
+    /// a row that is not drawn.
+    pub fn rendered_rows(&self, selected: Option<usize>) -> usize {
+        let needed = selected.map_or(0, |row| {
+            (row + 1).div_ceil(CLIPBOARD_ROW_CHUNK) * CLIPBOARD_ROW_CHUNK
+        });
+        self.shown
+            .max(CLIPBOARD_ROW_CHUNK)
+            .max(needed)
+            .min(self.items.len())
+    }
+
+    /// Render one more chunk of rows, when some are still hidden.
+    pub fn show_more(&mut self, selected: Option<usize>) -> bool {
+        let rendered = self.rendered_rows(selected);
+        if rendered >= self.items.len() {
+            return false;
+        }
+        self.shown = rendered + CLIPBOARD_ROW_CHUNK;
+        true
+    }
+
     pub fn clear(&mut self) {
         let generation = self.generation.wrapping_add(1);
         let session = self.session.wrapping_add(1);

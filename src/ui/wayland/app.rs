@@ -288,6 +288,9 @@ const PREVIEW_SCROLL_STEP: f32 = 120.0;
 const SCRIPT_FILTER_PREVIEW_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(80);
 /// Most picked rows the Script Filter usage cache keeps.
 const SCRIPT_FILTER_USAGE_CAP: usize = 2000;
+/// Relative scroll offset of the list past which more clipboard rows are
+/// rendered.
+const CLIPBOARD_SHOW_MORE_AT: f32 = 0.9;
 
 /// Look up the page preview of `tab` for `list`, unless one is running or
 /// already known.
@@ -1861,6 +1864,10 @@ impl LauncherApp {
                 // Slack downloads the pictures of the rows scrolled into view.
                 if self.command_list.addon == Some(CommandListAddon::Slack) {
                     self.slack.scroll = offset;
+                }
+                if offset >= CLIPBOARD_SHOW_MORE_AT && self.clipboard.active {
+                    let selected = self.selected_clipboard_item();
+                    self.clipboard.show_more(selected);
                 }
                 Task::none()
             }

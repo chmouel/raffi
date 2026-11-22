@@ -3110,7 +3110,9 @@ impl LauncherApp {
             }
 
             let now = super::clipboard_store::now_secs();
-            for item in &state.items {
+            let rendered = state.rendered_rows(self.selected_index.checked_sub(special_item_idx));
+            let hidden = state.items.len() - rendered;
+            for item in &state.items[..rendered] {
                 let is_selected = self.selected_index == special_item_idx;
                 let (title, subtitle): (std::borrow::Cow<'_, str>, std::borrow::Cow<'_, str>) =
                     match state.labels.get(&item.id) {
@@ -3153,6 +3155,7 @@ impl LauncherApp {
                 );
                 special_item_idx += 1;
             }
+            special_item_idx += hidden;
         }
 
         if let Some(status) = self.command_list.status() {
