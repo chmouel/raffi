@@ -418,9 +418,13 @@ fn api_error(method: &str, error: &str, value: &Value) -> String {
     }
 }
 
-/// The client of this process, built from the user's commands on first use
-/// so a password manager prompt only shows once.
-static CLIENT: Mutex<Option<Arc<Client>>> = Mutex::new(None);
+/// The commands that print the Slack token and cookie.
+type CredentialCommands = (Option<String>, Option<String>);
+
+/// The client of this process with the commands it was built from, built on
+/// first use so a password manager prompt only shows once. Other commands,
+/// from a config loaded later, build a new one.
+static CLIENT: Mutex<Option<(CredentialCommands, Arc<Client>)>> = Mutex::new(None);
 
 pub(super) fn client(
     token_command: Option<&str>,
@@ -429,8 +433,15 @@ pub(super) fn client(
     let mut slot = CLIENT
         .lock()
         .map_err(|_| "Slack client unavailable".to_string())?;
+    let commands: CredentialCommands = (
+        token_command.map(str::to_string),
+        cookie_command.map(str::to_string),
+    );
     // A refused client is rebuilt so the commands print the updated token.
-    if let Some(client) = slot.as_ref().filter(|client| client.rejection().is_none()) {
+    if let Some((_, client)) = slot
+        .as_ref()
+        .filter(|(built_from, client)| *built_from == commands && client.rejection().is_none())
+    {
         return Ok(client.clone());
     }
     let token_command = token_command
@@ -445,7 +456,7 @@ pub(super) fn client(
         _ => None,
     };
     let client = Arc::new(Client::new(Credentials::new(token, cookie)?));
-    *slot = Some(client.clone());
+    *slot = Some((commands, client.clone()));
     Ok(client)
 }
 
@@ -454,7 +465,7 @@ pub(super) fn current_client() -> Result<Arc<Client>, String> {
     CLIENT
         .lock()
         .ok()
-        .and_then(|slot| slot.clone())
+        .and_then(|slot| slot.as_ref().map(|(_, client)| client.clone()))
         .ok_or_else(|| "Slack is not connected".to_string())
 }
 
@@ -1387,6 +1398,16 @@ pub(super) mod tests {
         );
         assert!(workspace_icon(&client, &account).is_err());
         assert_eq!(fake.methods(), ["team.info"; 5]);
+    }
+
+    #[test]
+    fn test_client_is_rebuilt_for_other_credential_commands() {
+        let first = client(Some("printf xoxp-1"), None).unwrap();
+        let again = client(Some("printf xoxp-1"), None).unwrap();
+        assert!(Arc::ptr_eq(&first, &again));
+        let other = client(Some("printf xoxp-2"), None).unwrap();
+        assert!(!Arc::ptr_eq(&first, &other));
+        assert!(Arc::ptr_eq(&current_client().unwrap(), &other));
     }
 
     #[test]
