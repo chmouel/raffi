@@ -428,6 +428,11 @@ impl Daemon {
         let id = self.next_id;
         self.next_id += 1;
         crate::process::set_served_env(Some(job.env.clone()));
+        let slack = &job.served.session.config.addons.slack;
+        super::slack_api::select_window_client(
+            slack.token_command.as_deref(),
+            slack.cookie_command.as_deref(),
+        );
         let (app, boot) = job.launch.boot(true);
         let mut settings = job.launch.window_settings();
         settings.exit_on_close_request = false;

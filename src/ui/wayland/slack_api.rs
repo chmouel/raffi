@@ -478,6 +478,44 @@ pub(super) fn client(
     Ok(client)
 }
 
+/// Point the served window at the client already built for its credential
+/// commands in its environment, if any, rather than the last window's.
+pub(super) fn select_window_client(token_command: Option<&str>, cookie_command: Option<&str>) {
+    let Some(digest) = crate::process::env_digest() else {
+        return;
+    };
+    if let Ok(mut slot) = CLIENTS.lock() {
+        let clients = slot.get_or_insert_with(Clients::default);
+        let key: ClientKey = (
+            token_command.map(str::to_string),
+            cookie_command.map(str::to_string),
+            Some(digest),
+        );
+        clients.current[1] = clients.built.contains_key(&key).then_some(key);
+    }
+}
+
+/// Whether the cached directory of `workspace` may be shown here. Once
+/// this process has logged in to Slack, only the account of the current
+/// client on this side is, so a window never shows another one's rows.
+fn may_show(workspace: &Workspace) -> bool {
+    let context = usize::from(crate::process::env_digest().is_some());
+    let Ok(slot) = CLIENTS.lock() else {
+        return false;
+    };
+    let Some(clients) = slot.as_ref().filter(|clients| !clients.built.is_empty()) else {
+        return true;
+    };
+    clients.current[context]
+        .as_ref()
+        .and_then(|key| clients.built.get(key))
+        .is_some_and(|client| {
+            client
+                .known_identity()
+                .is_none_or(|account| account.same_account(workspace))
+        })
+}
+
 /// The client last built or reused by a load on this side (server work or
 /// the served window), for actions run from the list.
 pub(super) fn current_client() -> Result<Arc<Client>, String> {
@@ -1172,6 +1210,11 @@ pub(super) fn write_cache<T: Serialize>(name: &str, workspace: &Workspace, value
 static DIRECTORY: Mutex<Option<Arc<Directory>>> = Mutex::new(None);
 
 pub(super) fn cached_directory() -> Option<Arc<Directory>> {
+    stored_directory().filter(|directory| may_show(&directory.workspace))
+}
+
+/// The cached directory, whichever account it belongs to.
+fn stored_directory() -> Option<Arc<Directory>> {
     if let Some(directory) = DIRECTORY.lock().ok().and_then(|slot| slot.clone()) {
         return Some(directory);
     }
@@ -1212,10 +1255,10 @@ pub(super) fn verified_directory(client: &Client) -> Result<Option<Arc<Directory
         Err(error) if client.rejection().is_some() => return Err(error),
         Err(error) => {
             crate::debug_log!("slack: cannot tell whose the token is: {error}");
-            return Ok(cached_directory());
+            return Ok(stored_directory());
         }
     };
-    let Some(directory) = cached_directory() else {
+    let Some(directory) = stored_directory() else {
         return Ok(None);
     };
     if directory.workspace.same_account(&account) {
@@ -1447,8 +1490,23 @@ pub(super) mod tests {
         });
         assert!(!Arc::ptr_eq(&served, &first));
         client(Some("printf xoxp-1"), None).unwrap();
-        crate::process::with_env(caller, || {
+        crate::process::with_env(caller.clone(), || {
             assert!(Arc::ptr_eq(&current_client().unwrap(), &served));
+        });
+        // The next window, for other commands, neither acts on nor shows
+        // the last window's account until it has logged in itself.
+        let workspace = Workspace {
+            team_id: "T1".into(),
+            user_id: "U1".into(),
+            ..Workspace::default()
+        };
+        crate::process::with_env(caller.clone(), || {
+            select_window_client(Some("printf xoxp-2"), None);
+            assert!(current_client().is_err());
+            assert!(!may_show(&workspace));
+            select_window_client(Some("printf xoxp-1"), None);
+            assert!(Arc::ptr_eq(&current_client().unwrap(), &served));
+            assert!(may_show(&workspace));
         });
     }
 
