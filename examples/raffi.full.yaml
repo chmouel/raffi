@@ -5,634 +5,634 @@
 
 version: 1
 
-# addons:  # Addon configurations (script filters, web searches, etc.)
-#   # Configuration for listing installed applications next to the launchers
-#   apps:
-#     # Also list the actions applications declare, such as Firefox's "New Private
-#     # Window" (default: true).
-#     actions: true
-#     # List the installed desktop applications after the launchers (default: false).
-#     # Apps named like a launcher, or running the same command, are left out.
-#     enabled: false
-#   audio:  # Configuration for the audio device switcher addon
-#     # Close Raffi after an action instead of staying open and refreshing the list
-#     # (default: `general.close_on_action`, else false).
-#     close_on_action:
-#     enabled: true  # Turn the addon off with `false` (default: true).
-#     # Highest output volume the volume rows set, in percent (default: 100).
-#     max_volume: 100
-#     trigger: audio  # Keyword that opens the audio device list (default: `audio`).
-#     # Percent the Volume up and Volume down rows change the output volume by (default:
-#     # 5).
-#     volume_step: 5
-#   bitwarden:  # Configuration for the Bitwarden addon, backed by rbw
-#     # Seconds before a copied secret is cleared from the clipboard (default: 45, 0 =
-#     # never).
-#     clipboard_timeout: 45
-#     # Close Raffi after copying a secret (default: `general.close_on_action`, else
-#     # true).
-#     close_on_action:
-#     enabled: true  # Turn the addon off with `false` (default: true).
-#     trigger: bw  # Keyword that opens the vault list (default: `bw`).
-#     # Milliseconds to wait after Raffi closes before typing (default: 200).
-#     type_delay_ms: 200
-#   bluetooth:  # Configuration for the Bluetooth addon
-#     # Close Raffi after an action instead of staying open and refreshing the list
-#     # (default: `general.close_on_action`, else false).
-#     close_on_action:
-#     enabled: true  # Turn the addon off with `false` (default: true).
-#     trigger: bt  # Keyword that opens the Bluetooth list (default: `bt`).
-#   # Configuration for the browser bookmarks addon (native UI only)
-#   bookmarks:
-#     # Close Raffi after opening a bookmark (default: `general.close_on_action`, else
-#     # true).
-#     close_on_action:
-#     enabled: true  # Turn the addon off with `false` (default: true).
-#     # Opens bookmarks of every source without its own `open_with` (default: the
-#     # browser and profile they come from).
-#     open_with:
-#     # Where bookmarks come from (default: every profile of every supported browser
-#     # found).
-#     sources:
-#         # Browser whose profiles hold the bookmarks. Optional with `path`, where it
-#         # only picks the browser that opens the links.
-#       - browser:
-#         folder:  # Only list this folder, such as `Bookmarks Toolbar/Work`.
-#         # Label of the source in the list (default: the browser and profile).
-#         name:
-#         # Opens this source's bookmarks (default: `addons.bookmarks.open_with`, else
-#         # the browser and profile they come from).
-#         open_with:
-#         # A bookmarks file read directly: Chromium's `Bookmarks`, Firefox's
-#         # `places.sqlite`, or the profile directory holding one.
-#         path:
-#         # Profile to read, by name or directory (default: every profile).
-#         profile:
-#     trigger: bm  # Keyword that opens the bookmarks (default: `bm`).
-#   browser_history:  # Configuration for the browser history addon (native UI only)
-#     # Seconds cached browser-history snapshots stay fresh (default: 300).
-#     cache_seconds: 300
-#     # Close Raffi after opening a page (default: `general.close_on_action`, else
-#     # true).
-#     close_on_action:
-#     enabled: true  # Turn the addon off with `false` (default: true).
-#     # Most recent and most visited URLs read per source (default: 2000, clamped to
-#     # 100..10000).
-#     max_entries: 2000
-#     # Opens pages of every source without its own `open_with` (default: the browser
-#     # and profile they come from).
-#     open_with:
-#     # Where history comes from (default: every profile of every supported browser
-#     # found).
-#     sources:
-#         # Browser whose profiles hold the history. Optional with `path`, where it only
-#         # picks the browser that opens the links.
-#       - browser:
-#         # Label of the source in the list (default: the browser and profile).
-#         name:
-#         # Opens this source's pages (default: `addons.browser_history.open_with`, else
-#         # the browser and profile they come from).
-#         open_with:
-#         # A history file read directly: Chromium's `History`, Firefox's
-#         # `places.sqlite`, or the profile directory holding one.
-#         path:
-#         # Profile to read, by name or directory (default: every profile).
-#         profile:
-#     trigger: hist  # Keyword that opens browser history (default: `hist`).
-#   # Configuration for the browser tabs addon, fed by the Vicinae browser extension
-#   browser_tabs:
-#     # Close Raffi after switching to a tab (default: `general.close_on_action`, else
-#     # true).
-#     close_on_action:
-#     enabled: true  # Turn the addon off with `false` (default: true).
-#     # Where to download site icons the browsers have not stored themselves (default:
-#     # `twenty`). Downloading sends the domains of open tabs to that service; `none`
-#     # keeps favicons to the browsers' own and stops fetching the selected page for its
-#     # preview.
-#     favicon_service: twenty
-#     trigger: tabs  # Keyword that opens the tab list (default: `tabs`).
-#   calculator:  # Configuration for the calculator addon
-#     # Close Raffi after copying a calculation result (default:
-#     # `general.close_on_action`, else true).
-#     close_on_action:
-#     enabled: true  # Turn the addon off with `false` (default: true).
-#   clipboard:  # Configuration for the clipboard history addon
-#     action: copy  # Action on Enter (default: `copy`).
-#     # Clipboard manager that stores the history browsed by the clipboard addon
-#     backend: auto
-#     # Close Raffi after copying a clipboard entry (default: `general.close_on_action`,
-#     # else true).
-#     close_on_action:
-#     # Unset turns it on when the backend is running at startup (a CopyQ process, or
-#     # `raffi --server` for the `raffi` backend); `true` or `false` overrides the
-#     # detection.
-#     enabled:
-#     # Rust regular expressions. An entry whose complete text matches any of them is
-#     # not recorded by Raffi and is hidden from the browser (default: none). Matching
-#     # is case-sensitive unless a flag such as `(?i)` is used. Existing entries are
-#     # hidden, not deleted, and CopyQ keeps recording.
-#     exclude_patterns: []
-#     # `raffi` backend: images larger than this many MB are not recorded (default: 50).
-#     max_image_size_mb: 50
-#     # `raffi` backend: entries kept in the history (default: 1000).
-#     max_items: 1000
-#     # `raffi` backend: total size of the history in MB before the oldest entries are
-#     # dropped (default: 500).
-#     max_size_mb: 500
-#     # Hide text entries shorter than this many characters, ignoring surrounding
-#     # whitespace (default: 3). Images and files are always shown.
-#     min_chars: 3
-#     # Read text from history images with tesseract, when it is installed (default:
-#     # off).
-#     ocr:
-#       # Extract text from images in Raffi's clipboard history (default: false).
-#       enabled: false
-#       languages: [eng]  # Tesseract language codes (default: ["eng"]).
-#     secondary_action: hypr_paste  # Action on Ctrl+Enter (default: `hypr_paste`).
-#     # Record copies carrying `x-kde-passwordManagerHint` as temporary entries even
-#     # when no `temporary_patterns` matches, instead of skipping them (default: false).
-#     temporary_password_manager: false
-#     # Rust regular expressions. An entry whose complete text matches any of them is
-#     # recorded as a temporary entry of Raffi's history, kept for `temporary_timeout`
-#     # seconds (default: none). `exclude_patterns` wins over these, and CopyQ keeps
-#     # recording everything.
-#     temporary_patterns: []
-#     # Seconds a temporary entry stays in Raffi's history (default: 60).
-#     temporary_timeout: 60
-#     trigger: clip  # Keyword that opens the history (default: `clip`).
-#   color:  # Configuration for the inline color converter addon
-#     # Close Raffi after copying a color value (default: `general.close_on_action`,
-#     # else true).
-#     close_on_action:
-#     enabled: true  # Turn the addon off with `false` (default: true).
-#   currency:  # Configuration for the currency addon
-#     # Close Raffi after copying a conversion result (default:
-#     # `general.close_on_action`, else true).
-#     close_on_action:
-#     # Currencies an amount without a target converts to (default: [USD, EUR, GBP]).
-#     currencies:
-#     # Currency an amount without one converts from (default: USD).
-#     default_currency: USD
-#     enabled: true  # Turn the addon off with `false` (default: true).
-#     # Exchange rate sources in the order they are tried; the next one is contacted
-#     # only when the previous one fails or has none of the requested rates. Default:
-#     # `[frankfurter]`, so no other site is contacted unless listed here. An empty list
-#     # contacts nothing, and conversions report an error.
-#     sources:
-#     trigger:  # Character that opens the converter (default: $).
-#   # Configuration for the developer tools addon: the `dev` transform list and the
-#   # inline `uuid` and `pw` generators
-#   devtools:
-#     # Close Raffi after copying a generated or transformed value (default:
-#     # `general.close_on_action`, else true).
-#     close_on_action:
-#     enabled: true  # Turn the addon off with `false` (default: true).
-#     # Length of passwords generated by `pw` without a length, from 8 to 128 (default:
-#     # 20).
-#     password_length: 20
-#     trigger: dev  # Keyword that opens the transform list (default: `dev`).
-#   emoji:  # Configuration for the emoji picker addon
-#     # What Enter does: `copy`, `insert`, or a command run for the character (default:
-#     # copy).
-#     action: copy
-#     # Close Raffi after executing an emoji action (default: `general.close_on_action`,
-#     # else true).
-#     close_on_action:
-#     # Character lists to load, such as `emojis_smileys_emotion`, `gitmoji` or
-#     # `nerd_font` (default: the standard emoji groups).
-#     data_files:
-#     enabled: true  # Turn the addon off with `false` (default: true).
-#     # What Ctrl+Enter does, with the same values as `action` (default: insert).
-#     secondary_action: insert
-#     trigger: emoji  # Keyword that opens the picker (default: `emoji`).
-#   file_browser:  # Configuration for the file browser addon
-#     # Action on Enter for files: `open` (xdg-open), `copy`, `insert`, or a shell
-#     # command where `{value}` is the full path. Defaults to `open`.
-#     action: open
-#     # Close Raffi after executing a file browser action (default:
-#     # `general.close_on_action`, else true).
-#     close_on_action:
-#     enabled: true  # Turn the addon off with `false` (default: true).
-#     # Edit paths the way Emacs fido-mode does: Backspace on a trailing `/` goes up to
-#     # the parent directory, and typing `~/` or `/` right after a `/` starts over from
-#     # home or the root. Off, the input is plain text.
-#     fido_style: true
-#     # File manager opened with Ctrl+B on the browsed directory. `{value}` is replaced
-#     # by the directory, otherwise it is appended as the last argument. Nautilus,
-#     # Dolphin, Nemo and Caja also get the selected entry highlighted. Autodetected
-#     # when unset.
-#     file_manager:
-#     # Command that previews the selected entry in the preview pane. Unset uses the
-#     # previewer bundled with raffi when python3 is installed; `none` turns it off. A
-#     # command runs through `sh -c` with the path appended as the last argument (also
-#     # in `$RAFFI_VALUE`) and prints ANSI text or a Script Filter preview object; no
-#     # output or a non-zero exit keeps the built-in preview. Killed after 3 seconds.
-#     preview_command:
-#     # Action on Ctrl+Enter for files and directories, with the same values as
-#     # `action`. Defaults to `copy`.
-#     secondary_action: copy
-#     # Initial filter of the listing: `all`, `files` or `directories`; Ctrl+Tab cycles
-#     # through them.
-#     show: all
-#     show_hidden: false  # List dotfiles too, such as `~/.config` (default: false).
-#     # Initial order of the listing; Ctrl+S cycles through the modes. Directories are
-#     # always listed first.
-#     sort: name
-#     # Reverse the sort order: Z to A, or oldest first for date sorts. Directories stay
-#     # first and Ctrl+S keeps this setting.
-#     sort_reverse: false
-#   # Characters to type before addon keywords are suggested (default: 3). A keyword
-#   # typed in full is always suggested.
-#   keyword_min_chars: 3
-#   kill:  # Configuration for the kill process addon
-#     # Close Raffi after sending a signal instead of staying open and refreshing the
-#     # list (default: `general.close_on_action`, else false).
-#     close_on_action:
-#     enabled: true  # Turn the addon off with `false` (default: true).
-#     trigger: kill  # Keyword that opens the process list (default: `kill`).
-#   media:  # Configuration for the media controls addon
-#     # Close Raffi after an action instead of staying open and refreshing the list
-#     # (default: `general.close_on_action`, else false).
-#     close_on_action:
-#     enabled: true  # Turn the addon off with `false` (default: true).
-#     trigger: media  # Keyword that opens the media controls (default: `media`).
-#   pass:  # Configuration for the pass (password-store) addon
-#     # Seconds before a copied secret is cleared from the clipboard (default: 45, 0 =
-#     # never).
-#     clipboard_timeout: 45
-#     # Close Raffi after copying a secret (default: `general.close_on_action`, else
-#     # true).
-#     close_on_action:
-#     enabled: true  # Turn the addon off with `false` (default: true).
-#     # Who asks for the GPG passphrase: `raffi` (default) or `agent`.
-#     pinentry: raffi
-#     # Password store directory (default: `$PASSWORD_STORE_DIR`, else
-#     # `~/.password-store`).
-#     store_dir:
-#     trigger: pass  # Keyword that opens the password list (default: `pass`).
-#     # Milliseconds to wait after Raffi closes before typing (default: 200).
-#     type_delay_ms: 200
-#     # `key: value` lines read as the username, tried in this order (default: `login`,
-#     # `user`, `username`). Falls back to the entry file name.
-#     username_fields:
-#   script_filters:  # Script filters, each a command Raffi runs for a keyword
-#       # What Enter does with the row: `copy`, `insert` or a shell command (default:
-#       # copy).
-#     - action: copy
-#       # Extra entries of the action menu of every valid row, listed after the actions
-#       # the row declares itself.
-#       actions:
-#           # What the entry does with the row's value, with the same values as the
-#           # filter's `action`.
-#         - action: copy
-#           title: Example  # Label shown in the action menu.
-#       args: []  # Arguments passed to `command` before the query.
-#       # How long a script may ask its output to stay fresh, with a top-level `"cache":
-#       # {"seconds": N}`, when that is more than `cache_seconds`. A script can always
-#       # ask for less. Needs `cache_seconds`, which turns caching on.
-#       cache_max_seconds:
-#       # How long a query's items and previews stay fresh before Raffi refreshes them
-#       # in the background. Unset disables caching, so side-effecting scripts never run
-#       # from or through the cache.
-#       cache_seconds:
-#       # Close Raffi after executing an action on a result (default:
-#       # `general.close_on_action`, else true).
-#       close_on_action:
-#       # Program run for the filter, without a shell, with `args` then the typed query
-#       # as its last argument.
-#       command: ~/.config/raffi/scripts/example.py
-#       # Re-run the command with `RAFFI_PREVIEW=1` for the selected item and show the
-#       # preview object it prints (default: true).
-#       dynamic_preview: true
-#       # Environment variables set for the command and its preview runs.
-#       env:
-#         example: value
-#       # Icon of rows without one of their own: emoji, icon name or image path.
-#       icon:
-#       keyword: ex  # Keyword that opens the filter.
-#       # Characters typed after the keyword before the command runs; until then Raffi
-#       # says how many more to type (default: 0).
-#       min_query_length: 0
-#       # Name shown while its command runs, and used to address the filter in
-#       # `main_view`, `fallbacks` and `-o addons.script_filters.<name>.<key>`.
-#       name: Example
-#       # What Ctrl+Enter does, with the same values as `action` (default: same as
-#       # `action`).
-#       secondary_action:
-#       # Rank the rows you already picked first, most recently picked first. Unset
-#       # follows the script's top-level `"sort": "usage"`, `true` always ranks by
-#       # usage, `false` always keeps the order the script prints. Rows never picked
-#       # stay where the script put them, and a list with indented rows keeps its shape.
-#       # This ranks the filter's own list; the main view keeps script-filter results in
-#       # the order the script prints.
-#       sort_by_usage:
-#       # Seconds between background warming runs for `warm_queries` (default:
-#       # `cache_seconds`).
-#       warm_interval_seconds:
-#       # Queries the server warms periodically, such as `["", "review"]`.
-#       warm_queries: []
-#   slack:  # Configuration for the Slack addon
-#     # Minutes the cached conversations, people, muted conversations and searches count
-#     # as fresh before Raffi asks Slack again (default: 60); 0 asks every time. Cached
-#     # rows and previews show at once while the fresh ones load.
-#     cache_minutes: 60
-#     # Close Raffi after opening a conversation or message (default:
-#     # `general.close_on_action`, else true).
-#     close_on_action:
-#     # Shell command printing the value of the `d` cookie, needed with a session
-#     # (`xoxc-`) token.
-#     cookie_command:
-#     enabled: false  # Off by default: the addon needs a Slack token.
-#     # Order of the messages in the previews (default: `newest_first`). Threads keep
-#     # their first message on top.
-#     message_order: newest_first
-#     # Open conversations in the desktop app or in the browser (default: desktop).
-#     # Ctrl+Enter uses the other one.
-#     open_in: desktop
-#     # Shell command printing the Slack token: a user token (`xoxp-`) from your own
-#     # Slack app, or the session token (`xoxc-`) of a logged-in browser tab.
-#     token_command:
-#     trigger: slack  # Keyword that opens the Slack list (default: `slack`).
-#     # Conversations to check for unread messages (`#channel`, `@user` or an id), up to
-#     # 30, used when Slack does not report unread conversations for the token, as with
-#     # `xoxp-` tokens.
-#     unread_conversations: []
-#     # Minutes between server warming runs for the Slack views (default:
-#     # `cache_minutes` when it is above 0).
-#     warm_interval_minutes:
-#   system:  # Configuration for the system commands addon
-#     # Close Raffi after running a system command (default: `general.close_on_action`,
-#     # else true).
-#     close_on_action:
-#     # Commands replacing the built-in ones of the system commands addon, as argument
-#     # lists run without a shell. An empty list hides the entry.
-#     commands:
-#       # Default: Hyprland's dpms dispatcher on Hyprland (through `hyprctl eval` with a
-#       # Lua config, `hyprctl dispatch dpms off` otherwise), `niri msg action
-#       # power-off-monitors` on niri, `swaymsg 'output * power off'` on sway; omitted
-#       # without a supported compositor.
-#       display_off:
-#       hibernate:  # Default: `systemctl hibernate`.
-#       lock:  # Default: `loginctl lock-session`.
-#       # Default: Hyprland's exit dispatcher on Hyprland (through `hyprctl eval` with a
-#       # Lua config, `hyprctl dispatch exit` otherwise), `niri msg action quit
-#       # --skip-confirmation` on niri, `swaymsg exit` on sway, otherwise `loginctl
-#       # terminate-session $XDG_SESSION_ID`.
-#       logout:
-#       reboot:  # Default: `systemctl reboot`.
-#       shutdown:  # Default: `systemctl poweroff`.
-#       suspend:  # Default: `systemctl suspend`.
-#     enabled: true  # Turn the addon off with `false` (default: true).
-#     extra:  # Extra entries appended after the built-in system commands.
-#         # Command and arguments run directly without a shell.
-#       - argv: ["notify-send", "Example"]
-#         confirm: true  # Ask for a second Enter before running (default: true).
-#         icon: system-run  # System icon name (default: `system-run`).
-#         # Allow keeping Raffi open when `close_on_action` is false (default: false).
-#         keep_open: false
-#         title: Example  # Label shown in the list.
-#         # Verb completing "Press Enter again to ..." when confirmation is enabled
-#         # (default: lowercase `title`).
-#         verb:
-#     hide: []  # Entries left out of the list.
-#     trigger: sys  # Keyword that opens the list (default: `sys`).
-#   terminal:  # Configuration for the run in terminal addon
-#     # Close Raffi after running a command in the terminal (default:
-#     # `general.close_on_action`, else true).
-#     close_on_action:
-#     # Terminal command line the command to run is appended to, such as `[alacritty,
-#     # -e]`. Found automatically when unset: xdg-terminal-exec, then `$TERMINAL`, then
-#     # the first known terminal installed.
-#     command:
-#     enabled: true  # Turn the addon off with `false` (default: true).
-#     # Keep the terminal open once the command exits, until Enter is pressed (default:
-#     # true).
-#     hold: true
-#     # kitty remote control address, such as `unix:${XDG_RUNTIME_DIR}/kitty`, as given
-#     # to kitty's `listen_on`. Read from kitty.conf when unset.
-#     kitty_socket:
-#     open_in: tab  # Where typed commands open (default: tab).
-#     # Keyword that runs the rest of the query in a terminal (default: `>`).
-#     trigger: ">"
-#   # Text snippet sources, from inline snippets, a file or a command
-#   text_snippets:
-#       # What Enter does: `copy`, `insert`, `hypr_paste` or a shell command (default:
-#       # copy).
-#     - action: copy
-#       args: []  # Arguments passed to `command`.
-#       # Close Raffi after executing a snippet action (default:
-#       # `general.close_on_action`, else true).
-#       close_on_action:
-#       command:  # Program that prints its snippets as Script Filter JSON.
-#       directory:  # Path to a directory of `.snippet` files.
-#       # Path to a YAML file of snippets, in the same format as `snippets`.
-#       file:
-#       # Default icon for its snippets: emoji, icon name or image path.
-#       icon:
-#       keyword: ex  # Keyword that opens the source.
-#       # Markdown file of `## Name` snippets. Read as the source, and the file that
-#       # clipboard entries are saved to with the browser's save action.
-#       markdown:
-#       # Name shown on its keyword row and while a `command` source loads.
-#       name: Example
-#       # Expand dynamic placeholders such as {clipboard} and {date} in snippet values.
-#       placeholders: true
-#       # Best-effort restoration of plain text after the `hypr_paste` action.
-#       restore_clipboard: false
-#       secondary_action:  # What Ctrl+Enter does, with the same values as `action`.
-#       # Snippets written in the config, each with a `name` and a `value`.
-#       snippets:
-#         - icon:  # Emoji, icon name, or image path overriding the source icon.
-#           # Optional short keyword; an exact match ranks the snippet first.
-#           keyword:
-#           name: Example  # Name shown in the list and matched when searching.
-#           value: Example  # Text copied, inserted or handed to the action.
-#   units:  # Configuration for the inline unit converter addon
-#     # Close Raffi after copying a converted value (default: `general.close_on_action`,
-#     # else true).
-#     close_on_action:
-#     enabled: true  # Turn the addon off with `false` (default: true).
-#   web_searches:  # Web searches opened in the browser for a keyword
-#       # Close Raffi after opening a web search URL (default:
-#       # `general.close_on_action`, else true).
-#     - close_on_action:
-#       icon:  # Icon name shown next to the search row.
-#       keyword: ex  # Keyword that opens the search.
-#       # Name shown in the search row, as in "Search Google for 'rust traits'".
-#       name: Example
-#       # URL template; every `{query}` is replaced by the percent-encoded query.
-#       url: https://example.com
-#   # Configuration for the window switcher addon for Hyprland, niri and sway
-#   windows:
-#     # Close Raffi after focusing or moving a window (default:
-#     # `general.close_on_action`, else true).
-#     close_on_action:
-#     enabled: true  # Turn the addon off with `false` (default: true).
-#     trigger: win  # Keyword that opens the window list (default: `win`).
-#   world_clock:  # Configuration for the inline world clock addon
-#     # Close Raffi after copying a time value (default: `general.close_on_action`, else
-#     # true).
-#     close_on_action:
-#     enabled: true  # Turn the addon off with `false` (default: true).
-# general:  # General settings (UI, theme, font, etc.)
-#   # Ask the compositor to blur what shows through the window (KDE/KWin; other
-#   # compositors use their own rules). Default: true.
-#   blur: true
-#   # Clipboard manager for `{clipboard:N}` snippet placeholders
-#   clipboard_history: auto
-#   # Close Raffi after executing an action. Unset closes after most actions, but keeps
-#   # the media, audio, Bluetooth and kill addons open; `true` or `false` applies to
-#   # every addon and launcher without its own `close_on_action`.
-#   close_on_action:
-#   # Shell that runs script launchers and terminal-addon commands (default: bash).
-#   default_script_shell: bash
-#   # Rows added below the main list while typing, such as
-#   # `addons.web_searches."Google"` or `addons.terminal` (default: none).
-#   fallbacks: []
-#   # Font family name, such as `Inter` (default: the system UI font).
-#   font_family:
-#   # Base font size in px; the other sizes scale from it (default: 20).
-#   font_size: 20
-#   # How launchers start their program: `auto` (default) asks Hyprland, niri or sway to
-#   # start it, `direct` starts it from Raffi.
-#   launch: auto
-#   # Sources mixed into the main view. An object with `entries` (the sources to show,
-#   # in order) and `exclude` (sources to remove after resolving). A plain list is
-#   # accepted as shorthand for `{ entries: <list> }`. Null or empty entries shows only
-#   # apps and custom entries.
-#   main_view:
-#     entries:  # Sources to show in the main view
-#       - launchers
-#       - windows
-#       - browser_tabs
-#       - bookmarks
-#       - system
-#       - media
-#       - audio
-#       - bluetooth
-#       - pass
-#       - clipboard
-#       - bitwarden
-#       - terminal
-#       - emoji
-#     exclude: []  # Sources to exclude from the main view
-#   # What the chips row above the apps shows on an empty query when `main_view` is set:
-#   # `name` (default), `keyword` or `off`
-#   main_view_chips: name
-#   # Search queries the history keeps; 0 disables it (default: 10).
-#   max_history: 10
-#   # Start without loading icons, for a faster start (default: false).
-#   no_icons: false
-#   # Opacity of the window backgrounds, from 0.0 (see-through) to 1.0 (the theme as
-#   # designed). Text and icons stay opaque. Default: 0.95.
-#   opacity: 0.95
-#   # Outer margin around the window content in px, instead of the one that follows
-#   # `font_size` (default: 20).
-#   padding: 20
-#   # Appearance of the right-hand preview pane (font, size, colours, width)
-#   preview:
-#     colors:  # Colour overrides for the preview pane
-#       accent:  # Headings, badges and hero values
-#       bg:  # Background of the whole preview pane
-#       bg_block:  # Background of the content/code blocks inside the pane
-#       border:  # Pane and block borders
-#       text_main:  # Title and main text colour
-#       text_muted:  # Subtitles, metadata keys and hints
-#     # Font family for the preview pane, including message, snippet and clipboard text
-#     # (default: the UI font)
-#     font_family:
-#     # Base font size in px for preview text (default: 0.8 × general font_size, 16 at
-#     # the default 20). Title, headings and hero values scale from it.
-#     font_size:
-#     # Monospace font family for code blocks such as file contents, commands and script
-#     # output (default: system monospace)
-#     mono_font_family:
-#     # Width of the preview pane as a percentage of the window (10-80, default: 50)
-#     width_percent: 50
-#   # Focus an app's open window instead of starting it again (default: false).
-#   # Launchers can set `raise` and `window_class`. Raffi's own window only, on
-#   # Hyprland, niri and sway.
-#   raise_running: false
-#   # Renderer for the window: `auto` (default: `gpu` when `opacity` is below 1, else
-#   # `cpu`), `cpu` (faster to open, opaque on Wayland) or `gpu`. An `ICED_BACKEND`
-#   # environment variable takes precedence.
-#   renderer: auto
-#   # Show the Alfred-style right-hand preview pane (default: true). On the main page it
-#   # stays open, empty when the selected row has nothing to preview. `false` hides it
-#   # everywhere except entries with their own `show_preview: true`. Can also be toggled
-#   # at runtime with Ctrl+P.
-#   show_preview: true
-#   # Show a tip about a keyword in the empty search box, such as `clip for Clipboard
-#   # history` (default: true).
-#   show_tips: true
-#   # Sort launcher, snippet and password rows by past use: `frequency`, `recency` or
-#   # `hybrid` (default: hybrid).
-#   sort_mode: hybrid
-#   # Extra window classes treated as terminals by `hypr_paste` (sent Ctrl+Shift+V
-#   # instead of Ctrl+V). Added to the built-in list; matched case-insensitively.
-#   terminal_classes: []
-#   # Theme preset: dark, light, catppuccin, catppuccin-latte, tokyo-night, nord,
-#   # gruvbox, dracula, rose-pine or kanagawa (default: dark).
-#   theme: dark
-#   # Per-colour overrides of the theme, as #RGB, #RRGGBB or #RRGGBBAA
-#   theme_colors:
-#     accent:  # Selected rows, borders and highlights (default: the theme's)
-#     accent_hover:  # Accent of hovered rows (default: the theme's)
-#     bg_base:  # Main window background (default: the theme's)
-#     bg_input:  # Search input background (default: the theme's)
-#     border:  # Window and separator borders (default: the theme's)
-#     selection_bg:  # Background of the selected row (default: the theme's)
-#     text_main:  # Primary text (default: the theme's)
-#     text_muted:  # Secondary text, subtitles and hints (default: the theme's)
-#   # Window entries show in: `native` (Raffi's own window), or `fuzzel`; `wayland` and
-#   # `iced` are aliases of `native`. Unset uses the native window when this build has
-#   # it, and `fuzzel` otherwise.
-#   ui_type:
-#   # Start with modal vim keybindings in normal mode (default: false). Toggle at
-#   # runtime with Ctrl+Alt+V.
-#   vim_mode: false
-#   window_height: 600  # Window height in px (default: 600).
-#   window_width: 800  # Window width in px (default: 800).
-# launchers:  # Launcher entries keyed by name
-#   example:  # Represents the configuration for each Raffi entry.
-#     # Route this launcher to an internal command: picking it types this text for you,
-#     # such as `mp owner/project` (an addon keyword followed by its query). Cannot be
-#     # combined with `binary`, `script`, `args` or `env`.
-#     alias:
-#     args:
-#     binary:
-#     # Close Raffi after launching this entry (default: `general.close_on_action`, else
-#     # true).
-#     close_on_action:
-#     description:
-#     # Desktop file ID of the installed application this launcher stands for, so the
-#     # apps addon does not list it twice (default: none).
-#     desktop:
-#     disabled:
-#     # Environment variables set for the binary or script, added to Raffi's own
-#     # environment. Values expand `~/` and `${VAR}`.
-#     env:
-#       example: value
-#     icon:
-#     # Show the entry only inside this compositor, or one of these: `hyprland`, `niri`,
-#     # `sway`.
-#     ifcompositor:
-#     ifenveq:
-#     ifenvnotset:
-#     ifenvset:
-#     ifexist:
-#     # Keyword that stands for `alias` while typing: with keyword `shortcut`, typing
-#     # `shortcut query` searches `mp owner/project query` while the input keeps showing
-#     # `shortcut query`. Requires `alias`; no whitespace.
-#     keyword:
-#     # Focus the app's open window instead of starting it again (default:
-#     # `general.raise_running`, else false).
-#     raise:
-#     script:
-#     # Preview this launcher entry in the right-hand pane. Unset previews it whenever
-#     # the pane shows; `false` never previews it; `true` previews it even when
-#     # `general.show_preview` is `false`.
-#     show_preview:
-#     # Window class (Hyprland, Xwayland) or app ID (niri, sway) of the app's windows,
-#     # for `raise` (default: the binary name).
-#     window_class:
+addons: # Addon configurations (script filters, web searches, etc.)
+  # Configuration for listing installed applications next to the launchers
+  apps:
+    # Also list the actions applications declare, such as Firefox's "New Private
+    # Window" (default: true).
+    actions: true
+    # List the installed desktop applications after the launchers (default: false).
+    # Apps named like a launcher, or running the same command, are left out.
+    enabled: false
+  audio: # Configuration for the audio device switcher addon
+    # Close Raffi after an action instead of staying open and refreshing the list
+    # (default: `general.close_on_action`, else false).
+    close_on_action:
+    enabled: true # Turn the addon off with `false` (default: true).
+    # Highest output volume the volume rows set, in percent (default: 100).
+    max_volume: 100
+    trigger: audio # Keyword that opens the audio device list (default: `audio`).
+    # Percent the Volume up and Volume down rows change the output volume by (default:
+    # 5).
+    volume_step: 5
+  bitwarden: # Configuration for the Bitwarden addon, backed by rbw
+    # Seconds before a copied secret is cleared from the clipboard (default: 45, 0 =
+    # never).
+    clipboard_timeout: 45
+    # Close Raffi after copying a secret (default: `general.close_on_action`, else
+    # true).
+    close_on_action:
+    enabled: true # Turn the addon off with `false` (default: true).
+    trigger: bw # Keyword that opens the vault list (default: `bw`).
+    # Milliseconds to wait after Raffi closes before typing (default: 200).
+    type_delay_ms: 200
+  bluetooth: # Configuration for the Bluetooth addon
+    # Close Raffi after an action instead of staying open and refreshing the list
+    # (default: `general.close_on_action`, else false).
+    close_on_action:
+    enabled: true # Turn the addon off with `false` (default: true).
+    trigger: bt # Keyword that opens the Bluetooth list (default: `bt`).
+  # Configuration for the browser bookmarks addon (native UI only)
+  bookmarks:
+    # Close Raffi after opening a bookmark (default: `general.close_on_action`, else
+    # true).
+    close_on_action:
+    enabled: true # Turn the addon off with `false` (default: true).
+    # Opens bookmarks of every source without its own `open_with` (default: the
+    # browser and profile they come from).
+    open_with:
+    # Where bookmarks come from (default: every profile of every supported browser
+    # found).
+    sources:
+      # Browser whose profiles hold the bookmarks. Optional with `path`, where it
+      # only picks the browser that opens the links.
+      - browser:
+        folder: # Only list this folder, such as `Bookmarks Toolbar/Work`.
+        # Label of the source in the list (default: the browser and profile).
+        name:
+        # Opens this source's bookmarks (default: `addons.bookmarks.open_with`, else
+        # the browser and profile they come from).
+        open_with:
+        # A bookmarks file read directly: Chromium's `Bookmarks`, Firefox's
+        # `places.sqlite`, or the profile directory holding one.
+        path:
+        # Profile to read, by name or directory (default: every profile).
+        profile:
+    trigger: bm # Keyword that opens the bookmarks (default: `bm`).
+  browser_history: # Configuration for the browser history addon (native UI only)
+    # Seconds cached browser-history snapshots stay fresh (default: 300).
+    cache_seconds: 300
+    # Close Raffi after opening a page (default: `general.close_on_action`, else
+    # true).
+    close_on_action:
+    enabled: true # Turn the addon off with `false` (default: true).
+    # Most recent and most visited URLs read per source (default: 2000, clamped to
+    # 100..10000).
+    max_entries: 2000
+    # Opens pages of every source without its own `open_with` (default: the browser
+    # and profile they come from).
+    open_with:
+    # Where history comes from (default: every profile of every supported browser
+    # found).
+    sources:
+      # Browser whose profiles hold the history. Optional with `path`, where it only
+      # picks the browser that opens the links.
+      - browser:
+        # Label of the source in the list (default: the browser and profile).
+        name:
+        # Opens this source's pages (default: `addons.browser_history.open_with`, else
+        # the browser and profile they come from).
+        open_with:
+        # A history file read directly: Chromium's `History`, Firefox's
+        # `places.sqlite`, or the profile directory holding one.
+        path:
+        # Profile to read, by name or directory (default: every profile).
+        profile:
+    trigger: hist # Keyword that opens browser history (default: `hist`).
+  # Configuration for the browser tabs addon, fed by the Vicinae browser extension
+  browser_tabs:
+    # Close Raffi after switching to a tab (default: `general.close_on_action`, else
+    # true).
+    close_on_action:
+    enabled: true # Turn the addon off with `false` (default: true).
+    # Where to download site icons the browsers have not stored themselves (default:
+    # `twenty`). Downloading sends the domains of open tabs to that service; `none`
+    # keeps favicons to the browsers' own and stops fetching the selected page for its
+    # preview.
+    favicon_service: twenty
+    trigger: tabs # Keyword that opens the tab list (default: `tabs`).
+  calculator: # Configuration for the calculator addon
+    # Close Raffi after copying a calculation result (default:
+    # `general.close_on_action`, else true).
+    close_on_action:
+    enabled: true # Turn the addon off with `false` (default: true).
+  clipboard: # Configuration for the clipboard history addon
+    action: copy # Action on Enter (default: `copy`).
+    # Clipboard manager that stores the history browsed by the clipboard addon
+    backend: auto
+    # Close Raffi after copying a clipboard entry (default: `general.close_on_action`,
+    # else true).
+    close_on_action:
+    # Unset turns it on when the backend is running at startup (a CopyQ process, or
+    # `raffi --server` for the `raffi` backend); `true` or `false` overrides the
+    # detection.
+    enabled:
+    # Rust regular expressions. An entry whose complete text matches any of them is
+    # not recorded by Raffi and is hidden from the browser (default: none). Matching
+    # is case-sensitive unless a flag such as `(?i)` is used. Existing entries are
+    # hidden, not deleted, and CopyQ keeps recording.
+    exclude_patterns: []
+    # `raffi` backend: images larger than this many MB are not recorded (default: 50).
+    max_image_size_mb: 50
+    # `raffi` backend: entries kept in the history (default: 1000).
+    max_items: 1000
+    # `raffi` backend: total size of the history in MB before the oldest entries are
+    # dropped (default: 500).
+    max_size_mb: 500
+    # Hide text entries shorter than this many characters, ignoring surrounding
+    # whitespace (default: 3). Images and files are always shown.
+    min_chars: 3
+    # Read text from history images with tesseract, when it is installed (default:
+    # off).
+    ocr:
+      # Extract text from images in Raffi's clipboard history (default: false).
+      enabled: false
+      languages: [eng] # Tesseract language codes (default: ["eng"]).
+    secondary_action: hypr_paste # Action on Ctrl+Enter (default: `hypr_paste`).
+    # Record copies carrying `x-kde-passwordManagerHint` as temporary entries even
+    # when no `temporary_patterns` matches, instead of skipping them (default: false).
+    temporary_password_manager: false
+    # Rust regular expressions. An entry whose complete text matches any of them is
+    # recorded as a temporary entry of Raffi's history, kept for `temporary_timeout`
+    # seconds (default: none). `exclude_patterns` wins over these, and CopyQ keeps
+    # recording everything.
+    temporary_patterns: []
+    # Seconds a temporary entry stays in Raffi's history (default: 60).
+    temporary_timeout: 60
+    trigger: clip # Keyword that opens the history (default: `clip`).
+  color: # Configuration for the inline color converter addon
+    # Close Raffi after copying a color value (default: `general.close_on_action`,
+    # else true).
+    close_on_action:
+    enabled: true # Turn the addon off with `false` (default: true).
+  currency: # Configuration for the currency addon
+    # Close Raffi after copying a conversion result (default:
+    # `general.close_on_action`, else true).
+    close_on_action:
+    # Currencies an amount without a target converts to (default: [USD, EUR, GBP]).
+    currencies:
+    # Currency an amount without one converts from (default: USD).
+    default_currency: USD
+    enabled: true # Turn the addon off with `false` (default: true).
+    # Exchange rate sources in the order they are tried; the next one is contacted
+    # only when the previous one fails or has none of the requested rates. Default:
+    # `[frankfurter]`, so no other site is contacted unless listed here. An empty list
+    # contacts nothing, and conversions report an error.
+    sources:
+    trigger: # Character that opens the converter (default: $).
+  # Configuration for the developer tools addon: the `dev` transform list and the
+  # inline `uuid` and `pw` generators
+  devtools:
+    # Close Raffi after copying a generated or transformed value (default:
+    # `general.close_on_action`, else true).
+    close_on_action:
+    enabled: true # Turn the addon off with `false` (default: true).
+    # Length of passwords generated by `pw` without a length, from 8 to 128 (default:
+    # 20).
+    password_length: 20
+    trigger: dev # Keyword that opens the transform list (default: `dev`).
+  emoji: # Configuration for the emoji picker addon
+    # What Enter does: `copy`, `insert`, or a command run for the character (default:
+    # copy).
+    action: copy
+    # Close Raffi after executing an emoji action (default: `general.close_on_action`,
+    # else true).
+    close_on_action:
+    # Character lists to load, such as `emojis_smileys_emotion`, `gitmoji` or
+    # `nerd_font` (default: the standard emoji groups).
+    data_files:
+    enabled: true # Turn the addon off with `false` (default: true).
+    # What Ctrl+Enter does, with the same values as `action` (default: insert).
+    secondary_action: insert
+    trigger: emoji # Keyword that opens the picker (default: `emoji`).
+  file_browser: # Configuration for the file browser addon
+    # Action on Enter for files: `open` (xdg-open), `copy`, `insert`, or a shell
+    # command where `{value}` is the full path. Defaults to `open`.
+    action: open
+    # Close Raffi after executing a file browser action (default:
+    # `general.close_on_action`, else true).
+    close_on_action:
+    enabled: true # Turn the addon off with `false` (default: true).
+    # Edit paths the way Emacs fido-mode does: Backspace on a trailing `/` goes up to
+    # the parent directory, and typing `~/` or `/` right after a `/` starts over from
+    # home or the root. Off, the input is plain text.
+    fido_style: true
+    # File manager opened with Ctrl+B on the browsed directory. `{value}` is replaced
+    # by the directory, otherwise it is appended as the last argument. Nautilus,
+    # Dolphin, Nemo and Caja also get the selected entry highlighted. Autodetected
+    # when unset.
+    file_manager:
+    # Command that previews the selected entry in the preview pane. Unset uses the
+    # previewer bundled with raffi when python3 is installed; `none` turns it off. A
+    # command runs through `sh -c` with the path appended as the last argument (also
+    # in `$RAFFI_VALUE`) and prints ANSI text or a Script Filter preview object; no
+    # output or a non-zero exit keeps the built-in preview. Killed after 3 seconds.
+    preview_command:
+    # Action on Ctrl+Enter for files and directories, with the same values as
+    # `action`. Defaults to `copy`.
+    secondary_action: copy
+    # Initial filter of the listing: `all`, `files` or `directories`; Ctrl+Tab cycles
+    # through them.
+    show: all
+    show_hidden: false # List dotfiles too, such as `~/.config` (default: false).
+    # Initial order of the listing; Ctrl+S cycles through the modes. Directories are
+    # always listed first.
+    sort: name
+    # Reverse the sort order: Z to A, or oldest first for date sorts. Directories stay
+    # first and Ctrl+S keeps this setting.
+    sort_reverse: false
+  # Characters to type before addon keywords are suggested (default: 3). A keyword
+  # typed in full is always suggested.
+  keyword_min_chars: 3
+  kill: # Configuration for the kill process addon
+    # Close Raffi after sending a signal instead of staying open and refreshing the
+    # list (default: `general.close_on_action`, else false).
+    close_on_action:
+    enabled: true # Turn the addon off with `false` (default: true).
+    trigger: kill # Keyword that opens the process list (default: `kill`).
+  media: # Configuration for the media controls addon
+    # Close Raffi after an action instead of staying open and refreshing the list
+    # (default: `general.close_on_action`, else false).
+    close_on_action:
+    enabled: true # Turn the addon off with `false` (default: true).
+    trigger: media # Keyword that opens the media controls (default: `media`).
+  pass: # Configuration for the pass (password-store) addon
+    # Seconds before a copied secret is cleared from the clipboard (default: 45, 0 =
+    # never).
+    clipboard_timeout: 45
+    # Close Raffi after copying a secret (default: `general.close_on_action`, else
+    # true).
+    close_on_action:
+    enabled: true # Turn the addon off with `false` (default: true).
+    # Who asks for the GPG passphrase: `raffi` (default) or `agent`.
+    pinentry: raffi
+    # Password store directory (default: `$PASSWORD_STORE_DIR`, else
+    # `~/.password-store`).
+    store_dir:
+    trigger: pass # Keyword that opens the password list (default: `pass`).
+    # Milliseconds to wait after Raffi closes before typing (default: 200).
+    type_delay_ms: 200
+    # `key: value` lines read as the username, tried in this order (default: `login`,
+    # `user`, `username`). Falls back to the entry file name.
+    username_fields:
+  script_filters: # Script filters, each a command Raffi runs for a keyword
+    # What Enter does with the row: `copy`, `insert` or a shell command (default:
+    # copy).
+    - action: copy
+      # Extra entries of the action menu of every valid row, listed after the actions
+      # the row declares itself.
+      actions:
+        # What the entry does with the row's value, with the same values as the
+        # filter's `action`.
+        - action: copy
+          title: Example # Label shown in the action menu.
+      args: [] # Arguments passed to `command` before the query.
+      # How long a script may ask its output to stay fresh, with a top-level `"cache":
+      # {"seconds": N}`, when that is more than `cache_seconds`. A script can always
+      # ask for less. Needs `cache_seconds`, which turns caching on.
+      cache_max_seconds:
+      # How long a query's items and previews stay fresh before Raffi refreshes them
+      # in the background. Unset disables caching, so side-effecting scripts never run
+      # from or through the cache.
+      cache_seconds:
+      # Close Raffi after executing an action on a result (default:
+      # `general.close_on_action`, else true).
+      close_on_action:
+      # Program run for the filter, without a shell, with `args` then the typed query
+      # as its last argument.
+      command: ~/.config/raffi/scripts/example.py
+      # Re-run the command with `RAFFI_PREVIEW=1` for the selected item and show the
+      # preview object it prints (default: true).
+      dynamic_preview: true
+      # Environment variables set for the command and its preview runs.
+      env:
+        example: value
+      # Icon of rows without one of their own: emoji, icon name or image path.
+      icon:
+      keyword: ex # Keyword that opens the filter.
+      # Characters typed after the keyword before the command runs; until then Raffi
+      # says how many more to type (default: 0).
+      min_query_length: 0
+      # Name shown while its command runs, and used to address the filter in
+      # `main_view`, `fallbacks` and `-o addons.script_filters.<name>.<key>`.
+      name: Example
+      # What Ctrl+Enter does, with the same values as `action` (default: same as
+      # `action`).
+      secondary_action:
+      # Rank the rows you already picked first, most recently picked first. Unset
+      # follows the script's top-level `"sort": "usage"`, `true` always ranks by
+      # usage, `false` always keeps the order the script prints. Rows never picked
+      # stay where the script put them, and a list with indented rows keeps its shape.
+      # This ranks the filter's own list; the main view keeps script-filter results in
+      # the order the script prints.
+      sort_by_usage:
+      # Seconds between background warming runs for `warm_queries` (default:
+      # `cache_seconds`).
+      warm_interval_seconds:
+      # Queries the server warms periodically, such as `["", "review"]`.
+      warm_queries: []
+  slack: # Configuration for the Slack addon
+    # Minutes the cached conversations, people, muted conversations and searches count
+    # as fresh before Raffi asks Slack again (default: 60); 0 asks every time. Cached
+    # rows and previews show at once while the fresh ones load.
+    cache_minutes: 60
+    # Close Raffi after opening a conversation or message (default:
+    # `general.close_on_action`, else true).
+    close_on_action:
+    # Shell command printing the value of the `d` cookie, needed with a session
+    # (`xoxc-`) token.
+    cookie_command:
+    enabled: false # Off by default: the addon needs a Slack token.
+    # Order of the messages in the previews (default: `newest_first`). Threads keep
+    # their first message on top.
+    message_order: newest_first
+    # Open conversations in the desktop app or in the browser (default: desktop).
+    # Ctrl+Enter uses the other one.
+    open_in: desktop
+    # Shell command printing the Slack token: a user token (`xoxp-`) from your own
+    # Slack app, or the session token (`xoxc-`) of a logged-in browser tab.
+    token_command:
+    trigger: slack # Keyword that opens the Slack list (default: `slack`).
+    # Conversations to check for unread messages (`#channel`, `@user` or an id), up to
+    # 30, used when Slack does not report unread conversations for the token, as with
+    # `xoxp-` tokens.
+    unread_conversations: []
+    # Minutes between server warming runs for the Slack views (default:
+    # `cache_minutes` when it is above 0).
+    warm_interval_minutes:
+  system: # Configuration for the system commands addon
+    # Close Raffi after running a system command (default: `general.close_on_action`,
+    # else true).
+    close_on_action:
+    # Commands replacing the built-in ones of the system commands addon, as argument
+    # lists run without a shell. An empty list hides the entry.
+    commands:
+      # Default: Hyprland's dpms dispatcher on Hyprland (through `hyprctl eval` with a
+      # Lua config, `hyprctl dispatch dpms off` otherwise), `niri msg action
+      # power-off-monitors` on niri, `swaymsg 'output * power off'` on sway; omitted
+      # without a supported compositor.
+      display_off:
+      hibernate: # Default: `systemctl hibernate`.
+      lock: # Default: `loginctl lock-session`.
+      # Default: Hyprland's exit dispatcher on Hyprland (through `hyprctl eval` with a
+      # Lua config, `hyprctl dispatch exit` otherwise), `niri msg action quit
+      # --skip-confirmation` on niri, `swaymsg exit` on sway, otherwise `loginctl
+      # terminate-session $XDG_SESSION_ID`.
+      logout:
+      reboot: # Default: `systemctl reboot`.
+      shutdown: # Default: `systemctl poweroff`.
+      suspend: # Default: `systemctl suspend`.
+    enabled: true # Turn the addon off with `false` (default: true).
+    extra: # Extra entries appended after the built-in system commands.
+      # Command and arguments run directly without a shell.
+      - argv: ["notify-send", "Example"]
+        confirm: true # Ask for a second Enter before running (default: true).
+        icon: system-run # System icon name (default: `system-run`).
+        # Allow keeping Raffi open when `close_on_action` is false (default: false).
+        keep_open: false
+        title: Example # Label shown in the list.
+        # Verb completing "Press Enter again to ..." when confirmation is enabled
+        # (default: lowercase `title`).
+        verb:
+    hide: [] # Entries left out of the list.
+    trigger: sys # Keyword that opens the list (default: `sys`).
+  terminal: # Configuration for the run in terminal addon
+    # Close Raffi after running a command in the terminal (default:
+    # `general.close_on_action`, else true).
+    close_on_action:
+    # Terminal command line the command to run is appended to, such as `[alacritty,
+    # -e]`. Found automatically when unset: xdg-terminal-exec, then `$TERMINAL`, then
+    # the first known terminal installed.
+    command:
+    enabled: true # Turn the addon off with `false` (default: true).
+    # Keep the terminal open once the command exits, until Enter is pressed (default:
+    # true).
+    hold: true
+    # kitty remote control address, such as `unix:${XDG_RUNTIME_DIR}/kitty`, as given
+    # to kitty's `listen_on`. Read from kitty.conf when unset.
+    kitty_socket:
+    open_in: tab # Where typed commands open (default: tab).
+    # Keyword that runs the rest of the query in a terminal (default: `>`).
+    trigger: ">"
+  # Text snippet sources, from inline snippets, a file or a command
+  text_snippets:
+    # What Enter does: `copy`, `insert`, `hypr_paste` or a shell command (default:
+    # copy).
+    - action: copy
+      args: [] # Arguments passed to `command`.
+      # Close Raffi after executing a snippet action (default:
+      # `general.close_on_action`, else true).
+      close_on_action:
+      command: # Program that prints its snippets as Script Filter JSON.
+      directory: # Path to a directory of `.snippet` files.
+      # Path to a YAML file of snippets, in the same format as `snippets`.
+      file:
+      # Default icon for its snippets: emoji, icon name or image path.
+      icon:
+      keyword: ex # Keyword that opens the source.
+      # Markdown file of `## Name` snippets. Read as the source, and the file that
+      # clipboard entries are saved to with the browser's save action.
+      markdown:
+      # Name shown on its keyword row and while a `command` source loads.
+      name: Example
+      # Expand dynamic placeholders such as {clipboard} and {date} in snippet values.
+      placeholders: true
+      # Best-effort restoration of plain text after the `hypr_paste` action.
+      restore_clipboard: false
+      secondary_action: # What Ctrl+Enter does, with the same values as `action`.
+      # Snippets written in the config, each with a `name` and a `value`.
+      snippets:
+        - icon: # Emoji, icon name, or image path overriding the source icon.
+          # Optional short keyword; an exact match ranks the snippet first.
+          keyword:
+          name: Example # Name shown in the list and matched when searching.
+          value: Example # Text copied, inserted or handed to the action.
+  units: # Configuration for the inline unit converter addon
+    # Close Raffi after copying a converted value (default: `general.close_on_action`,
+    # else true).
+    close_on_action:
+    enabled: true # Turn the addon off with `false` (default: true).
+  web_searches: # Web searches opened in the browser for a keyword
+    # Close Raffi after opening a web search URL (default:
+    # `general.close_on_action`, else true).
+    - close_on_action:
+      icon: # Icon name shown next to the search row.
+      keyword: ex # Keyword that opens the search.
+      # Name shown in the search row, as in "Search Google for 'rust traits'".
+      name: Example
+      # URL template; every `{query}` is replaced by the percent-encoded query.
+      url: https://example.com
+  # Configuration for the window switcher addon for Hyprland, niri and sway
+  windows:
+    # Close Raffi after focusing or moving a window (default:
+    # `general.close_on_action`, else true).
+    close_on_action:
+    enabled: true # Turn the addon off with `false` (default: true).
+    trigger: win # Keyword that opens the window list (default: `win`).
+  world_clock: # Configuration for the inline world clock addon
+    # Close Raffi after copying a time value (default: `general.close_on_action`, else
+    # true).
+    close_on_action:
+    enabled: true # Turn the addon off with `false` (default: true).
+general: # General settings (UI, theme, font, etc.)
+  # Ask the compositor to blur what shows through the window (KDE/KWin; other
+  # compositors use their own rules). Default: true.
+  blur: true
+  # Clipboard manager for `{clipboard:N}` snippet placeholders
+  clipboard_history: auto
+  # Close Raffi after executing an action. Unset closes after most actions, but keeps
+  # the media, audio, Bluetooth and kill addons open; `true` or `false` applies to
+  # every addon and launcher without its own `close_on_action`.
+  close_on_action:
+  # Shell that runs script launchers and terminal-addon commands (default: bash).
+  default_script_shell: bash
+  # Rows added below the main list while typing, such as
+  # `addons.web_searches."Google"` or `addons.terminal` (default: none).
+  fallbacks: []
+  # Font family name, such as `Inter` (default: the system UI font).
+  font_family:
+  # Base font size in px; the other sizes scale from it (default: 20).
+  font_size: 20
+  # How launchers start their program: `auto` (default) asks Hyprland, niri or sway to
+  # start it, `direct` starts it from Raffi.
+  launch: auto
+  # Sources mixed into the main view. An object with `entries` (the sources to show,
+  # in order) and `exclude` (sources to remove after resolving). A plain list is
+  # accepted as shorthand for `{ entries: <list> }`. Null or empty entries shows only
+  # apps and custom entries.
+  main_view:
+    entries: # Sources to show in the main view
+      - launchers
+      - windows
+      - browser_tabs
+      - bookmarks
+      - system
+      - media
+      - audio
+      - bluetooth
+      - pass
+      - clipboard
+      - bitwarden
+      - terminal
+      - emoji
+    exclude: [] # Sources to exclude from the main view
+  # What the chips row above the apps shows on an empty query when `main_view` is set:
+  # `name` (default), `keyword` or `off`
+  main_view_chips: name
+  # Search queries the history keeps; 0 disables it (default: 10).
+  max_history: 10
+  # Start without loading icons, for a faster start (default: false).
+  no_icons: false
+  # Opacity of the window backgrounds, from 0.0 (see-through) to 1.0 (the theme as
+  # designed). Text and icons stay opaque. Default: 0.95.
+  opacity: 0.95
+  # Outer margin around the window content in px, instead of the one that follows
+  # `font_size` (default: 20).
+  padding: 20
+  # Appearance of the right-hand preview pane (font, size, colours, width)
+  preview:
+    colors: # Colour overrides for the preview pane
+      accent: # Headings, badges and hero values
+      bg: # Background of the whole preview pane
+      bg_block: # Background of the content/code blocks inside the pane
+      border: # Pane and block borders
+      text_main: # Title and main text colour
+      text_muted: # Subtitles, metadata keys and hints
+    # Font family for the preview pane, including message, snippet and clipboard text
+    # (default: the UI font)
+    font_family:
+    # Base font size in px for preview text (default: 0.8 × general font_size, 16 at
+    # the default 20). Title, headings and hero values scale from it.
+    font_size:
+    # Monospace font family for code blocks such as file contents, commands and script
+    # output (default: system monospace)
+    mono_font_family:
+    # Width of the preview pane as a percentage of the window (10-80, default: 50)
+    width_percent: 50
+  # Focus an app's open window instead of starting it again (default: false).
+  # Launchers can set `raise` and `window_class`. Raffi's own window only, on
+  # Hyprland, niri and sway.
+  raise_running: false
+  # Renderer for the window: `auto` (default: `gpu` when `opacity` is below 1, else
+  # `cpu`), `cpu` (faster to open, opaque on Wayland) or `gpu`. An `ICED_BACKEND`
+  # environment variable takes precedence.
+  renderer: auto
+  # Show the Alfred-style right-hand preview pane (default: true). On the main page it
+  # stays open, empty when the selected row has nothing to preview. `false` hides it
+  # everywhere except entries with their own `show_preview: true`. Can also be toggled
+  # at runtime with Ctrl+P.
+  show_preview: true
+  # Show a tip about a keyword in the empty search box, such as `clip for Clipboard
+  # history` (default: true).
+  show_tips: true
+  # Sort launcher, snippet and password rows by past use: `frequency`, `recency` or
+  # `hybrid` (default: hybrid).
+  sort_mode: hybrid
+  # Extra window classes treated as terminals by `hypr_paste` (sent Ctrl+Shift+V
+  # instead of Ctrl+V). Added to the built-in list; matched case-insensitively.
+  terminal_classes: []
+  # Theme preset: dark, light, catppuccin, catppuccin-latte, tokyo-night, nord,
+  # gruvbox, dracula, rose-pine or kanagawa (default: dark).
+  theme: dark
+  # Per-colour overrides of the theme, as #RGB, #RRGGBB or #RRGGBBAA
+  theme_colors:
+    accent: # Selected rows, borders and highlights (default: the theme's)
+    accent_hover: # Accent of hovered rows (default: the theme's)
+    bg_base: # Main window background (default: the theme's)
+    bg_input: # Search input background (default: the theme's)
+    border: # Window and separator borders (default: the theme's)
+    selection_bg: # Background of the selected row (default: the theme's)
+    text_main: # Primary text (default: the theme's)
+    text_muted: # Secondary text, subtitles and hints (default: the theme's)
+  # Window entries show in: `native` (Raffi's own window), or `fuzzel`; `wayland` and
+  # `iced` are aliases of `native`. Unset uses the native window when this build has
+  # it, and `fuzzel` otherwise.
+  ui_type:
+  # Start with modal vim keybindings in normal mode (default: false). Toggle at
+  # runtime with Ctrl+Alt+V.
+  vim_mode: false
+  window_height: 600 # Window height in px (default: 600).
+  window_width: 800 # Window width in px (default: 800).
+launchers: # Launcher entries keyed by name
+  example: # Represents the configuration for each Raffi entry.
+    # Route this launcher to an internal command: picking it types this text for you,
+    # such as `mp owner/project` (an addon keyword followed by its query). Cannot be
+    # combined with `binary`, `script`, `args` or `env`.
+    alias:
+    args:
+    binary:
+    # Close Raffi after launching this entry (default: `general.close_on_action`, else
+    # true).
+    close_on_action:
+    description:
+    # Desktop file ID of the installed application this launcher stands for, so the
+    # apps addon does not list it twice (default: none).
+    desktop:
+    disabled:
+    # Environment variables set for the binary or script, added to Raffi's own
+    # environment. Values expand `~/` and `${VAR}`.
+    env:
+      example: value
+    icon:
+    # Show the entry only inside this compositor, or one of these: `hyprland`, `niri`,
+    # `sway`.
+    ifcompositor:
+    ifenveq:
+    ifenvnotset:
+    ifenvset:
+    ifexist:
+    # Keyword that stands for `alias` while typing: with keyword `shortcut`, typing
+    # `shortcut query` searches `mp owner/project query` while the input keeps showing
+    # `shortcut query`. Requires `alias`; no whitespace.
+    keyword:
+    # Focus the app's open window instead of starting it again (default:
+    # `general.raise_running`, else false).
+    raise:
+    script:
+    # Preview this launcher entry in the right-hand pane. Unset previews it whenever
+    # the pane shows; `false` never previews it; `true` previews it even when
+    # `general.show_preview` is `false`.
+    show_preview:
+    # Window class (Hyprland, Xwayland) or app ID (niri, sway) of the app's windows,
+    # for `raise` (default: the binary name).
+    window_class:
