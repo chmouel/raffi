@@ -9,16 +9,11 @@ Type=simple
 ExecStart=%h/.local/bin/raffi --server
 Restart=on-failure
 RestartSec=5
-# The service only needs the user's runtime and cache directories, plus the
-# clipboard history database directory. ReadWritePaths must exist before the
-# sandbox is set up, so it is created outside the sandbox first. Adjust both
-# lines if XDG_DATA_HOME is not ~/.local/share.
-ExecStartPre=+mkdir -p -m 0700 %h/.local/share/raffi
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=%t %h/.cache %h/.local/share/raffi
+# The server also shows the launcher window, which starts programs, runs
+# scripts and writes anywhere the launcher does, so it is not sandboxed.
+WorkingDirectory=%h
+# Programs launched from the window outlive a server restart.
+KillMode=process
 
 [Install]
 WantedBy=graphical-session.target

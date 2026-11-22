@@ -339,6 +339,44 @@ the rename keep working.
   raffi: refreshed slack:unread in 0.7s
   ```
 
+  When the server has a display (`WAYLAND_DISPLAY` or `DISPLAY` set), it
+  also shows the launcher window. Running `raffi` from a keybinding then
+  asks the server to open it instead of starting a new window, which skips
+  process start-up, the font scan and library loading, so the window
+  appears noticeably sooner. Each open still reads the configuration and
+  your command-line options as a new process would. Running `raffi` again
+  while the window is shown closes it.
+
+  The server opens the window only when it would behave exactly as a new
+  process: `raffi` was started without a terminal (its input and output on
+  `/dev/null`, as from a keybinding), from the same directory as the
+  server, with the same build, renderer and font. Anything else, such as a
+  run from a terminal, `-p`, `-d`, the `fuzzel` UI or a configuration that
+  does not exist yet, opens the window in the calling process as before.
+  After rebuilding Raffi, restart the server: until then it refuses opens
+  and says so in its output.
+
+  Programs launched from the window are started by the server, with the
+  environment of the user service manager rather than the one of the
+  process that called `raffi`. Use `--in-process` when that matters. The
+  window takes a few hundred megabytes of memory in the server while it
+  runs.
+
+  The service file in `misc/systemd/raffi-server.service` is set up for
+  this: it runs from your home directory, has no sandbox, since the
+  launcher has to start programs and write files, and keeps launched
+  programs running when the server restarts. After upgrading, copy it
+  again and run `systemctl --user daemon-reload`.
+
+
+**`--in-process`** `boolean` (default: `false`)
+
+Open the window in this process even when the server can show it.
+
+  ```bash
+  raffi --in-process
+  ```
+
 
 ## Clipboard
 
