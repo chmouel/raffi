@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::process::Command;
 use std::time::Duration;
 
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -656,7 +655,7 @@ pub(super) fn run_kept_open(action: &DeferredAction) -> Result<(), String> {
     match action {
         DeferredAction::Command(argv) => {
             let (program, args) = argv.split_first().ok_or("no command to run")?;
-            let mut command = Command::new(program);
+            let mut command = crate::process::command(program);
             command.args(args);
             run_bounded(command, KEPT_OPEN_TIMEOUT, 64 * 1024)
                 .map(|_| ())

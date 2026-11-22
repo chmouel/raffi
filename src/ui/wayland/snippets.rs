@@ -1,7 +1,7 @@
 use std::cmp::Reverse;
 use std::fs::File;
 use std::io::Read;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::Duration;
 
 use chrono::{DateTime, Local};
@@ -100,7 +100,7 @@ pub(super) fn run_text_snippet_command(
     args: &[String],
 ) -> Result<Vec<TextSnippet>, String> {
     crate::debug_log!("snippets: executing command={command:?} args={args:?}");
-    let output = Command::new(command)
+    let output = crate::process::command(command)
         .args(args)
         .stdin(Stdio::null())
         .stderr(Stdio::null())
@@ -647,7 +647,7 @@ impl Providers for LiveProviders {
     }
 
     fn shell(&mut self, command: &str) -> Result<String, String> {
-        let mut process = Command::new("sh");
+        let mut process = crate::process::command("sh");
         process.arg("-c").arg(command);
         let output = run_bounded(process, SHELL_TIMEOUT, MAX_VALUE)?;
         let mut text = String::from_utf8_lossy(&output).into_owned();

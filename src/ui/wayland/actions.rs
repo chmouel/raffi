@@ -65,7 +65,7 @@ fn spawn_and_reap(mut command: Command) -> std::io::Result<()> {
 fn spawn_insert(value: &str, cursor_moves: usize) -> Result<(), String> {
     let tool =
         find_tool(&["wtype", "ydotool"]).ok_or("cannot type text: install wtype or ydotool")?;
-    let mut command = Command::new("sh");
+    let mut command = crate::process::command("sh");
     command
         .arg("-c")
         .arg(insert_command(tool, cursor_moves))
@@ -87,7 +87,7 @@ fn try_copy(value: &str) -> Result<(), String> {
         "xsel" => "printf '%s' \"$RAFFI_COPY_VALUE\" | xsel --clipboard --input".to_string(),
         _ => "wl-copy -- \"$RAFFI_COPY_VALUE\"".to_string(),
     };
-    let mut command = Command::new("sh");
+    let mut command = crate::process::command("sh");
     command
         .arg("-c")
         .arg(&copy_cmd)
@@ -115,7 +115,7 @@ pub(super) fn copy_text_checked(text: &str) -> Result<(), String> {
 pub(super) fn copy_image_checked(path: &Path, mime_type: &str) -> Result<(), String> {
     let tool = find_tool(&["wl-copy", "xclip"])
         .ok_or("cannot copy image: install wl-clipboard or xclip")?;
-    let mut command = Command::new(tool);
+    let mut command = crate::process::command(tool);
     if tool == "xclip" {
         command
             .args(["-selection", "clipboard", "-t"])
@@ -161,7 +161,7 @@ fn copy_file_to_clipboard_with(
 fn copy_with(argv: &[&str], text: &str, timeout: Duration) -> Result<(), String> {
     let (program, args) = argv.split_first().ok_or("no clipboard tool")?;
     let name = program_name(program);
-    let mut child = Command::new(program)
+    let mut child = crate::process::command(program)
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
@@ -410,7 +410,7 @@ fn check_terminal_tab(
     let query = |argv: Option<Vec<String>>| {
         let argv = argv?;
         let (program, args) = argv.split_first()?;
-        let mut command = Command::new(program);
+        let mut command = crate::process::command(program);
         command.args(args);
         match run_bounded_status(command, timeout, 16 * 1024 * 1024) {
             Ok((status, output)) if status.success() => Some(output),
@@ -435,7 +435,7 @@ fn check_terminal_tab(
 fn run_detached(argv: &[String], timeout: Duration) -> Result<(), String> {
     let (program, args) = argv.split_first().ok_or("no command to run")?;
     let name = program_name(program);
-    let mut child = Command::new(program)
+    let mut child = crate::process::command(program)
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -468,7 +468,7 @@ fn run_batch(commands: &[Vec<String>], timeout: Duration) -> Result<(), String> 
     commands.iter().try_for_each(|argv| {
         let (program, args) = argv.split_first().ok_or("no command to run")?;
         let name = program_name(program);
-        let mut command = Command::new(program);
+        let mut command = crate::process::command(program);
         command.args(args);
         let (status, _) = run_bounded_status(command, timeout, 64 * 1024)
             .map_err(|error| format!("{name}: {error}"))?;
@@ -487,7 +487,7 @@ fn spawn_custom_action(
 ) -> Result<(), String> {
     let command_str = action.replace("{value}", value);
     crate::debug_log!("action: executing shell command={command_str:?}");
-    let mut command = Command::new("sh");
+    let mut command = crate::process::command("sh");
     command
         .arg("-c")
         .arg(&command_str)
@@ -530,7 +530,7 @@ pub(super) fn execute_file_action(action: &str, path: &str) {
         return execute_action(action, path);
     }
     crate::debug_log!("action: xdg-open {path:?}");
-    let mut command = Command::new("xdg-open");
+    let mut command = crate::process::command("xdg-open");
     command
         .arg(path)
         .stdin(Stdio::null())
@@ -688,7 +688,7 @@ fn read_limited(reader: &mut impl Read, max_output: usize) -> ReadOutcome {
 }
 
 pub(super) fn kill_process_group(pgid: u32) {
-    let _ = Command::new("sh")
+    let _ = crate::process::command("sh")
         .arg("-c")
         .arg(format!(
             "kill -s TERM -- -{pgid} 2>/dev/null; sleep 0.1; kill -s KILL -- -{pgid} 2>/dev/null"
@@ -804,7 +804,7 @@ pub(super) fn run_bounded_with_input(
     const MAX_STDERR: usize = 64 * 1024;
     let (program, args) = argv.split_first().ok_or("no command to run")?;
     let name = program_name(program);
-    let mut child = Command::new(program)
+    let mut child = crate::process::command(program)
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -887,7 +887,7 @@ pub(super) fn read_clipboard() -> Result<String, String> {
     ];
     let mut errors = Vec::new();
     for (tool, args) in backends {
-        let mut command = Command::new(tool);
+        let mut command = crate::process::command(tool);
         command.args(args);
         match run_bounded(command, CLIPBOARD_TIMEOUT, MAX_VALUE) {
             Ok(bytes) => {
@@ -917,7 +917,7 @@ pub(super) fn read_clipboard() -> Result<String, String> {
 /// Explain a failed `wl-paste --type text` when the clipboard is empty or
 /// holds only non-text data such as an image.
 fn wayland_clipboard_without_text() -> Option<String> {
-    let mut command = Command::new("wl-paste");
+    let mut command = crate::process::command("wl-paste");
     command.arg("--list-types");
     match run_bounded(command, CLIPBOARD_TIMEOUT, 64 * 1024) {
         Ok(output) => describe_non_text(&String::from_utf8_lossy(&output)),
@@ -952,7 +952,7 @@ mod tests {
     use super::*;
 
     fn sh(script: &str) -> Command {
-        let mut command = Command::new("sh");
+        let mut command = crate::process::command("sh");
         command.arg("-c").arg(script);
         command
     }
@@ -1137,7 +1137,7 @@ mod tests {
     #[test]
     fn test_run_bounded_reports_missing_program() {
         let error = run_bounded(
-            Command::new("raffi-no-such-program"),
+            crate::process::command("raffi-no-such-program"),
             Duration::from_secs(1),
             1024,
         )
@@ -1259,7 +1259,7 @@ mod tests {
         let image = b"\x89PNG\r\n\x1a\n\x00\xff";
         std::fs::write(&input_path, image).unwrap();
 
-        let mut command = Command::new("sh");
+        let mut command = crate::process::command("sh");
         command
             .args(["-c", "cat > \"$1\"", "copy-image"])
             .arg(&output_path);

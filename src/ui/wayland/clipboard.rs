@@ -7,7 +7,6 @@
 //! refuse to act when it is gone.
 
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 
 use chrono::{Datelike, NaiveDateTime, TimeZone};
@@ -565,7 +564,7 @@ impl CopyQ {
         timeout: Duration,
         max_output: usize,
     ) -> Result<Vec<u8>, String> {
-        let mut command = Command::new(self.program());
+        let mut command = crate::process::command(self.program());
         if let Some(session) = &self.session {
             command.args(["-s", session]);
         }

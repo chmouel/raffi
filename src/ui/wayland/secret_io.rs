@@ -250,7 +250,7 @@ fn feed_stdin(child: &mut Child, input: Option<&Secret>) {
 /// cancellation the group is killed and the child reaped.
 pub(super) fn run_split(cmd: &Cmd, cancel: &Cancel) -> Result<Output, SecretError> {
     let name = cmd.name().to_string();
-    let mut command = Command::new(&cmd.program);
+    let mut command = crate::process::command(&cmd.program);
     command
         .args(&cmd.args)
         .stdin(if cmd.stdin.is_some() {
@@ -476,7 +476,7 @@ pub(super) fn copy_secret(
     }
     argv.extend(tools.serve.iter().cloned());
     let name = program_name(&tools.serve[0]).to_string();
-    let mut command = Command::new(&argv[0]);
+    let mut command = crate::process::command(&argv[0]);
     command
         .args(&argv[1..])
         .stdin(Stdio::piped())

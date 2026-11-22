@@ -1,7 +1,7 @@
 //! The Wayland compositor Raffi runs in, and starting programs through it.
 
 use std::io::Read;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
@@ -173,7 +173,7 @@ pub fn lua_quote(value: &str) -> String {
 /// error. A compositor that does not answer in time is an error, so the
 /// caller does not start the program a second time.
 fn run_bounded(program: &'static str, argv: &[String]) -> Result<(bool, String)> {
-    let mut child = Command::new(program)
+    let mut child = crate::process::command(program)
         .args(&argv[1..])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

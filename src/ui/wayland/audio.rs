@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::process::Command;
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -271,7 +270,7 @@ pub(super) fn set_volume_argv(name: &str, percent: u32) -> Vec<String> {
 pub(super) fn load_devices(options: AudioOptions) -> Vec<CommandItem> {
     load_devices_with(
         |args| {
-            let mut command = Command::new("pactl");
+            let mut command = crate::process::command("pactl");
             command.args(args);
             run_bounded(command, TIMEOUT, MAX_OUTPUT)
         },

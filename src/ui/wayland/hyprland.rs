@@ -241,7 +241,7 @@ impl HyprAction {
     /// Run the action in the current Hyprland session.
     pub(super) fn run(&self) -> Result<(), String> {
         self.run_with(|args| {
-            let mut command = Command::new("hyprctl");
+            let mut command = crate::process::command("hyprctl");
             command.args(args);
             let (status, output) = run_bounded_status(command, TIMEOUT, 64 * 1024)
                 .map_err(|error| format!("hyprctl: {error}"))?;
@@ -288,11 +288,11 @@ fn checked_status(success: bool, reply: &str) -> Result<(), String> {
 pub(super) fn notify(message: &str) {
     crate::debug_log!("notify: {message}");
     let command = if in_session() {
-        let mut command = Command::new("hyprctl");
+        let mut command = crate::process::command("hyprctl");
         command.args(["notify", "0", "5000", "rgb(ff5555)", message]);
         command
     } else {
-        let mut command = Command::new("notify-send");
+        let mut command = crate::process::command("notify-send");
         command.args(["--app-name=Raffi", "--urgency=critical", "Raffi", message]);
         command
     };
@@ -307,7 +307,7 @@ pub(super) fn valid_instance_signature(instance: &str) -> bool {
 }
 
 fn hyprctl_command(program: &Path, instance: &str, args: &[&str]) -> Command {
-    let mut command = Command::new(program);
+    let mut command = crate::process::command(program);
     command.arg("-i").arg(instance).args(args);
     command
 }
@@ -388,7 +388,7 @@ impl Hyprland {
         validate_snippet(value)?;
         self.check_target()?;
         self.restoration = if restore_clipboard {
-            let mut command = Command::new("wl-paste");
+            let mut command = crate::process::command("wl-paste");
             command.args(["--no-newline", "--type", "text"]);
             match ClipboardRestore::snapshot(command) {
                 Ok(snapshot) => Some(snapshot),
@@ -402,7 +402,7 @@ impl Hyprland {
         } else {
             None
         };
-        self.publish(|| Command::new("wl-copy"), value)
+        self.publish(|| crate::process::command("wl-copy"), value)
     }
 
     fn publish(&self, wl_copy: impl Fn() -> Command, value: &str) -> Result<(), String> {
@@ -442,9 +442,9 @@ impl Hyprland {
         ))?;
         if let Some(restoration) = &self.restoration {
             std::thread::sleep(RESTORE_DELAY);
-            let mut types = Command::new("wl-paste");
+            let mut types = crate::process::command("wl-paste");
             types.arg("--list-types");
-            if let Err(error) = restoration.restore(types, Command::new("wl-copy")) {
+            if let Err(error) = restoration.restore(types, crate::process::command("wl-copy")) {
                 crate::debug_log!("hypr_paste: clipboard restoration skipped or failed: {error}");
             }
         }
@@ -575,7 +575,7 @@ mod tests {
     use std::os::unix::net::UnixListener;
 
     fn shell(script: &str) -> Command {
-        let mut command = Command::new("sh");
+        let mut command = crate::process::command("sh");
         command.args(["-c", script, "test"]);
         command
     }
@@ -742,7 +742,7 @@ printf '%s|' "$@" > "$OUT"
     #[test]
     fn test_clipboard_status_checks_failure_timeout_and_parent_exit() {
         let shell = |script: &str| {
-            let mut command = Command::new("sh");
+            let mut command = crate::process::command("sh");
             command.args(["-c", script]);
             command
         };
@@ -753,18 +753,19 @@ printf '%s|' "$@" > "$OUT"
         let started = Instant::now();
         wait_status(shell("sleep 2 & exit 0"), TIMEOUT).unwrap();
         assert!(started.elapsed() < Duration::from_secs(1));
-        assert!(
-            wait_status(Command::new("raffi-no-such-copy-program"), TIMEOUT)
-                .unwrap_err()
-                .contains("cannot start")
-        );
+        assert!(wait_status(
+            crate::process::command("raffi-no-such-copy-program"),
+            TIMEOUT
+        )
+        .unwrap_err()
+        .contains("cannot start"));
     }
 
     /// Another test thread forking while a script is being written makes running
     /// it fail with ETXTBSY until that child execs; wait for this to clear.
     fn wait_until_runnable(program: &std::path::Path) {
         for _ in 0..200 {
-            match Command::new(program).output() {
+            match crate::process::command(program).output() {
                 Err(error) if error.raw_os_error() == Some(26) => {
                     std::thread::sleep(Duration::from_millis(5))
                 }

@@ -6338,7 +6338,7 @@ impl LauncherApp {
                 } => {
                     let act = action.as_deref().unwrap_or("copy");
                     if !query.is_empty() {
-                        let output = std::process::Command::new(command)
+                        let output = crate::process::command(command)
                             .args(args)
                             .stdin(std::process::Stdio::null())
                             .stderr(std::process::Stdio::null())

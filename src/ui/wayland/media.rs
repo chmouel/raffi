@@ -1,4 +1,3 @@
-use std::process::Command;
 use std::time::Duration;
 
 use super::actions::{run_bounded, DeferredAction};
@@ -30,7 +29,7 @@ pub(super) struct Player {
 pub(super) fn load_players(keep_open: bool) -> Result<Vec<CommandItem>, String> {
     load_players_with(
         |args| {
-            let mut command = Command::new("playerctl");
+            let mut command = crate::process::command("playerctl");
             command.args(args);
             run_bounded(command, TIMEOUT, MAX_OUTPUT)
         },

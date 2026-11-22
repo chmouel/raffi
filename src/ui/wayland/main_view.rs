@@ -3,7 +3,6 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -2214,7 +2213,7 @@ impl LauncherApp {
         let generation = *generation;
         let live = live.clone();
         let query = searched.clone();
-        let mut command = Command::new(&config.command);
+        let mut command = crate::process::command(&config.command);
         command.args(&config.args).envs(&config.env).arg(&query);
         let icon = config.icon.clone();
         Task::perform(

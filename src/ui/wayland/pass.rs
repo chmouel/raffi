@@ -629,7 +629,7 @@ mod tests {
         fs::set_permissions(&home, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
         let gpg = |args: &[&str], input: Option<&str>| {
             use std::io::Write;
-            let mut child = std::process::Command::new("gpg")
+            let mut child = crate::process::command("gpg")
                 .args(["--homedir", home.to_str().unwrap(), "--batch", "--quiet"])
                 .args(args)
                 .stdin(std::process::Stdio::piped())
@@ -670,7 +670,7 @@ mod tests {
                 Some("pw\nlogin: me\n"),
             );
         if !encrypted {
-            let _ = std::process::Command::new("gpgconf")
+            let _ = crate::process::command("gpgconf")
                 .args(["--homedir", home.to_str().unwrap(), "--kill", "gpg-agent"])
                 .status();
             fs::remove_dir_all(dir).unwrap();
@@ -693,7 +693,7 @@ mod tests {
         assert_eq!(password(&plain).expose(), "pw");
         // gpg-agent now has it cached.
         assert!(decrypt(&runner, &ctx, "site", Pinentry::Cached).is_ok());
-        let _ = std::process::Command::new("gpgconf")
+        let _ = crate::process::command("gpgconf")
             .args(["--homedir", home.to_str().unwrap(), "--kill", "gpg-agent"])
             .status();
         fs::remove_dir_all(dir).unwrap();

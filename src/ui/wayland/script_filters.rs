@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -167,7 +167,7 @@ pub(super) fn run_script_filter(
     timeout: Option<Duration>,
 ) -> Result<ScriptFilterResult, String> {
     crate::debug_log!("script_filter: executing command={command:?} args={args:?} query={query:?}");
-    let mut process = Command::new(command);
+    let mut process = crate::process::command(command);
     process.args(args).envs(env).arg(query);
     let output = match timeout {
         Some(timeout) => super::actions::run_bounded_status(process, timeout, MAX_LIST_OUTPUT)
@@ -277,7 +277,7 @@ impl PreviewRequest {
             self.command,
             self.env.get("RAFFI_VALUE")
         );
-        let mut command = Command::new(&self.command);
+        let mut command = crate::process::command(&self.command);
         command.args(&self.args).arg(&self.query).envs(&self.env);
         let output = super::actions::run_bounded(command, PREVIEW_TIMEOUT, MAX_PREVIEW_OUTPUT)
             .map_err(ScriptFilterPreviewError::Run)?;

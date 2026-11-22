@@ -16,6 +16,7 @@ use serde_yaml::Value;
 pub mod browser_host;
 pub mod compositor;
 pub mod debug;
+mod process;
 #[cfg(feature = "wayland")]
 pub mod secret;
 pub mod terminal;
@@ -5991,7 +5992,7 @@ pub(crate) fn spawn_launcher_command(
             Err(error) => debug_log!("launch: {error:#}; starting it directly"),
         }
     }
-    let mut command = Command::new(&argv[0]);
+    let mut command = crate::process::command(&argv[0]);
     command.args(&argv[1..]);
     command.envs(mc.env.iter().flatten());
     spawn_and_reap(command).context(if mc.script.is_some() {
@@ -6037,7 +6038,7 @@ pub fn url_encode_query(query: &str) -> String {
 pub fn execute_web_search_url(url_template: &str, query: &str) -> Result<()> {
     let encoded = url_encode_query(query);
     let url = url_template.replace("{query}", &encoded);
-    let mut command = Command::new("xdg-open");
+    let mut command = crate::process::command("xdg-open");
     command.arg(&url);
     spawn_and_reap(command).context("cannot open web search URL")?;
     Ok(())
@@ -7242,7 +7243,7 @@ launchers:
         );
         let formatted = format_print_only_command(&config, "sh").unwrap();
 
-        let output = Command::new("sh")
+        let output = crate::process::command("sh")
             .arg("-c")
             .arg(&formatted)
             .output()
@@ -7259,7 +7260,7 @@ launchers:
         let config = binary_config(Some("printf"), Some(vec!["%s|%s", "hello world", "a'b"]));
         let formatted = format_print_only_command(&config, "").unwrap();
 
-        let output = Command::new("sh")
+        let output = crate::process::command("sh")
             .arg("-c")
             .arg(&formatted)
             .output()
@@ -7296,7 +7297,7 @@ launchers:
         let config = binary_config(Some("printf"), Some(vec!["$(id -u)", "a b; echo pwned"]));
         let formatted = format_print_only_command(&config, "").unwrap();
 
-        let output = Command::new("/bin/sh")
+        let output = crate::process::command("/bin/sh")
             .arg("-c")
             .arg(&formatted)
             .env("PATH", shadowed_path(&dir))
@@ -7320,7 +7321,7 @@ launchers:
         let config = binary_config(Some("source"), Some(vec!["/etc/hostname"]));
         let formatted = format_print_only_command(&config, "").unwrap();
 
-        let output = Command::new("/bin/sh")
+        let output = crate::process::command("/bin/sh")
             .arg("-c")
             .arg(&formatted)
             .env("PATH", shadowed_path(&dir))
@@ -7344,7 +7345,7 @@ launchers:
         let config = binary_config(Some("raffifakeapp"), Some(vec!["one"]));
         let formatted = format_print_only_command(&config, "").unwrap();
 
-        let output = Command::new("/bin/sh")
+        let output = crate::process::command("/bin/sh")
             .arg("-c")
             .arg(format!(
                 "raffifakeapp() {{ printf 'FUNCTION\\n'; }}\n{formatted}"
@@ -7367,7 +7368,7 @@ launchers:
         let config = script_config("echo hello", None);
         let formatted = format_print_only_command(&config, "test").unwrap();
 
-        let output = Command::new("/bin/sh")
+        let output = crate::process::command("/bin/sh")
             .arg("-c")
             .arg(&formatted)
             .env("PATH", shadowed_path(&dir))

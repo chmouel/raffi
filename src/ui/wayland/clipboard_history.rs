@@ -10,7 +10,6 @@ use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
 
 use super::actions::run_bounded;
@@ -135,7 +134,7 @@ fn run<S: AsRef<OsStr>>(
     args: impl IntoIterator<Item = S>,
     max_output: usize,
 ) -> Result<Vec<u8>, String> {
-    let mut command = Command::new(program);
+    let mut command = crate::process::command(program);
     command.args(args);
     run_bounded(command, COMMAND_TIMEOUT, max_output).map_err(|error| format!("{program}: {error}"))
 }

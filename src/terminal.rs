@@ -586,7 +586,7 @@ mod tests {
         assert!(held[4].starts_with(r#"( eval "$1" ); "#) && held[4].contains("read -r _"));
         assert_eq!(held.last().map(String::as_str), Some(command));
 
-        let output = std::process::Command::new("sh")
+        let output = crate::process::command("sh")
             .args(&argv[3..])
             .env("HOME", "/home/x")
             .output()
@@ -608,7 +608,7 @@ mod tests {
                 ("exec </dev/null", 0),
             ] {
                 let argv = shell_argv(&[], shell, command, true);
-                let mut child = std::process::Command::new(&argv[0])
+                let mut child = crate::process::command(&argv[0])
                     .args(&argv[1..])
                     .stdin(std::process::Stdio::piped())
                     .stdout(std::process::Stdio::piped())

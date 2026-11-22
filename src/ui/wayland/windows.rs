@@ -1,7 +1,7 @@
 use std::cmp::Reverse;
 use std::io::Read;
 use std::os::unix::process::CommandExt;
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::{ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
@@ -51,7 +51,7 @@ impl Compositor {
     pub(super) fn load_view(self, view: View, keep_open: bool) -> Result<Vec<CommandItem>, String> {
         let program = self.program();
         let run = |args: &[&str]| {
-            let mut command = Command::new(program);
+            let mut command = crate::process::command(program);
             command.args(args);
             run_bounded(command, TIMEOUT, MAX_OUTPUT).map_err(|error| format!("{program}: {error}"))
         };
@@ -120,7 +120,7 @@ pub(super) struct ProcessWindow {
 impl Compositor {
     fn process_windows(self) -> Result<Vec<ProcessWindow>, String> {
         let program = self.program();
-        let mut command = Command::new(program);
+        let mut command = crate::process::command(program);
         command.args(match self {
             Self::Hyprland => &["clients", "-j"][..],
             Self::Niri => &["msg", "--json", "windows"][..],
@@ -1405,7 +1405,7 @@ pub(super) fn sway_exit() -> Result<(), String> {
 /// its socket before answering; `closed` recognizes that error output.
 fn quit_session(argv: &[&str], compositor: &str, closed: fn(&str) -> bool) -> Result<(), String> {
     let (program, args) = argv.split_first().unwrap();
-    let mut child = Command::new(program)
+    let mut child = crate::process::command(program)
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())

@@ -6,7 +6,6 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::LazyLock;
 use std::time::{Duration, SystemTime};
 
@@ -234,7 +233,7 @@ impl FilePreviewRequest {
             self.command,
             self.env.get("RAFFI_VALUE")
         );
-        let mut command = Command::new("sh");
+        let mut command = crate::process::command("sh");
         command.arg("-c").arg(self.shell_line()).envs(&self.env);
         let (status, output) =
             super::actions::run_bounded_status(command, PREVIEW_TIMEOUT, MAX_PREVIEW_OUTPUT)?;

@@ -4,7 +4,7 @@
 use std::io::{BufRead, BufReader, Read};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -93,7 +93,7 @@ enum Source {
 impl Source {
     fn open(compositor: Compositor) -> Result<(Self, Box<dyn Read + Send>), String> {
         let spawn = |program: &str, args: &[&str]| {
-            let mut child = Command::new(program)
+            let mut child = crate::process::command(program)
                 .args(args)
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())

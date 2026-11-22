@@ -1,4 +1,3 @@
-use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
@@ -32,7 +31,7 @@ pub(super) struct Output {
 pub(super) type Runner = dyn Fn(&[&str], Duration) -> Result<Output, String> + Send + Sync;
 
 fn bluetoothctl(args: &[&str], timeout: Duration) -> Result<Output, String> {
-    let mut command = Command::new("bluetoothctl");
+    let mut command = crate::process::command("bluetoothctl");
     command.args(args);
     let (status, stdout) = run_bounded_status(command, timeout, MAX_OUTPUT)?;
     Ok(Output {

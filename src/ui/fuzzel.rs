@@ -1,7 +1,4 @@
-use std::{
-    io::Write,
-    process::{Command, Stdio},
-};
+use std::{io::Write, process::Stdio};
 
 use anyhow::{Context, Result};
 
@@ -78,7 +75,7 @@ fn run_fuzzel_with_input(input: &str) -> Result<String> {
     let cache_file = cache_file
         .to_str()
         .context("MRU cache path is not valid UTF-8")?;
-    let mut child = Command::new("fuzzel")
+    let mut child = crate::process::command("fuzzel")
         .args(["-d", "--counter", "--cache", cache_file])
         .stdout(Stdio::piped())
         .stdin(Stdio::piped())

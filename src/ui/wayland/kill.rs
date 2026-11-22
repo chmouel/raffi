@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 use std::time::{Duration, Instant};
 
 use super::actions::{run_bounded, DeferredAction};
@@ -310,7 +309,7 @@ pub(super) fn send_signal_in(
 /// it off the UI thread.
 pub(super) fn send_signal(target: &SignalTarget) -> Result<(), String> {
     send_signal_in(Path::new(PROC), target, |argv| {
-        let mut command = Command::new(&argv[0]);
+        let mut command = crate::process::command(&argv[0]);
         command.args(&argv[1..]);
         run_bounded(command, KILL_TIMEOUT, 4096).map(|_| ())
     })
@@ -489,7 +488,7 @@ mod tests {
     fn test_live_sleep_child_is_listed_and_terminated() {
         use std::os::unix::process::ExitStatusExt;
 
-        let mut child = Command::new("sleep").arg("60").spawn().unwrap();
+        let mut child = crate::process::command("sleep").arg("60").spawn().unwrap();
         let pid = child.id();
         let deadline = Instant::now() + Duration::from_secs(10);
         let process = loop {
