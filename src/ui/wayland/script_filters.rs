@@ -310,9 +310,9 @@ pub(super) fn execute_script_filter_preview(
     Task::perform(
         async move {
             let (sender, receiver) = iced::futures::channel::oneshot::channel();
-            std::thread::spawn(move || {
+            std::thread::spawn(crate::process::inherit(move || {
                 let _ = sender.send(request.run());
-            });
+            }));
             receiver.await.unwrap_or_else(|_| {
                 Err(ScriptFilterPreviewError::Run(
                     "preview worker stopped".into(),
@@ -388,9 +388,9 @@ pub(super) fn execute_script_filter_children(
     Task::perform(
         async move {
             let (sender, receiver) = iced::futures::channel::oneshot::channel();
-            std::thread::spawn(move || {
+            std::thread::spawn(crate::process::inherit(move || {
                 let _ = sender.send(request.run());
-            });
+            }));
             receiver
                 .await
                 .unwrap_or_else(|_| Err("children worker stopped".into()))
@@ -424,10 +424,10 @@ pub(super) fn schedule_script_filter_preview(
     Task::perform(
         async move {
             let (sender, receiver) = iced::futures::channel::oneshot::channel();
-            std::thread::spawn(move || {
+            std::thread::spawn(crate::process::inherit(move || {
                 sleep_unless_superseded(delay, generation, &live);
                 let _ = sender.send(());
-            });
+            }));
             let _ = receiver.await;
         },
         move |()| Message::ScriptFilterPreviewDue(generation, index),

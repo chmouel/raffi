@@ -655,10 +655,10 @@ impl Core {
         // Look up the app now, while it still has focus.
         let _ = std::thread::Builder::new()
             .name("raffi-clipboard-app".into())
-            .spawn(move || {
+            .spawn(crate::process::inherit(move || {
                 crate::process::mark_server_thread();
                 let _ = found.send(focused_app());
-            });
+            }));
         writers
     }
 
@@ -750,12 +750,12 @@ impl Core {
             return;
         };
         let mime = mime.to_string();
-        std::thread::spawn(move || {
+        std::thread::spawn(crate::process::inherit(move || {
             let data = data_for(&formats, &mime).unwrap_or_default();
             if let Err(error) = write_pipe(fd, data, Instant::now() + WRITE_TIMEOUT) {
                 crate::debug_log!("clipboard: serving {mime} failed: {error}");
             }
-        });
+        }));
     }
 }
 
@@ -1045,21 +1045,21 @@ pub(crate) fn start(limits: Limits, policy: Policy, ocr_enabled: bool) {
     let password_manager = policy.temporary_password_manager;
     std::thread::Builder::new()
         .name("raffi-clipboard-record".into())
-        .spawn(move || {
+        .spawn(crate::process::inherit(move || {
             crate::process::mark_server_thread();
             record(queue, limits, policy, ocr_enabled)
-        })
+        }))
         .ok();
     std::thread::Builder::new()
         .name("raffi-clipboard-load".into())
-        .spawn(move || {
+        .spawn(crate::process::inherit(move || {
             crate::process::mark_server_thread();
             load_entries(requested)
-        })
+        }))
         .ok();
     std::thread::Builder::new()
         .name("raffi-clipboard".into())
-        .spawn(move || {
+        .spawn(crate::process::inherit(move || {
             crate::process::mark_server_thread();
             let mut last_error = None;
             loop {
@@ -1102,7 +1102,7 @@ pub(crate) fn start(limits: Limits, policy: Policy, ocr_enabled: bool) {
                 }
                 std::thread::sleep(RECONNECT_DELAY);
             }
-        })
+        }))
         .ok();
     eprintln!("raffi: recording the clipboard history");
 }

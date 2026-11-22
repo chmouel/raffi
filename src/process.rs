@@ -36,10 +36,46 @@ fn served_env() -> Option<ClientEnv> {
 }
 
 /// Keep the server's own environment on this thread, for the server's
-/// background work. Threads it starts must call it again.
+/// background work. Threads started through [`inherit`] keep it too.
 #[cfg_attr(not(feature = "wayland"), allow(dead_code))]
 pub(crate) fn mark_server_thread() {
     SERVER_THREAD.with(|server| server.set(true));
+}
+
+/// The environment work started now has to keep: the served caller's, or
+/// `None` for the server's own.
+#[derive(Clone)]
+#[cfg_attr(not(feature = "wayland"), allow(dead_code))]
+pub(crate) struct Context(Option<ClientEnv>);
+
+#[cfg_attr(not(feature = "wayland"), allow(dead_code))]
+pub(crate) fn context() -> Context {
+    Context(served_env())
+}
+
+#[cfg_attr(not(feature = "wayland"), allow(dead_code))]
+impl Context {
+    /// Run `f` in this environment on the current thread.
+    pub(crate) fn enter<T>(&self, f: impl FnOnce() -> T) -> T {
+        match &self.0 {
+            Some(env) => with_env(env.clone(), f),
+            None => {
+                let previous = SERVER_THREAD.with(|server| server.replace(true));
+                let result = f();
+                SERVER_THREAD.with(|server| server.set(previous));
+                result
+            }
+        }
+    }
+}
+
+/// Wrap `f`, to run on a new thread, so it keeps the environment current
+/// here even after the window it was started for has closed and another
+/// caller's is served.
+#[cfg_attr(not(feature = "wayland"), allow(dead_code))]
+pub(crate) fn inherit<T>(f: impl FnOnce() -> T) -> impl FnOnce() -> T {
+    let context = context();
+    move || context.enter(f)
 }
 
 /// Tells apart the environments a command can run in: `None` for this
@@ -219,5 +255,18 @@ mod tests {
         })
         .join()
         .unwrap();
+    }
+
+    #[test]
+    fn started_work_keeps_the_environment_it_was_started_in() {
+        let env: ClientEnv = Arc::new(HashMap::from([(
+            "RAFFI_TEST_CLIENT_VARIABLE".to_string(),
+            "client".to_string(),
+        )]));
+        let for_client = with_env(env, || inherit(|| var("RAFFI_TEST_CLIENT_VARIABLE")));
+        let read = std::thread::spawn(for_client).join().unwrap();
+        assert_eq!(read.as_deref(), Ok("client"));
+        let server = std::thread::spawn(inherit(|| SERVER_THREAD.with(Cell::get)));
+        assert!(server.join().unwrap());
     }
 }

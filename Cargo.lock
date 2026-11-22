@@ -3510,6 +3510,7 @@ dependencies = [
  "fuzzy-matcher",
  "gumdrop",
  "iced",
+ "iced_futures",
  "image",
  "jiff",
  "jsonschema",

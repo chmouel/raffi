@@ -403,7 +403,7 @@ fn sweep(store: &mut Store, now: i64) -> Result<usize, String> {
 pub(crate) fn start_sweeper() {
     std::thread::Builder::new()
         .name("raffi-clipboard-sweep".into())
-        .spawn(|| {
+        .spawn(crate::process::inherit(|| {
             let mut store: Option<Store> = None;
             loop {
                 let result = match store.as_mut() {
@@ -418,7 +418,7 @@ pub(crate) fn start_sweeper() {
                 }
                 std::thread::sleep(SWEEP_INTERVAL);
             }
-        })
+        }))
         .ok();
 }
 

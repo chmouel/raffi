@@ -1264,7 +1264,7 @@ pub(crate) fn handle_request(state: &Arc<ServerState>, request: Request) -> Resp
                 let publication = held.publication();
                 let claim = publication.clone();
                 let state = state.clone();
-                std::thread::spawn(move || {
+                std::thread::spawn(crate::process::inherit(move || {
                     crate::process::mark_server_thread();
                     let result = server_run(script_filters::run_script_filter(
                         &command,
@@ -1281,7 +1281,7 @@ pub(crate) fn handle_request(state: &Arc<ServerState>, request: Request) -> Resp
                         state.set_status("script-filters", result.err());
                     }
                     drop(held);
-                });
+                }));
             }
             Response::ScriptFilter { payload, stale }
         }
@@ -1304,7 +1304,7 @@ pub(crate) fn handle_request(state: &Arc<ServerState>, request: Request) -> Resp
             if (payload.is_none() || stale) && state.begin(&format!("preview:{key}")) {
                 let state = state.clone();
                 let job_key = format!("preview:{key}");
-                std::thread::spawn(move || {
+                std::thread::spawn(crate::process::inherit(move || {
                     crate::process::mark_server_thread();
                     let request = PreviewRequest {
                         command,
@@ -1316,7 +1316,7 @@ pub(crate) fn handle_request(state: &Arc<ServerState>, request: Request) -> Resp
                     let error = request.run().err().map(|error| error.into_message());
                     state.set_status("script-filters", error);
                     state.finish(&job_key);
-                });
+                }));
             }
             Response::ScriptFilterPreview { payload, stale }
         }
@@ -1331,10 +1331,10 @@ pub(crate) fn handle_request(state: &Arc<ServerState>, request: Request) -> Resp
             wait: false,
         } => {
             let state = state.clone();
-            std::thread::spawn(move || {
+            std::thread::spawn(crate::process::inherit(move || {
                 crate::process::mark_server_thread();
                 let _ = logged(&source, || warm_named(&state, &source));
-            });
+            }));
             Response::Ok
         }
         Request::RefreshAll => match logged("all sources", || warm_all(state)) {
@@ -1711,7 +1711,9 @@ pub(crate) fn serve(listener: UnixListener, state: Arc<ServerState>) -> Result<(
         match stream {
             Ok(stream) => {
                 let state = state.clone();
-                std::thread::spawn(move || serve_connection(state, stream));
+                std::thread::spawn(crate::process::inherit(move || {
+                    serve_connection(state, stream)
+                }));
             }
             Err(error) => crate::debug_log!("cache: accept failed: {error}"),
         }
@@ -1766,7 +1768,7 @@ pub(crate) fn run_server(config: ParsedConfig, window: crate::ui::UISettings) ->
     let Some(host) = host else {
         return serve(listener, state);
     };
-    let server = std::thread::spawn(move || serve(listener, state));
+    let server = std::thread::spawn(crate::process::inherit(move || serve(listener, state)));
     super::resident::run(host);
     server
         .join()
@@ -1775,7 +1777,7 @@ pub(crate) fn run_server(config: ParsedConfig, window: crate::ui::UISettings) ->
 
 /// Start periodic warming for every source that opted in.
 fn warm_loop(state: Arc<ServerState>) {
-    std::thread::spawn(move || {
+    std::thread::spawn(crate::process::inherit(move || {
         crate::process::mark_server_thread();
         let mut last: HashMap<String, u64> = HashMap::new();
         let mut warmers: HashMap<usize, Warmer> = HashMap::new();
@@ -1824,7 +1826,7 @@ fn warm_loop(state: Arc<ServerState>) {
             }
             std::thread::sleep(WARM_TICK);
         }
-    });
+    }));
 }
 
 fn due(last: &HashMap<String, u64>, source: &str, now: u64, interval: u64) -> bool {
@@ -1975,14 +1977,16 @@ fn warm_all(state: &Arc<ServerState>) -> Result<(), String> {
     let errors: Vec<String> = std::thread::scope(|scope| {
         let mut jobs = Vec::new();
         if addons.slack.enabled {
-            jobs.push(scope.spawn(|| warm_slack(state)));
+            jobs.push(scope.spawn(crate::process::inherit(|| warm_slack(state))));
         }
         if addons.browser_history.enabled {
-            jobs.push(scope.spawn(|| warm_browser_history(state)));
+            jobs.push(scope.spawn(crate::process::inherit(|| warm_browser_history(state))));
         }
         for (index, config) in addons.script_filters.iter().enumerate() {
             if !config.warm_queries.is_empty() {
-                jobs.push(scope.spawn(move || warm_script_filter(state, index, config)));
+                jobs.push(scope.spawn(crate::process::inherit(move || {
+                    warm_script_filter(state, index, config)
+                })));
             }
         }
         jobs.into_iter()

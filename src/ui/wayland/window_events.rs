@@ -76,11 +76,11 @@ const SWAY_CHANGES: [&str; 11] = [
 pub(super) fn watch(compositor: &Compositor) -> UnboundedReceiver<()> {
     let (sender, receiver) = unbounded();
     let compositor = *compositor;
-    std::thread::spawn(move || {
+    std::thread::spawn(crate::process::inherit(move || {
         if let Err(error) = run(compositor, &sender) {
             crate::debug_log!("windows: no live updates from {compositor:?}: {error}");
         }
-    });
+    }));
     receiver
 }
 
@@ -147,7 +147,9 @@ fn hyprland_socket() -> Result<PathBuf, String> {
 fn run(compositor: Compositor, sender: &UnboundedSender<()>) -> Result<(), String> {
     let (source, reader) = Source::open(compositor)?;
     let (changed, changes) = mpsc::channel();
-    std::thread::spawn(move || read_events(compositor, reader, |()| changed.send(()).is_ok()));
+    std::thread::spawn(crate::process::inherit(move || {
+        read_events(compositor, reader, |()| changed.send(()).is_ok())
+    }));
     loop {
         match changes.recv_timeout(IDLE_CHECK) {
             Ok(()) => {

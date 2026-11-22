@@ -81,10 +81,10 @@ impl LauncherApp {
         Task::perform(
             async move {
                 let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                std::thread::spawn(move || {
+                std::thread::spawn(crate::process::inherit(move || {
                     std::thread::sleep(SEARCH_DEBOUNCE);
                     let _ = sender.send(());
-                });
+                }));
                 let _ = receiver.await;
                 (session, generation)
             },

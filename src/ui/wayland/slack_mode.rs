@@ -130,10 +130,10 @@ impl LauncherApp {
                 Task::perform(
                     async move {
                         let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                        std::thread::spawn(move || {
+                        std::thread::spawn(crate::process::inherit(move || {
                             std::thread::sleep(SEARCH_DEBOUNCE);
                             let _ = sender.send(());
-                        });
+                        }));
                         let _ = receiver.await;
                         terms
                     },
@@ -349,11 +349,11 @@ impl LauncherApp {
                 let identity = identity.clone();
                 async move {
                     let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                    std::thread::spawn(move || {
+                    std::thread::spawn(crate::process::inherit(move || {
                         let preview =
                             slack::load_preview(&identity, &wanted, stale, epoch, newest_first);
                         let _ = sender.send(preview);
-                    });
+                    }));
                     receiver.await.ok().flatten()
                 }
             },
@@ -511,10 +511,10 @@ impl LauncherApp {
         Task::perform(
             async move {
                 let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                std::thread::spawn(move || {
+                std::thread::spawn(crate::process::inherit(move || {
                     std::thread::sleep(IMAGES_SETTLE);
                     let _ = sender.send(());
-                });
+                }));
                 let _ = receiver.await;
             },
             move |()| Message::SlackImagesDue(session, request),
@@ -540,9 +540,9 @@ impl LauncherApp {
         Task::perform(
             async move {
                 let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                std::thread::spawn(move || {
+                std::thread::spawn(crate::process::inherit(move || {
                     let _ = sender.send(slack::fetch_images(wants, &account, generation));
-                });
+                }));
                 receiver
                     .await
                     .unwrap_or(slack::ImagesOutcome::Attempted(Vec::new()))

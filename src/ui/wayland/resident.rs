@@ -554,10 +554,57 @@ fn finish(job: Job) {
     let _ = job.reply.send(Response::Done { error });
 }
 
+/// iced's executor, running each task and subscription in the environment
+/// current when it was started, so work begun for a window keeps that
+/// caller's environment after the window closes and another one opens.
+struct ServedExecutor(iced::executor::Default);
+
+impl iced::Executor for ServedExecutor {
+    fn new() -> Result<Self, iced::futures::io::Error> {
+        iced::executor::Default::new().map(Self)
+    }
+
+    fn spawn(
+        &self,
+        future: impl std::future::Future<Output = ()> + iced_futures::MaybeSend + 'static,
+    ) {
+        self.0.spawn(InContext {
+            context: crate::process::context(),
+            future: Box::pin(future),
+        });
+    }
+
+    fn block_on<T>(&self, future: impl std::future::Future<Output = T>) -> T {
+        self.0.block_on(future)
+    }
+
+    fn enter<R>(&self, f: impl FnOnce() -> R) -> R {
+        self.0.enter(f)
+    }
+}
+
+struct InContext<F> {
+    context: crate::process::Context,
+    future: std::pin::Pin<Box<F>>,
+}
+
+impl<F: std::future::Future> std::future::Future for InContext<F> {
+    type Output = F::Output;
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let this = &mut *self;
+        this.context.enter(|| this.future.as_mut().poll(cx))
+    }
+}
+
 /// Show windows for clients until the window loop fails.
 pub(super) fn run(_hosting: Hosting) {
     let font_family = HOST.get().and_then(|host| host.font_family.clone());
     let mut daemon = iced::daemon(Daemon::boot, Daemon::update, Daemon::view)
+        .executor::<ServedExecutor>()
         .subscription(Daemon::subscription)
         .theme(Daemon::theme)
         .style(Daemon::style);

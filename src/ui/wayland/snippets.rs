@@ -749,9 +749,9 @@ async fn run_blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
     let (sender, receiver) = iced::futures::channel::oneshot::channel();
-    std::thread::spawn(move || {
+    std::thread::spawn(crate::process::inherit(move || {
         let _ = sender.send(work());
-    });
+    }));
     receiver
         .await
         .unwrap_or_else(|_| Err("snippet worker stopped unexpectedly".into()))

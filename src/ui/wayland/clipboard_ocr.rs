@@ -14,7 +14,7 @@ const TIMEOUT: Duration = Duration::from_secs(60);
 pub(crate) fn start(language: String) {
     std::thread::Builder::new()
         .name("raffi-clipboard-ocr".into())
-        .spawn(move || loop {
+        .spawn(crate::process::inherit(move || loop {
             let result = Store::open_default().and_then(|mut store| {
                 let Some(job) = store.next_ocr_job()? else {
                     return Ok(false);
@@ -31,7 +31,7 @@ pub(crate) fn start(language: String) {
                     std::thread::sleep(Duration::from_secs(5));
                 }
             }
-        })
+        }))
         .ok();
 }
 

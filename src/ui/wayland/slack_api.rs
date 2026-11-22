@@ -938,7 +938,11 @@ fn look_up_users(client: &Client, workspace: &Workspace, ids: &[String]) -> (Vec
         std::thread::scope(|scope| {
             let handles: Vec<_> = chunk
                 .iter()
-                .map(|id| scope.spawn(move || client.call("users.info", &[("user", id)])))
+                .map(|id| {
+                    scope.spawn(crate::process::inherit(move || {
+                        client.call("users.info", &[("user", id)])
+                    }))
+                })
                 .collect();
             for (handle, id) in handles.into_iter().zip(chunk) {
                 match handle.join() {

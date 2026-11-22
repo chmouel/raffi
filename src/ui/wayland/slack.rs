@@ -841,9 +841,15 @@ type LiveReplies = (Option<Value>, Option<Value>, Option<Value>);
 
 fn fetch_live(client: &Client) -> LiveReplies {
     std::thread::scope(|scope| {
-        let profile = scope.spawn(|| client.call("users.profile.get", &[]).ok());
-        let dnd = scope.spawn(|| client.call("dnd.info", &[]).ok());
-        let presence = scope.spawn(|| client.call("users.getPresence", &[]).ok());
+        let profile = scope.spawn(crate::process::inherit(|| {
+            client.call("users.profile.get", &[]).ok()
+        }));
+        let dnd = scope.spawn(crate::process::inherit(|| {
+            client.call("dnd.info", &[]).ok()
+        }));
+        let presence = scope.spawn(crate::process::inherit(|| {
+            client.call("users.getPresence", &[]).ok()
+        }));
         let join =
             |handle: std::thread::ScopedJoinHandle<'_, Option<Value>>| handle.join().ok().flatten();
         (join(profile), join(dnd), join(presence))
@@ -1698,7 +1704,7 @@ fn download_avatars(
         // Three workers overlap the slow avatar downloads; extra work like
         // the workspace icon runs on the scope's main thread meanwhile.
         for _ in 0..3 {
-            scope.spawn(|| loop {
+            scope.spawn(crate::process::inherit(|| loop {
                 if !current() {
                     break;
                 }
@@ -1711,7 +1717,7 @@ fn download_avatars(
                         found.push((id, path));
                     }
                 }
-            });
+            }));
         }
         alongside_finds = alongside();
     });
@@ -1782,12 +1788,12 @@ fn refresh_directory_in_background(client: std::sync::Arc<Client>) {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return;
     }
-    std::thread::spawn(move || {
+    std::thread::spawn(crate::process::inherit(move || {
         if let Err(error) = slack_api::directory(&client, true) {
             crate::debug_log!("slack: directory refresh failed: {error}");
         }
         RUNNING.store(false, Ordering::SeqCst);
-    });
+    }));
 }
 
 /// The home rows. Blocking.
@@ -1797,9 +1803,10 @@ pub(super) fn load_home(
 ) -> Result<Vec<CommandItem>, String> {
     let (client, directory) = connect(&config, refresh)?;
     let (replies, counts, muted) = std::thread::scope(|scope| {
-        let counts =
-            scope.spawn(|| client.call("client.counts", &[("thread_counts_by_channel", "true")]));
-        let muted_state = scope.spawn(|| muted(&client, refresh));
+        let counts = scope.spawn(crate::process::inherit(|| {
+            client.call("client.counts", &[("thread_counts_by_channel", "true")])
+        }));
+        let muted_state = scope.spawn(crate::process::inherit(|| muted(&client, refresh)));
         let replies = fetch_live(&client);
         let counts = counts
             .join()
@@ -2284,7 +2291,7 @@ fn check_configured(
     let found = Mutex::new(Vec::new());
     std::thread::scope(|scope| {
         for _ in 0..4 {
-            scope.spawn(|| {
+            scope.spawn(crate::process::inherit(|| {
                 while let Some(channel) = channels.get(next.fetch_add(1, Ordering::Relaxed)) {
                     match check_conversation(client, channel) {
                         Ok(Some(unread)) => {
@@ -2303,7 +2310,7 @@ fn check_configured(
                         }
                     }
                 }
-            });
+            }));
         }
     });
     let mut found = found.into_inner().unwrap_or_else(|e| e.into_inner());
@@ -2435,10 +2442,10 @@ fn refresh_muted_in_background(client: std::sync::Arc<Client>) {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return;
     }
-    std::thread::spawn(move || {
+    std::thread::spawn(crate::process::inherit(move || {
         fetch_muted(&client);
         RUNNING.store(false, Ordering::SeqCst);
-    });
+    }));
 }
 
 fn fetch_muted(client: &Client) -> Option<HashSet<String>> {
@@ -2465,7 +2472,7 @@ pub(super) fn load_unread(
 ) -> Result<Vec<CommandItem>, String> {
     let (client, directory) = connect(&config, refresh)?;
     let (counts, muted) = std::thread::scope(|scope| {
-        let muted = scope.spawn(|| muted(&client, refresh));
+        let muted = scope.spawn(crate::process::inherit(|| muted(&client, refresh)));
         let counts = client.call("client.counts", &[("thread_counts_by_channel", "true")]);
         (counts, muted.join().unwrap_or_default())
     });

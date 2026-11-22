@@ -283,10 +283,10 @@ impl LauncherApp {
         Task::perform(
             async move {
                 let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                std::thread::spawn(move || {
+                std::thread::spawn(crate::process::inherit(move || {
                     std::thread::sleep(PREVIEW_DEBOUNCE);
                     let _ = sender.send(());
-                });
+                }));
                 let _ = receiver.await;
                 path
             },
@@ -349,9 +349,9 @@ impl LauncherApp {
         Task::perform(
             async move {
                 let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                std::thread::spawn(move || {
+                std::thread::spawn(crate::process::inherit(move || {
                     let _ = sender.send(request.run());
-                });
+                }));
                 let result = receiver
                     .await
                     .unwrap_or_else(|_| Err("preview worker stopped".into()));

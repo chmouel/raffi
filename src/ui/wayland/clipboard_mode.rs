@@ -42,12 +42,12 @@ pub(super) fn expiry_tick() -> UnboundedReceiver<()> {
 /// when the receiver is dropped.
 pub(super) fn ticker(period: std::time::Duration) -> UnboundedReceiver<()> {
     let (sender, receiver) = unbounded();
-    std::thread::spawn(move || loop {
+    std::thread::spawn(crate::process::inherit(move || loop {
         std::thread::sleep(period);
         if sender.unbounded_send(()).is_err() {
             break;
         }
-    });
+    }));
     receiver
 }
 

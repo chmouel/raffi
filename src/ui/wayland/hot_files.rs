@@ -279,11 +279,11 @@ pub(super) fn warm() {
 
 /// Warm the startup files now and then every `INTERVAL`.
 pub(super) fn keep_warm() {
-    std::thread::spawn(|| loop {
+    std::thread::spawn(crate::process::inherit(|| loop {
         crate::process::mark_server_thread();
         warm();
         std::thread::sleep(INTERVAL);
-    });
+    }));
 }
 
 #[cfg(test)]

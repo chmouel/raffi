@@ -123,9 +123,9 @@ pub(super) async fn off_thread_copy(
     copy: impl FnOnce() -> Result<(), String> + Send + 'static,
 ) -> Result<(), String> {
     let (sender, receiver) = iced::futures::channel::oneshot::channel();
-    std::thread::spawn(move || {
+    std::thread::spawn(crate::process::inherit(move || {
         let _ = sender.send(copy());
-    });
+    }));
     receiver
         .await
         .unwrap_or_else(|_| Err("copy worker stopped unexpectedly".into()))
@@ -317,9 +317,9 @@ pub(super) fn request_tab_preview(
             let url = url.clone();
             async move {
                 let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                std::thread::spawn(move || {
+                std::thread::spawn(crate::process::inherit(move || {
                     let _ = sender.send(super::tab_preview::load(&url, &browser, service, &wanted));
-                });
+                }));
                 receiver.await.ok().flatten()
             }
         },
@@ -2991,9 +2991,9 @@ impl LauncherApp {
                 load.chain(Task::perform(
                     async move {
                         let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                        std::thread::spawn(move || {
+                        std::thread::spawn(crate::process::inherit(move || {
                             let _ = sender.send(super::favicons::fetch_pending(service));
-                        });
+                        }));
                         receiver.await.unwrap_or(false)
                     },
                     move |fetched| Message::FaviconsFetched(session, fetched),
@@ -3167,7 +3167,7 @@ impl LauncherApp {
         Task::perform(
             async move {
                 let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                std::thread::spawn(move || {
+                std::thread::spawn(crate::process::inherit(move || {
                     std::thread::sleep(super::bitwarden::SEARCH_DEBOUNCE);
                     let found = if cancel.is_cancelled() {
                         Default::default()
@@ -3179,7 +3179,7 @@ impl LauncherApp {
                         })
                     };
                     let _ = sender.send(found);
-                });
+                }));
                 receiver.await.unwrap_or_default()
             },
             move |found| Message::VaultSearchDone(generation, found),
@@ -3242,10 +3242,10 @@ impl LauncherApp {
         Task::perform(
             async move {
                 let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                std::thread::spawn(move || {
+                std::thread::spawn(crate::process::inherit(move || {
                     let runner = SystemRunner { cancel };
                     let _ = sender.send(super::vault::run(&runner, request));
-                });
+                }));
                 receiver.await.unwrap_or_else(|_| {
                     Report::failed(SecretError::Tool("stopped unexpectedly".to_string()))
                 })
@@ -3351,7 +3351,7 @@ impl LauncherApp {
                     return Task::perform(
                         async move {
                             let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                            std::thread::spawn(move || {
+                            std::thread::spawn(crate::process::inherit(move || {
                                 let runner = SystemRunner { cancel };
                                 let outcome = match job.run_with(&runner) {
                                     Ok(()) => Outcome::Done,
@@ -3361,7 +3361,7 @@ impl LauncherApp {
                                     outcome,
                                     notice: None,
                                 });
-                            });
+                            }));
                             receiver.await.unwrap_or_else(|_| {
                                 Report::failed(SecretError::Tool(
                                     "stopped unexpectedly".to_string(),
@@ -3664,9 +3664,9 @@ impl LauncherApp {
         Task::perform(
             async move {
                 let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                std::thread::spawn(move || {
+                std::thread::spawn(crate::process::inherit(move || {
                     let _ = sender.send(load());
-                });
+                }));
                 receiver
                     .await
                     .unwrap_or_else(|_| Err("loading stopped unexpectedly".to_string()))
@@ -5417,7 +5417,9 @@ impl LauncherApp {
             .flatten()
             .map(std::path::PathBuf::from)
             .collect();
-        std::thread::spawn(move || super::hot_files::record(config_path, icons));
+        std::thread::spawn(crate::process::inherit(move || {
+            super::hot_files::record(config_path, icons)
+        }));
         let Some(handles) = handles else {
             crate::debug_log!("dnd: no Wayland window, drag-and-drop disabled");
             return Task::none();
@@ -5985,7 +5987,7 @@ impl LauncherApp {
         Task::perform(
             async move {
                 let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                std::thread::spawn(move || {
+                std::thread::spawn(crate::process::inherit(move || {
                     let result = if matches!(
                         addon,
                         CommandListAddon::Terminal
@@ -5998,7 +6000,7 @@ impl LauncherApp {
                         super::command_list::run_kept_open(&action)
                     };
                     let _ = sender.send(result);
-                });
+                }));
                 let result = receiver
                     .await
                     .unwrap_or_else(|_| Err("action stopped unexpectedly".to_string()));
@@ -6068,7 +6070,7 @@ impl LauncherApp {
         Task::perform(
             async move {
                 let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                std::thread::spawn(move || {
+                std::thread::spawn(crate::process::inherit(move || {
                     std::thread::sleep(HASH_DEBOUNCE);
                     let rows = if current.load(std::sync::atomic::Ordering::SeqCst) == generation {
                         compute_hash_rows(&jobs, &payload)
@@ -6076,7 +6078,7 @@ impl LauncherApp {
                         Vec::new()
                     };
                     let _ = sender.send(rows);
-                });
+                }));
                 receiver.await.unwrap_or_default()
             },
             move |rows| Message::DevtoolsHashes(generation, rows),
@@ -6390,11 +6392,11 @@ impl LauncherApp {
                         tab.as_ref(),
                     );
                     if !self.should_close(fallback.close_on_action) {
-                        std::thread::spawn(move || {
+                        std::thread::spawn(crate::process::inherit(move || {
                             if let Err(error) = action.run() {
                                 eprintln!("raffi: {error}");
                             }
-                        });
+                        }));
                         self.save_query_to_history();
                         return Task::none();
                     }

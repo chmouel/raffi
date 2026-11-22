@@ -813,9 +813,9 @@ fn filter_main_view_snippets(main_view: &mut MainViewState, source: usize, usage
 /// Run `work` on its own thread; None if it panicked.
 async fn off_thread<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Option<T> {
     let (sender, receiver) = iced::futures::channel::oneshot::channel();
-    std::thread::spawn(move || {
+    std::thread::spawn(crate::process::inherit(move || {
         let _ = sender.send(work());
-    });
+    }));
     receiver.await.ok()
 }
 
@@ -1418,10 +1418,10 @@ impl LauncherApp {
         Task::perform(
             async move {
                 let (sender, receiver) = iced::futures::channel::oneshot::channel();
-                std::thread::spawn(move || {
+                std::thread::spawn(crate::process::inherit(move || {
                     std::thread::sleep(super::slack_mode::SEARCH_DEBOUNCE);
                     let _ = sender.send(());
-                });
+                }));
                 let _ = receiver.await;
             },
             move |_| Message::MainViewSlackSearchDue(source, generation, query),

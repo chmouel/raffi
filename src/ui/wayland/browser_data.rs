@@ -18,9 +18,9 @@ pub(super) async fn off_thread<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
 ) -> Option<T> {
     let (sender, receiver) = iced::futures::channel::oneshot::channel();
-    std::thread::spawn(move || {
+    std::thread::spawn(crate::process::inherit(move || {
         let _ = sender.send(work());
-    });
+    }));
     receiver.await.ok()
 }
 

@@ -67,7 +67,7 @@ fn queue(source: PathBuf, thumbnail: PathBuf) {
     static WORKER: OnceLock<Sender<(PathBuf, PathBuf)>> = OnceLock::new();
     let worker = WORKER.get_or_init(|| {
         let (sender, receiver) = std::sync::mpsc::channel::<(PathBuf, PathBuf)>();
-        std::thread::spawn(move || {
+        std::thread::spawn(crate::process::inherit(move || {
             if let Some(dir) = thumbnail_dir() {
                 remove_stale_partials(&dir);
             }
@@ -80,7 +80,7 @@ fn queue(source: PathBuf, thumbnail: PathBuf) {
                     crate::debug_log!("icons: no thumbnail for {}: {error}", source.display());
                 }
             }
-        });
+        }));
         sender
     });
     let _ = worker.send((source, thumbnail));

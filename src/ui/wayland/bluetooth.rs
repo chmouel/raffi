@@ -182,7 +182,7 @@ fn scan_info(
             Arc::clone(&next),
             sender.clone(),
         );
-        std::thread::spawn(move || loop {
+        std::thread::spawn(crate::process::inherit(move || loop {
             let index = next.fetch_add(1, Ordering::SeqCst);
             let Some(address) = addresses.get(index) else {
                 break;
@@ -201,7 +201,7 @@ fn scan_info(
             if sender.send((index, info)).is_err() {
                 break;
             }
-        });
+        }));
     }
     drop(sender);
     let mut infos: Vec<Option<DeviceInfo>> = addresses.iter().map(|_| None).collect();

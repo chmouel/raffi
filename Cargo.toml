@@ -22,6 +22,7 @@ include = [
 default = ["wayland", "config-validation"]
 wayland = [
   "iced",
+  "iced_futures",
   "ureq",
   "regex",
   "evalexpr",
@@ -56,6 +57,7 @@ iced = { version = "0.14", features = [
   "image",
   "svg",
 ], optional = true }
+iced_futures = { version = "0.14", default-features = false, optional = true }
 ureq = { version = "3", features = ["json"], optional = true }
 regex = { version = "1.12", optional = true }
 shlex = { version = "2.0", optional = true }

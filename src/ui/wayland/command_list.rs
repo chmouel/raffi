@@ -826,14 +826,14 @@ pub(super) fn filter_items_with_documents_into(
                 .enumerate()
                 .map(|(chunk_index, chunk)| {
                     let rank = &rank;
-                    scope.spawn(move || {
+                    scope.spawn(crate::process::inherit(move || {
                         let start = chunk_index * chunk_size;
                         chunk
                             .iter()
                             .enumerate()
                             .filter_map(|(offset, item)| rank(start + offset, item))
                             .collect::<Vec<_>>()
-                    })
+                    }))
                 })
                 .collect();
             handles

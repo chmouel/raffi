@@ -238,11 +238,11 @@ fn feed_stdin(child: &mut Child, input: Option<&Secret>) {
         return;
     };
     let bytes = input.map(|secret| secret.expose().as_bytes().to_vec());
-    std::thread::spawn(move || {
+    std::thread::spawn(crate::process::inherit(move || {
         if let Some(bytes) = bytes {
             let _ = stdin.write_all(&bytes);
         }
-    });
+    }));
 }
 
 /// Run `cmd` in its own process group, with its stdout and stderr captured
@@ -288,12 +288,12 @@ pub(super) fn run_split(cmd: &Cmd, cancel: &Cancel) -> Result<Output, SecretErro
     let (sender, receiver) = mpsc::channel();
     let stdout_sender = sender.clone();
     let max_output = cmd.max_output;
-    std::thread::spawn(move || {
+    std::thread::spawn(crate::process::inherit(move || {
         let _ = stdout_sender.send((true, read_all(&mut stdout, max_output)));
-    });
-    std::thread::spawn(move || {
+    }));
+    std::thread::spawn(crate::process::inherit(move || {
         let _ = sender.send((false, read_all(&mut stderr, MAX_STDERR)));
-    });
+    }));
 
     let deadline = Instant::now() + cmd.timeout;
     let timed_out = || SecretError::Tool(format!("{name} timed out"));
@@ -513,9 +513,9 @@ pub(super) fn copy_secret(
         if copied {
             let _ = std::thread::Builder::new()
                 .name("raffi-reaper".to_string())
-                .spawn(move || {
+                .spawn(crate::process::inherit(move || {
                     let _ = child.wait();
-                });
+                }));
             return Ok(());
         }
         if Instant::now() >= deadline {

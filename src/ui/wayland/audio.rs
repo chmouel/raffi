@@ -287,9 +287,13 @@ pub(super) fn load_devices_with(
 ) -> Vec<CommandItem> {
     let (sinks, sources, default_sink, default_source) = std::thread::scope(|scope| {
         let pactl = &pactl;
-        let sinks = scope.spawn(|| pactl(&["-f", "json", "list", "sinks"]));
-        let sources = scope.spawn(|| pactl(&["-f", "json", "list", "sources"]));
-        let default_sink = scope.spawn(|| pactl(&["get-default-sink"]));
+        let sinks = scope.spawn(crate::process::inherit(|| {
+            pactl(&["-f", "json", "list", "sinks"])
+        }));
+        let sources = scope.spawn(crate::process::inherit(|| {
+            pactl(&["-f", "json", "list", "sources"])
+        }));
+        let default_sink = scope.spawn(crate::process::inherit(|| pactl(&["get-default-sink"])));
         let default_source = pactl(&["get-default-source"]);
         let join = |handle: std::thread::ScopedJoinHandle<'_, Result<Vec<u8>, String>>| {
             handle

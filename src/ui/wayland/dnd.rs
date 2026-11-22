@@ -189,7 +189,7 @@ pub(crate) fn spawn(handles: RawWaylandHandles) -> (DragSource, UnboundedReceive
     // lifetime argument).
     let worker = std::thread::Builder::new()
         .name("raffi-dnd".to_string())
-        .spawn({
+        .spawn(crate::process::inherit({
             let handles = SendHandles(
                 handles.display as *mut c_void,
                 handles.surface as *mut c_void,
@@ -200,7 +200,7 @@ pub(crate) fn spawn(handles: RawWaylandHandles) -> (DragSource, UnboundedReceive
                 // including worker_main's early returns.
                 let _ = ack_tx.send(());
             }
-        })
+        }))
         .ok();
 
     let source = DragSource {

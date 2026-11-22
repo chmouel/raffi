@@ -407,7 +407,7 @@ pub(super) fn fetch_pending(service: FaviconService) -> bool {
     let fetched = AtomicBool::new(false);
     std::thread::scope(|scope| {
         for _ in 0..FETCH_THREADS.min(hosts.len()) {
-            scope.spawn(|| {
+            scope.spawn(crate::process::inherit(|| {
                 while let Some(host) = hosts.get(next.fetch_add(1, Ordering::Relaxed)) {
                     let icon = service_url(service, host)
                         .and_then(|url| download(&agent, &url, MAX_ICON_BYTES))
@@ -417,7 +417,7 @@ pub(super) fn fetch_pending(service: FaviconService) -> bool {
                         None => mark_miss(&dir, host),
                     }
                 }
-            });
+            }));
         }
     });
     fetched.into_inner()

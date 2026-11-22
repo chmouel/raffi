@@ -57,9 +57,9 @@ fn spawn_and_reap(mut command: Command) -> std::io::Result<()> {
     let mut child = command.spawn()?;
     let _ = std::thread::Builder::new()
         .name("raffi-reaper".to_string())
-        .spawn(move || {
+        .spawn(crate::process::inherit(move || {
             let _ = child.wait();
-        });
+        }));
     Ok(())
 }
 
@@ -261,10 +261,10 @@ fn exit_error(name: &str, status: ExitStatus) -> String {
 fn spawn_writer(child: &mut Child, input: Vec<u8>) -> mpsc::Receiver<bool> {
     let (sender, receiver) = mpsc::channel();
     let stdin = child.stdin.take();
-    std::thread::spawn(move || {
+    std::thread::spawn(crate::process::inherit(move || {
         let written = stdin.is_some_and(|mut stdin| stdin.write_all(&input).is_ok());
         let _ = sender.send(written);
-    });
+    }));
     receiver
 }
 
@@ -505,9 +505,9 @@ fn run_detached(argv: &[String], timeout: Duration) -> Result<(), String> {
             Ok(None) => {
                 let _ = std::thread::Builder::new()
                     .name("raffi-reaper".to_string())
-                    .spawn(move || {
+                    .spawn(crate::process::inherit(move || {
                         let _ = child.wait();
-                    });
+                    }));
                 return Ok(());
             }
             Err(_) => return Err(format!("{name} could not be waited for")),
@@ -793,9 +793,9 @@ pub(super) fn run_bounded_status(
         return Err("cannot read output".into());
     };
     let (sender, receiver) = mpsc::channel();
-    std::thread::spawn(move || {
+    std::thread::spawn(crate::process::inherit(move || {
         let _ = sender.send(read_limited(&mut stdout, max_output));
-    });
+    }));
 
     let fail = |child: &mut std::process::Child, message: String| {
         kill_process_group(pgid);
@@ -879,10 +879,10 @@ pub(super) fn run_bounded_with_input(
     let _ = spawn_writer(&mut child, input.to_vec());
     let (sender, receiver) = mpsc::channel();
     let stdout_sender = sender.clone();
-    std::thread::spawn(move || {
+    std::thread::spawn(crate::process::inherit(move || {
         let _ = stdout_sender.send((true, read_limited(&mut stdout, max_output)));
-    });
-    std::thread::spawn(move || {
+    }));
+    std::thread::spawn(crate::process::inherit(move || {
         let mut chunk = [0u8; 8192];
         let mut total = 0usize;
         let outcome = loop {
@@ -899,7 +899,7 @@ pub(super) fn run_bounded_with_input(
             }
         };
         let _ = sender.send((false, outcome));
-    });
+    }));
 
     let mut output = None;
     let mut stderr_open = true;
