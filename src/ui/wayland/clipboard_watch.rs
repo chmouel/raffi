@@ -656,6 +656,7 @@ impl Core {
         let _ = std::thread::Builder::new()
             .name("raffi-clipboard-app".into())
             .spawn(move || {
+                crate::process::mark_server_thread();
                 let _ = found.send(focused_app());
             });
         writers
@@ -1044,15 +1045,22 @@ pub(crate) fn start(limits: Limits, policy: Policy, ocr_enabled: bool) {
     let password_manager = policy.temporary_password_manager;
     std::thread::Builder::new()
         .name("raffi-clipboard-record".into())
-        .spawn(move || record(queue, limits, policy, ocr_enabled))
+        .spawn(move || {
+            crate::process::mark_server_thread();
+            record(queue, limits, policy, ocr_enabled)
+        })
         .ok();
     std::thread::Builder::new()
         .name("raffi-clipboard-load".into())
-        .spawn(move || load_entries(requested))
+        .spawn(move || {
+            crate::process::mark_server_thread();
+            load_entries(requested)
+        })
         .ok();
     std::thread::Builder::new()
         .name("raffi-clipboard".into())
         .spawn(move || {
+            crate::process::mark_server_thread();
             let mut last_error = None;
             loop {
                 let core = || {

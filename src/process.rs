@@ -1,7 +1,7 @@
 //! Starting child processes without the environment Raffi set for itself,
 //! and reading the environment of the client a served window is for.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::env::VarError;
 use std::ffi::{OsStr, OsString};
@@ -20,12 +20,26 @@ thread_local! {
     /// Overrides `SERVED_ENV` on one thread, while it loads a client's
     /// session next to a window still showing for another.
     static THREAD_ENV: RefCell<Option<ClientEnv>> = const { RefCell::new(None) };
+    /// Set on the server's own threads, which keep its environment while a
+    /// window shows.
+    static SERVER_THREAD: Cell<bool> = const { Cell::new(false) };
 }
 
 fn served_env() -> Option<ClientEnv> {
-    THREAD_ENV
-        .with(|env| env.borrow().clone())
-        .or_else(|| SERVED_ENV.lock().ok().and_then(|env| env.clone()))
+    if let Some(env) = THREAD_ENV.with(|env| env.borrow().clone()) {
+        return Some(env);
+    }
+    if SERVER_THREAD.with(Cell::get) {
+        return None;
+    }
+    SERVED_ENV.lock().ok().and_then(|env| env.clone())
+}
+
+/// Keep the server's own environment on this thread, for the server's
+/// background work. Threads it starts must call it again.
+#[cfg_attr(not(feature = "wayland"), allow(dead_code))]
+pub(crate) fn mark_server_thread() {
+    SERVER_THREAD.with(|server| server.set(true));
 }
 
 /// Make `env` the environment Raffi reads and gives its children, until

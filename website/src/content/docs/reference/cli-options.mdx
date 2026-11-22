@@ -360,8 +360,10 @@ the rename keep working.
   The calling process sends its environment along. While its window is
   shown, Raffi reads that environment, so `ifenvset`, `${VAR}` and `PATH`
   lookups see the variables your compositor set, and the programs it
-  starts get exactly that environment. The window takes a few hundred megabytes of memory in the server while it
-  runs.
+  starts get exactly that environment. The server's own work, such as
+  recording the clipboard and refreshing caches, keeps the server's
+  environment. The window takes a few hundred megabytes of memory in the
+  server while it runs.
 
   The service file in `misc/systemd/raffi-server.service` is set up for
   this: it runs from your home directory, has no sandbox, since the

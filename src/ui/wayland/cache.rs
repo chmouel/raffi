@@ -1265,6 +1265,7 @@ pub(crate) fn handle_request(state: &Arc<ServerState>, request: Request) -> Resp
                 let claim = publication.clone();
                 let state = state.clone();
                 std::thread::spawn(move || {
+                    crate::process::mark_server_thread();
                     let result = server_run(script_filters::run_script_filter(
                         &command,
                         &args,
@@ -1304,6 +1305,7 @@ pub(crate) fn handle_request(state: &Arc<ServerState>, request: Request) -> Resp
                 let state = state.clone();
                 let job_key = format!("preview:{key}");
                 std::thread::spawn(move || {
+                    crate::process::mark_server_thread();
                     let request = PreviewRequest {
                         command,
                         args,
@@ -1330,6 +1332,7 @@ pub(crate) fn handle_request(state: &Arc<ServerState>, request: Request) -> Resp
         } => {
             let state = state.clone();
             std::thread::spawn(move || {
+                crate::process::mark_server_thread();
                 let _ = logged(&source, || warm_named(&state, &source));
             });
             Response::Ok
@@ -1682,6 +1685,7 @@ fn read_request(stream: &mut UnixStream, limit: usize) -> Incoming {
 }
 
 fn serve_connection(state: Arc<ServerState>, mut stream: UnixStream) {
+    crate::process::mark_server_thread();
     let reply = match read_request(&mut stream, MAX_REQUEST_LINE) {
         Incoming::Request(Request::Open {
             build,
@@ -1772,6 +1776,7 @@ pub(crate) fn run_server(config: ParsedConfig, window: crate::ui::UISettings) ->
 /// Start periodic warming for every source that opted in.
 fn warm_loop(state: Arc<ServerState>) {
     std::thread::spawn(move || {
+        crate::process::mark_server_thread();
         let mut last: HashMap<String, u64> = HashMap::new();
         let mut warmers: HashMap<usize, Warmer> = HashMap::new();
         loop {
