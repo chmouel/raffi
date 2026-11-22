@@ -279,16 +279,19 @@ fn accept(
         return Err(format!("{name} differs from the server's"));
     }
     let env: ClientEnv = Arc::new(env);
-    let served = crate::process::with_env(env.clone(), || ServedOpen::load(argv))?;
-    let settings = &served.session.settings;
-    if settings.renderer != host.renderer {
-        return Err("asks for another renderer than the server's".into());
-    }
-    if settings.font_family != host.font_family {
-        return Err("asks for another font than the server's".into());
-    }
-    let config = &served.session.config;
-    let launch = Launch::prepare(&config.entries, &config.addons, settings, host.translucent);
+    let (served, launch) = crate::process::with_env(env.clone(), || {
+        let served = ServedOpen::load(argv)?;
+        let settings = &served.session.settings;
+        if settings.renderer != host.renderer {
+            return Err("asks for another renderer than the server's".to_string());
+        }
+        if settings.font_family != host.font_family {
+            return Err("asks for another font than the server's".into());
+        }
+        let config = &served.session.config;
+        let launch = Launch::prepare(&config.entries, &config.addons, settings, host.translucent);
+        Ok((served, launch))
+    })?;
     let (sender, receiver) = mpsc::channel();
     Ok((
         Job {
