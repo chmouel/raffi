@@ -133,11 +133,11 @@ impl Source {
 }
 
 fn hyprland_socket() -> Result<PathBuf, String> {
-    let instance = std::env::var("HYPRLAND_INSTANCE_SIGNATURE")
+    let instance = crate::process::var("HYPRLAND_INSTANCE_SIGNATURE")
         .ok()
         .filter(|instance| super::hyprland::valid_instance_signature(instance))
         .ok_or("no valid HYPRLAND_INSTANCE_SIGNATURE")?;
-    let runtime = std::env::var_os("XDG_RUNTIME_DIR").ok_or("no XDG_RUNTIME_DIR")?;
+    let runtime = crate::process::var_os("XDG_RUNTIME_DIR").ok_or("no XDG_RUNTIME_DIR")?;
     Ok(PathBuf::from(runtime)
         .join("hypr")
         .join(instance)

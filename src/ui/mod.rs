@@ -192,8 +192,8 @@ pub fn get_mru_cache_path() -> Result<PathBuf> {
     if cfg!(test) {
         anyhow::bail!("usage caches are disabled in tests");
     }
-    let cache_dir = std::env::var("XDG_CACHE_HOME")
-        .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()));
+    let cache_dir = crate::process::var("XDG_CACHE_HOME")
+        .unwrap_or_else(|_| format!("{}/.cache", crate::process::var("HOME").unwrap_or_default()));
     let mut path = PathBuf::from(cache_dir);
     path.push("raffi");
     std::fs::create_dir_all(&path)?;

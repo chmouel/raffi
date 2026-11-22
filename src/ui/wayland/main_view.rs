@@ -953,7 +953,7 @@ impl LauncherApp {
             }
             Offer::Keyword(KeywordAddon::Bitwarden) => exists("rbw"),
             Offer::Keyword(KeywordAddon::Terminal) => {
-                let env_terminal = std::env::var("TERMINAL").ok();
+                let env_terminal = crate::process::var("TERMINAL").ok();
                 crate::terminal::resolve(
                     self.addons.terminal.command.as_deref(),
                     env_terminal.as_deref(),
@@ -964,7 +964,7 @@ impl LauncherApp {
         });
         self.main_view.recent_path = crate::ui::get_recent_cache_path().ok();
         self.main_view.window_session =
-            super::windows::Compositor::instance(|name| std::env::var(name).ok());
+            super::windows::Compositor::instance(|name| crate::process::var(name).ok());
         self.main_view.recent = super::recent::load(self.main_view.recent_path.as_deref());
         if self.main_view.hide_launchers {
             self.filtered_configs.clear();
@@ -1204,7 +1204,7 @@ impl LauncherApp {
                 );
             }
             CommandListAddon::System => {
-                let session_id = std::env::var("XDG_SESSION_ID").ok();
+                let session_id = crate::process::var("XDG_SESSION_ID").ok();
                 let keep_open = !self.should_close(self.addons.system.close_on_action);
                 let items = super::system::system_entries(
                     &self.addons.system,

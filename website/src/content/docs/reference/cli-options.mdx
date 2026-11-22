@@ -349,24 +349,28 @@ the rename keep working.
 
   The server opens the window only when it would behave exactly as a new
   process: `raffi` was started without a terminal (its input and output on
-  `/dev/null`, as from a keybinding), from the same directory as the
-  server, with the same build, renderer and font. Anything else, such as a
+  `/dev/null`, as from a keybinding), from the same directory and session
+  as the server (the same `HOME`, XDG directories, display and compositor),
+  with the same build, renderer and font. Anything else, such as a
   run from a terminal, `-p`, `-d`, the `fuzzel` UI or a configuration that
   does not exist yet, opens the window in the calling process as before.
   After rebuilding Raffi, restart the server: until then it refuses opens
   and says so in its output.
 
-  Programs launched from the window are started by the server, with the
-  environment of the user service manager rather than the one of the
-  process that called `raffi`. Use `--in-process` when that matters. The
-  window takes a few hundred megabytes of memory in the server while it
+  The calling process sends its environment along. While its window is
+  shown, Raffi reads that environment, so `ifenvset`, `${VAR}` and `PATH`
+  lookups see the variables your compositor set, and the programs it
+  starts get exactly that environment. The window takes a few hundred megabytes of memory in the server while it
   runs.
 
   The service file in `misc/systemd/raffi-server.service` is set up for
   this: it runs from your home directory, has no sandbox, since the
   launcher has to start programs and write files, and keeps launched
   programs running when the server restarts. After upgrading, copy it
-  again and run `systemctl --user daemon-reload`.
+  again and run `systemctl --user daemon-reload`. A server running under a
+  unit that still sandboxes it (`ProtectHome`, `ProtectSystem`,
+  `PrivateTmp`, `NoNewPrivileges`) or kills its children on restart does
+  not show the window, and says so in its output.
 
 
 **`--in-process`** `boolean` (default: `false`)

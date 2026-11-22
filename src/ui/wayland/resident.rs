@@ -7,13 +7,16 @@
 //!
 //! The client asks only when the server can show the window exactly as the
 //! client would: launched from a keybinding (no terminal), from the same
-//! directory, with the same build, renderer and font. Anything else runs in
-//! the client process as before.
+//! directory and session, with the same build, renderer and font. Anything
+//! else runs in the client process as before. The client's environment is
+//! sent along: Raffi reads it, and the programs it starts get it, while that
+//! client's window runs.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::os::unix::net::UnixStream;
+use std::process::Stdio;
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -26,15 +29,32 @@ use super::cache::{Request, Response};
 use super::state::LauncherApp;
 use super::types::Message;
 use super::Launch;
+use crate::process::ClientEnv;
 use crate::ServedOpen;
 
 /// Revision of the `Open` exchange, reported in the server status.
-pub(super) const WINDOW_PROTOCOL: u32 = 1;
+pub(super) const WINDOW_PROTOCOL: u32 = 2;
 /// How long a client waits for the server to accept an open.
 const ACCEPT_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long the text typed after a snippet pick may take before the next
 /// window can open.
 const TYPING_TIMEOUT: Duration = Duration::from_secs(10);
+/// Variables that place a client in a session: when one differs from the
+/// server's, the window would open on another display or use other files,
+/// so the client shows it itself.
+const SESSION_VARIABLES: [&str; 11] = [
+    "HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_STATE_HOME",
+    "XDG_RUNTIME_DIR",
+    "WAYLAND_DISPLAY",
+    "DISPLAY",
+    "HYPRLAND_INSTANCE_SIGNATURE",
+    "NIRI_SOCKET",
+    "SWAYSOCK",
+];
 
 /// What the server was started with; an open needing something else is
 /// refused.
@@ -44,6 +64,8 @@ struct Host {
     translucent: bool,
     build: String,
     cwd: String,
+    /// The server's own environment, before it set the renderer.
+    env: HashMap<String, String>,
 }
 
 static HOST: OnceLock<Host> = OnceLock::new();
@@ -58,6 +80,20 @@ pub(super) struct Hosting(());
 /// Get the server ready to show the window when it has a display. Must run
 /// before any thread starts: it sets the renderer in the environment.
 pub(super) fn prepare(settings: crate::ui::UISettings) -> Option<Hosting> {
+    let limits = service_limits();
+    if !limits.is_empty() {
+        eprintln!(
+            "raffi: the service would restrict the programs the launcher starts ({}), \
+             so the server does not show the launcher window. Install the unit from \
+             misc/systemd/raffi-server.service, then run systemctl --user daemon-reload \
+             and restart the server",
+            limits.join(", ")
+        );
+        return None;
+    }
+    let env = std::env::vars_os()
+        .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
+        .collect();
     let display = ["WAYLAND_DISPLAY", "DISPLAY"]
         .iter()
         .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()));
@@ -83,6 +119,7 @@ pub(super) fn prepare(settings: crate::ui::UISettings) -> Option<Hosting> {
         translucent,
         build,
         cwd,
+        env,
     });
     let (sender, receiver) = channel::unbounded();
     *lock(&JOBS) = Some(sender);
@@ -98,6 +135,68 @@ pub(super) fn window_protocol() -> u32 {
     } else {
         0
     }
+}
+
+/// Service settings that would stop programs the launcher starts from
+/// working as they do from a keybinding: a read-only or private home and
+/// `/tmp`, no privilege escalation, or being killed with the server.
+fn service_limits() -> Vec<String> {
+    let mut limits = Vec::new();
+    let no_new_privileges = std::fs::read_to_string("/proc/self/status").is_ok_and(|status| {
+        status
+            .lines()
+            .any(|line| line.split_whitespace().eq(["NoNewPrivs:", "1"]))
+    });
+    if no_new_privileges {
+        limits.push("NoNewPrivileges=yes".to_string());
+    }
+    let Some(unit) = service_unit() else {
+        return limits;
+    };
+    let shown = crate::process::command("systemctl")
+        .args(["--user", "show", &unit])
+        .args(["-p", "KillMode", "-p", "PrivateTmp"])
+        .args(["-p", "ProtectHome", "-p", "ProtectSystem"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output();
+    if let Some(output) = shown.ok().filter(|output| output.status.success()) {
+        limits.extend(limiting_properties(&String::from_utf8_lossy(
+            &output.stdout,
+        )));
+    }
+    limits
+}
+
+/// The systemd service this process runs in, if any.
+fn service_unit() -> Option<String> {
+    let cgroup = std::fs::read_to_string("/proc/self/cgroup").ok()?;
+    let path = cgroup.lines().find_map(|line| line.strip_prefix("0::"))?;
+    let unit = path.rsplit('/').next()?;
+    (unit.ends_with(".service") && !unit.starts_with("user@")).then(|| unit.to_string())
+}
+
+/// The lines of `systemctl show` output that restrict launched programs.
+fn limiting_properties(properties: &str) -> Vec<String> {
+    properties
+        .lines()
+        .filter(|line| match line.split_once('=') {
+            Some(("KillMode", mode)) => mode != "process",
+            Some(("PrivateTmp" | "ProtectHome" | "ProtectSystem", value)) => value != "no",
+            _ => false,
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+/// The first session variable that differs between the server and a client.
+fn session_difference(
+    server: &HashMap<String, String>,
+    client: &HashMap<String, String>,
+) -> Option<&'static str> {
+    SESSION_VARIABLES
+        .into_iter()
+        .find(|name| server.get(*name) != client.get(*name))
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -125,8 +224,14 @@ fn write_response(stream: &mut UnixStream, response: &Response) -> std::io::Resu
 
 /// Answer an `Open` request on a server socket thread: refuse it, or hand
 /// it to the window loop and report how it ended.
-pub(super) fn serve_open(mut stream: UnixStream, build: &str, argv: &[String], cwd: &str) {
-    let job = match accept(build, argv, cwd) {
+pub(super) fn serve_open(
+    mut stream: UnixStream,
+    build: &str,
+    argv: &[String],
+    cwd: &str,
+    env: HashMap<String, String>,
+) {
+    let job = match accept(build, argv, cwd, env) {
         Ok(job) => job,
         Err(reason) => {
             eprintln!("raffi: showing the window in the client: {reason}");
@@ -154,7 +259,12 @@ pub(super) fn serve_open(mut stream: UnixStream, build: &str, argv: &[String], c
 
 type Accepted = (Job, mpsc::Receiver<Response>);
 
-fn accept(build: &str, argv: &[String], cwd: &str) -> Result<Accepted, String> {
+fn accept(
+    build: &str,
+    argv: &[String],
+    cwd: &str,
+    env: HashMap<String, String>,
+) -> Result<Accepted, String> {
     let host = HOST.get().ok_or("the server shows no window")?;
     if lock(&JOBS).is_none() {
         return Err("the server shows no window".into());
@@ -165,7 +275,11 @@ fn accept(build: &str, argv: &[String], cwd: &str) -> Result<Accepted, String> {
     if cwd != host.cwd {
         return Err("started from another directory than the server".into());
     }
-    let served = ServedOpen::load(argv)?;
+    if let Some(name) = session_difference(&host.env, &env) {
+        return Err(format!("{name} differs from the server's"));
+    }
+    let env: ClientEnv = Arc::new(env);
+    let served = crate::process::with_env(env.clone(), || ServedOpen::load(argv))?;
     let settings = &served.session.settings;
     if settings.renderer != host.renderer {
         return Err("asks for another renderer than the server's".into());
@@ -180,6 +294,7 @@ fn accept(build: &str, argv: &[String], cwd: &str) -> Result<Accepted, String> {
         Job {
             served,
             launch: Arc::new(launch),
+            env,
             reply: sender,
         },
         receiver,
@@ -190,6 +305,7 @@ fn accept(build: &str, argv: &[String], cwd: &str) -> Result<Accepted, String> {
 struct Job {
     served: ServedOpen,
     launch: Arc<Launch>,
+    env: ClientEnv,
     reply: mpsc::Sender<Response>,
 }
 
@@ -255,6 +371,7 @@ impl Daemon {
                     return Task::none();
                 }
                 self.stage = Stage::Idle;
+                crate::process::set_served_env(None);
                 let queued: Vec<Job> = self.queue.drain(..).collect();
                 Task::batch(queued.into_iter().map(|job| self.receive(job)))
             }
@@ -281,6 +398,7 @@ impl Daemon {
     fn open(&mut self, job: Job) -> Task<HostMessage> {
         let id = self.next_id;
         self.next_id += 1;
+        crate::process::set_served_env(Some(job.env.clone()));
         let (app, boot) = job.launch.boot(true);
         let mut settings = job.launch.window_settings();
         settings.exit_on_close_request = false;
@@ -450,6 +568,9 @@ pub(crate) fn open_in_server() -> Option<Result<()>> {
         .into_os_string()
         .into_string()
         .ok()?;
+    let env = std::env::vars_os()
+        .map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
+        .collect::<Option<HashMap<String, String>>>()?;
     let build = build_identity().ok()?;
     let status = super::cache::try_request(&Request::Status, super::cache::PROBE_TIMEOUT)?;
     if !shows_windows(&status) {
@@ -458,7 +579,13 @@ pub(crate) fn open_in_server() -> Option<Result<()>> {
     let path = super::cache::cache_socket_path().ok()?;
     let mut stream = UnixStream::connect(path).ok()?;
     let _ = stream.set_write_timeout(Some(ACCEPT_TIMEOUT));
-    let mut line = serde_json::to_vec(&Request::Open { build, argv, cwd }).ok()?;
+    let mut line = serde_json::to_vec(&Request::Open {
+        build,
+        argv,
+        cwd,
+        env,
+    })
+    .ok()?;
     line.push(b'\n');
     stream.write_all(&line).ok()?;
     await_window(stream)
@@ -517,6 +644,53 @@ mod tests {
         }
         drop(server);
         await_window(client)
+    }
+
+    #[test]
+    fn test_clients_from_another_session_show_the_window_themselves() {
+        let env = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
+            pairs
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.to_string()))
+                .collect()
+        };
+        let server = env(&[("HOME", "/home/u"), ("WAYLAND_DISPLAY", "wayland-1")]);
+        // Variables Raffi forwards, such as PATH or the session id, may differ.
+        let keybinding = env(&[
+            ("HOME", "/home/u"),
+            ("WAYLAND_DISPLAY", "wayland-1"),
+            ("XDG_SESSION_ID", "2"),
+            ("PATH", "/client/bin"),
+        ]);
+        assert_eq!(session_difference(&server, &keybinding), None);
+        let other_display = env(&[("HOME", "/home/u"), ("WAYLAND_DISPLAY", "wayland-2")]);
+        assert_eq!(
+            session_difference(&server, &other_display),
+            Some("WAYLAND_DISPLAY")
+        );
+        let x11 = env(&[
+            ("HOME", "/home/u"),
+            ("WAYLAND_DISPLAY", "wayland-1"),
+            ("DISPLAY", ":1"),
+        ]);
+        assert_eq!(session_difference(&server, &x11), Some("DISPLAY"));
+    }
+
+    #[test]
+    fn test_service_settings_restricting_launches_are_reported() {
+        let current = "KillMode=process\nPrivateTmp=no\nProtectHome=no\nProtectSystem=no\n";
+        assert!(limiting_properties(current).is_empty());
+        let sandboxed =
+            "KillMode=control-group\nPrivateTmp=yes\nProtectHome=read-only\nProtectSystem=strict\n";
+        assert_eq!(
+            limiting_properties(sandboxed),
+            [
+                "KillMode=control-group",
+                "PrivateTmp=yes",
+                "ProtectHome=read-only",
+                "ProtectSystem=strict"
+            ]
+        );
     }
 
     #[test]

@@ -376,9 +376,13 @@ pub(super) fn expand_launcher_keyword<'a>(
 
 fn expand_file_browser_query(trimmed: &str) -> String {
     if trimmed == "~" {
-        format!("{}/", std::env::var("HOME").unwrap_or_default())
+        format!("{}/", crate::process::var("HOME").unwrap_or_default())
     } else if let Some(rest) = trimmed.strip_prefix("~/") {
-        format!("{}/{}", std::env::var("HOME").unwrap_or_default(), rest)
+        format!(
+            "{}/{}",
+            crate::process::var("HOME").unwrap_or_default(),
+            rest
+        )
     } else {
         trimmed.to_string()
     }
@@ -2109,7 +2113,7 @@ impl LauncherApp {
         } else if let Some((parent, left)) = fido_updir(
             &self.search_query,
             &query,
-            &std::env::var("HOME").unwrap_or_default(),
+            &crate::process::var("HOME").unwrap_or_default(),
         ) {
             (parent, Some(left))
         } else if let Some(restart) = fido_restart(&self.search_query, &query) {
@@ -2950,7 +2954,7 @@ impl LauncherApp {
         self.command_list.set_query(query);
         match addon {
             CommandListAddon::System => {
-                let session_id = std::env::var("XDG_SESSION_ID").ok();
+                let session_id = crate::process::var("XDG_SESSION_ID").ok();
                 let keep_open = !self.should_close(self.addons.system.close_on_action);
                 let items = system_entries(
                     &self.addons.system,
@@ -3034,7 +3038,7 @@ impl LauncherApp {
             }
             CommandListAddon::Terminal if !entered => Task::none(),
             CommandListAddon::Terminal => {
-                let env_terminal = std::env::var("TERMINAL").ok();
+                let env_terminal = crate::process::var("TERMINAL").ok();
                 let Some(prefix) = crate::terminal::resolve(
                     self.addons.terminal.command.as_deref(),
                     env_terminal.as_deref(),
@@ -5452,7 +5456,10 @@ impl LauncherApp {
             if entry.is_dir && !secondary {
                 let new_query = format!(
                     "{}/",
-                    tilde_path(&entry.full_path, &std::env::var("HOME").unwrap_or_default())
+                    tilde_path(
+                        &entry.full_path,
+                        &crate::process::var("HOME").unwrap_or_default()
+                    )
                 );
                 self.search_query = new_query.clone();
                 return Task::done(Message::SearchChanged(new_query));
@@ -5666,7 +5673,10 @@ impl LauncherApp {
             self.file_browser.entries.get(entry_index)
         };
         if let Some(entry) = entry {
-            let path = tilde_path(&entry.full_path, &std::env::var("HOME").unwrap_or_default());
+            let path = tilde_path(
+                &entry.full_path,
+                &crate::process::var("HOME").unwrap_or_default(),
+            );
             let new_query = if entry.is_dir {
                 format!("{path}/")
             } else {

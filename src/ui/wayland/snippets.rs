@@ -643,7 +643,7 @@ impl Providers for LiveProviders {
     }
 
     fn env(&mut self, name: &str) -> Option<String> {
-        std::env::var(name).ok()
+        crate::process::var(name).ok()
     }
 
     fn shell(&mut self, command: &str) -> Result<String, String> {

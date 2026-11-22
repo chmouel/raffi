@@ -2930,7 +2930,7 @@ pub struct DefaultEnvProvider;
 
 impl EnvProvider for DefaultEnvProvider {
     fn var(&self, key: &str) -> Result<String, std::env::VarError> {
-        std::env::var(key)
+        crate::process::var(key)
     }
 }
 
@@ -2995,11 +2995,11 @@ fn get_icon_map() -> Result<HashMap<String, String>> {
     let mut icon_map: HashMap<String, String> = HashMap::new();
     let mut icon_sizes: HashMap<String, u32> = HashMap::new();
     let mut data_dirs =
-        std::env::var("XDG_DATA_DIRS").unwrap_or("/usr/local/share/:/usr/share/".to_string());
-    let data_home = std::env::var("XDG_DATA_HOME").unwrap_or_else(|_| {
+        crate::process::var("XDG_DATA_DIRS").unwrap_or("/usr/local/share/:/usr/share/".to_string());
+    let data_home = crate::process::var("XDG_DATA_HOME").unwrap_or_else(|_| {
         format!(
             "{}/.local/share/",
-            std::env::var("HOME").unwrap_or_default()
+            crate::process::var("HOME").unwrap_or_default()
         )
     });
     write!(&mut data_dirs, ":{data_home}")?;
@@ -3037,7 +3037,11 @@ fn get_icon_map() -> Result<HashMap<String, String>> {
 /// Expand `~/` prefix to the user's HOME directory.
 pub(crate) fn expand_tilde(s: &str) -> String {
     if let Some(stripped) = s.strip_prefix("~/") {
-        format!("{}/{}", std::env::var("HOME").unwrap_or_default(), stripped)
+        format!(
+            "{}/{}",
+            crate::process::var("HOME").unwrap_or_default(),
+            stripped
+        )
     } else {
         s.to_string()
     }
@@ -3052,7 +3056,7 @@ fn expand_env_vars(s: &str) -> String {
         if c == '$' && chars.peek() == Some(&'{') {
             chars.next(); // consume '{'
             let var_name: String = chars.by_ref().take_while(|&c| c != '}').collect();
-            result.push_str(&std::env::var(&var_name).unwrap_or_default());
+            result.push_str(&crate::process::var(&var_name).unwrap_or_default());
         } else {
             result.push(c);
         }
@@ -4786,7 +4790,7 @@ pub(crate) fn find_binary(binary: &str) -> bool {
         return Path::new(binary).exists();
     }
 
-    std::env::var("PATH")
+    crate::process::var("PATH")
         .unwrap_or_default()
         .split(':')
         .any(|path| Path::new(&format!("{path}/{binary}")).exists())
@@ -4811,13 +4815,13 @@ fn default_ui_type(fuzzel_available: bool, fallbacks_configured: bool) -> Result
 fn xdg_data_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
 
-    if let Ok(data_home) = std::env::var("XDG_DATA_HOME") {
+    if let Ok(data_home) = crate::process::var("XDG_DATA_HOME") {
         dirs.push(PathBuf::from(data_home));
-    } else if let Ok(home) = std::env::var("HOME") {
+    } else if let Ok(home) = crate::process::var("HOME") {
         dirs.push(PathBuf::from(home).join(".local/share"));
     }
 
-    let system_dirs = std::env::var("XDG_DATA_DIRS")
+    let system_dirs = crate::process::var("XDG_DATA_DIRS")
         .unwrap_or_else(|_| "/usr/local/share:/usr/share".to_string());
     dirs.extend(std::env::split_paths(&system_dirs));
 
@@ -4966,7 +4970,7 @@ impl DesktopScan {
                 .enabled
                 .then(|| terminal::resolve_default(terminal.command.as_deref()))
                 .flatten(),
-            desktops: std::env::var("XDG_CURRENT_DESKTOP")
+            desktops: crate::process::var("XDG_CURRENT_DESKTOP")
                 .unwrap_or_default()
                 .split(':')
                 .filter(|desktop| !desktop.is_empty())
@@ -5255,8 +5259,9 @@ const GENERIC_ICON_NAMES: &[&str] = &[
 
 pub(crate) fn icon_cache_dir() -> PathBuf {
     PathBuf::from(
-        std::env::var("XDG_CACHE_HOME")
-            .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default())),
+        crate::process::var("XDG_CACHE_HOME").unwrap_or_else(|_| {
+            format!("{}/.cache", crate::process::var("HOME").unwrap_or_default())
+        }),
     )
     .join("raffi")
 }
@@ -5488,7 +5493,7 @@ pub(crate) fn sanitize_display_text(text: &str) -> String {
 /// The message locale the desktop entries should be named in: `LC_ALL` first,
 /// then `LC_MESSAGES`, then `LANG`.
 fn message_locale() -> String {
-    message_locale_from(|name| std::env::var(name).ok())
+    message_locale_from(|name| crate::process::var(name).ok())
 }
 
 /// `message_locale` over `var`; an empty variable counts as unset.
@@ -6823,7 +6828,7 @@ fn default_config_path(args: &Args) -> String {
     args.configfile.clone().unwrap_or_else(|| {
         format!(
             "{}/.config/raffi/raffi.yaml",
-            std::env::var("HOME").unwrap_or_default()
+            crate::process::var("HOME").unwrap_or_default()
         )
     })
 }
@@ -7245,7 +7250,7 @@ launchers:
 "#;
         let parsed = read_config_from_reader(Cursor::new(yaml), &Args::default()).unwrap();
         assert_eq!(parsed.entries.len(), 1);
-        let home = std::env::var("HOME").unwrap_or_default();
+        let home = crate::process::var("HOME").unwrap_or_default();
         assert_eq!(
             parsed.entries[0].env.as_ref().unwrap()["DIRS"],
             format!("{home}/bin:{home}")
@@ -8088,7 +8093,7 @@ launchers:
 
     #[test]
     fn test_expand_tilde() {
-        let home = std::env::var("HOME").unwrap();
+        let home = crate::process::var("HOME").unwrap();
         assert_eq!(expand_tilde("~/foo/bar"), format!("{home}/foo/bar"));
     }
 
@@ -8100,7 +8105,7 @@ launchers:
 
     #[test]
     fn test_expand_env_vars() {
-        let home = std::env::var("HOME").unwrap();
+        let home = crate::process::var("HOME").unwrap();
         assert_eq!(expand_env_vars("${HOME}/foo"), format!("{home}/foo"));
     }
 
@@ -8111,8 +8116,8 @@ launchers:
 
     #[test]
     fn test_expand_env_vars_multiple() {
-        let home = std::env::var("HOME").unwrap();
-        let user = std::env::var("USER").unwrap_or_default();
+        let home = crate::process::var("HOME").unwrap();
+        let user = crate::process::var("USER").unwrap_or_default();
         assert_eq!(
             expand_env_vars("${HOME}/stuff/${USER}/data"),
             format!("{home}/stuff/{user}/data")
@@ -8127,8 +8132,8 @@ launchers:
 
     #[test]
     fn test_expand_config_value_combined() {
-        let home = std::env::var("HOME").unwrap();
-        let user = std::env::var("USER").unwrap_or_default();
+        let home = crate::process::var("HOME").unwrap();
+        let user = crate::process::var("USER").unwrap_or_default();
         assert_eq!(
             expand_config_value("~/foo/${USER}/bar"),
             format!("{home}/foo/{user}/bar")
@@ -8137,7 +8142,7 @@ launchers:
 
     #[test]
     fn test_config_expands_env_vars_in_fields() {
-        let home = std::env::var("HOME").unwrap();
+        let home = crate::process::var("HOME").unwrap();
         let yaml_config = r#"
         version: 1
         launchers:
@@ -8180,7 +8185,7 @@ launchers:
 
     #[test]
     fn test_config_expands_tilde_in_fields() {
-        let home = std::env::var("HOME").unwrap();
+        let home = crate::process::var("HOME").unwrap();
         let yaml_config = r#"
         version: 1
         launchers:
@@ -8914,7 +8919,7 @@ launchers:
         let templates = &parsed_config.addons.text_snippets[1];
         assert_eq!(templates.name, "Templates");
         assert_eq!(templates.keyword, "tpl");
-        let home = std::env::var("HOME").unwrap();
+        let home = crate::process::var("HOME").unwrap();
         assert_eq!(
             templates.file,
             Some(format!("{home}/.config/raffi/snippets.yaml"))
@@ -8978,7 +8983,7 @@ launchers:
         };
         let parsed_config = read_config_from_reader(Cursor::new(yaml_config), &args).unwrap();
         let notes = &parsed_config.addons.text_snippets[0];
-        let home = std::env::var("HOME").unwrap();
+        let home = crate::process::var("HOME").unwrap();
         assert_eq!(notes.markdown, Some(format!("{home}/notes/snippets.md")));
         assert!(notes.file.is_none() && notes.directory.is_none());
     }
@@ -9034,7 +9039,7 @@ launchers:
         assert_eq!(snippets_dir.name, "Snippets");
         assert_eq!(snippets_dir.keyword, "sn");
         assert_eq!(snippets_dir.icon, Some("snippets".to_string()));
-        let home = std::env::var("HOME").unwrap();
+        let home = crate::process::var("HOME").unwrap();
         assert_eq!(
             snippets_dir.directory,
             Some(format!("{home}/.local/share/snippets"))
@@ -10656,7 +10661,7 @@ Icon=firefox
     fn test_default_icon_path_materializes_bundled_icon_without_repo_cwd() {
         let cache_root = temp_test_dir("default-icon-cache");
         let cwd = temp_test_dir("default-icon-cwd");
-        let previous_cache_home = std::env::var_os("XDG_CACHE_HOME");
+        let previous_cache_home = crate::process::var_os("XDG_CACHE_HOME");
         let previous_cwd = std::env::current_dir().unwrap();
 
         std::env::set_var("XDG_CACHE_HOME", &cache_root);

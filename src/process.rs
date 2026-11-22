@@ -1,19 +1,81 @@
-//! Starting child processes without the environment Raffi set for itself.
+//! Starting child processes without the environment Raffi set for itself,
+//! and reading the environment of the client a served window is for.
 
-use std::ffi::OsStr;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::env::VarError;
+use std::ffi::{OsStr, OsString};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+
+/// The environment of a client whose window the server shows.
+pub(crate) type ClientEnv = Arc<HashMap<String, String>>;
+
+/// The environment of the window being served, read by every thread while it
+/// runs and finishes.
+static SERVED_ENV: Mutex<Option<ClientEnv>> = Mutex::new(None);
+
+thread_local! {
+    /// Overrides `SERVED_ENV` on one thread, while it loads a client's
+    /// session next to a window still showing for another.
+    static THREAD_ENV: RefCell<Option<ClientEnv>> = const { RefCell::new(None) };
+}
+
+fn served_env() -> Option<ClientEnv> {
+    THREAD_ENV
+        .with(|env| env.borrow().clone())
+        .or_else(|| SERVED_ENV.lock().ok().and_then(|env| env.clone()))
+}
+
+/// Make `env` the environment Raffi reads and gives its children, until
+/// cleared with `None`.
+#[cfg_attr(not(feature = "wayland"), allow(dead_code))]
+pub(crate) fn set_served_env(env: Option<ClientEnv>) {
+    if let Ok(mut served) = SERVED_ENV.lock() {
+        *served = env;
+    }
+}
+
+/// Run `f` with `env` as the environment on this thread.
+#[cfg_attr(not(feature = "wayland"), allow(dead_code))]
+pub(crate) fn with_env<T>(env: ClientEnv, f: impl FnOnce() -> T) -> T {
+    let previous = THREAD_ENV.with(|current| current.replace(Some(env)));
+    let result = f();
+    THREAD_ENV.with(|current| *current.borrow_mut() = previous);
+    result
+}
+
+/// `std::env::var_os`, from the client's environment while serving a window.
+/// Use it for every variable Raffi reads.
+pub(crate) fn var_os(name: impl AsRef<str>) -> Option<OsString> {
+    let name = name.as_ref();
+    match served_env() {
+        Some(env) => env.get(name).map(OsString::from),
+        None => std::env::var_os(name),
+    }
+}
+
+/// `std::env::var`, from the client's environment while serving a window.
+pub(crate) fn var(name: impl AsRef<str>) -> Result<String, VarError> {
+    match var_os(name) {
+        Some(value) => value.into_string().map_err(VarError::NotUnicode),
+        None => Err(VarError::NotPresent),
+    }
+}
 
 /// Variables Raffi exported for its own window, which children must not
 /// inherit.
 static EXPORTED: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 
-/// A `Command` for `program` that leaves out the variables Raffi exported.
-/// Use it for every child Raffi starts.
+/// A `Command` for `program` that leaves out the variables Raffi exported,
+/// and gets the client's environment while serving a window. Use it for
+/// every child Raffi starts.
 pub(crate) fn command(program: impl AsRef<OsStr>) -> Command {
     let mut command = Command::new(program);
-    if let Ok(exported) = EXPORTED.lock() {
+    if let Some(env) = served_env() {
+        command.env_clear().envs(env.iter());
+    } else if let Ok(exported) = EXPORTED.lock() {
         for name in exported.iter() {
             command.env_remove(name);
         }
@@ -88,5 +150,29 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&output.stdout), "unset");
         unexport_all();
         assert!(std::env::var_os(name).is_none());
+    }
+
+    #[test]
+    fn served_environment_is_read_and_given_to_children() {
+        let env: ClientEnv = Arc::new(HashMap::from([(
+            "RAFFI_TEST_CLIENT_VARIABLE".to_string(),
+            "client".to_string(),
+        )]));
+        let (read, printed, path) = with_env(env, || {
+            let output = command("/bin/sh")
+                .args(["-c", "printf %s \"$RAFFI_TEST_CLIENT_VARIABLE${PATH-}\""])
+                .output()
+                .unwrap();
+            (
+                var("RAFFI_TEST_CLIENT_VARIABLE"),
+                String::from_utf8_lossy(&output.stdout).into_owned(),
+                var_os("PATH"),
+            )
+        });
+        assert_eq!(read.as_deref(), Ok("client"));
+        // Only the client's variables, none of this process's.
+        assert!(printed.starts_with("client"), "{printed}");
+        assert!(path.is_none());
+        assert!(var("RAFFI_TEST_CLIENT_VARIABLE").is_err());
     }
 }

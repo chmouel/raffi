@@ -2152,7 +2152,7 @@ mod tests {
     #[test]
     #[ignore]
     fn live_niri_actions() {
-        let id = std::env::var("RAFFI_NIRI_TEST_ID").unwrap();
+        let id = crate::process::var("RAFFI_NIRI_TEST_ID").unwrap();
         let items = Compositor::Niri.load_windows(false).unwrap();
         let item = items.iter().find(|item| item.identity == id).unwrap();
         let run = |action: &CommandAction| {
@@ -2448,7 +2448,7 @@ mod tests {
     #[test]
     #[ignore]
     fn live_sway_actions() {
-        let id = std::env::var("RAFFI_SWAY_TEST_ID").unwrap();
+        let id = crate::process::var("RAFFI_SWAY_TEST_ID").unwrap();
         let items = Compositor::Sway.load_windows(false).unwrap();
         let item = items.iter().find(|item| item.identity == id).unwrap();
         let run = |action: &CommandAction| {

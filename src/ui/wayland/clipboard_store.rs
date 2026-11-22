@@ -145,10 +145,12 @@ pub(crate) fn default_path() -> Result<PathBuf, String> {
     if cfg!(test) {
         return Err("the clipboard history database is disabled in tests".into());
     }
-    let base = std::env::var_os("XDG_DATA_HOME")
+    let base = crate::process::var_os("XDG_DATA_HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))
+        .or_else(|| {
+            crate::process::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share"))
+        })
         .ok_or("cannot find the data directory: HOME is not set")?;
     Ok(base.join("raffi").join("clipboard.db"))
 }

@@ -387,7 +387,7 @@ pub(super) fn load(config: &BookmarksAddonConfig) -> Library {
             ..Library::default()
         };
     };
-    let path = std::env::var_os("PATH").unwrap_or_default();
+    let path = crate::process::var_os("PATH").unwrap_or_default();
     load_from(config, &home, &config_dir, &path)
 }
 

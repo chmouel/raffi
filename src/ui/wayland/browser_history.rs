@@ -925,7 +925,7 @@ pub(super) fn load(config: &BrowserHistoryAddonConfig) -> Library {
             return merge_libraries(&snapshot.libraries, &groups, snapshot.errors);
         }
     }
-    let path = std::env::var_os("PATH").unwrap_or_default();
+    let path = crate::process::var_os("PATH").unwrap_or_default();
     let mut snapshot = BrowserHistorySnapshot::new(config, &groups, errors.clone());
     let mut budget = MAX_LIBRARY_ENTRIES;
     for group in &groups {
@@ -962,7 +962,7 @@ pub(super) fn initialize(config: &BrowserHistoryAddonConfig) -> BrowserHistoryIn
             };
         }
     }
-    let path = std::env::var_os("PATH").unwrap_or_default();
+    let path = crate::process::var_os("PATH").unwrap_or_default();
     let library = groups
         .first()
         .map(|group| read_group(config, &path, group, MAX_LIBRARY_ENTRIES));
@@ -995,7 +995,7 @@ pub(super) fn load_group(
             }
         }
     }
-    let path = std::env::var_os("PATH").unwrap_or_default();
+    let path = crate::process::var_os("PATH").unwrap_or_default();
     let library = read_group(config, &path, group, MAX_LIBRARY_ENTRIES);
     let mut snapshot = read_snapshot().unwrap_or_else(|| {
         let (groups, errors) = discover(config);
@@ -1021,7 +1021,7 @@ pub(super) fn warm(config: &BrowserHistoryAddonConfig) -> Result<(), String> {
             Err(errors.join("; "))
         };
     }
-    let path = std::env::var_os("PATH").unwrap_or_default();
+    let path = crate::process::var_os("PATH").unwrap_or_default();
     let mut snapshot = BrowserHistorySnapshot::new(config, &groups, errors);
     let mut budget = MAX_LIBRARY_ENTRIES;
     for group in &groups {

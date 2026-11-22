@@ -81,8 +81,10 @@ pub(super) fn emoji_fallback_entries() -> Vec<EmojiEntry> {
 fn emoji_cache_dir() -> String {
     format!(
         "{}/raffi/emoji",
-        std::env::var("XDG_CACHE_HOME")
-            .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()))
+        crate::process::var("XDG_CACHE_HOME").unwrap_or_else(|_| format!(
+            "{}/.cache",
+            crate::process::var("HOME").unwrap_or_default()
+        ))
     )
 }
 

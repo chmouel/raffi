@@ -56,7 +56,7 @@ pub(super) fn load_tabs(
     if browsers.is_empty() {
         let (setup, installed) = browser_host::user_dirs()
             .map(|(home, config)| {
-                let path = std::env::var_os("PATH").unwrap_or_default();
+                let path = crate::process::var_os("PATH").unwrap_or_default();
                 (
                     browser_host::host_setup(&home, &config),
                     browser_host::installed_browsers(&home, &config, &path),

@@ -105,7 +105,7 @@ fn paste_mods(class: &str, extra: &[String]) -> &'static str {
 
 /// Whether Raffi runs inside a Hyprland session.
 pub(super) fn in_session() -> bool {
-    std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some_and(|value| !value.is_empty())
+    crate::process::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some_and(|value| !value.is_empty())
 }
 
 /// Capture the paste target when a snippet source needs it. Inside Hyprland,
@@ -314,13 +314,13 @@ fn hyprctl_command(program: &Path, instance: &str, args: &[&str]) -> Command {
 
 impl Hyprland {
     pub(super) fn capture(terminal_classes: &[String]) -> Result<Self, String> {
-        let instance = std::env::var("HYPRLAND_INSTANCE_SIGNATURE")
+        let instance = crate::process::var("HYPRLAND_INSTANCE_SIGNATURE")
             .map_err(|_| "hypr_paste requires a Hyprland session".to_string())?;
         if !valid_instance_signature(&instance) {
             return Err("invalid Hyprland instance signature".into());
         }
-        let runtime =
-            std::env::var_os("XDG_RUNTIME_DIR").ok_or("hypr_paste requires XDG_RUNTIME_DIR")?;
+        let runtime = crate::process::var_os("XDG_RUNTIME_DIR")
+            .ok_or("hypr_paste requires XDG_RUNTIME_DIR")?;
         let mut target = Self {
             socket_dir: PathBuf::from(runtime).join("hypr").join(&instance),
             instance,
@@ -964,8 +964,8 @@ printf '%s|' "$@" > "$OUT"
     #[test]
     #[ignore]
     fn live_hypr_actions() {
-        let address = std::env::var("RAFFI_HYPR_TEST_ADDRESS").unwrap();
-        let workspace = std::env::var("RAFFI_HYPR_TEST_WORKSPACE").unwrap();
+        let address = crate::process::var("RAFFI_HYPR_TEST_ADDRESS").unwrap();
+        let workspace = crate::process::var("RAFFI_HYPR_TEST_WORKSPACE").unwrap();
         let slot = |action| {
             std::sync::Mutex::new(Some(super::super::actions::DeferredAction::Hypr(action)))
         };

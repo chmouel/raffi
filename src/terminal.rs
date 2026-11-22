@@ -67,7 +67,7 @@ pub fn resolve(
 
 /// [`resolve`] with `$TERMINAL` and the binaries on `PATH`.
 pub fn resolve_default(configured: Option<&[String]>) -> Option<Vec<String>> {
-    let env_terminal = std::env::var("TERMINAL").ok();
+    let env_terminal = crate::process::var("TERMINAL").ok();
     resolve(
         configured,
         env_terminal.as_deref(),
@@ -145,7 +145,11 @@ pub fn tab_kind(prefix: &[String]) -> Option<TabKind> {
 /// or WezTerm. `kitty_socket` overrides `listen_on` from kitty.conf.
 pub fn find_tab_target(prefix: &[String], kitty_socket: Option<&str>) -> Option<TabTarget> {
     let kind = tab_kind(prefix)?;
-    let env = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
+    let env = |name: &str| {
+        crate::process::var(name)
+            .ok()
+            .filter(|value| !value.is_empty())
+    };
     let sockets = std::fs::read_to_string("/proc/net/unix")
         .map(|table| unix_sockets(&table))
         .unwrap_or_default();

@@ -418,7 +418,7 @@ fn current_uid() -> io::Result<u32> {
 /// directories, and refuses ones that are not private to this user.
 pub fn socket_dir() -> io::Result<PathBuf> {
     let uid = current_uid()?;
-    let base = match std::env::var_os("XDG_RUNTIME_DIR").filter(|dir| !dir.is_empty()) {
+    let base = match crate::process::var_os("XDG_RUNTIME_DIR").filter(|dir| !dir.is_empty()) {
         Some(dir) => PathBuf::from(dir).join("raffi"),
         None => std::env::temp_dir().join(format!("raffi-{uid}")),
     };
@@ -1025,8 +1025,8 @@ pub fn host_setup(home: &Path, config: &Path) -> HostSetup {
 
 /// The home and configuration directories the browsers use.
 pub fn user_dirs() -> Result<(PathBuf, PathBuf)> {
-    let home = PathBuf::from(std::env::var_os("HOME").context("HOME is not set")?);
-    let config = std::env::var_os("XDG_CONFIG_HOME")
+    let home = PathBuf::from(crate::process::var_os("HOME").context("HOME is not set")?);
+    let config = crate::process::var_os("XDG_CONFIG_HOME")
         .filter(|dir| !dir.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".config"));

@@ -33,7 +33,7 @@ impl PassContext {
         Self {
             store_dir: resolve_store_dir(
                 config.store_dir.as_deref(),
-                std::env::var("PASSWORD_STORE_DIR").ok().as_deref(),
+                crate::process::var("PASSWORD_STORE_DIR").ok().as_deref(),
             ),
             pinentry: config.pinentry,
             username_fields: config.username_fields(),

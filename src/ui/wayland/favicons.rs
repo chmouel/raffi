@@ -51,10 +51,12 @@ pub(super) fn host_key(url: &str) -> Option<String> {
 
 /// `name` under Raffi's cache directory.
 pub(super) fn cache_dir_named(name: &str) -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME")
+    let base = crate::process::var_os("XDG_CACHE_HOME")
         .filter(|dir| !dir.is_empty())
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))?;
+        .or_else(|| {
+            crate::process::var_os("HOME").map(|home| PathBuf::from(home).join(".cache"))
+        })?;
     Some(base.join("raffi").join(name))
 }
 

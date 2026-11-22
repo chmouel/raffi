@@ -254,7 +254,7 @@ pub(super) fn load_items(runner: &dyn Runner) -> Result<Vec<CommandItem>, Secret
     if !output.success() {
         return Err(SecretError::Tool("Cannot list the vault".into()));
     }
-    let otp = cache_file(|key| std::env::var(key).ok())
+    let otp = cache_file(|key| crate::process::var(key).ok())
         .and_then(|path| std::fs::File::open(path).ok())
         .map(|file| otp_ids(BufReader::new(file)))
         .unwrap_or_default();

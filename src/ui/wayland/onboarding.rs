@@ -595,7 +595,7 @@ impl LauncherApp {
                 let path = self.onboarding.config_path.as_ref().map(|path| {
                     super::app::tilde_path(
                         &path.to_string_lossy(),
-                        &std::env::var("HOME").unwrap_or_default(),
+                        &crate::process::var("HOME").unwrap_or_default(),
                     )
                 });
                 let status = match &path {

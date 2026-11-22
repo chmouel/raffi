@@ -58,7 +58,7 @@ impl Compositor {
     }
 
     pub fn current() -> Option<Self> {
-        Self::detect(|name| std::env::var(name).ok())
+        Self::detect(|name| crate::process::var(name).ok())
     }
 
     /// The program Raffi talks to the compositor with.

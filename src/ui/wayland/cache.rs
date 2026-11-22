@@ -208,6 +208,9 @@ pub(crate) enum Request {
         /// The client's command line, its program name first.
         argv: Vec<String>,
         cwd: String,
+        /// The client's environment, read and passed on to programs while
+        /// its window shows.
+        env: HashMap<String, String>,
     },
 }
 
@@ -654,7 +657,7 @@ pub(crate) fn cache_socket_path() -> Result<PathBuf> {
     if cfg!(test) {
         anyhow::bail!("the cache socket is disabled in tests");
     }
-    let base = std::env::var_os("XDG_RUNTIME_DIR")
+    let base = crate::process::var_os("XDG_RUNTIME_DIR")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(format!("/tmp/raffi-{}", unsafe { libc::getuid() })));
@@ -1680,8 +1683,13 @@ fn read_request(stream: &mut UnixStream, limit: usize) -> Incoming {
 
 fn serve_connection(state: Arc<ServerState>, mut stream: UnixStream) {
     let reply = match read_request(&mut stream, MAX_REQUEST_LINE) {
-        Incoming::Request(Request::Open { build, argv, cwd }) => {
-            return super::resident::serve_open(stream, &build, &argv, &cwd);
+        Incoming::Request(Request::Open {
+            build,
+            argv,
+            cwd,
+            env,
+        }) => {
+            return super::resident::serve_open(stream, &build, &argv, &cwd, env);
         }
         Incoming::Request(request) => handle_request(&state, request),
         Incoming::Refused(failure) => failure.into(),

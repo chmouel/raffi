@@ -285,7 +285,7 @@ struct Io {
 impl Io {
     fn detect() -> Self {
         let stdout_tty = crate::ui::is_tty(libc::STDOUT_FILENO);
-        let width = std::env::var("COLUMNS")
+        let width = crate::process::var("COLUMNS")
             .ok()
             .and_then(|columns| columns.trim().parse().ok())
             .filter(|width| *width > MIN_PREVIEW_CHARS * 4)
@@ -295,7 +295,7 @@ impl Io {
             stderr_tty: crate::ui::is_tty(libc::STDERR_FILENO),
             stdin_tty: crate::ui::is_tty(libc::STDIN_FILENO),
             width,
-            color: stdout_tty && std::env::var_os("NO_COLOR").is_none(),
+            color: stdout_tty && crate::process::var_os("NO_COLOR").is_none(),
         }
     }
 

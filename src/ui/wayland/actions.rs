@@ -18,7 +18,7 @@ const APP_START_WAIT: Duration = Duration::from_secs(10);
 const MAX_CURSOR_MOVES: usize = 1000;
 
 pub(super) fn find_tool(candidates: &[&'static str]) -> Option<&'static str> {
-    std::env::var_os("PATH").and_then(|paths| {
+    crate::process::var_os("PATH").and_then(|paths| {
         for dir in std::env::split_paths(&paths) {
             for candidate in candidates {
                 if dir.join(candidate).is_file() {
@@ -664,7 +664,7 @@ fn supports_select(manager: &str) -> bool {
 /// `xdg-open`, with `selected` highlighted when the manager supports it.
 pub(super) fn open_in_file_manager(dir: &str, selected: Option<&str>, configured: Option<&str>) {
     let manager = configured.unwrap_or_else(|| {
-        let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+        let desktop = crate::process::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
         detect_file_manager(&desktop, |name| find_tool(&[name]).is_some()).unwrap_or("xdg-open")
     });
     let (command, value) = file_manager_command(manager, dir, selected);
