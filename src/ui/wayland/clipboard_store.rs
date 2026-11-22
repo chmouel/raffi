@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension, MAIN_DB};
 
 use super::clipboard::{
     bounded_text, decode_image, image_dimensions, inspect_files, ClipItem, ClipPreview, ItemKind,
@@ -1189,10 +1189,12 @@ impl Store {
     /// of the stored bytes rather than the whole picture.
     pub(crate) fn image_meta(&self, hash: &str, now: i64) -> Result<Option<ImageMeta>, String> {
         let id = self.item_id(hash, now)?;
+        // substr() on a BLOB loads it whole, so read the header through
+        // incremental blob I/O instead.
         let row = self
             .conn
             .query_row(
-                "SELECT mime, length(data), substr(data, 1, ?2) FROM formats
+                "SELECT rowid, mime, length(data) FROM formats
                  WHERE item_id = ?1 AND mime LIKE 'image/%'
                  ORDER BY CASE mime
                      WHEN 'image/png' THEN 0
@@ -1200,24 +1202,31 @@ impl Store {
                      ELSE 1
                  END, mime
                  LIMIT 1",
-                params![id, IMAGE_HEADER_BYTES as i64],
+                [id],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, Vec<u8>>(2)?,
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
                     ))
                 },
             )
             .optional()
             .map_err(db_error)?;
-        Ok(row.and_then(|(mime, bytes, header)| {
-            image_dimensions(&header).map(|(width, height)| ImageMeta {
-                mime,
-                width,
-                height,
-                bytes: bytes.max(0) as usize,
-            })
+        let Some((rowid, mime, bytes)) = row else {
+            return Ok(None);
+        };
+        let blob = self
+            .conn
+            .blob_open(MAIN_DB, c"formats", c"data", rowid, true)
+            .map_err(db_error)?;
+        let mut header = vec![0; IMAGE_HEADER_BYTES.min(blob.len())];
+        blob.read_at_exact(&mut header, 0).map_err(db_error)?;
+        Ok(image_dimensions(&header).map(|(width, height)| ImageMeta {
+            mime,
+            width,
+            height,
+            bytes: bytes.max(0) as usize,
         }))
     }
 
@@ -1697,6 +1706,34 @@ mod tests {
             )
             .unwrap();
         bytes
+    }
+
+    #[test]
+    fn image_meta_reads_the_preferred_image_header() {
+        let (mut store, dir) = temp_store("image-meta");
+        let picture = png(5, 3);
+        let image = store
+            .insert(
+                Capture {
+                    formats: vec![
+                        ("image/bmp".into(), b"not an image".to_vec()),
+                        ("image/png".into(), picture.clone()),
+                    ],
+                    copied_at: NOW,
+                    source: None,
+                    password_marked: false,
+                },
+                &LIMITS,
+                NOW,
+            )
+            .unwrap();
+        let meta = store.image_meta(&image, NOW).unwrap().unwrap();
+        assert_eq!(meta.mime, "image/png");
+        assert_eq!((meta.width, meta.height), (5, 3));
+        assert_eq!(meta.bytes, picture.len());
+        let plain = store.insert(text("plain", NOW), &LIMITS, NOW).unwrap();
+        assert!(store.image_meta(&plain, NOW).unwrap().is_none());
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
