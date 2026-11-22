@@ -549,6 +549,8 @@ pub(crate) struct EmojiEntry {
 
 #[derive(Debug, Clone)]
 pub(crate) enum Message {
+    /// Close the window of a resident Raffi, which keeps running.
+    CloseWindow,
     SearchChanged(String),
     OpenActions,
     /// Right-click on a result row: select it and open its actions.

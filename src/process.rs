@@ -1,7 +1,8 @@
 //! Starting child processes without the environment Raffi set for itself.
 
 use std::ffi::OsStr;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 /// Variables Raffi exported for its own window, which children must not
@@ -18,6 +19,32 @@ pub(crate) fn command(program: impl AsRef<OsStr>) -> Command {
         }
     }
     command
+}
+
+/// Set while the server shows the launcher window for clients.
+static HOSTING_WINDOW: AtomicBool = AtomicBool::new(false);
+
+/// Mark this process as the server showing the launcher window.
+#[cfg_attr(not(feature = "wayland"), allow(dead_code))]
+pub(crate) fn set_hosting_window() {
+    HOSTING_WINDOW.store(true, Ordering::SeqCst);
+}
+
+/// Whether this process is the server showing the launcher window.
+pub(crate) fn hosting_window() -> bool {
+    HOSTING_WINDOW.load(Ordering::SeqCst)
+}
+
+/// Give a program Raffi starts and leaves running no streams when the server
+/// shows the window, as a launcher started from a keybinding has none, so
+/// its output stays out of the server's log.
+pub(crate) fn detach_streams(command: &mut Command) {
+    if hosting_window() {
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+    }
 }
 
 /// Export `name` for Raffi's own use, unless the user already set it.

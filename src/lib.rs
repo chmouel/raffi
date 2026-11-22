@@ -2683,6 +2683,11 @@ pub struct Args {
     pub cache_daemon: bool,
     #[options(help = "start with vim keybindings in normal mode", no_short)]
     pub vim_mode: bool,
+    #[options(
+        help = "open the window in this process even when the raffi server can show it",
+        no_short
+    )]
+    pub in_process: bool,
     #[options(command)]
     pub command: Option<Subcommand>,
 }
@@ -5896,6 +5901,7 @@ fn launcher_env_prefix(mc: &RaffiConfig) -> Vec<String> {
 /// Spawn `command` and reap the child in a background thread so it never
 /// lingers as a zombie when Raffi stays open.
 fn spawn_and_reap(mut command: Command) -> std::io::Result<()> {
+    crate::process::detach_streams(&mut command);
     let mut child = command.spawn()?;
     let _ = std::thread::Builder::new()
         .name("raffi-reaper".to_string())
@@ -6788,7 +6794,15 @@ pub fn run(args: Args) -> Result<()> {
 
     #[cfg(feature = "wayland")]
     if args.wants_server() {
-        return ui::run_server(load_config(&args, configfile)?);
+        let session = load_session(&args, configfile)?;
+        return ui::run_server(session.config, session.settings);
+    }
+
+    #[cfg(feature = "wayland")]
+    if served_args_problem(&args).is_none() {
+        if let Some(result) = ui::open_in_server() {
+            return result;
+        }
     }
 
     let session = load_session(&args, configfile)?;
@@ -7011,6 +7025,75 @@ pub(crate) fn load_session(args: &Args, configfile: &str) -> Result<Session> {
     })
 }
 
+/// Why the server cannot show the window for a run with `args`, checked by
+/// the client before it asks and by the server again. The window has to
+/// behave as when this process shows it: options that print, write files,
+/// log or run something else stay in the process.
+#[cfg(feature = "wayland")]
+pub(crate) fn served_args_problem(args: &Args) -> Option<&'static str> {
+    if args.in_process {
+        Some("--in-process was given")
+    } else if args.print_only {
+        Some("print-only output belongs to the caller")
+    } else if args.debug_file.is_some() {
+        Some("the debug log belongs to the caller")
+    } else if args.refresh_cache {
+        Some("the caches are refreshed by the caller")
+    } else if args.help
+        || args.version
+        || args.last_query
+        || args.print_config
+        || args.generate_schemas
+        || args.check_config
+        || args.install_browser_host
+        || args.uninstall_browser_host
+        || args.wants_server()
+        || args.command.is_some()
+    {
+        Some("not a launcher window")
+    } else {
+        None
+    }
+}
+
+/// A launcher window a client asked the server to show: the client's command
+/// line, and the session loaded from it as `run` would.
+#[cfg(feature = "wayland")]
+pub(crate) struct ServedOpen {
+    pub(crate) session: Session,
+    args: Args,
+}
+
+#[cfg(feature = "wayland")]
+impl ServedOpen {
+    /// Load the session for the client command line `argv`. `Err` says why
+    /// the client has to show the window itself.
+    pub(crate) fn load(argv: &[String]) -> Result<Self, String> {
+        let args = Args::parse_args_default(argv.get(1..).unwrap_or_default())
+            .map_err(|error| format!("cannot read the command line: {error}"))?;
+        if let Some(problem) = served_args_problem(&args) {
+            return Err(problem.to_string());
+        }
+        let configfile = default_config_path(&args);
+        let session = load_session(&args, &configfile).map_err(|error| format!("{error:#}"))?;
+        if session.config.entries.is_empty() {
+            return Err("nothing to launch".into());
+        }
+        if session.ui_type != UIType::Native {
+            return Err("the window is not Raffi's own".into());
+        }
+        if !session.settings.existing_configuration {
+            return Err("there is no configuration yet".into());
+        }
+        Ok(Self { session, args })
+    }
+
+    /// Run the entry the window returned, as `run` does after the window.
+    pub(crate) fn launch(&self, chosen: &str) -> Result<()> {
+        launch_chosen(&self.session, &self.args, chosen)
+    }
+}
+
 /// Run the entry the UI returned, if any.
 fn launch_chosen(session: &Session, args: &Args, chosen: &str) -> Result<()> {
     let chosen_name = chosen.trim();
@@ -7044,6 +7127,21 @@ fn launch_chosen(session: &Session, args: &Args, chosen: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "wayland")]
+    #[test]
+    fn test_only_plain_launcher_runs_are_shown_by_the_server() {
+        let problem = |argv: &[&str]| {
+            let args = Args::parse_args_default(argv).unwrap();
+            served_args_problem(&args)
+        };
+        assert_eq!(problem(&["-i", "clip ", "--theme", "light"]), None);
+        assert!(problem(&["--in-process"]).is_some());
+        assert!(problem(&["-p"]).is_some());
+        assert!(problem(&["-d", "/tmp/log"]).is_some());
+        assert!(problem(&["--server"]).is_some());
+        assert!(problem(&["--check-config"]).is_some());
+    }
     use std::io::Cursor;
     use std::os::unix::fs::PermissionsExt;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -7457,6 +7555,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            in_process: false,
             command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -7546,6 +7645,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            in_process: false,
             command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -7701,6 +7801,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            in_process: false,
             command: None,
         };
         let env_provider = MockEnvProvider {
@@ -7863,6 +7964,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            in_process: false,
             command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -7969,6 +8071,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            in_process: false,
             command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -8176,6 +8279,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            in_process: false,
             command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -8224,6 +8328,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            in_process: false,
             command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -8308,6 +8413,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            in_process: false,
             command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -8358,6 +8464,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            in_process: false,
             command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -8404,6 +8511,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            in_process: false,
             command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -8704,6 +8812,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            in_process: false,
             command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -8779,6 +8888,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            in_process: false,
             command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -8866,6 +8976,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            in_process: false,
             command: None,
         };
         let parsed_config = read_config_from_reader(Cursor::new(yaml_config), &args).unwrap();
@@ -8916,6 +9027,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            in_process: false,
             command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -8970,6 +9082,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            in_process: false,
             command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -9020,6 +9133,7 @@ launchers:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            in_process: false,
             command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -9073,6 +9187,7 @@ launchers:
                 cache_daemon: false,
                 options: Vec::new(),
                 vim_mode: false,
+                in_process: false,
                 command: None,
             };
             read_config_from_reader(Cursor::new(yaml), &args)
@@ -9561,6 +9676,7 @@ shell:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            in_process: false,
             command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -9617,6 +9733,7 @@ shell:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            in_process: false,
             command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();
@@ -9672,6 +9789,7 @@ shell:
             cache_daemon: false,
             options: Vec::new(),
             vim_mode: false,
+            in_process: false,
             command: None,
         };
         let parsed_config = read_config_from_reader(reader, &args).unwrap();

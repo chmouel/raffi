@@ -17,7 +17,9 @@ use self::wayland::WaylandUI;
 #[cfg(feature = "wayland")]
 pub(crate) use self::wayland::THUMBNAIL_DIR_NAME;
 #[cfg(feature = "wayland")]
-pub(crate) use self::wayland::{clear_wayland_caches, run_clipboard_cli, run_server};
+pub(crate) use self::wayland::{
+    clear_wayland_caches, open_in_server, run_clipboard_cli, run_server,
+};
 #[cfg(feature = "wayland")]
 pub(crate) use self::wayland::{clipboard_running_cmdlines, resolve_clipboard_addon};
 

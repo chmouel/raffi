@@ -31,7 +31,7 @@ pub(super) const MAX_STALE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const LIST_KEEP: usize = 200;
 const PREVIEW_KEEP: usize = 200;
 const SERVER_CLIENT_TIMEOUT: Duration = Duration::from_millis(100);
-const PROBE_TIMEOUT: Duration = Duration::from_millis(500);
+pub(super) const PROBE_TIMEOUT: Duration = Duration::from_millis(500);
 /// Waited refreshes run Slack and script filters, which can be slow.
 const WAIT_TIMEOUT: Duration = Duration::from_secs(120);
 const CLIPBOARD_TIMEOUT: Duration = Duration::from_secs(5);
@@ -198,6 +198,17 @@ pub(crate) enum Request {
         #[serde(default)]
         source: Option<String>,
     },
+    /// Show the launcher window for a client. Sent only to a server whose
+    /// status reports the same `window` protocol. The server answers
+    /// `Accepted` or `Refused`, then `Done` or `Toggled`.
+    Open {
+        /// The client's executable, so a server still running an older
+        /// build after an upgrade refuses.
+        build: String,
+        /// The client's command line, its program name first.
+        argv: Vec<String>,
+        cwd: String,
+    },
 }
 
 /// One MIME type of a `clipboard set` request, with its bytes base64-encoded:
@@ -223,7 +234,24 @@ pub(crate) enum Response {
         /// The server records the clipboard history.
         #[serde(default)]
         clipboard: bool,
+        /// Revision of the `Open` exchange when the server can show the
+        /// launcher window, 0 when it cannot.
+        #[serde(default)]
+        window: u32,
     },
+    /// The server shows the window for an `Open` request.
+    Accepted,
+    /// The server cannot show the window: the client shows it itself.
+    Refused {
+        reason: String,
+    },
+    /// The window of an accepted `Open` closed and what was picked ran.
+    Done {
+        #[serde(default)]
+        error: Option<String>,
+    },
+    /// The `Open` request closed the window that was showing.
+    Toggled,
     /// The content is on the clipboard. `id` is the history entry it was
     /// recorded as, absent when the policy kept it out of the history.
     ClipboardSet {
@@ -1163,6 +1191,10 @@ pub(crate) fn handle_request(state: &Arc<ServerState>, request: Request) -> Resp
             sources: state.source_status(),
             protocol: PROTOCOL,
             clipboard: super::clipboard_watch::recording(),
+            window: super::resident::window_protocol(),
+        },
+        Request::Open { .. } => Response::Refused {
+            reason: "the window is opened over a connection of its own".into(),
         },
         Request::GetScriptFilter {
             key,
@@ -1648,6 +1680,9 @@ fn read_request(stream: &mut UnixStream, limit: usize) -> Incoming {
 
 fn serve_connection(state: Arc<ServerState>, mut stream: UnixStream) {
     let reply = match read_request(&mut stream, MAX_REQUEST_LINE) {
+        Incoming::Request(Request::Open { build, argv, cwd }) => {
+            return super::resident::serve_open(stream, &build, &argv, &cwd);
+        }
         Incoming::Request(request) => handle_request(&state, request),
         Incoming::Refused(failure) => failure.into(),
         Incoming::Closed => return,
@@ -1672,8 +1707,12 @@ pub(crate) fn serve(listener: UnixListener, state: Arc<ServerState>) -> Result<(
     Ok(())
 }
 
-/// Run the server in the foreground.
-pub(crate) fn run_server(config: ParsedConfig) -> Result<()> {
+/// Run the server in the foreground. With a display, it also shows the
+/// launcher window for clients: `window` holds the settings it was started
+/// with.
+pub(crate) fn run_server(config: ParsedConfig, window: crate::ui::UISettings) -> Result<()> {
+    // Before any thread starts: it may set the environment.
+    let host = super::resident::prepare(window);
     let socket = cache_socket_path()?;
     let _ = fs::remove_file(&socket);
     let listener =
@@ -1712,7 +1751,14 @@ pub(crate) fn run_server(config: ParsedConfig) -> Result<()> {
         );
     }
     warm_loop(state.clone());
-    serve(listener, state)
+    let Some(host) = host else {
+        return serve(listener, state);
+    };
+    let server = std::thread::spawn(move || serve(listener, state));
+    super::resident::run(host);
+    server
+        .join()
+        .map_err(|_| anyhow::anyhow!("the server thread panicked"))?
 }
 
 /// Start periodic warming for every source that opted in.

@@ -53,6 +53,7 @@ fn insert_command(tool: &str, cursor_moves: usize) -> String {
 }
 
 fn spawn_and_reap(mut command: Command) -> std::io::Result<()> {
+    crate::process::detach_streams(&mut command);
     let mut child = command.spawn()?;
     let _ = std::thread::Builder::new()
         .name("raffi-reaper".to_string())
@@ -73,7 +74,59 @@ fn spawn_insert(value: &str, cursor_moves: usize) -> Result<(), String> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    spawn_and_reap(command).map_err(|error| format!("cannot run {tool}: {error}"))
+    if !crate::process::hosting_window() {
+        return spawn_and_reap(command).map_err(|error| format!("cannot run {tool}: {error}"));
+    }
+    // In its own process group, so a stuck typist can be killed with its
+    // children.
+    command.process_group(0);
+    let child = command
+        .spawn()
+        .map_err(|error| format!("cannot run {tool}: {error}"))?;
+    TYPING
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .push(child);
+    Ok(())
+}
+
+/// Children typing text into the window Raffi closed, kept when the server
+/// shows the window: it must not open again before they are done, or the
+/// text lands in Raffi.
+static TYPING: Mutex<Vec<Child>> = Mutex::new(Vec::new());
+
+/// Wait for the typing children to end, killing those still running after
+/// `timeout` along with their process group.
+pub(super) fn wait_for_typing(timeout: Duration) -> Result<(), String> {
+    let children = std::mem::take(&mut *TYPING.lock().unwrap_or_else(|error| error.into_inner()));
+    let deadline = Instant::now() + timeout;
+    let mut killed = 0;
+    for mut child in children {
+        loop {
+            match child.try_wait() {
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Ok(None) => {
+                    if let Ok(group) = i32::try_from(child.id()) {
+                        // SAFETY: kill(2) only sends a signal.
+                        unsafe { libc::kill(-group, libc::SIGKILL) };
+                    }
+                    let _ = child.wait();
+                    killed += 1;
+                    break;
+                }
+                Ok(Some(_)) | Err(_) => break,
+            }
+        }
+    }
+    if killed > 0 {
+        return Err(format!(
+            "typing the text took longer than {}s and was stopped",
+            timeout.as_secs()
+        ));
+    }
+    Ok(())
 }
 
 /// Copy a value to the clipboard using the first available tool.
@@ -950,6 +1003,35 @@ fn describe_non_text(types: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_wait_for_typing_kills_the_typist_group_at_the_deadline() {
+        let pid_file = std::env::temp_dir().join(format!("raffi-typist-{}", std::process::id()));
+        let _ = std::fs::remove_file(&pid_file);
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg(format!("sleep 30 & echo $! > {}; wait", pid_file.display()))
+            .process_group(0);
+        TYPING.lock().unwrap().push(command.spawn().unwrap());
+        let start = Instant::now();
+        while !pid_file.exists() && start.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let error = wait_for_typing(Duration::from_millis(200)).unwrap_err();
+        assert!(error.contains("stopped"), "{error}");
+        assert!(start.elapsed() < Duration::from_secs(5));
+        let sleeper = std::fs::read_to_string(&pid_file).unwrap();
+        let stat = format!("/proc/{}/stat", sleeper.trim());
+        let gone = (0..100).any(|_| {
+            std::thread::sleep(Duration::from_millis(10));
+            std::fs::read_to_string(&stat).map_or(true, |stat| stat.contains(") Z "))
+        });
+        assert!(gone, "the typist's child survived");
+        assert!(TYPING.lock().unwrap().is_empty());
+        assert!(wait_for_typing(Duration::from_millis(10)).is_ok());
+        let _ = std::fs::remove_file(&pid_file);
+    }
 
     fn sh(script: &str) -> Command {
         let mut command = crate::process::command("sh");

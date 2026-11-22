@@ -45,6 +45,7 @@ mod placeholders;
 mod preview;
 mod ranking;
 mod recent;
+mod resident;
 mod script_filters;
 mod secret_io;
 mod server_refresh;
@@ -378,9 +379,11 @@ fn run_wayland_ui(
 }
 
 /// Run the optional background server.
-pub(crate) fn run_server(config: crate::ParsedConfig) -> Result<()> {
-    self::cache::run_server(config)
+pub(crate) fn run_server(config: crate::ParsedConfig, window: UISettings) -> Result<()> {
+    self::cache::run_server(config, window)
 }
+
+pub(crate) use self::resident::open_in_server;
 
 /// Clear every wayland-side disk cache and ask a running server to clear its state.
 pub(crate) fn clear_wayland_caches() {

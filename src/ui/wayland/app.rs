@@ -1292,7 +1292,7 @@ impl LauncherApp {
     /// Close Raffi: end the process, or only the window when resident.
     pub(super) fn exit(&self) -> Task<Message> {
         if self.resident {
-            iced::window::oldest().and_then(iced::window::close)
+            Task::done(Message::CloseWindow)
         } else {
             iced::exit()
         }
@@ -1308,6 +1308,11 @@ impl LauncherApp {
     }
 
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
+        if let Message::CloseWindow = message {
+            // The drag worker uses the window's surface: stop it first.
+            self.drag = None;
+            return iced::window::oldest().and_then(iced::window::close);
+        }
         let task = self.update_inner(message);
         self.sync_vault();
         let prompt_insert = self.ensure_text_prompt_insert();
@@ -1585,6 +1590,8 @@ impl LauncherApp {
             }
         }
         match message {
+            // Handled by `update` before any prompt can take it.
+            Message::CloseWindow => Task::none(),
             Message::OpenOnboarding => self.open_onboarding(),
             Message::OpenConfigSetup => self.open_config_setup(),
             Message::CreateStarterConfig => self.create_starter_config(),
@@ -5395,7 +5402,9 @@ impl LauncherApp {
         &mut self,
         handles: Option<super::dnd::RawWaylandHandles>,
     ) -> Task<Message> {
-        super::release_renderer_override();
+        if !self.resident {
+            super::release_renderer_override();
+        }
         crate::debug::mark("window created");
         let config_path = self.onboarding.config_path.clone();
         let icons: Vec<std::path::PathBuf> = self
