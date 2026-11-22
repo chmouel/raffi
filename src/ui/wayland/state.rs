@@ -453,6 +453,9 @@ pub(super) struct ClipboardState {
     pub preview_inflight: Option<String>,
     pub preview_stale: bool,
     pub ocr_revision: Option<i64>,
+    /// OCR revision the latest scan saw before listing, so the first tick
+    /// does not list the history again when nothing was recognized since.
+    pub ocr_seen: std::sync::Arc<std::sync::Mutex<Option<i64>>>,
     pub ocr_revision_inflight: bool,
     /// Image item whose preview shows only its recognized text.
     pub ocr_text_only: Option<String>,

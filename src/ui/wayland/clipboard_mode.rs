@@ -19,6 +19,19 @@ const EXPIRY_TICK: Duration = Duration::from_secs(1);
 /// Blocking read of the complete recognized text of an image.
 type OcrTextReader = Box<dyn Fn(&super::clipboard::ItemRef) -> Result<String, String> + Send>;
 
+/// Store in `seen` the OCR revision of the history before it is listed.
+fn record_ocr_revision(history: &History, seen: &std::sync::Mutex<Option<i64>>) {
+    if !matches!(history.resolve(), Ok(super::clipboard::Backend::Raffi)) {
+        return;
+    }
+    let Ok(Some(store)) = super::clipboard_store::Store::open_existing() else {
+        return;
+    };
+    if let Ok(revision) = store.ocr_revision() {
+        *seen.lock().unwrap_or_else(|e| e.into_inner()) = Some(revision);
+    }
+}
+
 /// Report every [`EXPIRY_TICK`] while the subscription is kept, so the list
 /// can drop the entries that reached their deadline.
 pub(super) fn expiry_tick() -> UnboundedReceiver<()> {
@@ -158,8 +171,19 @@ impl LauncherApp {
         let min_chars = self.addons.clipboard.min_chars();
         let exclude = self.addons.clipboard.exclude_regexes();
         let history = History::new(self.addons.clipboard.backend);
+        let ocr_seen = self
+            .addons
+            .clipboard
+            .ocr
+            .enabled
+            .then(|| state.ocr_seen.clone());
         Task::perform(
-            async move { history.list_page("", 0, &query, kind, min_chars, &exclude?, cancel) },
+            async move {
+                if let Some(seen) = ocr_seen {
+                    record_ocr_revision(&history, &seen);
+                }
+                history.list_page("", 0, &query, kind, min_chars, &exclude?, cancel)
+            },
             move |result| Message::ClipboardPage(generation, result),
         )
     }
@@ -327,7 +351,16 @@ impl LauncherApp {
         if self.clipboard.ocr_revision == Some(revision) {
             return Task::none();
         }
+        let first = self.clipboard.ocr_revision.is_none();
         self.clipboard.ocr_revision = Some(revision);
+        let seen = *self
+            .clipboard
+            .ocr_seen
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if first && seen == Some(revision) {
+            return Task::none();
+        }
         self.clipboard.previews.clear();
         self.clipboard.preview_stale = self.clipboard.preview_inflight.is_some();
         self.handle_clipboard_refresh()

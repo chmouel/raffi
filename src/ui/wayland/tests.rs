@@ -5988,6 +5988,37 @@ fn test_clipboard_renders_a_growing_window_of_rows() {
 }
 
 #[test]
+fn test_clipboard_first_ocr_revision_seen_by_the_scan_does_not_rescan() {
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip ");
+    let _ = app.update(Message::ClipboardPage(
+        generation,
+        Ok(clip_page("a", 1, 1, vec![clip(0, "a", "a")])),
+    ));
+    *app.clipboard.ocr_seen.lock().unwrap() = Some(3);
+    let session = app.clipboard.session;
+    let _ = app.handle_clipboard_ocr_revision(session, Ok(3));
+    assert_eq!(app.clipboard.generation, generation, "no new scan");
+    assert_eq!(app.clipboard.ocr_revision, Some(3));
+
+    let _ = app.handle_clipboard_ocr_revision(session, Ok(4));
+    assert_ne!(
+        app.clipboard.generation, generation,
+        "a new revision rescans"
+    );
+}
+
+#[test]
+fn test_clipboard_first_ocr_revision_newer_than_the_scan_rescans() {
+    let mut app = test_app(clipboard_addons());
+    let generation = open_clipboard(&mut app, "clip ");
+    *app.clipboard.ocr_seen.lock().unwrap() = Some(3);
+    let session = app.clipboard.session;
+    let _ = app.handle_clipboard_ocr_revision(session, Ok(4));
+    assert_ne!(app.clipboard.generation, generation);
+}
+
+#[test]
 fn test_clipboard_ocr_refresh_discards_inflight_preview() {
     let mut app = test_app(clipboard_addons());
     let generation = open_clipboard(&mut app, "clip query");
