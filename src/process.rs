@@ -42,6 +42,19 @@ pub(crate) fn mark_server_thread() {
     SERVER_THREAD.with(|server| server.set(true));
 }
 
+/// Tells apart the environments a command can run in: `None` for this
+/// process's own, otherwise a digest of the served client's.
+#[cfg_attr(not(feature = "wayland"), allow(dead_code))]
+pub(crate) fn env_digest() -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let env = served_env()?;
+    let mut entries: Vec<_> = env.iter().collect();
+    entries.sort();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    entries.hash(&mut hasher);
+    Some(hasher.finish())
+}
+
 /// Make `env` the environment Raffi reads and gives its children, until
 /// cleared with `None`.
 #[cfg_attr(not(feature = "wayland"), allow(dead_code))]
@@ -188,5 +201,23 @@ mod tests {
         assert!(printed.starts_with("client"), "{printed}");
         assert!(path.is_none());
         assert!(var("RAFFI_TEST_CLIENT_VARIABLE").is_err());
+    }
+
+    #[test]
+    fn server_threads_still_honour_an_explicit_environment() {
+        let env: ClientEnv = Arc::new(HashMap::from([(
+            "RAFFI_TEST_CLIENT_VARIABLE".to_string(),
+            "client".to_string(),
+        )]));
+        std::thread::spawn(move || {
+            mark_server_thread();
+            assert!(env_digest().is_none());
+            let (read, digest) =
+                with_env(env, || (var("RAFFI_TEST_CLIENT_VARIABLE"), env_digest()));
+            assert_eq!(read.as_deref(), Ok("client"));
+            assert!(digest.is_some());
+        })
+        .join()
+        .unwrap();
     }
 }

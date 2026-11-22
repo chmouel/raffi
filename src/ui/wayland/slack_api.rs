@@ -418,31 +418,48 @@ fn api_error(method: &str, error: &str, value: &Value) -> String {
     }
 }
 
-/// The commands that print the Slack token and cookie.
-type CredentialCommands = (Option<String>, Option<String>);
+/// What a client was built from: the commands printing the Slack token and
+/// cookie, and the environment they ran in (see `process::env_digest`).
+type ClientKey = (Option<String>, Option<String>, Option<u64>);
 
-/// The client of this process with the commands it was built from, built on
-/// first use so a password manager prompt only shows once. Other commands,
-/// from a config loaded later, build a new one.
-static CLIENT: Mutex<Option<(CredentialCommands, Arc<Client>)>> = Mutex::new(None);
+/// The clients of this process, built on first use so a password manager
+/// prompt only shows once. A config loaded later with other commands, or a
+/// window served for a caller with another environment, builds its own.
+#[derive(Default)]
+struct Clients {
+    built: HashMap<ClientKey, Arc<Client>>,
+    /// The client last loaded by the server's own work, then by the window
+    /// being served, so the server warming Slack never changes the account
+    /// a window acts on.
+    current: [Option<ClientKey>; 2],
+}
+
+static CLIENTS: Mutex<Option<Clients>> = Mutex::new(None);
 
 pub(super) fn client(
     token_command: Option<&str>,
     cookie_command: Option<&str>,
 ) -> Result<Arc<Client>, String> {
-    let mut slot = CLIENT
+    let mut slot = CLIENTS
         .lock()
         .map_err(|_| "Slack client unavailable".to_string())?;
-    let commands: CredentialCommands = (
+    let clients = slot.get_or_insert_with(Clients::default);
+    let digest = crate::process::env_digest();
+    let key: ClientKey = (
         token_command.map(str::to_string),
         cookie_command.map(str::to_string),
+        digest,
     );
+    let context = usize::from(digest.is_some());
     // A refused client is rebuilt so the commands print the updated token.
-    if let Some((_, client)) = slot
-        .as_ref()
-        .filter(|(built_from, client)| *built_from == commands && client.rejection().is_none())
+    if let Some(client) = clients
+        .built
+        .get(&key)
+        .filter(|client| client.rejection().is_none())
+        .cloned()
     {
-        return Ok(client.clone());
+        clients.current[context] = Some(key);
+        return Ok(client);
     }
     let token_command = token_command
         .map(str::trim)
@@ -456,16 +473,23 @@ pub(super) fn client(
         _ => None,
     };
     let client = Arc::new(Client::new(Credentials::new(token, cookie)?));
-    *slot = Some((commands, client.clone()));
+    clients.built.insert(key.clone(), client.clone());
+    clients.current[context] = Some(key);
     Ok(client)
 }
 
-/// The client already built by a load, for actions run from the list.
+/// The client last built or reused by a load on this side (server work or
+/// the served window), for actions run from the list.
 pub(super) fn current_client() -> Result<Arc<Client>, String> {
-    CLIENT
+    let context = usize::from(crate::process::env_digest().is_some());
+    CLIENTS
         .lock()
         .ok()
-        .and_then(|slot| slot.as_ref().map(|(_, client)| client.clone()))
+        .and_then(|slot| {
+            let clients = slot.as_ref()?;
+            let key = clients.current[context].as_ref()?;
+            clients.built.get(key).cloned()
+        })
         .ok_or_else(|| "Slack is not connected".to_string())
 }
 
@@ -1408,6 +1432,20 @@ pub(super) mod tests {
         let other = client(Some("printf xoxp-2"), None).unwrap();
         assert!(!Arc::ptr_eq(&first, &other));
         assert!(Arc::ptr_eq(&current_client().unwrap(), &other));
+        // A window served for a caller has clients of its own, and the
+        // server's work loading Slack meanwhile does not change them.
+        let caller: crate::process::ClientEnv = Arc::new(HashMap::from([(
+            "PATH".to_string(),
+            std::env::var("PATH").unwrap_or_default(),
+        )]));
+        let served = crate::process::with_env(caller.clone(), || {
+            client(Some("printf xoxp-1"), None).unwrap()
+        });
+        assert!(!Arc::ptr_eq(&served, &first));
+        client(Some("printf xoxp-1"), None).unwrap();
+        crate::process::with_env(caller, || {
+            assert!(Arc::ptr_eq(&current_client().unwrap(), &served));
+        });
     }
 
     #[test]
