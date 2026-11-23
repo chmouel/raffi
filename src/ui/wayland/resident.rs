@@ -278,7 +278,7 @@ fn accept(
     if let Some(name) = session_difference(&host.env, &env) {
         return Err(format!("{name} differs from the server's"));
     }
-    let env: ClientEnv = Arc::new(env);
+    let env = ClientEnv::new(env);
     let (served, launch) = crate::process::with_env(env.clone(), || {
         let served = ServedOpen::load(argv)?;
         let settings = &served.session.settings;

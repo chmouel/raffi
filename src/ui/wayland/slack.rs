@@ -2090,38 +2090,52 @@ pub(super) fn load_search(
             &["edit-find", SLACK_ICON],
         ));
     }
-    remember_search(View::Search(terms), &rows);
+    remember_search(client.id(), View::Search(terms), &rows);
     Ok(rows)
 }
 
-/// A search or people lookup of this process, with the account epoch it
-/// was made in.
-type Search = (View, u64, std::time::Instant, Vec<CommandItem>);
+/// A search or people lookup of this process, scoped to the client and
+/// account epoch it was made in.
+type Search = (u64, View, u64, std::time::Instant, Vec<CommandItem>);
 
 /// Searches and people lookups of this process, newest last.
 static SEARCHES: std::sync::Mutex<Vec<Search>> = std::sync::Mutex::new(Vec::new());
 
-fn remember_search(view: View, rows: &[CommandItem]) {
+fn remember_search(client_id: u64, view: View, rows: &[CommandItem]) {
     let epoch = slack_api::account_epoch();
     let Ok(mut searches) = SEARCHES.lock() else {
         return;
     };
-    searches.retain(|(seen, ..)| seen != &view);
+    searches.retain(|(owner, seen, ..)| !(*owner == client_id && seen == &view));
     if searches.len() >= MAX_CACHED_SEARCHES {
         searches.remove(0);
     }
-    searches.push((view, epoch, std::time::Instant::now(), rows.to_vec()));
+    searches.push((
+        client_id,
+        view,
+        epoch,
+        std::time::Instant::now(),
+        rows.to_vec(),
+    ));
 }
 
 /// The rows of a search or people lookup done while they are fresh, for the
-/// account of the credentials.
+/// current window's connected client.
 pub(super) fn cached_search(view: &View) -> Option<Vec<CommandItem>> {
+    let client_id = slack_api::current_client_id()?;
+    cached_search_for(client_id, view)
+}
+
+fn cached_search_for(client_id: u64, view: &View) -> Option<Vec<CommandItem>> {
     let searches = SEARCHES.lock().ok()?;
     let epoch = slack_api::account_epoch();
     searches
         .iter()
-        .find(|(seen, made, at, _)| {
-            seen == view && *made == epoch && at.elapsed() < slack_api::cache_fresh()
+        .find(|(owner, seen, made, at, _)| {
+            *owner == client_id
+                && seen == view
+                && *made == epoch
+                && at.elapsed() < slack_api::cache_fresh()
         })
         .map(|(.., rows)| rows.clone())
 }
@@ -2165,7 +2179,7 @@ pub(super) fn load_people(
             &["system-users", SLACK_ICON],
         ));
     }
-    remember_search(View::People(query), &rows);
+    remember_search(client.id(), View::People(query), &rows);
     Ok(rows)
 }
 
@@ -4905,14 +4919,16 @@ mod tests {
     }
 
     #[test]
-    fn test_searches_are_remembered_per_view() {
+    fn test_searches_are_remembered_per_view_and_client() {
         let rows = vec![row("slack:none", "No messages match", &[SLACK_ICON])];
         let view = View::Search("remembered terms".into());
-        assert!(cached_search(&view).is_none());
-        remember_search(view.clone(), &rows);
-        let found = cached_search(&view).unwrap();
+        assert!(cached_search_for(101, &view).is_none());
+        remember_search(101, view.clone(), &rows);
+        let found = cached_search_for(101, &view).unwrap();
         assert_eq!(found[0].identity, "slack:none");
-        assert!(cached_search(&View::People("remembered terms".into())).is_none());
+        assert!(cached_search_for(101, &View::People("remembered terms".into())).is_none());
+        // Another client cannot read the first client's cached search.
+        assert!(cached_search_for(102, &view).is_none());
     }
 
     #[test]

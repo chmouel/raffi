@@ -6,11 +6,29 @@ use std::collections::HashMap;
 use std::env::VarError;
 use std::ffi::{OsStr, OsString};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-/// The environment of a client whose window the server shows.
-pub(crate) type ClientEnv = Arc<HashMap<String, String>>;
+/// The environment of a client whose window the server shows, tagged with a
+/// unique scope id so background work stays tied to the window that started it.
+#[derive(Clone)]
+pub(crate) struct ClientEnv {
+    vars: Arc<HashMap<String, String>>,
+    scope: u64,
+}
+
+#[cfg_attr(not(feature = "wayland"), allow(dead_code))]
+static NEXT_SCOPE: AtomicU64 = AtomicU64::new(1);
+
+impl ClientEnv {
+    #[cfg_attr(not(feature = "wayland"), allow(dead_code))]
+    pub(crate) fn new(vars: HashMap<String, String>) -> Self {
+        Self {
+            vars: Arc::new(vars),
+            scope: NEXT_SCOPE.fetch_add(1, Ordering::Relaxed),
+        }
+    }
+}
 
 /// The environment of the window being served, read by every thread while it
 /// runs and finishes.
@@ -78,13 +96,40 @@ pub(crate) fn inherit<T>(f: impl FnOnce() -> T) -> impl FnOnce() -> T {
     move || context.enter(f)
 }
 
+/// Per-launch variables that change every time a compositor or shell opens
+/// Raffi without changing the user's account context.
+#[cfg_attr(not(feature = "wayland"), allow(dead_code))]
+const EPHEMERAL_ENV_VARS: &[&str] = &[
+    "XDG_ACTIVATION_TOKEN",
+    "DESKTOP_STARTUP_ID",
+    "INVOCATION_ID",
+    "JOURNAL_STREAM",
+    "NOTIFY_SOCKET",
+    "SYSTEMD_EXEC_PID",
+    "WINDOWID",
+    "SHLVL",
+    "_",
+    "OLDPWD",
+];
+
+/// Identifies the served window this thread is working for, or `None` for
+/// the process's own environment.
+#[cfg_attr(not(feature = "wayland"), allow(dead_code))]
+pub(crate) fn env_scope() -> Option<u64> {
+    served_env().map(|env| env.scope)
+}
+
 /// Tells apart the environments a command can run in: `None` for this
-/// process's own, otherwise a digest of the served client's.
+/// process's own, otherwise a digest of the served client's stable variables.
 #[cfg_attr(not(feature = "wayland"), allow(dead_code))]
 pub(crate) fn env_digest() -> Option<u64> {
     use std::hash::{Hash, Hasher};
     let env = served_env()?;
-    let mut entries: Vec<_> = env.iter().collect();
+    let mut entries: Vec<_> = env
+        .vars
+        .iter()
+        .filter(|(name, _)| !EPHEMERAL_ENV_VARS.contains(&name.as_str()))
+        .collect();
     entries.sort();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     entries.hash(&mut hasher);
@@ -114,7 +159,7 @@ pub(crate) fn with_env<T>(env: ClientEnv, f: impl FnOnce() -> T) -> T {
 pub(crate) fn var_os(name: impl AsRef<str>) -> Option<OsString> {
     let name = name.as_ref();
     match served_env() {
-        Some(env) => env.get(name).map(OsString::from),
+        Some(env) => env.vars.get(name).map(OsString::from),
         None => std::env::var_os(name),
     }
 }
@@ -137,7 +182,7 @@ static EXPORTED: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 pub(crate) fn command(program: impl AsRef<OsStr>) -> Command {
     let mut command = Command::new(program);
     if let Some(env) = served_env() {
-        command.env_clear().envs(env.iter());
+        command.env_clear().envs(env.vars.iter());
     } else if let Ok(exported) = EXPORTED.lock() {
         for name in exported.iter() {
             command.env_remove(name);
@@ -217,7 +262,7 @@ mod tests {
 
     #[test]
     fn served_environment_is_read_and_given_to_children() {
-        let env: ClientEnv = Arc::new(HashMap::from([(
+        let env = ClientEnv::new(HashMap::from([(
             "RAFFI_TEST_CLIENT_VARIABLE".to_string(),
             "client".to_string(),
         )]));
@@ -241,7 +286,7 @@ mod tests {
 
     #[test]
     fn server_threads_still_honour_an_explicit_environment() {
-        let env: ClientEnv = Arc::new(HashMap::from([(
+        let env = ClientEnv::new(HashMap::from([(
             "RAFFI_TEST_CLIENT_VARIABLE".to_string(),
             "client".to_string(),
         )]));
@@ -259,7 +304,7 @@ mod tests {
 
     #[test]
     fn started_work_keeps_the_environment_it_was_started_in() {
-        let env: ClientEnv = Arc::new(HashMap::from([(
+        let env = ClientEnv::new(HashMap::from([(
             "RAFFI_TEST_CLIENT_VARIABLE".to_string(),
             "client".to_string(),
         )]));
@@ -268,5 +313,29 @@ mod tests {
         assert_eq!(read.as_deref(), Ok("client"));
         let server = std::thread::spawn(inherit(|| SERVER_THREAD.with(Cell::get)));
         assert!(server.join().unwrap());
+    }
+
+    #[test]
+    fn env_digest_ignores_ephemeral_launch_variables() {
+        let first = ClientEnv::new(HashMap::from([
+            ("HOME".to_string(), "/home/u".to_string()),
+            ("XDG_ACTIVATION_TOKEN".to_string(), "token-1".to_string()),
+            ("DESKTOP_STARTUP_ID".to_string(), "startup-1".to_string()),
+        ]));
+        let second = ClientEnv::new(HashMap::from([
+            ("HOME".to_string(), "/home/u".to_string()),
+            ("XDG_ACTIVATION_TOKEN".to_string(), "token-2".to_string()),
+            ("DESKTOP_STARTUP_ID".to_string(), "startup-2".to_string()),
+        ]));
+        let other = ClientEnv::new(HashMap::from([
+            ("HOME".to_string(), "/home/u".to_string()),
+            ("SLACK_PROFILE".to_string(), "work".to_string()),
+        ]));
+        let d1 = with_env(first.clone(), env_digest);
+        let d2 = with_env(second.clone(), env_digest);
+        let d3 = with_env(other, env_digest);
+        assert_eq!(d1, d2);
+        assert_ne!(d1, d3);
+        assert_ne!(with_env(first, env_scope), with_env(second, env_scope));
     }
 }

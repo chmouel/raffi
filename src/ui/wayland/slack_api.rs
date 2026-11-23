@@ -207,7 +207,10 @@ fn read_reply(mut response: ureq::http::Response<ureq::Body>) -> Result<Reply, S
     })
 }
 
+static NEXT_CLIENT_ID: AtomicU64 = AtomicU64::new(1);
+
 pub(super) struct Client {
+    id: u64,
     http: Box<dyn Http>,
     sleep: fn(Duration),
     kind: TokenKind,
@@ -225,6 +228,7 @@ impl Client {
             .build()
             .into();
         Self {
+            id: NEXT_CLIENT_ID.fetch_add(1, Ordering::Relaxed),
             kind: credentials.kind,
             http: Box::new(UreqHttp { agent, credentials }),
             sleep: std::thread::sleep,
@@ -241,12 +245,17 @@ impl Client {
     #[cfg(test)]
     pub fn fake_with(http: Box<dyn Http>, kind: TokenKind) -> Self {
         Self {
+            id: NEXT_CLIENT_ID.fetch_add(1, Ordering::Relaxed),
             http,
             sleep: |_| {},
             kind,
             rejection: Mutex::new(None),
             identity: OnceLock::new(),
         }
+    }
+
+    pub fn id(&self) -> u64 {
+        self.id
     }
 
     /// The error Slack gave when it refused the token, as after logging
@@ -422,45 +431,119 @@ fn api_error(method: &str, error: &str, value: &Value) -> String {
 /// cookie, and the environment they ran in (see `process::env_digest`).
 type ClientKey = (Option<String>, Option<String>, Option<u64>);
 
+/// Most credential-bearing clients kept in memory at once; least-recently
+/// used ones are dropped so repeated environment changes never grow without
+/// bound.
+const MAX_CLIENTS: usize = 8;
+
+/// Most served-window scopes remembered at once.
+const MAX_SCOPES: usize = 32;
+
+struct CachedClient {
+    client: Arc<Client>,
+    used: u64,
+}
+
+struct ScopeEntry {
+    key: ClientKey,
+    used: u64,
+}
+
 /// The clients of this process, built on first use so a password manager
 /// prompt only shows once. A config loaded later with other commands, or a
 /// window served for a caller with another environment, builds its own.
 #[derive(Default)]
 struct Clients {
-    built: HashMap<ClientKey, Arc<Client>>,
-    /// The client last loaded by the server's own work, then by the window
-    /// being served, so the server warming Slack never changes the account
-    /// a window acts on.
-    current: [Option<ClientKey>; 2],
+    built: HashMap<ClientKey, CachedClient>,
+    /// Per-key build lock so concurrent callers for the same credentials
+    /// share one prompt without holding `CLIENTS` across command execution.
+    building: HashMap<ClientKey, Arc<Mutex<()>>>,
+    /// The client key selected for each window scope (`None` for server or
+    /// standalone work, `Some(id)` for a served window).
+    scopes: HashMap<Option<u64>, ScopeEntry>,
+    tick: u64,
+}
+
+impl Clients {
+    fn next_tick(&mut self) -> u64 {
+        self.tick += 1;
+        self.tick
+    }
+
+    fn record_scope(&mut self, scope: Option<u64>, key: ClientKey) {
+        let used = self.next_tick();
+        self.scopes.insert(scope, ScopeEntry { key, used });
+        while self.scopes.len() > MAX_SCOPES {
+            let oldest = self
+                .scopes
+                .iter()
+                .filter(|(k, _)| k.is_some())
+                .min_by_key(|(_, entry)| entry.used)
+                .map(|(k, _)| *k);
+            match oldest {
+                Some(oldest) => {
+                    self.scopes.remove(&oldest);
+                }
+                None => break,
+            }
+        }
+    }
+
+    fn reuse(&mut self, scope: Option<u64>, key: &ClientKey) -> Option<Arc<Client>> {
+        let used = self.next_tick();
+        let client = self
+            .built
+            .get_mut(key)
+            .filter(|entry| entry.client.rejection().is_none())
+            .map(|entry| {
+                entry.used = used;
+                entry.client.clone()
+            })?;
+        self.record_scope(scope, key.clone());
+        Some(client)
+    }
+
+    fn insert(&mut self, scope: Option<u64>, key: ClientKey, client: Arc<Client>) {
+        let used = self.next_tick();
+        self.built
+            .insert(key.clone(), CachedClient { client, used });
+        while self.built.len() > MAX_CLIENTS {
+            let oldest = self
+                .built
+                .iter()
+                .filter(|(k, _)| *k != &key)
+                .min_by_key(|(_, entry)| entry.used)
+                .map(|(k, _)| k.clone());
+            match oldest {
+                Some(oldest) => {
+                    self.built.remove(&oldest);
+                }
+                None => break,
+            }
+        }
+        self.record_scope(scope, key);
+    }
+
+    fn current(&self, scope: Option<u64>) -> Option<Arc<Client>> {
+        let key = &self.scopes.get(&scope)?.key;
+        self.built.get(key).map(|entry| entry.client.clone())
+    }
 }
 
 static CLIENTS: Mutex<Option<Clients>> = Mutex::new(None);
 
-pub(super) fn client(
-    token_command: Option<&str>,
-    cookie_command: Option<&str>,
-) -> Result<Arc<Client>, String> {
-    let mut slot = CLIENTS
-        .lock()
-        .map_err(|_| "Slack client unavailable".to_string())?;
-    let clients = slot.get_or_insert_with(Clients::default);
-    let digest = crate::process::env_digest();
-    let key: ClientKey = (
+fn client_key(token_command: Option<&str>, cookie_command: Option<&str>) -> ClientKey {
+    (
         token_command.map(str::to_string),
         cookie_command.map(str::to_string),
-        digest,
-    );
-    let context = usize::from(digest.is_some());
-    // A refused client is rebuilt so the commands print the updated token.
-    if let Some(client) = clients
-        .built
-        .get(&key)
-        .filter(|client| client.rejection().is_none())
-        .cloned()
-    {
-        clients.current[context] = Some(key);
-        return Ok(client);
-    }
+        crate::process::env_digest(),
+    )
+}
+
+fn build_credentials(
+    token_command: Option<&str>,
+    cookie_command: Option<&str>,
+) -> Result<Credentials, String> {
     let token_command = token_command
         .map(str::trim)
         .filter(|command| !command.is_empty())
@@ -472,63 +555,109 @@ pub(super) fn client(
         }
         _ => None,
     };
-    let client = Arc::new(Client::new(Credentials::new(token, cookie)?));
-    clients.built.insert(key.clone(), client.clone());
-    clients.current[context] = Some(key);
-    Ok(client)
+    Credentials::new(token, cookie)
 }
 
-/// Point the served window at the client already built for its credential
-/// commands in its environment, if any, rather than the last window's.
-pub(super) fn select_window_client(token_command: Option<&str>, cookie_command: Option<&str>) {
-    let Some(digest) = crate::process::env_digest() else {
-        return;
+pub(super) fn client(
+    token_command: Option<&str>,
+    cookie_command: Option<&str>,
+) -> Result<Arc<Client>, String> {
+    let scope = crate::process::env_scope();
+    let key = client_key(token_command, cookie_command);
+
+    let key_lock = {
+        let mut slot = CLIENTS
+            .lock()
+            .map_err(|_| "Slack client unavailable".to_string())?;
+        let clients = slot.get_or_insert_with(Clients::default);
+        // A refused client is rebuilt so the commands print the updated token.
+        if let Some(client) = clients.reuse(scope, &key) {
+            return Ok(client);
+        }
+        clients.building.entry(key.clone()).or_default().clone()
     };
+
+    // Hold only the per-key lock while running credential commands so
+    // `CLIENTS` stays free for the UI thread and other windows.
+    let _build_guard = key_lock
+        .lock()
+        .map_err(|_| "Slack client unavailable".to_string())?;
+
+    {
+        let mut slot = CLIENTS
+            .lock()
+            .map_err(|_| "Slack client unavailable".to_string())?;
+        let clients = slot.get_or_insert_with(Clients::default);
+        if let Some(client) = clients.reuse(scope, &key) {
+            if Arc::strong_count(&key_lock) == 2 {
+                clients.building.remove(&key);
+            }
+            return Ok(client);
+        }
+    }
+
+    let built = build_credentials(token_command, cookie_command)
+        .map(|credentials| Arc::new(Client::new(credentials)));
+
     if let Ok(mut slot) = CLIENTS.lock() {
         let clients = slot.get_or_insert_with(Clients::default);
-        let key: ClientKey = (
-            token_command.map(str::to_string),
-            cookie_command.map(str::to_string),
-            Some(digest),
-        );
-        clients.current[1] = clients.built.contains_key(&key).then_some(key);
+        if let Ok(client) = &built {
+            clients.insert(scope, key.clone(), client.clone());
+        }
+        if Arc::strong_count(&key_lock) == 2 {
+            clients.building.remove(&key);
+        }
+    }
+
+    built
+}
+
+/// Point the served window at the client key for its credential commands in
+/// its environment, rather than any other window's.
+pub(super) fn select_window_client(token_command: Option<&str>, cookie_command: Option<&str>) {
+    let Some(scope) = crate::process::env_scope() else {
+        return;
+    };
+    let key = client_key(token_command, cookie_command);
+    if let Ok(mut slot) = CLIENTS.lock() {
+        let clients = slot.get_or_insert_with(Clients::default);
+        clients.record_scope(Some(scope), key);
     }
 }
 
 /// Whether the cached directory of `workspace` may be shown here. Once
-/// this process has logged in to Slack, only the account of the current
-/// client on this side is, so a window never shows another one's rows.
+/// this process has logged in to Slack, only the verified account of this
+/// window's client may be shown, so a window never shows another account's
+/// rows.
 fn may_show(workspace: &Workspace) -> bool {
-    let context = usize::from(crate::process::env_digest().is_some());
+    let scope = crate::process::env_scope();
     let Ok(slot) = CLIENTS.lock() else {
         return false;
     };
     let Some(clients) = slot.as_ref().filter(|clients| !clients.built.is_empty()) else {
         return true;
     };
-    clients.current[context]
-        .as_ref()
-        .and_then(|key| clients.built.get(key))
-        .is_some_and(|client| {
-            client
-                .known_identity()
-                .is_none_or(|account| account.same_account(workspace))
-        })
+    clients.current(scope).is_some_and(|client| {
+        client
+            .known_identity()
+            .is_some_and(|account| account.same_account(workspace))
+    })
 }
 
-/// The client last built or reused by a load on this side (server work or
-/// the served window), for actions run from the list.
+/// The client built for this window (or server work), for actions run from
+/// the list.
 pub(super) fn current_client() -> Result<Arc<Client>, String> {
-    let context = usize::from(crate::process::env_digest().is_some());
+    let scope = crate::process::env_scope();
     CLIENTS
         .lock()
         .ok()
-        .and_then(|slot| {
-            let clients = slot.as_ref()?;
-            let key = clients.current[context].as_ref()?;
-            clients.built.get(key).cloned()
-        })
+        .and_then(|slot| slot.as_ref()?.current(scope))
         .ok_or_else(|| "Slack is not connected".to_string())
+}
+
+/// Identifies the active client for this window, if one is connected.
+pub(super) fn current_client_id() -> Option<u64> {
+    current_client().ok().map(|client| client.id())
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1246,18 +1375,11 @@ pub(super) fn account_epoch() -> u64 {
 }
 
 /// The cached directory if it belongs to the account of `client`. One of
-/// another account is forgotten at once, so it is never shown again. When
-/// Slack cannot be asked, as offline, the cached one is kept; nothing is
-/// cached until [`Client::known_identity`] is known.
+/// another account is forgotten at once, so it is never shown again. An
+/// unverified client never reuses a cached directory until `auth.test`
+/// confirms its account.
 pub(super) fn verified_directory(client: &Client) -> Result<Option<Arc<Directory>>, String> {
-    let account = match client.identity() {
-        Ok(account) => account,
-        Err(error) if client.rejection().is_some() => return Err(error),
-        Err(error) => {
-            crate::debug_log!("slack: cannot tell whose the token is: {error}");
-            return Ok(stored_directory());
-        }
-    };
+    let account = client.identity()?;
     let Some(directory) = stored_directory() else {
         return Ok(None);
     };
@@ -1481,33 +1603,128 @@ pub(super) mod tests {
         assert!(Arc::ptr_eq(&current_client().unwrap(), &other));
         // A window served for a caller has clients of its own, and the
         // server's work loading Slack meanwhile does not change them.
-        let caller: crate::process::ClientEnv = Arc::new(HashMap::from([(
-            "PATH".to_string(),
-            std::env::var("PATH").unwrap_or_default(),
-        )]));
-        let served = crate::process::with_env(caller.clone(), || {
+        let base_env = || {
+            HashMap::from([(
+                "PATH".to_string(),
+                std::env::var("PATH").unwrap_or_default(),
+            )])
+        };
+        let window_a = crate::process::ClientEnv::new(base_env());
+        let served = crate::process::with_env(window_a.clone(), || {
             client(Some("printf xoxp-1"), None).unwrap()
         });
         assert!(!Arc::ptr_eq(&served, &first));
         client(Some("printf xoxp-1"), None).unwrap();
-        crate::process::with_env(caller.clone(), || {
+        crate::process::with_env(window_a.clone(), || {
             assert!(Arc::ptr_eq(&current_client().unwrap(), &served));
         });
-        // The next window, for other commands, neither acts on nor shows
-        // the last window's account until it has logged in itself.
+        // A new window with a different per-launch activation token reuses
+        // the same client when selected, while staying scoped separately
+        // from window A.
+        let mut env_b = base_env();
+        env_b.insert("XDG_ACTIVATION_TOKEN".to_string(), "tok-2".to_string());
+        let window_b = crate::process::ClientEnv::new(env_b);
         let workspace = Workspace {
             team_id: "T1".into(),
             user_id: "U1".into(),
             ..Workspace::default()
         };
-        crate::process::with_env(caller.clone(), || {
+        let other_workspace = Workspace {
+            team_id: "T2".into(),
+            user_id: "U2".into(),
+            ..Workspace::default()
+        };
+        crate::process::with_env(window_b.clone(), || {
             select_window_client(Some("printf xoxp-2"), None);
             assert!(current_client().is_err());
+            assert!(current_client_id().is_none());
             assert!(!may_show(&workspace));
             select_window_client(Some("printf xoxp-1"), None);
             assert!(Arc::ptr_eq(&current_client().unwrap(), &served));
-            assert!(may_show(&workspace));
+            assert_eq!(current_client_id(), Some(served.id()));
+            // Unverified identity: cached directory is rejected until verified.
+            assert!(!may_show(&workspace));
         });
+        // Once verified, only the matching workspace may be shown.
+        let _ = served.identity.set(workspace.clone());
+        crate::process::with_env(window_b.clone(), || {
+            assert!(may_show(&workspace));
+            assert!(!may_show(&other_workspace));
+        });
+        // Delayed work from window A keeps window A's client even after
+        // window B selects another command.
+        crate::process::with_env(window_b.clone(), || {
+            select_window_client(Some("printf xoxp-2"), None);
+        });
+        crate::process::with_env(window_a.clone(), || {
+            assert!(Arc::ptr_eq(&current_client().unwrap(), &served));
+        });
+        crate::process::with_env(window_b, || {
+            assert!(current_client().is_err());
+        });
+    }
+
+    #[test]
+    fn test_select_window_client_does_not_wait_for_credential_commands() {
+        let env_slow = crate::process::ClientEnv::new(HashMap::from([
+            (
+                "PATH".to_string(),
+                std::env::var("PATH").unwrap_or_default(),
+            ),
+            ("RAFFI_TEST_SLOW_CLIENT".to_string(), "1".to_string()),
+        ]));
+        let env_other = crate::process::ClientEnv::new(HashMap::from([
+            (
+                "PATH".to_string(),
+                std::env::var("PATH").unwrap_or_default(),
+            ),
+            ("RAFFI_TEST_OTHER_CLIENT".to_string(), "1".to_string()),
+        ]));
+        let handle = std::thread::spawn(move || {
+            crate::process::with_env(env_slow, || {
+                client(Some("sleep 0.25; printf xoxp-slow"), None)
+            })
+        });
+        // Give the background thread time to enter `read_secret_command`.
+        std::thread::sleep(Duration::from_millis(50));
+        let started = std::time::Instant::now();
+        crate::process::with_env(env_other, || {
+            select_window_client(Some("printf xoxp-other"), None);
+        });
+        assert!(
+            started.elapsed() < Duration::from_millis(100),
+            "select_window_client blocked for {:?}",
+            started.elapsed()
+        );
+        assert!(handle.join().unwrap().is_ok());
+    }
+
+    #[test]
+    fn test_verified_directory_rejects_unverified_client_on_auth_failure() {
+        let fake = FakeHttp::with(vec![ok(
+            serde_json::json!({"ok": false, "error": "fatal_error"}),
+        )]);
+        let client = Client::fake(Box::new(fake));
+        assert!(verified_directory(&client).is_err());
+    }
+
+    #[test]
+    fn test_clients_cache_evicts_least_recently_used() {
+        let mut clients = Clients::default();
+        for i in 0..(MAX_CLIENTS + 3) {
+            let key: ClientKey = (Some(format!("cmd-{i}")), None, Some(i as u64));
+            let client = Arc::new(Client::fake(Box::new(FakeHttp::default())));
+            clients.insert(Some(i as u64), key, client);
+        }
+        assert_eq!(clients.built.len(), MAX_CLIENTS);
+        assert!(!clients
+            .built
+            .contains_key(&(Some("cmd-0".into()), None, Some(0))));
+        assert!(clients.built.contains_key(&(
+            Some(format!("cmd-{}", MAX_CLIENTS + 2)),
+            None,
+            Some((MAX_CLIENTS + 2) as u64)
+        )));
     }
 
     #[test]
