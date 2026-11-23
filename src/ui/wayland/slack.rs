@@ -1883,7 +1883,9 @@ fn load_home_with(
         let counts = scope.spawn(crate::process::inherit(|| {
             client.call("client.counts", &[("thread_counts_by_channel", "true")])
         }));
-        let muted_state = scope.spawn(crate::process::inherit(|| muted(client, refresh)));
+        let muted_state = scope.spawn(crate::process::inherit(|| {
+            muted(client, &directory.workspace, refresh)
+        }));
         let replies = fetch_live(client);
         let counts = counts
             .join()
@@ -1916,9 +1918,8 @@ fn load_home_with(
     };
     let answered = replies.0.is_some() || replies.1.is_some() || replies.2.is_some();
     let account = client.known_identity();
-    let previous = account
-        .and_then(|account| slack_api::read_cache(slack_api::LIVE_FILE, account))
-        .map(|(live, _)| live);
+    let cache_account = cache_read_account(client, directory);
+    let previous = slack_api::read_cache(slack_api::LIVE_FILE, cache_account).map(|(live, _)| live);
     let mut live = merge_live(previous, replies);
     if let Some((threads, activity)) = badges {
         live.unread_threads = threads.or(live.unread_threads);
@@ -1933,11 +1934,21 @@ fn load_home_with(
         sort_unread(&mut stored);
         slack_api::write_cache(slack_api::UNREAD_FILE, account, &stored);
     }
+    let unread = unread.or_else(|| {
+        slack_api::read_cache(slack_api::UNREAD_FILE, cache_account).map(|(unread, _)| unread)
+    });
     let mut rows = home_list(directory, &live, unread.as_deref(), config.open_in);
     if let Some(muted) = muted {
         dim_muted_home_rows(&mut rows, directory, &muted);
     }
     Ok(rows)
+}
+
+/// Account to read offline fallback caches from: the verified client identity
+/// when known, otherwise the workspace of the credential-matched cached
+/// directory.
+fn cache_read_account<'a>(client: &'a Client, directory: &'a Directory) -> &'a Workspace {
+    client.known_identity().unwrap_or(&directory.workspace)
 }
 
 /// The home rows from the cache, without asking Slack, to show until
@@ -1984,16 +1995,18 @@ pub(super) fn load_actions(
     config: crate::SlackAddonConfig,
     refresh: bool,
 ) -> Result<Vec<CommandItem>, String> {
-    let (client, _) = connect(&config, refresh)?;
+    let (client, directory) = connect(&config, refresh)?;
     let replies = fetch_live(&client);
     if let Some(error) = client.rejection() {
         return Err(error);
     }
     let answered = replies.0.is_some() || replies.1.is_some() || replies.2.is_some();
     let account = client.known_identity();
-    let previous = account
-        .and_then(|account| slack_api::read_cache(slack_api::LIVE_FILE, account))
-        .map(|(live, _)| live);
+    let previous = slack_api::read_cache(
+        slack_api::LIVE_FILE,
+        cache_read_account(&client, &directory),
+    )
+    .map(|(live, _)| live);
     let live = merge_live(previous, replies);
     if let Some(account) = account.filter(|_| answered) {
         slack_api::write_cache(slack_api::LIVE_FILE, account, &live);
@@ -2511,13 +2524,16 @@ pub(super) fn unread_rows(
 /// The conversations the user muted, from the cache while it is fresh
 /// unless `refresh`, else from Slack, or none when Slack does not say.
 /// Blocking unless cached.
-fn muted(client: &std::sync::Arc<Client>, refresh: bool) -> Option<HashSet<String>> {
+fn muted(
+    client: &std::sync::Arc<Client>,
+    workspace: &Workspace,
+    refresh: bool,
+) -> Option<HashSet<String>> {
     if refresh {
         return fetch_muted(client);
     }
-    let cached = client
-        .known_identity()
-        .and_then(|account| slack_api::read_cache(slack_api::MUTED_FILE, account));
+    let account = client.known_identity().unwrap_or(workspace);
+    let cached = slack_api::read_cache(slack_api::MUTED_FILE, account);
     let Some((muted, age)) = cached else {
         return fetch_muted(client);
     };
@@ -2572,7 +2588,9 @@ fn load_unread_with(
     refresh: bool,
 ) -> Result<Vec<CommandItem>, String> {
     let (counts, muted) = std::thread::scope(|scope| {
-        let muted = scope.spawn(crate::process::inherit(|| muted(client, refresh)));
+        let muted = scope.spawn(crate::process::inherit(|| {
+            muted(client, &directory.workspace, refresh)
+        }));
         let counts = client.call("client.counts", &[("thread_counts_by_channel", "true")]);
         (counts, muted.join().unwrap_or_default())
     });
@@ -5308,5 +5326,25 @@ mod tests {
             "credential command should run once"
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_cache_read_account_falls_back_to_directory_when_offline() {
+        let client = Client::fake(Box::new(FakeHttp::with(Vec::new())));
+        let directory = Directory::new(
+            Workspace {
+                team_id: "T1".into(),
+                user_id: "U1".into(),
+                ..Workspace::default()
+            },
+            Vec::new(),
+            Vec::new(),
+            1_000,
+        );
+        assert!(client.known_identity().is_none());
+        assert_eq!(
+            cache_read_account(&client, &directory),
+            &directory.workspace
+        );
     }
 }
