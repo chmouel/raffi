@@ -2,132 +2,70 @@
 
 # Raffi
 
-Raffi is a keyboard-driven search box for your Wayland desktop. From one place you can open apps, browse files, switch windows, paste from your clipboard history, fill in passwords, do sums, convert currencies and a lot more. It is written in Rust and works without a background server; running the optional [`raffi --server`](https://chmouel.github.io/raffi/reference/cli-options/#cache-management) opens the window about a third faster, warms caches in the background, and records your built-in clipboard history.
+[![Release](https://img.shields.io/github/v/release/chmouel/raffi?style=flat-square)](https://github.com/chmouel/raffi/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/chmouel/raffi/rust.yaml?branch=main&style=flat-square&label=CI)](https://github.com/chmouel/raffi/actions/workflows/rust.yaml)
+[![Crates.io](https://img.shields.io/crates/v/raffi?style=flat-square)](https://crates.io/crates/raffi)
+[![AUR](https://img.shields.io/aur/version/raffi-bin?style=flat-square)](https://aur.archlinux.org/packages/raffi-bin)
+[![Docs](https://img.shields.io/badge/docs-chmouel.github.io%2Fraffi-2563eb?style=flat-square)](https://chmouel.github.io/raffi/)
+[![License](https://img.shields.io/github/license/chmouel/raffi?style=flat-square)](LICENSE)
 
-It works as soon as it is installed. A YAML file lets you pick a theme, choose which addons are on, add web searches and snippets, and add commands or scripts of your own.
+[Documentation](https://chmouel.github.io/raffi/) · [Releases](https://github.com/chmouel/raffi/releases) · [Issues](https://github.com/chmouel/raffi/issues) · [Screenshots](#screenshots)
 
 ![Raffi with the preview pane open](website/src/assets/screenshots/main.png)
 
-The full documentation lives at <https://chmouel.github.io/raffi/>. More screenshots are [further down](#screenshots).
+Raffi is a keyboard-driven launcher for Wayland written in Rust. Drop it into a keybinding and start typing: with no configuration file at all, it searches your installed desktop applications, open windows, and system commands from a single box. You do not need a background daemon to run it. When you do want the extra speed or built-in clipboard recording, starting the optional [`raffi --server`](https://chmouel.github.io/raffi/reference/cli-options/#cache-management) keeps the graphics stack and fonts loaded so the window opens about a third faster, warms slow caches while Raffi is closed, and records everything you copy.
+
+Once the window is up, type to filter, move with the arrow keys, and press Enter. A preview pane sits on the right (`Ctrl+P` toggles it) to show what the selected row will open or run. Lists with multiple views switch with `Ctrl+Tab` and `Ctrl+Shift+Tab`, and the footer shows where you are. Pressing `Ctrl+/` or typing `?` lists every active keyword and shortcut; if you forget one, typing a word like `volume` or `password` brings up the right keyword anyway.
+
+Most built-in tools need no setup. Expressions like `2*(3+4)`, `$10 to eur`, `10 km to mi`, `#ff8800`, and `15:00 paris to nyc` answer directly in the list through the [calculator](https://chmouel.github.io/raffi/features/calculator/), [currency](https://chmouel.github.io/raffi/features/currency-converter/), [unit](https://chmouel.github.io/raffi/features/unit-conversion/), [color](https://chmouel.github.io/raffi/features/color-converter/), and [world clock](https://chmouel.github.io/raffi/features/world-clock/) addons. Starting a query with `/` or `~/` opens the [file browser](https://chmouel.github.io/raffi/features/file-browser/) with inline previews for source code, images, videos, and PDFs. For day-to-day desktop control, keywords handle [window switching](https://chmouel.github.io/raffi/features/window-switcher/) on Sway, Hyprland, and niri (`win `), [system actions](https://chmouel.github.io/raffi/features/system-commands/) (`sys `), [audio outputs and volume](https://chmouel.github.io/raffi/features/audio-switcher/) (`audio `), [media playback](https://chmouel.github.io/raffi/features/media-controls/) (`media `), [Bluetooth](https://chmouel.github.io/raffi/features/bluetooth/) (`bt `), [killing processes](https://chmouel.github.io/raffi/features/kill-process/) (`kill `), [developer utilities](https://chmouel.github.io/raffi/features/developer-tools/) (`dev `), emoji and Nerd Font icons (`emoji `), and running a command in a [terminal](https://chmouel.github.io/raffi/features/terminal/) (`> htop`).
+
+Around your browser and daily work, Raffi reads [open tabs](https://chmouel.github.io/raffi/features/browser-tabs/) (`tabs `, via the Vicinae browser extension), [bookmarks](https://chmouel.github.io/raffi/features/bookmarks/) (`bm `), and [browser history](https://chmouel.github.io/raffi/features/browser-history/) (`hist `). It pulls credentials from [pass](https://chmouel.github.io/raffi/features/password-store/) (`pass `) or [Bitwarden](https://chmouel.github.io/raffi/features/bitwarden/) via `rbw` (`bw `), and an optional [Slack](https://chmouel.github.io/raffi/features/slack/) addon (`slack `) searches messages, opens conversations, lists unreads, and sets your status. The [clipboard history](https://chmouel.github.io/raffi/features/clipboard-history/) (`clip `, or `raffi clipboard` from scripts) works like Alfred's clipboard manager on macOS: it runs OCR over screenshots so you can search text inside images, expires one-time codes, skips password managers, tags each item with the source application's icon, and lets you save any text entry straight into your [snippets](https://chmouel.github.io/raffi/features/text-snippets/#saving-from-the-clipboard). You can extend the launcher with custom [web searches](https://chmouel.github.io/raffi/features/web-search/), [text snippets](https://chmouel.github.io/raffi/features/text-snippets/), and [script filters](https://chmouel.github.io/raffi/features/script-filters/), style it with built-in [themes](https://chmouel.github.io/raffi/features/themes/) or your own palette, or point it at [Fuzzel](https://chmouel.github.io/raffi/integration/fuzzel/) if you prefer that frontend.
 
 ## Installation
 
-Arch Linux (AUR):
+Install Raffi from your package manager, with Cargo, or from the [GitHub releases](https://github.com/chmouel/raffi/releases) page (see the [installation guide](https://chmouel.github.io/raffi/installation/) for building from source):
 
 ```sh
+# Arch Linux (AUR)
 yay -S raffi-bin
-```
 
-Nix:
-
-```sh
+# Nix
 nix-shell -p raffi
-```
 
-Homebrew or Linuxbrew:
-
-```sh
+# Homebrew / Linuxbrew
 brew tap chmouel/raffi https://github.com/chmouel/raffi
 brew install raffi
-```
 
-With Cargo:
-
-```sh
+# Cargo
 cargo install raffi
 ```
 
-Prebuilt binaries are on the [releases page](https://github.com/chmouel/raffi/releases). The [installation guide](https://chmouel.github.io/raffi/installation/) covers building from source.
+## Keybindings
 
-## Bind it to a key
-
-Run `raffi` and start typing. With no config yet, Raffi searches your installed applications, open windows and system commands in one list, so you can try it straight away.
-
-Most people bind it to a key in their compositor. For Sway:
+Bind `raffi` to a shortcut in your compositor. Inside Sway, Hyprland, and niri, Raffi asks the compositor to launch whatever you pick.
 
 ```config
+# Sway (~/.config/sway/config)
 bindsym Mod4+Space exec raffi
 ```
 
-For Hyprland's Lua config:
-
 ```lua
+-- Hyprland (Lua)
 hl.bind("SUPER + R", hl.dsp.exec_cmd("raffi"))
 ```
 
-For niri:
-
 ```kdl
+// niri (~/.config/niri/config.kdl)
 binds {
     Mod+R { spawn "raffi"; }
 }
 ```
 
-Inside Hyprland, niri and Sway, Raffi asks the compositor to start the app you pick. The [Sway](https://chmouel.github.io/raffi/integration/sway/), [Hyprland](https://chmouel.github.io/raffi/integration/hyprland/) and [niri](https://chmouel.github.io/raffi/integration/niri/) pages cover window rules and more examples, and the [CLI reference](https://chmouel.github.io/raffi/reference/cli-options/) lists every flag.
-
-## Features
-
-Type to search, use the arrow keys to move, and press Enter. A preview pane on the right shows what the selected entry will do, and `Ctrl+P` hides or shows it. Press `Ctrl+/`, or type `?` on its own, to see every keyword and shortcut your config turns on. If you forget a keyword, type what you want, such as `volume` or `password`, and Raffi suggests the right one.
-
-Some lists have more than one view, and `Ctrl+Tab` always switches between them, with `Ctrl+Shift+Tab` going back. The footer tells you which view you are on. See [keyboard shortcuts](https://chmouel.github.io/raffi/reference/keyboard-shortcuts/) for the full list.
-
-Most addons start with a keyword followed by a space. Others answer as soon as your search looks like something they understand.
-
-### Direct Answers:
-
-- [Calculator](https://chmouel.github.io/raffi/features/calculator/): type a sum like `2*(3+4)`
-- [Currency converter](https://chmouel.github.io/raffi/features/currency-converter/): `$10 to eur`
-- [Unit conversion](https://chmouel.github.io/raffi/features/unit-conversion/): `10 km to mi`, `70f to c`
-- [Color converter](https://chmouel.github.io/raffi/features/color-converter/): `#ff8800` or `rgb(255 136 0)`
-- [World clock](https://chmouel.github.io/raffi/features/world-clock/): `time tokyo`, `15:00 paris to nyc`
-- [Developer tools](https://chmouel.github.io/raffi/features/developer-tools/): `dev ` to encode, decode or hash text, plus UUID and password generators
-
-### Pick items
-
-- [File browser](https://chmouel.github.io/raffi/features/file-browser/): start with `/` or `~/`, with previews of PDFs, images, videos and source code
-- Emoji and Nerd Font icons: `emoji `
-- [Clipboard history](https://chmouel.github.io/raffi/features/clipboard-history/): `clip `, or `raffi clipboard` from a script
-- [Text snippets](https://chmouel.github.io/raffi/features/text-snippets/), [web searches](https://chmouel.github.io/raffi/features/web-search/) and [script filters](https://chmouel.github.io/raffi/features/script-filters/), each under a keyword you choose
-- [Installed apps](https://chmouel.github.io/raffi/features/installed-apps/), with their actions such as opening a private window
-
-Clipboard history is worth turning on: the clipboard manager Alfred gives you
-on macOS, in the same search box as everything else. It searches the text
-inside screenshots, expires one-time codes, ignores password managers, show an icon from which app the paste come from and
-saves any text entry as a [snippet](https://chmouel.github.io/raffi/features/text-snippets/#saving-from-the-clipboard).
-
-### Desktop control:
-
-- [System commands](https://chmouel.github.io/raffi/features/system-commands/) to lock, suspend, log out or shut down: `sys `
-- [Window switcher](https://chmouel.github.io/raffi/features/window-switcher/) for Hyprland, niri and sway: `win `
-- [Browser tabs](https://chmouel.github.io/raffi/features/browser-tabs/) through the Vicinae browser extension: `tabs `
-- [Bookmarks](https://chmouel.github.io/raffi/features/bookmarks/): search and open browser bookmarks: `bm `
-- [Browser history](https://chmouel.github.io/raffi/features/browser-history/): search visited pages browser by browser: `hist `
-- [Media controls](https://chmouel.github.io/raffi/features/media-controls/): `media `
-- [Audio devices and volume](https://chmouel.github.io/raffi/features/audio-switcher/): `audio `
-- [Bluetooth](https://chmouel.github.io/raffi/features/bluetooth/): `bt `
-- [Stop a process](https://chmouel.github.io/raffi/features/kill-process/): `kill `
-- [Run a command in a terminal](https://chmouel.github.io/raffi/features/terminal/): `> htop`
-
-### Passwords access:
-
-- [pass](https://chmouel.github.io/raffi/features/password-store/): `pass `
-- [Bitwarden](https://chmouel.github.io/raffi/features/bitwarden/) through rbw: `bw `
-
-### Chat:
-
-[Slack](https://chmouel.github.io/raffi/features/slack/) is off until you set it up. Then `slack ` opens conversations, searches messages, lists what you haven't read and sets your status.
-
-### Look
-
-You can change how Raffi looks with the built-in [themes](https://chmouel.github.io/raffi/features/themes/) or your own colors.
-
-### Legacy Fuzzel support
-
-If you already use [Fuzzel](https://codeberg.org/dnkl/fuzzel), Raffi can show your apps and entries there instead. See the [Fuzzel page](https://chmouel.github.io/raffi/integration/fuzzel/) for what that gives up.
+Window rules and fuller setups live on the [Sway](https://chmouel.github.io/raffi/integration/sway/), [Hyprland](https://chmouel.github.io/raffi/integration/hyprland/), and [niri](https://chmouel.github.io/raffi/integration/niri/) pages. Every command-line flag is documented in the [CLI reference](https://chmouel.github.io/raffi/reference/cli-options/), and the full keymap is on the [keyboard shortcuts](https://chmouel.github.io/raffi/reference/keyboard-shortcuts/) page.
 
 ## Configuration
 
-Raffi needs no config to start. When you want to change something, settings go in `~/.config/raffi/raffi.yaml`:
+Raffi starts without any config files. When you want to customize it, general settings and addons go in `~/.config/raffi/raffi.yaml`:
 
 ```yaml
 general:
@@ -142,9 +80,7 @@ addons:
       url: "https://google.com/search?q={query}"
 ```
 
-`main_view` picks what shows up in the main list as you type. Omitting it keeps the default sources even after you add a config file; `null` or `[]` shows only apps and your own entries. `apps` keeps installed applications listed after you add entries of your own, and `web_searches` turns `g rust` into a Google search.
-
-Commands and scripts of your own go in `~/.config/raffi/launchers.yaml`:
+`main_view` chooses which sources appear in the default list (omitting it keeps the defaults; setting `null` or `[]` limits the list to apps and your own entries). Custom commands and inline scripts go in `~/.config/raffi/launchers.yaml`:
 
 ```yaml
 firefox_private:
@@ -154,22 +90,22 @@ firefox_private:
   description: Firefox private window
 ```
 
-[`examples/raffi.yaml`](examples/raffi.yaml) is a short starter config, and [`examples/raffi.full.yaml`](examples/raffi.full.yaml) is the generated reference listing every setting with its description (`raffi --print-config` prints it). [`examples/launchers.yaml`](examples/launchers.yaml) has entries to copy from. The [configuration guide](https://chmouel.github.io/raffi/configuration/overview/) covers settings, addons and custom entries.
-
-## Contributing
-
-Bug reports and pull requests are welcome on [GitHub](https://github.com/chmouel/raffi).
+Check [`examples/raffi.yaml`](examples/raffi.yaml) for a minimal starter, [`examples/raffi.full.yaml`](examples/raffi.full.yaml) (also printed by `raffi --print-config`) for every available option, and [`examples/launchers.yaml`](examples/launchers.yaml) for sample entries. The [configuration guide](https://chmouel.github.io/raffi/configuration/overview/) walks through all of them.
 
 ## Screenshots
 
-### Search and Recent Picks
+<details open>
+<summary>Search and Recent Picks</summary>
 
 <p><img width="800" alt="Main view with launchers and a recently picked demo snippet" src="website/src/assets/screenshots/main-recent.png" /></p>
 <p><img width="800" alt="One search listing a launcher and matching demo windows" src="website/src/assets/screenshots/main-search.png" /></p>
 <p><img width="800" alt="Main view narrowed to Launchers with Ctrl+Tab" src="website/src/assets/screenshots/main-source.png" /></p>
 <p><img width="800" alt="A demo installed app and its private-window desktop action" src="website/src/assets/screenshots/installed-apps.png" /></p>
 
-### Desktop and Utilities
+</details>
+
+<details>
+<summary>Desktop and Utilities</summary>
 
 <p><img width="800" alt="Window switcher with demo application and workspace details" src="website/src/assets/screenshots/window-switcher.png" /></p>
 <p><img width="800" alt="Typed command ready to run in a terminal" src="website/src/assets/screenshots/terminal.png" /></p>
@@ -186,13 +122,19 @@ Bug reports and pull requests are welcome on [GitHub](https://github.com/chmouel
 <p><img width="800" alt="Developer encoding and hashing tools" src="website/src/assets/screenshots/developer-tools.png" /></p>
 <p><img width="800" alt="Time conversion between London and Tokyo" src="website/src/assets/screenshots/world-clock.png" /></p>
 
-### Clipboard and Passwords
+</details>
+
+<details>
+<summary>Clipboard and Passwords</summary>
 
 <p><img width="800" alt="Demo clipboard history with multiline text preview" src="website/src/assets/screenshots/clipboard-history.png" /></p>
 <p><img width="800" alt="Fictional password-store entries without decrypted secrets" src="website/src/assets/screenshots/password-store.png" /></p>
 <p><img width="800" alt="Demo Bitwarden logins with public entry details" src="website/src/assets/screenshots/bitwarden.png" /></p>
 
-### Files and Previews
+</details>
+
+<details>
+<summary>Files and Previews</summary>
 
 <p><img width="800" alt="File browser with directory preview" src="website/src/assets/screenshots/file-browser.png" /></p>
 <p><img width="800" alt="File browser source code preview" src="website/src/assets/screenshots/file-browser-code-preview.png" /></p>
@@ -203,7 +145,10 @@ Bug reports and pull requests are welcome on [GitHub](https://github.com/chmouel
 <p><img width="800" alt="File browser rendering a demo PDF page" src="website/src/assets/screenshots/file-browser-pdf.png" /></p>
 <p><img width="800" alt="File-only listing sorted by modification time" src="website/src/assets/screenshots/file-browser-filter.png" /></p>
 
-### Search and Web
+</details>
+
+<details>
+<summary>Search, Web, Help, and Scripts</summary>
 
 <p><img width="800" alt="Text snippets with expanded content preview" src="website/src/assets/screenshots/text-snippets.png" /></p>
 <p><img width="800" alt="Text snippet with expanded dynamic placeholders and raw template" src="website/src/assets/screenshots/text-snippets-placeholders.png" /></p>
@@ -214,9 +159,6 @@ Bug reports and pull requests are welcome on [GitHub](https://github.com/chmouel
 <p><img width="800" alt="Bookmarks toolbar folder with a bookmark's details in the preview" src="website/src/assets/screenshots/bookmarks.png" /></p>
 <p><img width="800" alt="Browser history rows with site, profile and visit time" src="website/src/assets/screenshots/browser-history.png" /></p>
 <p><img width="800" alt="Configured fallback search results and preview" src="website/src/assets/screenshots/fallbacks.png" /></p>
-
-### Search, Help, and Scripts
-
 <p><img width="800" alt="Keyword suggestion while typing" src="website/src/assets/screenshots/keyword-suggestion.png" /></p>
 <p><img width="800" alt="Keyword and shortcut help list" src="website/src/assets/screenshots/keyword-help.png" /></p>
 <p><img width="800" alt="Keyboard shortcut help filtered to the preview shortcuts" src="website/src/assets/screenshots/keyword-help-shortcuts.png" /></p>
@@ -226,7 +168,10 @@ Bug reports and pull requests are welcome on [GitHub](https://github.com/chmouel
 <p><img width="800" alt="Herdr demo workspace, session and pane tree" src="website/src/assets/screenshots/herdr-tree.png" /></p>
 <p><img width="800" alt="Herdr demo agents grouped by status with terminal preview" src="website/src/assets/screenshots/herdr-status.png" /></p>
 
-### Themes
+</details>
+
+<details>
+<summary>Themes</summary>
 
 <p><img width="800" alt="Built-in light theme" src="website/src/assets/screenshots/light-theme.png" /></p>
 <p><img width="800" alt="Catppuccin Mocha theme" src="website/src/assets/screenshots/theme-catppuccin.png" /></p>
@@ -235,16 +180,18 @@ Bug reports and pull requests are welcome on [GitHub](https://github.com/chmouel
 <p><img width="800" alt="Solarized Light theme" src="website/src/assets/screenshots/theme-solarized-light.png" /></p>
 <p><img width="800" alt="Tokyo Night theme" src="website/src/assets/screenshots/theme-tokyonight.png" /></p>
 
-## Licence
+</details>
 
-This project is released under the MIT Licence.
+## Contributing
+
+Bug reports and pull requests are welcome on [GitHub](https://github.com/chmouel/raffi).
+
+## License
+
+Released under the [Apache 2.0 License](LICENSE).
 
 ## Author
 
 [![Sponsor](https://img.shields.io/badge/Sponsor-❤️-ff69b4?style=for-the-badge&logo=github)](https://github.com/sponsors/chmouel)
 
-### Chmouel Boudjnah
-
-- Fediverse - [@chmouel@chmouel.com](https://fosstodon.org/@chmouel)
-- Twitter - [@chmouel](https://twitter.com/chmouel)
-- Blog  - [https://blog.chmouel.com](https://blog.chmouel.com)
+Chmouel Boudjnah · [Fediverse](https://fosstodon.org/@chmouel) · [Twitter](https://twitter.com/chmouel) · [Blog](https://blog.chmouel.com)
