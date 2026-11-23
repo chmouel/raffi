@@ -1,29 +1,28 @@
 ---
 title: Introduction
-description: A keyboard-driven search box for your Wayland desktop
+description: A fast, keyboard-driven launcher for Wayland desktops
 ---
 
 import { Image } from 'astro:assets';
 import mainScreenshot from '../../assets/screenshots/main.png';
 
-Raffi is a keyboard-driven search box for your Wayland desktop. From one
-place you can open apps, browse files, switch windows, paste from your
-clipboard history, fill in passwords, do sums and convert currencies. It is
-written in Rust and works without a background server; running the optional
-[`raffi --server`](reference/cli-options/#cache-management) opens the window about
-a third faster, warms caches in the background, and records your built-in
-clipboard history.
+Raffi is a fast, keyboard-driven launcher for Wayland written in Rust,
+inspired by Alfred and Raycast on macOS. Bind it to a shortcut and start
+typing: with no setup at all, one search box finds your apps, open windows,
+browser tabs, bookmarks, passwords, files, snippets, and clipboard history,
+ranking recent picks first and offering fallback actions like web search
+when nothing matches. You do not need a background daemon to use it. Running
+the optional [`raffi --server`](reference/cli-options/#cache-management)
+keeps the window about a third faster to open, warms caches in the
+background, and records your clipboard history.
 
 <Image src={mainScreenshot} alt="Raffi with the preview pane open" width={800} />
 
-## What you can do with it
+## What comes out of the box
 
-Raffi works as soon as it is installed. With no config, typing searches
-your installed applications, open windows and system commands in one list,
-along with browser tabs, media players and audio devices when the tools for
-them are set up.
-
-Some addons answer as soon as your query looks right:
+Built-in tools handle everyday desktop tasks without configuration. Math,
+currency and unit conversions, colors, and world clocks answer directly as
+you type:
 
 ```
 2 + 2 * 5
@@ -32,30 +31,33 @@ $10 to eur
 time tokyo
 ```
 
-Others start with a keyword and give you a list to pick from: `/` or `~/`
-for the file browser, `clip ` for clipboard history, `win ` for open windows,
-`pass ` for passwords, and many more. You can add your own web searches, text
-snippets and script filters, each under a keyword you choose. Script filters
-use the Alfred JSON format, so any command that prints a list can feed Raffi.
+You can browse files with inline previews for code, images, videos, and
+PDFs; switch windows on Sway, Hyprland, or niri; control audio, media,
+Bluetooth, and power actions; pull logins from
+[pass](features/password-store/) or [Bitwarden](features/bitwarden/); and
+search [Slack](features/slack/).
 
-[Clipboard history](../features/clipboard-history/) is the addon worth turning
-on first: the clipboard manager Alfred gives you on macOS, inside the same
-search box. It searches the text inside screenshots, expires one-time codes,
-ignores password managers, and saves any entry as a snippet.
+The [clipboard history](features/clipboard-history/) searches text inside
+screenshots with OCR, expires one-time codes, ignores password managers, and
+saves any entry as a [text snippet](features/text-snippets/) that pastes
+straight into your active window with dynamic placeholders like today's
+date.
 
-You can also add entries of your own: a command with arguments, an inline
-script in Bash, Python or any other interpreter, or an entry that only shows
-up when a program is installed.
-
-Press `Ctrl+/` or type `?` to see every keyword and shortcut your config
-turns on. When a list has more than one view, `Ctrl+Tab` switches between
-them.
+Press `Ctrl+/` or type `?` to see every active keyword and shortcut. When a
+list has multiple views, `Ctrl+Tab` switches between them.
 
 ## Making it yours
 
-Settings live in `~/.config/raffi/raffi.yaml`. This one picks a theme,
-chooses what the main list shows as you type, keeps installed apps listed,
-and adds a Google search under `g`:
+Everything lives in plain YAML with editor autocomplete through checked-in
+[JSON Schemas](reference/yaml-schema/). You can add custom commands, inline
+scripts, conditional entries that adapt to whichever machine you are on, web
+searches, and [Alfred-compatible script filters](features/script-filters/)
+with rich previews and action menus. Bind extra shortcuts like
+`raffi -i "clip "` to jump straight into any mode, pick from built-in
+[themes](features/themes/), or use [Fuzzel](integration/fuzzel/) as the
+frontend.
+
+Settings live in `~/.config/raffi/raffi.yaml`:
 
 ```yaml title="raffi.yaml"
 general:
@@ -82,7 +84,7 @@ firefox_private:
 
 ## Next steps
 
-[Install Raffi](installation/), then follow the [quick start](quickstart/) to
-bind it to a key and set it up. The
-[keyboard shortcuts](reference/keyboard-shortcuts/) page lists every key, and
-the Features section of the sidebar covers each addon.
+[Install Raffi](installation/), follow the [quick start](quickstart/) to
+bind it to a key, or copy a ready-made setup from the [recipes](recipes/).
+The [keyboard shortcuts](reference/keyboard-shortcuts/) page lists every
+key, and the Features section of the sidebar covers each addon in detail.

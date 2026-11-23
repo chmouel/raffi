@@ -9,21 +9,19 @@
 [![Docs](https://img.shields.io/badge/docs-chmouel.github.io%2Fraffi-2563eb?style=flat-square)](https://chmouel.github.io/raffi/)
 [![License](https://img.shields.io/github/license/chmouel/raffi?style=flat-square)](LICENSE)
 
-[Documentation](https://chmouel.github.io/raffi/) · [Releases](https://github.com/chmouel/raffi/releases) · [Issues](https://github.com/chmouel/raffi/issues) · [Screenshots](#screenshots)
+[Documentation](https://chmouel.github.io/raffi/) · [Recipes](https://chmouel.github.io/raffi/recipes/) · [Releases](https://github.com/chmouel/raffi/releases) · [Issues](https://github.com/chmouel/raffi/issues) · [Screenshots](#screenshots)
 
 ![Raffi with the preview pane open](website/src/assets/screenshots/main.png)
 
-Raffi is a keyboard-driven launcher for Wayland written in Rust. Drop it into a keybinding and start typing: with no configuration file at all, it searches your installed desktop applications, open windows, and system commands from a single box. You do not need a background daemon to run it. When you do want the extra speed or built-in clipboard recording, starting the optional [`raffi --server`](https://chmouel.github.io/raffi/reference/cli-options/#cache-management) keeps the graphics stack and fonts loaded so the window opens about a third faster, warms slow caches while Raffi is closed, and records everything you copy.
+Raffi is a fast, keyboard-driven launcher for Wayland written in Rust, inspired by Alfred and Raycast on macOS. Bind it to a shortcut and start typing: with no setup at all, one search box finds your apps, open windows, browser tabs, bookmarks, passwords, files, snippets, and clipboard history, ranking recent picks first and offering fallback actions like web search when nothing matches. You do not need a background daemon to use it. Running the optional [`raffi --server`](https://chmouel.github.io/raffi/reference/cli-options/#cache-management) keeps the window about a third faster to open, warms caches in the background, and records your clipboard history.
 
-Once the window is up, type to filter, move with the arrow keys, and press Enter. A preview pane sits on the right (`Ctrl+P` toggles it) to show what the selected row will open or run. Lists with multiple views switch with `Ctrl+Tab` and `Ctrl+Shift+Tab`, and the footer shows where you are. Pressing `Ctrl+/` or typing `?` lists every active keyword and shortcut; if you forget one, typing a word like `volume` or `password` brings up the right keyword anyway.
+Built-in tools cover most daily desktop tasks out of the box. Math, currency and unit conversions, colors, and world clocks answer right in the list as you type. You can browse files with inline previews for code, images, videos, and PDFs; switch windows on Sway, Hyprland, or niri; control audio, media, Bluetooth, and power actions; pull logins from [pass](https://chmouel.github.io/raffi/features/password-store/) or [Bitwarden](https://chmouel.github.io/raffi/features/bitwarden/); and search [Slack](https://chmouel.github.io/raffi/features/slack/). The [clipboard history](https://chmouel.github.io/raffi/features/clipboard-history/) searches text inside screenshots with OCR, expires one-time codes, ignores password managers, and saves any entry as a [text snippet](https://chmouel.github.io/raffi/features/text-snippets/) that pastes straight into your active window with dynamic placeholders like today's date.
 
-Most built-in tools need no setup. Expressions like `2*(3+4)`, `$10 to eur`, `10 km to mi`, `#ff8800`, and `15:00 paris to nyc` answer directly in the list through the [calculator](https://chmouel.github.io/raffi/features/calculator/), [currency](https://chmouel.github.io/raffi/features/currency-converter/), [unit](https://chmouel.github.io/raffi/features/unit-conversion/), [color](https://chmouel.github.io/raffi/features/color-converter/), and [world clock](https://chmouel.github.io/raffi/features/world-clock/) addons. Starting a query with `/` or `~/` opens the [file browser](https://chmouel.github.io/raffi/features/file-browser/) with inline previews for source code, images, videos, and PDFs. For day-to-day desktop control, keywords handle [window switching](https://chmouel.github.io/raffi/features/window-switcher/) on Sway, Hyprland, and niri (`win `), [system actions](https://chmouel.github.io/raffi/features/system-commands/) (`sys `), [audio outputs and volume](https://chmouel.github.io/raffi/features/audio-switcher/) (`audio `), [media playback](https://chmouel.github.io/raffi/features/media-controls/) (`media `), [Bluetooth](https://chmouel.github.io/raffi/features/bluetooth/) (`bt `), [killing processes](https://chmouel.github.io/raffi/features/kill-process/) (`kill `), [developer utilities](https://chmouel.github.io/raffi/features/developer-tools/) (`dev `), emoji and Nerd Font icons (`emoji `), and running a command in a [terminal](https://chmouel.github.io/raffi/features/terminal/) (`> htop`).
-
-Around your browser and daily work, Raffi reads [open tabs](https://chmouel.github.io/raffi/features/browser-tabs/) (`tabs `, via the Vicinae browser extension), [bookmarks](https://chmouel.github.io/raffi/features/bookmarks/) (`bm `), and [browser history](https://chmouel.github.io/raffi/features/browser-history/) (`hist `). It pulls credentials from [pass](https://chmouel.github.io/raffi/features/password-store/) (`pass `) or [Bitwarden](https://chmouel.github.io/raffi/features/bitwarden/) via `rbw` (`bw `), and an optional [Slack](https://chmouel.github.io/raffi/features/slack/) addon (`slack `) searches messages, opens conversations, lists unreads, and sets your status. The [clipboard history](https://chmouel.github.io/raffi/features/clipboard-history/) (`clip `, or `raffi clipboard` from scripts) works like Alfred's clipboard manager on macOS: it runs OCR over screenshots so you can search text inside images, expires one-time codes, skips password managers, tags each item with the source application's icon, and lets you save any text entry straight into your [snippets](https://chmouel.github.io/raffi/features/text-snippets/#saving-from-the-clipboard). You can extend the launcher with custom [web searches](https://chmouel.github.io/raffi/features/web-search/), [text snippets](https://chmouel.github.io/raffi/features/text-snippets/), and [script filters](https://chmouel.github.io/raffi/features/script-filters/), style it with built-in [themes](https://chmouel.github.io/raffi/features/themes/) or your own palette, or point it at [Fuzzel](https://chmouel.github.io/raffi/integration/fuzzel/) if you prefer that frontend.
+When you want to make Raffi yours, everything lives in plain YAML with editor autocomplete via JSON Schema. You can add custom commands, inline scripts, conditional entries that adapt to whichever machine you are on, web searches, and [Alfred-compatible script filters](https://chmouel.github.io/raffi/features/script-filters/) with rich previews and action menus. Bind extra shortcuts to jump straight into any mode (such as `Super+V` for clipboard history), pick from built-in [themes](https://chmouel.github.io/raffi/features/themes/), or use [Fuzzel](https://chmouel.github.io/raffi/integration/fuzzel/) as the frontend.
 
 ## Installation
 
-Install Raffi from your package manager, with Cargo, or from the [GitHub releases](https://github.com/chmouel/raffi/releases) page (see the [installation guide](https://chmouel.github.io/raffi/installation/) for building from source):
+Install from your package manager, Cargo, or [GitHub releases](https://github.com/chmouel/raffi/releases) (see the [installation guide](https://chmouel.github.io/raffi/installation/) to build from source):
 
 ```sh
 # Arch Linux (AUR)
@@ -40,9 +38,9 @@ brew install raffi
 cargo install raffi
 ```
 
-## Keybindings
+## Quick Start
 
-Bind `raffi` to a shortcut in your compositor. Inside Sway, Hyprland, and niri, Raffi asks the compositor to launch whatever you pick.
+Bind `raffi` to a key in your compositor (and optionally bind a second key like `raffi -i "clip "` to open clipboard history directly):
 
 ```config
 # Sway (~/.config/sway/config)
@@ -61,36 +59,7 @@ binds {
 }
 ```
 
-Window rules and fuller setups live on the [Sway](https://chmouel.github.io/raffi/integration/sway/), [Hyprland](https://chmouel.github.io/raffi/integration/hyprland/), and [niri](https://chmouel.github.io/raffi/integration/niri/) pages. Every command-line flag is documented in the [CLI reference](https://chmouel.github.io/raffi/reference/cli-options/), and the full keymap is on the [keyboard shortcuts](https://chmouel.github.io/raffi/reference/keyboard-shortcuts/) page.
-
-## Configuration
-
-Raffi starts without any config files. When you want to customize it, general settings and addons go in `~/.config/raffi/raffi.yaml`:
-
-```yaml
-general:
-  theme: dark
-  main_view: [launchers, windows, browser_tabs, system, clipboard]
-addons:
-  apps:
-    enabled: true
-  web_searches:
-    - name: Google
-      keyword: g
-      url: "https://google.com/search?q={query}"
-```
-
-`main_view` chooses which sources appear in the default list (omitting it keeps the defaults; setting `null` or `[]` limits the list to apps and your own entries). Custom commands and inline scripts go in `~/.config/raffi/launchers.yaml`:
-
-```yaml
-firefox_private:
-  binary: firefox
-  args: [--private-window]
-  icon: firefox
-  description: Firefox private window
-```
-
-Check [`examples/raffi.yaml`](examples/raffi.yaml) for a minimal starter, [`examples/raffi.full.yaml`](examples/raffi.full.yaml) (also printed by `raffi --print-config`) for every available option, and [`examples/launchers.yaml`](examples/launchers.yaml) for sample entries. The [configuration guide](https://chmouel.github.io/raffi/configuration/overview/) walks through all of them.
+Raffi works with no config file. When you are ready to customize it, drop settings in `~/.config/raffi/raffi.yaml` and your own commands in `~/.config/raffi/launchers.yaml`, or copy a ready-made setup from the [recipes](https://chmouel.github.io/raffi/recipes/) and [configuration guide](https://chmouel.github.io/raffi/configuration/overview/).
 
 ## Screenshots
 
