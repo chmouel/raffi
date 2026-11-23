@@ -64,6 +64,7 @@ impl LauncherApp {
     pub(super) fn handle_slack_query(&mut self, query: String) -> Task<Message> {
         self.command_list.enter(CommandListAddon::Slack);
         super::slack_api::set_cache_fresh(self.addons.slack.cache_fresh());
+        self.sync_slack_account();
         if self.slack.session != self.command_list.session {
             self.slack.session = self.command_list.session;
             self.slack.view = None;
@@ -388,8 +389,8 @@ impl LauncherApp {
         Task::none()
     }
 
-    /// Forget the previews of the account the credentials no longer belong
-    /// to, once Slack has said so.
+    /// Forget the rows, previews and images of the account the credentials no
+    /// longer belong to, once Slack has said so.
     pub(super) fn sync_slack_account(&mut self) {
         self.sync_slack_account_to(super::slack_api::account_epoch());
     }
@@ -403,8 +404,8 @@ impl LauncherApp {
         self.slack.stale_previews.clear();
         self.reset_slack_images();
         if self.command_list.addon == Some(CommandListAddon::Slack) {
-            self.command_list.previews.clear();
-            self.command_list.preview_inflight = None;
+            self.command_list.clear_for_account_change();
+            self.selected_index = 0;
         }
     }
 
@@ -596,12 +597,14 @@ impl LauncherApp {
         let Some(url) = url.filter(|u| !u.is_empty()) else {
             return Task::none();
         };
-        let identity = self
+        let Some(identity) = self
             .selected_index
             .checked_sub(self.command_list_offset())
             .and_then(|row| self.command_list.item(row))
             .map(|item| item.identity.clone())
-            .unwrap_or_else(|| format!("slack:open:{url}"));
+        else {
+            return Task::none();
+        };
         let action = slack::open_action(url);
         let keep_open = !self.addons.slack.close_on_action(self.close_on_action);
         self.run_command_list_action(CommandListAddon::Slack, identity, action, keep_open)

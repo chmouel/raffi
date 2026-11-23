@@ -1317,6 +1317,9 @@ impl LauncherApp {
             self.drag = None;
             return iced::window::oldest().and_then(iced::window::close);
         }
+        if self.command_list.addon == Some(CommandListAddon::Slack) {
+            self.sync_slack_account();
+        }
         let task = self.update_inner(message);
         self.sync_vault();
         let prompt_insert = self.ensure_text_prompt_insert();
@@ -5984,6 +5987,7 @@ impl LauncherApp {
         action: DeferredAction,
     ) -> Task<Message> {
         let session = self.command_list.session;
+        let slack_epoch = self.slack.epoch;
         Task::perform(
             async move {
                 let (sender, receiver) = iced::futures::channel::oneshot::channel();
@@ -5996,6 +6000,8 @@ impl LauncherApp {
                             | CommandListAddon::BrowserHistory
                     ) {
                         action.run()
+                    } else if let DeferredAction::Slack(slack_action) = &action {
+                        super::slack::run_action_for_epoch(slack_action, slack_epoch)
                     } else {
                         super::command_list::run_kept_open(&action)
                     };

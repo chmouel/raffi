@@ -2007,22 +2007,9 @@ fn warm_all(state: &Arc<ServerState>) -> Result<(), String> {
 fn warm_slack(state: &Arc<ServerState>) -> Result<(), String> {
     let config = state.addons.slack.clone();
     super::slack_api::set_cache_fresh(config.cache_fresh());
-    let mut error = None;
-    for result in [
-        super::slack::load_home(config.clone(), true),
-        super::slack::load_unread(config.clone(), true),
-        super::slack::load_threads(config.clone(), true),
-        super::slack::load_activity(config.clone(), true),
-    ] {
-        if let Err(message) = result {
-            error = Some(message);
-        }
-    }
-    if let Err(message) = super::slack::warm_cached_previews(&config, 10) {
-        error.get_or_insert(message);
-    }
-    state.set_status("slack", error.clone());
-    error.map_or(Ok(()), Err)
+    let result = super::slack::warm(&config, 10);
+    state.set_status("slack", result.as_ref().err().cloned());
+    result
 }
 
 /// Re-fetch one Slack view, for F5 on that view.

@@ -96,44 +96,11 @@ pub(crate) fn inherit<T>(f: impl FnOnce() -> T) -> impl FnOnce() -> T {
     move || context.enter(f)
 }
 
-/// Per-launch variables that change every time a compositor or shell opens
-/// Raffi without changing the user's account context.
-#[cfg_attr(not(feature = "wayland"), allow(dead_code))]
-const EPHEMERAL_ENV_VARS: &[&str] = &[
-    "XDG_ACTIVATION_TOKEN",
-    "DESKTOP_STARTUP_ID",
-    "INVOCATION_ID",
-    "JOURNAL_STREAM",
-    "NOTIFY_SOCKET",
-    "SYSTEMD_EXEC_PID",
-    "WINDOWID",
-    "SHLVL",
-    "_",
-    "OLDPWD",
-];
-
 /// Identifies the served window this thread is working for, or `None` for
 /// the process's own environment.
 #[cfg_attr(not(feature = "wayland"), allow(dead_code))]
 pub(crate) fn env_scope() -> Option<u64> {
     served_env().map(|env| env.scope)
-}
-
-/// Tells apart the environments a command can run in: `None` for this
-/// process's own, otherwise a digest of the served client's stable variables.
-#[cfg_attr(not(feature = "wayland"), allow(dead_code))]
-pub(crate) fn env_digest() -> Option<u64> {
-    use std::hash::{Hash, Hasher};
-    let env = served_env()?;
-    let mut entries: Vec<_> = env
-        .vars
-        .iter()
-        .filter(|(name, _)| !EPHEMERAL_ENV_VARS.contains(&name.as_str()))
-        .collect();
-    entries.sort();
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    entries.hash(&mut hasher);
-    Some(hasher.finish())
 }
 
 /// Make `env` the environment Raffi reads and gives its children, until
@@ -292,11 +259,10 @@ mod tests {
         )]));
         std::thread::spawn(move || {
             mark_server_thread();
-            assert!(env_digest().is_none());
-            let (read, digest) =
-                with_env(env, || (var("RAFFI_TEST_CLIENT_VARIABLE"), env_digest()));
+            assert!(env_scope().is_none());
+            let (read, scope) = with_env(env, || (var("RAFFI_TEST_CLIENT_VARIABLE"), env_scope()));
             assert_eq!(read.as_deref(), Ok("client"));
-            assert!(digest.is_some());
+            assert!(scope.is_some());
         })
         .join()
         .unwrap();
@@ -316,26 +282,9 @@ mod tests {
     }
 
     #[test]
-    fn env_digest_ignores_ephemeral_launch_variables() {
-        let first = ClientEnv::new(HashMap::from([
-            ("HOME".to_string(), "/home/u".to_string()),
-            ("XDG_ACTIVATION_TOKEN".to_string(), "token-1".to_string()),
-            ("DESKTOP_STARTUP_ID".to_string(), "startup-1".to_string()),
-        ]));
-        let second = ClientEnv::new(HashMap::from([
-            ("HOME".to_string(), "/home/u".to_string()),
-            ("XDG_ACTIVATION_TOKEN".to_string(), "token-2".to_string()),
-            ("DESKTOP_STARTUP_ID".to_string(), "startup-2".to_string()),
-        ]));
-        let other = ClientEnv::new(HashMap::from([
-            ("HOME".to_string(), "/home/u".to_string()),
-            ("SLACK_PROFILE".to_string(), "work".to_string()),
-        ]));
-        let d1 = with_env(first.clone(), env_digest);
-        let d2 = with_env(second.clone(), env_digest);
-        let d3 = with_env(other, env_digest);
-        assert_eq!(d1, d2);
-        assert_ne!(d1, d3);
+    fn each_served_window_gets_a_distinct_scope() {
+        let first = ClientEnv::new(HashMap::from([("HOME".to_string(), "/home/u".to_string())]));
+        let second = ClientEnv::new(HashMap::from([("HOME".to_string(), "/home/u".to_string())]));
         assert_ne!(with_env(first, env_scope), with_env(second, env_scope));
     }
 }

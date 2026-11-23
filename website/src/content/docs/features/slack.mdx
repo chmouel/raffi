@@ -355,9 +355,9 @@ week; without it, channels keep the generic icon.
 Raffi keeps what Slack last answered in `~/.cache/raffi/slack/` and shows it
 at once, then replaces it when Slack answers again:
 
-- `directory.json`: conversations and people, refreshed in the background
-  once older than `cache_minutes` (an hour by default), or right away
-  with Ctrl+R or the Reload conversations and people row.
+- `directories/`: conversations and people per credential set, refreshed in
+  the background once older than `cache_minutes` (an hour by default), or
+  right away with Ctrl+R or the Reload conversations and people row.
 - `live.json` and `unread.json`: your status, presence and snooze, and the
   conversations with unread messages, asked again every time the list
   opens.
@@ -377,11 +377,11 @@ the last answer stays: an unread list Slack could not check shows the
 previous one with a warning on top. How often you open each conversation
 is kept in `usage.cache`.
 
-Each cache belongs to the Slack account and workspace that fetched it.
-Until Slack answers, Raffi shows the cache of the account it last used.
-If `token_command` now prints another account's token, Raffi drops that
-account's directory, searches and previews as soon as Slack says so, and
-fetches the new account's.
+Each cache belongs to the Slack account and workspace that fetched it, and
+directories are keyed by a one-way SHA-256 fingerprint of the active
+credentials. If `token_command` prints another account's token, Raffi never
+shows the previous account's directory even while offline, and fetches the
+new account's directory separately.
 
 The cache files are readable by you only, but the previews hold message
 text. `raffi --refresh-cache` removes everything but the usage counts.

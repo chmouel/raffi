@@ -442,6 +442,26 @@ impl CommandListState {
         }
     }
 
+    /// Drop the current rows and previews when the backing account changed,
+    /// turning an in-flight refresh into a loading state so stale rows
+    /// cannot remain visible.
+    pub fn clear_for_account_change(&mut self) {
+        self.items.clear();
+        self.documents.clear();
+        self.filtered.clear();
+        self.filtered_scores.clear();
+        self.armed = None;
+        self.error = None;
+        self.refresh_error = None;
+        self.previews.clear();
+        self.preview_inflight = None;
+        self.preview_wanted.clear();
+        if self.refreshing {
+            self.refreshing = false;
+            self.loading = true;
+        }
+    }
+
     pub fn set_unavailable(&mut self, notice: String) {
         self.set_notice(notice);
         self.unavailable = true;

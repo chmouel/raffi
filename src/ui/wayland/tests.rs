@@ -12551,10 +12551,20 @@ fn test_slack_previews_of_another_account_are_dropped() {
         .previews
         .insert(identity.clone(), vec![text("account A")]);
 
-    // Slack says the token is someone else's.
+    // Slack says the token is someone else's: old rows and previews are dropped.
     app.sync_slack_account_to(app.slack.epoch + 1);
+    assert!(app.command_list.items.is_empty());
     assert!(app.command_list.previews.is_empty());
     assert_eq!(app.command_list.preview_inflight, None);
+    let generation = app.command_list.begin_load();
+    let _ = app.update(Message::CommandListLoaded(
+        generation,
+        Ok(vec![super::command_list::CommandItem::info(
+            &identity,
+            "#general".into(),
+            "icon",
+        )]),
+    ));
     let _ = app.ensure_slack_preview();
     let request = app.slack.preview_request;
     assert_ne!(request, old_request);
@@ -12582,6 +12592,109 @@ fn test_slack_previews_of_another_account_are_dropped() {
     ));
     assert_eq!(app.command_list.previews[&identity], [text("account B")]);
     assert_eq!(app.command_list.preview_inflight, None);
+}
+
+#[test]
+fn test_slack_refresh_failure_after_account_change_clears_old_rows() {
+    let mut addons = AddonsConfig::default();
+    addons.slack.enabled = true;
+    let mut app = test_app(addons);
+    app.history.max_items = 0;
+    let _ = app.update(Message::SearchChanged("slack unread ".into()));
+    let identity = "slack:unread:C1".to_string();
+    let generation = app.command_list.generation;
+    let _ = app.update(Message::CommandListLoaded(
+        generation,
+        Ok(vec![super::command_list::CommandItem::info(
+            &identity,
+            "#account-a".into(),
+            "icon",
+        )]),
+    ));
+    app.command_list.previews.insert(
+        identity.clone(),
+        vec![super::preview::PreviewBody::Text {
+            heading: None,
+            content: "account A".into(),
+            truncated: false,
+        }],
+    );
+
+    // Start a refresh (keeps rows while in flight), then the account changes
+    // before the refresh fails.
+    let refresh_gen = app.command_list.begin_refresh();
+    assert!(app.command_list.refreshing);
+    app.sync_slack_account_to(app.slack.epoch + 1);
+    assert!(app.command_list.items.is_empty());
+    assert!(app.command_list.previews.is_empty());
+    assert!(!app.command_list.refreshing);
+    assert!(app.command_list.loading);
+
+    let _ = app.update(Message::CommandListLoaded(
+        refresh_gen,
+        Err("network error".into()),
+    ));
+    assert!(app.command_list.items.is_empty());
+    assert_eq!(app.command_list.status(), Some("network error"));
+}
+
+#[test]
+fn test_slack_enter_in_account_switch_gap_does_not_run_old_row() {
+    let env = crate::process::ClientEnv::new(std::collections::HashMap::from([
+        (
+            "PATH".to_string(),
+            std::env::var("PATH").unwrap_or_default(),
+        ),
+        ("RAFFI_TEST_SLACK_GAP".to_string(), "1".to_string()),
+    ]));
+    crate::process::with_env(env, || {
+        let mut addons = AddonsConfig::default();
+        addons.slack.enabled = true;
+        addons.slack.close_on_action = Some(true);
+        let mut app = test_app(addons);
+        app.history.max_items = 0;
+
+        // Connect account A and load an unread row belonging to it.
+        super::slack_api::client(Some("printf xoxp-gap-a"), None, false).unwrap();
+        let _ = app.update(Message::SearchChanged("slack unread ".into()));
+        let unread = [super::slack::Unread {
+            channel: "C1".into(),
+            last_read: "1.0".into(),
+            latest: "5.0".into(),
+            mentions: 1,
+            count: Some(1),
+            muted: false,
+        }];
+        let mut dir = super::slack_api::Directory::default();
+        dir.workspace.team_id = "T1".into();
+        let rows = super::slack::unread_rows(
+            &unread,
+            &dir,
+            crate::SlackOpenIn::Desktop,
+            chrono::Local::now(),
+        );
+        let generation = app.command_list.generation;
+        let _ = app.update(Message::CommandListLoaded(generation, Ok(rows)));
+        let epoch_a = app.slack.epoch;
+        assert_ne!(epoch_a, 0);
+
+        // Start a refresh (rows stay visible) and simulate the refresh worker
+        // switching the active client to account B before CommandListLoaded lands.
+        let _refresh_gen = app.command_list.begin_refresh();
+        super::slack_api::client(Some("printf xoxp-gap-b"), None, true).unwrap();
+
+        // Enter pressed in that gap must clear the stale row and not run it.
+        let _ = app.update(Message::CommandListSelected(0));
+        assert!(deferred_action(&app).is_none());
+        assert!(app.command_list.items.is_empty());
+        assert!(app.command_list.loading);
+
+        // Any action already dispatched for epoch A is also refused after the switch.
+        let err =
+            super::slack::run_action_for_epoch(&super::slack::SlackAction::EndSnooze, epoch_a)
+                .unwrap_err();
+        assert!(err.contains("account changed"));
+    });
 }
 
 #[test]

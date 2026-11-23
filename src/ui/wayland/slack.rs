@@ -574,6 +574,16 @@ pub(super) enum SlackAction {
     },
 }
 
+/// Run `action` against Slack only if the active account epoch still
+/// matches `epoch`, so an action started before an account switch cannot
+/// run against the new client. Blocking: run it off the UI thread.
+pub(super) fn run_action_for_epoch(action: &SlackAction, epoch: u64) -> Result<(), String> {
+    if slack_api::account_epoch() != epoch {
+        return Err("Slack account changed; refresh and try again".to_string());
+    }
+    run_action(action)
+}
+
 /// Run `action` against Slack. Blocking: run it off the UI thread.
 pub(super) fn run_action(action: &SlackAction) -> Result<(), String> {
     match action {
@@ -1774,6 +1784,7 @@ fn connect(
     let client = slack_api::client(
         config.token_command.as_deref(),
         config.cookie_command.as_deref(),
+        refresh,
     )?;
     let directory = slack_api::directory(&client, refresh)?;
     if !refresh && !directory.is_fresh(slack_api::now_secs()) {
@@ -1796,18 +1807,48 @@ fn refresh_directory_in_background(client: std::sync::Arc<Client>) {
     }));
 }
 
+/// Refresh the home, unread, threads, activity and preview caches in one
+/// pass, running credential commands and fetching the directory once. Blocking.
+pub(super) fn warm(config: &crate::SlackAddonConfig, preview_limit: usize) -> Result<(), String> {
+    let (client, directory) = connect(config, true)?;
+    let mut error = None;
+    for result in [
+        load_home_with(config, &client, &directory, true),
+        load_unread_with(config, &client, &directory, false),
+        load_threads_with(config, &client, directory.clone()),
+        load_activity_with(config, &client, directory.clone()),
+    ] {
+        if let Err(message) = result {
+            error = Some(message);
+        }
+    }
+    if let Err(message) = warm_cached_previews_with(config, &directory, preview_limit) {
+        error.get_or_insert(message);
+    }
+    error.map_or(Ok(()), Err)
+}
+
 /// The home rows. Blocking.
 pub(super) fn load_home(
     config: crate::SlackAddonConfig,
     refresh: bool,
 ) -> Result<Vec<CommandItem>, String> {
     let (client, directory) = connect(&config, refresh)?;
+    load_home_with(&config, &client, &directory, refresh)
+}
+
+fn load_home_with(
+    config: &crate::SlackAddonConfig,
+    client: &std::sync::Arc<Client>,
+    directory: &Directory,
+    refresh: bool,
+) -> Result<Vec<CommandItem>, String> {
     let (replies, counts, muted) = std::thread::scope(|scope| {
         let counts = scope.spawn(crate::process::inherit(|| {
             client.call("client.counts", &[("thread_counts_by_channel", "true")])
         }));
-        let muted_state = scope.spawn(crate::process::inherit(|| muted(&client, refresh)));
-        let replies = fetch_live(&client);
+        let muted_state = scope.spawn(crate::process::inherit(|| muted(client, refresh)));
+        let replies = fetch_live(client);
         let counts = counts
             .join()
             .unwrap_or_else(|_| Err("Slack unread counts lookup panicked".to_string()));
@@ -1856,9 +1897,9 @@ pub(super) fn load_home(
         sort_unread(&mut stored);
         slack_api::write_cache(slack_api::UNREAD_FILE, account, &stored);
     }
-    let mut rows = home_list(&directory, &live, unread.as_deref(), config.open_in);
+    let mut rows = home_list(directory, &live, unread.as_deref(), config.open_in);
     if let Some(muted) = muted {
-        dim_muted_home_rows(&mut rows, &directory, &muted);
+        dim_muted_home_rows(&mut rows, directory, &muted);
     }
     Ok(rows)
 }
@@ -2485,12 +2526,25 @@ pub(super) fn load_unread(
     refresh: bool,
 ) -> Result<Vec<CommandItem>, String> {
     let (client, directory) = connect(&config, refresh)?;
+    load_unread_with(&config, &client, &directory, refresh)
+}
+
+fn load_unread_with(
+    config: &crate::SlackAddonConfig,
+    client: &std::sync::Arc<Client>,
+    directory: &Directory,
+    refresh: bool,
+) -> Result<Vec<CommandItem>, String> {
     let (counts, muted) = std::thread::scope(|scope| {
-        let muted = scope.spawn(crate::process::inherit(|| muted(&client, refresh)));
+        let muted = scope.spawn(crate::process::inherit(|| muted(client, refresh)));
         let counts = client.call("client.counts", &[("thread_counts_by_channel", "true")]);
         (counts, muted.join().unwrap_or_default())
     });
     let muted = muted.unwrap_or_default();
+    let cached = || {
+        slack_api::read_cache::<Vec<Unread>>(slack_api::UNREAD_FILE, &directory.workspace)
+            .map(|(unread, _)| unread)
+    };
     let checked = match counts {
         Ok(reply) => Checked::complete(counts_unread(&reply, &muted)),
         Err(error) => {
@@ -2499,28 +2553,29 @@ pub(super) fn load_unread(
             }
             if config.unread_conversations.is_empty() {
                 crate::debug_log!("slack: client.counts failed: {error}");
+                if let Some(last) = cached() {
+                    return Ok(with_cached_warning(
+                        unread_list(&last, directory, config.open_in),
+                        "the unread conversations",
+                    ));
+                }
                 return Err("Slack does not list unread conversations for this token: \
                      set addons.slack.unread_conversations to the ones to check"
                     .to_string());
             }
             crate::debug_log!("slack: client.counts failed, checking the configured list: {error}");
-            check_configured(&client, &directory, &config.unread_conversations, &muted)
+            check_configured(client, directory, &config.unread_conversations, &muted)
         }
     };
     if let Some(error) = client.rejection() {
         return Err(error);
     }
     let account = client.known_identity();
-    let cached = || {
-        account
-            .and_then(|account| slack_api::read_cache(slack_api::UNREAD_FILE, account))
-            .map(|(unread, _)| unread)
-    };
     let (unread, warning, keep) = unread_outcome(checked, cached)?;
     if let Some(account) = account.filter(|_| keep) {
         slack_api::write_cache(slack_api::UNREAD_FILE, account, &unread);
     }
-    let mut rows = unread_list(&unread, &directory, config.open_in);
+    let mut rows = unread_list(&unread, directory, config.open_in);
     if let Some(warning) = warning {
         rows.insert(
             0,
@@ -2576,6 +2631,18 @@ pub(super) fn unread_outcome(
         )),
         None => Err(message.to_string()),
     }
+}
+
+fn with_cached_warning(mut rows: Vec<CommandItem>, what: &str) -> Vec<CommandItem> {
+    rows.insert(
+        0,
+        row(
+            "slack:warning",
+            format!("Could not check {what}, showing the last list"),
+            &["dialog-warning", SLACK_ICON],
+        ),
+    );
+    rows
 }
 
 /// The unread rows from the cache, without asking Slack, to show until
@@ -2824,8 +2891,31 @@ pub(super) fn load_threads(
     refresh: bool,
 ) -> Result<Vec<CommandItem>, String> {
     let (client, directory) = connect(&config, refresh)?;
-    let threads = fetch_threads(&client, &directory)
-        .map_err(|error| web_client_error(&client, error, "unread threads"))?;
+    load_threads_with(&config, &client, directory)
+}
+
+fn load_threads_with(
+    config: &crate::SlackAddonConfig,
+    client: &Client,
+    directory: std::sync::Arc<Directory>,
+) -> Result<Vec<CommandItem>, String> {
+    let threads = match fetch_threads(client, &directory) {
+        Ok(threads) => threads,
+        Err(error) => {
+            if client.rejection().is_none() && client.is_session() {
+                if let Some((cached, _)) = slack_api::read_cache::<Vec<UnreadThread>>(
+                    slack_api::THREADS_FILE,
+                    &directory.workspace,
+                ) {
+                    return Ok(with_cached_warning(
+                        threads_list(&cached, &directory, config.open_in),
+                        "the unread threads",
+                    ));
+                }
+            }
+            return Err(web_client_error(client, error, "unread threads"));
+        }
+    };
     if let Some(account) = client.known_identity() {
         slack_api::write_cache(slack_api::THREADS_FILE, account, &threads);
     }
@@ -3070,20 +3160,42 @@ pub(super) fn load_activity(
     refresh: bool,
 ) -> Result<Vec<CommandItem>, String> {
     let (client, directory) = connect(&config, refresh)?;
-    let reply = client
-        .call(
-            "activity.feed",
-            &[
-                ("types", ACTIVITY_TYPES),
-                ("mode", "chrono_reads_and_unreads"),
-                ("unread_only", "true"),
-                ("limit", ACTIVITY_COUNT),
-            ],
-        )
-        .map_err(|error| web_client_error(&client, error, "activity"))?;
+    load_activity_with(&config, &client, directory)
+}
+
+fn load_activity_with(
+    config: &crate::SlackAddonConfig,
+    client: &Client,
+    directory: std::sync::Arc<Directory>,
+) -> Result<Vec<CommandItem>, String> {
+    let reply = match client.call(
+        "activity.feed",
+        &[
+            ("types", ACTIVITY_TYPES),
+            ("mode", "chrono_reads_and_unreads"),
+            ("unread_only", "true"),
+            ("limit", ACTIVITY_COUNT),
+        ],
+    ) {
+        Ok(reply) => reply,
+        Err(error) => {
+            if client.rejection().is_none() && client.is_session() {
+                if let Some((cached, _)) = slack_api::read_cache::<Vec<Activity>>(
+                    slack_api::ACTIVITY_FILE,
+                    &directory.workspace,
+                ) {
+                    return Ok(with_cached_warning(
+                        activity_list(&cached, &directory, config.open_in),
+                        "the activity",
+                    ));
+                }
+            }
+            return Err(web_client_error(client, error, "activity"));
+        }
+    };
     let activity = parse_activity(&reply);
     let actors: Vec<String> = activity.iter().map(|entry| entry.actor.clone()).collect();
-    let directory = slack_api::learn_users(&client, &directory, &actors);
+    let directory = slack_api::learn_users(client, &directory, &actors);
     if let Some(account) = client.known_identity() {
         slack_api::write_cache(slack_api::ACTIVITY_FILE, account, &activity);
     }
@@ -3475,7 +3587,7 @@ fn store_preview(
         return;
     };
     slack_api::write_cache(&preview_cache_name(identity), account, &cached);
-    if let Some(dir) = slack_api::cache_path(slack_api::PREVIEW_DIR) {
+    if let Some(dir) = slack_api::account_cache_path(slack_api::PREVIEW_DIR, account) {
         prune_previews(&dir, MAX_CACHED_PREVIEWS, slack_api::cache_max_age());
     }
 }
@@ -3557,12 +3669,13 @@ fn message_users(list: &[Value]) -> Vec<String> {
 
 /// Refresh the most recently viewed cached previews, bounded so a server run
 /// does not hammer the Slack API. Blocking.
-pub(super) fn warm_cached_previews(
+fn warm_cached_previews_with(
     config: &crate::SlackAddonConfig,
+    directory: &Directory,
     limit: usize,
 ) -> Result<(), String> {
-    let (_client, directory) = connect(config, false)?;
-    let Some(dir) = slack_api::cache_path(slack_api::PREVIEW_DIR) else {
+    let Some(dir) = slack_api::account_cache_path(slack_api::PREVIEW_DIR, &directory.workspace)
+    else {
         return Ok(());
     };
     let now = slack_api::now_secs();
@@ -5139,5 +5252,25 @@ mod tests {
             preview_cache_name("slack:msg:C1:1700000000.000100:../x"),
             "previews/slack_msg_C1_1700000000.000100_.._x.json"
         );
+    }
+
+    #[test]
+    fn test_warm_runs_credential_command_once() {
+        let dir = std::env::temp_dir().join(format!("raffi-slack-warm-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let counter = dir.join("runs");
+        let config = crate::SlackAddonConfig {
+            token_command: Some(format!("echo x >> {}; exit 1", counter.display())),
+            ..Default::default()
+        };
+        assert!(warm(&config, 10).is_err());
+        let runs = std::fs::read_to_string(&counter).unwrap_or_default();
+        assert_eq!(
+            runs.lines().count(),
+            1,
+            "credential command should run once"
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

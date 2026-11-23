@@ -34,6 +34,8 @@ const MAX_DIRECTORY_RETRY_WAIT: u64 = 60;
 const PAGE_SIZE: &str = "200";
 const MAX_PAGES: usize = 200;
 const DIRECTORY_FILE: &str = "directory.json";
+const DIRECTORIES_DIR: &str = "directories";
+const ACCOUNTS_DIR: &str = "accounts";
 pub(super) const LIVE_FILE: &str = "live.json";
 pub(super) const UNREAD_FILE: &str = "unread.json";
 pub(super) const MUTED_FILE: &str = "muted.json";
@@ -111,6 +113,147 @@ impl Credentials {
         let cookie = self.cookie.as_ref()?.expose();
         let value = cookie.strip_prefix("d=").unwrap_or(cookie);
         Some(format!("d={value}"))
+    }
+
+    /// One-way SHA-256 digest of the token and cookie, used to key cached
+    /// directories without writing secrets or command strings to disk.
+    fn fingerprint(&self) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(b"raffi-slack-credentials-v1\0");
+        let token = self.token.expose().as_bytes();
+        hasher.update(&(token.len() as u64).to_le_bytes());
+        hasher.update(token);
+        match &self.cookie {
+            Some(cookie) => {
+                let bytes = cookie.expose().as_bytes();
+                hasher.update(&(bytes.len() as u64).to_le_bytes());
+                hasher.update(bytes);
+            }
+            None => hasher.update(&0u64.to_le_bytes()),
+        }
+        hasher.finalize_hex()
+    }
+}
+
+/// Minimal FIPS 180-4 SHA-256 for one-way credential fingerprints.
+struct Sha256 {
+    state: [u32; 8],
+    block: [u8; 64],
+    block_len: usize,
+    total_len: u64,
+}
+
+impl Sha256 {
+    const K: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+        0xc67178f2,
+    ];
+
+    fn new() -> Self {
+        Self {
+            state: [
+                0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+                0x5be0cd19,
+            ],
+            block: [0; 64],
+            block_len: 0,
+            total_len: 0,
+        }
+    }
+
+    fn update(&mut self, mut data: &[u8]) {
+        self.total_len = self.total_len.wrapping_add(data.len() as u64);
+        if self.block_len > 0 {
+            let take = (64 - self.block_len).min(data.len());
+            self.block[self.block_len..self.block_len + take].copy_from_slice(&data[..take]);
+            self.block_len += take;
+            data = &data[take..];
+            if self.block_len == 64 {
+                let block = self.block;
+                self.compress(&block);
+                self.block_len = 0;
+            }
+        }
+        while data.len() >= 64 {
+            let mut block = [0u8; 64];
+            block.copy_from_slice(&data[..64]);
+            self.compress(&block);
+            data = &data[64..];
+        }
+        if !data.is_empty() {
+            self.block[..data.len()].copy_from_slice(data);
+            self.block_len = data.len();
+        }
+    }
+
+    fn compress(&mut self, block: &[u8; 64]) {
+        let mut w = [0u32; 64];
+        for (slot, chunk) in w.iter_mut().zip(block.as_chunks::<4>().0) {
+            *slot = u32::from_be_bytes(*chunk);
+        }
+        for i in 16..64 {
+            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
+            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16]
+                .wrapping_add(s0)
+                .wrapping_add(w[i - 7])
+                .wrapping_add(s1);
+        }
+        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = self.state;
+        for (&k, &word) in Self::K.iter().zip(&w) {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let ch = (e & f) ^ ((!e) & g);
+            let temp1 = h
+                .wrapping_add(s1)
+                .wrapping_add(ch)
+                .wrapping_add(k)
+                .wrapping_add(word);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let temp2 = s0.wrapping_add(maj);
+            h = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(temp1);
+            d = c;
+            c = b;
+            b = a;
+            a = temp1.wrapping_add(temp2);
+        }
+        for (slot, delta) in self.state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
+            *slot = slot.wrapping_add(delta);
+        }
+    }
+
+    fn finalize_hex(mut self) -> String {
+        let bit_len = self.total_len.wrapping_mul(8);
+        self.block[self.block_len] = 0x80;
+        self.block_len += 1;
+        if self.block_len > 56 {
+            self.block[self.block_len..].fill(0);
+            let block = self.block;
+            self.compress(&block);
+            self.block_len = 0;
+        }
+        self.block[self.block_len..56].fill(0);
+        self.block[56..64].copy_from_slice(&bit_len.to_be_bytes());
+        let block = self.block;
+        self.compress(&block);
+        self.block.fill(0);
+        let mut hex = String::with_capacity(64);
+        for word in self.state {
+            use std::fmt::Write;
+            let _ = write!(&mut hex, "{word:08x}");
+        }
+        hex
     }
 }
 
@@ -211,6 +354,7 @@ static NEXT_CLIENT_ID: AtomicU64 = AtomicU64::new(1);
 
 pub(super) struct Client {
     id: u64,
+    credential_id: String,
     http: Box<dyn Http>,
     sleep: fn(Duration),
     kind: TokenKind,
@@ -222,6 +366,7 @@ pub(super) struct Client {
 
 impl Client {
     pub fn new(credentials: Credentials) -> Self {
+        let credential_id = credentials.fingerprint();
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .timeout_global(Some(TIMEOUT))
             .http_status_as_error(false)
@@ -229,6 +374,7 @@ impl Client {
             .into();
         Self {
             id: NEXT_CLIENT_ID.fetch_add(1, Ordering::Relaxed),
+            credential_id,
             kind: credentials.kind,
             http: Box::new(UreqHttp { agent, credentials }),
             sleep: std::thread::sleep,
@@ -244,8 +390,10 @@ impl Client {
 
     #[cfg(test)]
     pub fn fake_with(http: Box<dyn Http>, kind: TokenKind) -> Self {
+        let id = NEXT_CLIENT_ID.fetch_add(1, Ordering::Relaxed);
         Self {
-            id: NEXT_CLIENT_ID.fetch_add(1, Ordering::Relaxed),
+            id,
+            credential_id: format!("fake-{id:016x}"),
             http,
             sleep: |_| {},
             kind,
@@ -256,6 +404,10 @@ impl Client {
 
     pub fn id(&self) -> u64 {
         self.id
+    }
+
+    pub fn credential_id(&self) -> &str {
+        &self.credential_id
     }
 
     /// The error Slack gave when it refused the token, as after logging
@@ -427,12 +579,12 @@ fn api_error(method: &str, error: &str, value: &Value) -> String {
     }
 }
 
-/// What a client was built from: the commands printing the Slack token and
-/// cookie, and the environment they ran in (see `process::env_digest`).
-type ClientKey = (Option<String>, Option<String>, Option<u64>);
+/// The configured credential commands for a scope, kept in memory only so
+/// switching commands within the same scope re-runs them.
+type CommandKey = (Option<String>, Option<String>);
 
 /// Most credential-bearing clients kept in memory at once; least-recently
-/// used ones are dropped so repeated environment changes never grow without
+/// used ones are dropped so repeated credential rotations never grow without
 /// bound.
 const MAX_CLIENTS: usize = 8;
 
@@ -445,22 +597,25 @@ struct CachedClient {
 }
 
 struct ScopeEntry {
-    key: ClientKey,
+    commands: CommandKey,
+    client: Arc<Client>,
+    epoch: u64,
     used: u64,
 }
 
-/// The clients of this process, built on first use so a password manager
-/// prompt only shows once. A config loaded later with other commands, or a
-/// window served for a caller with another environment, builds its own.
+/// The clients of this process, keyed by their one-way credential
+/// fingerprint so a new window or refresh always checks `token_command`
+/// and only reuses an existing `Client` when the credentials still match.
 #[derive(Default)]
 struct Clients {
-    built: HashMap<ClientKey, CachedClient>,
-    /// Per-key build lock so concurrent callers for the same credentials
-    /// share one prompt without holding `CLIENTS` across command execution.
-    building: HashMap<ClientKey, Arc<Mutex<()>>>,
-    /// The client key selected for each window scope (`None` for server or
+    by_credential: HashMap<String, CachedClient>,
+    /// Per-scope build lock so concurrent loads in the same window share
+    /// one credential read without holding `CLIENTS` across command execution.
+    building: HashMap<Option<u64>, Arc<Mutex<()>>>,
+    /// The active client for each window scope (`None` for server or
     /// standalone work, `Some(id)` for a served window).
     scopes: HashMap<Option<u64>, ScopeEntry>,
+    epoch_seq: u64,
     tick: u64,
 }
 
@@ -470,9 +625,24 @@ impl Clients {
         self.tick
     }
 
-    fn record_scope(&mut self, scope: Option<u64>, key: ClientKey) {
+    fn record_scope(&mut self, scope: Option<u64>, commands: CommandKey, client: Arc<Client>) {
         let used = self.next_tick();
-        self.scopes.insert(scope, ScopeEntry { key, used });
+        let epoch = match self.scopes.get(&scope) {
+            Some(existing) if existing.client.id() == client.id() => existing.epoch,
+            _ => {
+                self.epoch_seq += 1;
+                self.epoch_seq
+            }
+        };
+        self.scopes.insert(
+            scope,
+            ScopeEntry {
+                commands,
+                client,
+                epoch,
+                used,
+            },
+        );
         while self.scopes.len() > MAX_SCOPES {
             let oldest = self
                 .scopes
@@ -489,54 +659,75 @@ impl Clients {
         }
     }
 
-    fn reuse(&mut self, scope: Option<u64>, key: &ClientKey) -> Option<Arc<Client>> {
+    fn reuse_scope(&mut self, scope: Option<u64>, commands: &CommandKey) -> Option<Arc<Client>> {
         let used = self.next_tick();
-        let client = self
-            .built
-            .get_mut(key)
-            .filter(|entry| entry.client.rejection().is_none())
-            .map(|entry| {
-                entry.used = used;
-                entry.client.clone()
-            })?;
-        self.record_scope(scope, key.clone());
+        let entry = self.scopes.get_mut(&scope)?;
+        if &entry.commands != commands || entry.client.rejection().is_some() {
+            return None;
+        }
+        entry.used = used;
+        let client = entry.client.clone();
+        if let Some(cached) = self.by_credential.get_mut(client.credential_id()) {
+            cached.used = used;
+        }
         Some(client)
     }
 
-    fn insert(&mut self, scope: Option<u64>, key: ClientKey, client: Arc<Client>) {
+    fn resolve_or_insert(
+        &mut self,
+        scope: Option<u64>,
+        commands: CommandKey,
+        credentials: Credentials,
+    ) -> Arc<Client> {
+        let credential_id = credentials.fingerprint();
         let used = self.next_tick();
-        self.built
-            .insert(key.clone(), CachedClient { client, used });
-        while self.built.len() > MAX_CLIENTS {
-            let oldest = self
-                .built
-                .iter()
-                .filter(|(k, _)| *k != &key)
-                .min_by_key(|(_, entry)| entry.used)
-                .map(|(k, _)| k.clone());
-            match oldest {
-                Some(oldest) => {
-                    self.built.remove(&oldest);
+        let client = if let Some(cached) = self
+            .by_credential
+            .get_mut(&credential_id)
+            .filter(|entry| entry.client.rejection().is_none())
+        {
+            cached.used = used;
+            cached.client.clone()
+        } else {
+            let client = Arc::new(Client::new(credentials));
+            self.by_credential.insert(
+                credential_id.clone(),
+                CachedClient {
+                    client: client.clone(),
+                    used,
+                },
+            );
+            while self.by_credential.len() > MAX_CLIENTS {
+                let oldest = self
+                    .by_credential
+                    .iter()
+                    .filter(|(k, _)| k.as_str() != credential_id.as_str())
+                    .min_by_key(|(_, entry)| entry.used)
+                    .map(|(k, _)| k.clone());
+                match oldest {
+                    Some(oldest) => {
+                        self.by_credential.remove(&oldest);
+                    }
+                    None => break,
                 }
-                None => break,
             }
-        }
-        self.record_scope(scope, key);
+            client
+        };
+        self.record_scope(scope, commands, client.clone());
+        client
     }
 
     fn current(&self, scope: Option<u64>) -> Option<Arc<Client>> {
-        let key = &self.scopes.get(&scope)?.key;
-        self.built.get(key).map(|entry| entry.client.clone())
+        self.scopes.get(&scope).map(|entry| entry.client.clone())
     }
 }
 
 static CLIENTS: Mutex<Option<Clients>> = Mutex::new(None);
 
-fn client_key(token_command: Option<&str>, cookie_command: Option<&str>) -> ClientKey {
+fn command_key(token_command: Option<&str>, cookie_command: Option<&str>) -> CommandKey {
     (
         token_command.map(str::to_string),
         cookie_command.map(str::to_string),
-        crate::process::env_digest(),
     )
 }
 
@@ -561,87 +752,73 @@ fn build_credentials(
 pub(super) fn client(
     token_command: Option<&str>,
     cookie_command: Option<&str>,
+    refresh: bool,
 ) -> Result<Arc<Client>, String> {
     let scope = crate::process::env_scope();
-    let key = client_key(token_command, cookie_command);
+    let commands = command_key(token_command, cookie_command);
 
-    let key_lock = {
+    let scope_lock = {
         let mut slot = CLIENTS
             .lock()
             .map_err(|_| "Slack client unavailable".to_string())?;
         let clients = slot.get_or_insert_with(Clients::default);
-        // A refused client is rebuilt so the commands print the updated token.
-        if let Some(client) = clients.reuse(scope, &key) {
-            return Ok(client);
+        // Within the same window scope, reuse the active client unless a
+        // refresh was requested or Slack refused its credentials.
+        if !refresh {
+            if let Some(client) = clients.reuse_scope(scope, &commands) {
+                return Ok(client);
+            }
         }
-        clients.building.entry(key.clone()).or_default().clone()
+        clients.building.entry(scope).or_default().clone()
     };
 
-    // Hold only the per-key lock while running credential commands so
+    // Hold only the per-scope lock while running credential commands so
     // `CLIENTS` stays free for the UI thread and other windows.
-    let _build_guard = key_lock
+    let _build_guard = scope_lock
         .lock()
         .map_err(|_| "Slack client unavailable".to_string())?;
 
-    {
+    if !refresh {
         let mut slot = CLIENTS
             .lock()
             .map_err(|_| "Slack client unavailable".to_string())?;
         let clients = slot.get_or_insert_with(Clients::default);
-        if let Some(client) = clients.reuse(scope, &key) {
-            if Arc::strong_count(&key_lock) == 2 {
-                clients.building.remove(&key);
+        if let Some(client) = clients.reuse_scope(scope, &commands) {
+            if Arc::strong_count(&scope_lock) == 2 {
+                clients.building.remove(&scope);
             }
             return Ok(client);
         }
     }
 
-    let built = build_credentials(token_command, cookie_command)
-        .map(|credentials| Arc::new(Client::new(credentials)));
+    let built = build_credentials(token_command, cookie_command);
 
-    if let Ok(mut slot) = CLIENTS.lock() {
-        let clients = slot.get_or_insert_with(Clients::default);
-        if let Ok(client) = &built {
-            clients.insert(scope, key.clone(), client.clone());
+    let result = match CLIENTS.lock() {
+        Ok(mut slot) => {
+            let clients = slot.get_or_insert_with(Clients::default);
+            let client =
+                built.map(|credentials| clients.resolve_or_insert(scope, commands, credentials));
+            if Arc::strong_count(&scope_lock) == 2 {
+                clients.building.remove(&scope);
+            }
+            client
         }
-        if Arc::strong_count(&key_lock) == 2 {
-            clients.building.remove(&key);
-        }
-    }
-
-    built
-}
-
-/// Point the served window at the client key for its credential commands in
-/// its environment, rather than any other window's.
-pub(super) fn select_window_client(token_command: Option<&str>, cookie_command: Option<&str>) {
-    let Some(scope) = crate::process::env_scope() else {
-        return;
+        Err(_) => Err("Slack client unavailable".to_string()),
     };
-    let key = client_key(token_command, cookie_command);
-    if let Ok(mut slot) = CLIENTS.lock() {
-        let clients = slot.get_or_insert_with(Clients::default);
-        clients.record_scope(Some(scope), key);
-    }
+
+    result
 }
 
-/// Whether the cached directory of `workspace` may be shown here. Once
-/// this process has logged in to Slack, only the verified account of this
-/// window's client may be shown, so a window never shows another account's
-/// rows.
-fn may_show(workspace: &Workspace) -> bool {
-    let scope = crate::process::env_scope();
-    let Ok(slot) = CLIENTS.lock() else {
+/// Whether `directory` may be shown for `client`. Verified clients only show
+/// their own workspace; offline unverified clients only show a directory
+/// already loaded from their own credential fingerprint.
+fn may_show_for_client(client: &Client, directory: &Directory) -> bool {
+    if client.rejection().is_some() {
         return false;
-    };
-    let Some(clients) = slot.as_ref().filter(|clients| !clients.built.is_empty()) else {
-        return true;
-    };
-    clients.current(scope).is_some_and(|client| {
-        client
-            .known_identity()
-            .is_some_and(|account| account.same_account(workspace))
-    })
+    }
+    client
+        .known_identity()
+        .is_none_or(|account| account.same_account(&directory.workspace))
 }
 
 /// The client built for this window (or server work), for actions run from
@@ -1166,7 +1343,7 @@ pub(super) fn learn_users(
         .known_identity()
         .is_some_and(|account| account.same_account(&learned.workspace))
     {
-        store_directory(&learned);
+        store_directory(client.credential_id(), &learned);
     }
     learned
 }
@@ -1188,8 +1365,12 @@ pub(super) fn search_people(
     })
 }
 
-fn directory_path() -> Option<PathBuf> {
-    cache_path(DIRECTORY_FILE)
+fn directories_dir() -> Option<PathBuf> {
+    cache_path(DIRECTORIES_DIR)
+}
+
+fn directory_path_for(credential_id: &str) -> Option<PathBuf> {
+    Some(directories_dir()?.join(format!("{credential_id}.json")))
 }
 
 pub(super) fn read_directory_from(path: &Path, now: u64) -> Option<Directory> {
@@ -1203,8 +1384,37 @@ pub(super) fn read_directory_from(path: &Path, now: u64) -> Option<Directory> {
 }
 
 pub(super) fn write_directory_to(path: &Path, directory: &Directory) {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     if let Ok(data) = serde_json::to_vec(directory) {
         write_private(path, &data);
+    }
+}
+
+fn prune_directory_files(dir: &Path, keep: usize) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut files: Vec<(PathBuf, SystemTime)> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
+        .map(|path| {
+            let modified = path
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .unwrap_or(UNIX_EPOCH);
+            (path, modified)
+        })
+        .collect();
+    if files.len() <= keep {
+        return;
+    }
+    let drop_count = files.len() - keep;
+    files.sort_by_key(|(_, modified)| *modified);
+    for (path, _) in files.into_iter().take(drop_count) {
+        let _ = std::fs::remove_file(path);
     }
 }
 
@@ -1287,7 +1497,7 @@ pub(super) fn update_cache<T: Serialize + DeserializeOwned>(
     workspace: &Workspace,
     update: impl FnOnce(&mut T),
 ) {
-    if let Some(path) = cache_path(name) {
+    if let Some(path) = account_cache_path(name, workspace) {
         update_cache_at(&path, workspace, now_secs(), update);
     }
 }
@@ -1314,6 +1524,25 @@ pub(super) fn cached_account() -> Option<Workspace> {
         .filter(|workspace| !workspace.team_id.is_empty() && !workspace.user_id.is_empty())
 }
 
+fn account_key(workspace: &Workspace) -> Option<String> {
+    if workspace.team_id.is_empty() || workspace.user_id.is_empty() {
+        return None;
+    }
+    let mut hasher = Sha256::new();
+    hasher.update(workspace.team_id.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(workspace.user_id.as_bytes());
+    Some(hasher.finalize_hex())
+}
+
+fn account_cache_path_in(root: &Path, name: &str, workspace: &Workspace) -> Option<PathBuf> {
+    Some(
+        root.join(ACCOUNTS_DIR)
+            .join(account_key(workspace)?)
+            .join(name),
+    )
+}
+
 /// The file `name` in the Slack cache directory; none in unit tests.
 pub(super) fn cache_path(name: &str) -> Option<PathBuf> {
     crate::ui::get_slack_cache_dir()
@@ -1321,84 +1550,198 @@ pub(super) fn cache_path(name: &str) -> Option<PathBuf> {
         .map(|dir| dir.join(name))
 }
 
+/// The per-account cache file `name` for `workspace`; none in unit tests or
+/// when the account identity is unknown.
+pub(super) fn account_cache_path(name: &str, workspace: &Workspace) -> Option<PathBuf> {
+    let root = crate::ui::get_slack_cache_dir().ok()?;
+    account_cache_path_in(&root, name, workspace)
+}
+
 /// The value cached as `name` for the account of `workspace` and its age.
 pub(super) fn read_cache<T: DeserializeOwned>(
     name: &str,
     workspace: &Workspace,
 ) -> Option<(T, Duration)> {
-    read_cache_from(&cache_path(name)?, workspace, now_secs())
+    read_cache_from(&account_cache_path(name, workspace)?, workspace, now_secs())
 }
 
 pub(super) fn write_cache<T: Serialize>(name: &str, workspace: &Workspace, value: &T) {
-    if let Some(path) = cache_path(name) {
+    if let Some(path) = account_cache_path(name, workspace) {
         write_cache_to(&path, workspace, value, now_secs());
     }
 }
 
-/// The directory kept in memory once read or fetched in this process.
-static DIRECTORY: Mutex<Option<Arc<Directory>>> = Mutex::new(None);
-
-pub(super) fn cached_directory() -> Option<Arc<Directory>> {
-    stored_directory().filter(|directory| may_show(&directory.workspace))
+struct CachedDirectory {
+    directory: Arc<Directory>,
+    used: u64,
 }
 
-/// The cached directory, whichever account it belongs to.
-fn stored_directory() -> Option<Arc<Directory>> {
-    if let Some(directory) = DIRECTORY.lock().ok().and_then(|slot| slot.clone()) {
+/// In-memory directories and account epochs, keyed by each client's one-way
+/// credential fingerprint so concurrent accounts stay isolated in memory and
+/// on disk.
+#[derive(Default)]
+struct Directories {
+    by_credential: HashMap<String, CachedDirectory>,
+    epochs: HashMap<String, u64>,
+    tick: u64,
+}
+
+impl Directories {
+    fn next_tick(&mut self) -> u64 {
+        self.tick += 1;
+        self.tick
+    }
+
+    fn get(&mut self, credential_id: &str) -> Option<Arc<Directory>> {
+        let used = self.next_tick();
+        let entry = self.by_credential.get_mut(credential_id)?;
+        entry.used = used;
+        Some(entry.directory.clone())
+    }
+
+    fn insert(&mut self, credential_id: String, directory: Arc<Directory>) {
+        let used = self.next_tick();
+        self.by_credential
+            .insert(credential_id.clone(), CachedDirectory { directory, used });
+        while self.by_credential.len() > MAX_CLIENTS {
+            let oldest = self
+                .by_credential
+                .iter()
+                .filter(|(k, _)| *k != &credential_id)
+                .min_by_key(|(_, entry)| entry.used)
+                .map(|(k, _)| k.clone());
+            match oldest {
+                Some(oldest) => {
+                    self.by_credential.remove(&oldest);
+                }
+                None => break,
+            }
+        }
+    }
+
+    fn forget(&mut self, credential_id: &str) -> u64 {
+        self.by_credential.remove(credential_id);
+        let epoch = self.epochs.entry(credential_id.to_string()).or_insert(0);
+        *epoch += 1;
+        *epoch
+    }
+
+    fn epoch(&self, credential_id: Option<&str>) -> u64 {
+        credential_id
+            .and_then(|id| self.epochs.get(id).copied())
+            .unwrap_or(0)
+    }
+}
+
+/// The directories and account epochs kept in memory in this process.
+static DIRECTORIES: Mutex<Option<Directories>> = Mutex::new(None);
+
+fn read_disk_directory(credential_id: &str) -> Option<Arc<Directory>> {
+    Some(Arc::new(read_directory_from(
+        &directory_path_for(credential_id)?,
+        now_secs(),
+    )?))
+}
+
+fn memory_directory(credential_id: &str) -> Option<Arc<Directory>> {
+    DIRECTORIES
+        .lock()
+        .ok()
+        .and_then(|mut slot| slot.as_mut()?.get(credential_id))
+}
+
+fn remember_directory(credential_id: &str, directory: &Arc<Directory>) {
+    if cfg!(test) {
+        return;
+    }
+    if let Ok(mut slot) = DIRECTORIES.lock() {
+        slot.get_or_insert_with(Directories::default)
+            .insert(credential_id.to_string(), directory.clone());
+    }
+}
+
+/// The cached directory for `credential_id`, from memory or its per-credential
+/// file on disk. Never reads untagged legacy files.
+fn directory_for_credential(credential_id: &str) -> Option<Arc<Directory>> {
+    if let Some(directory) = memory_directory(credential_id) {
         return Some(directory);
     }
-    let directory = Arc::new(read_directory_from(&directory_path()?, now_secs())?);
-    if let Ok(mut slot) = DIRECTORY.lock() {
-        *slot = Some(directory.clone());
-    }
+    let directory = read_disk_directory(credential_id)?;
+    remember_directory(credential_id, &directory);
     Some(directory)
 }
 
-/// Re-read the directory another process, such as the server, wrote.
-/// The one in memory is kept when the file cannot be read.
+pub(super) fn cached_directory() -> Option<Arc<Directory>> {
+    let client = current_client().ok()?;
+    let directory = directory_for_credential(client.credential_id())?;
+    may_show_for_client(&client, &directory).then_some(directory)
+}
+
+/// Re-read the directory another process, such as the server, wrote for the
+/// current client's credentials.
 pub(super) fn reload_directory() {
-    let Some(directory) = directory_path().and_then(|path| read_directory_from(&path, now_secs()))
-    else {
+    let Ok(client) = current_client() else {
         return;
     };
-    if let Ok(mut slot) = DIRECTORY.lock() {
-        *slot = Some(Arc::new(directory));
+    let Some(directory) = read_disk_directory(client.credential_id()) else {
+        return;
+    };
+    if may_show_for_client(&client, &directory) {
+        remember_directory(client.credential_id(), &directory);
     }
 }
 
-/// Bumped each time the credentials turn out to belong to another account
-/// than the cached directory, so work started for the old one is dropped.
-static ACCOUNT_EPOCH: AtomicU64 = AtomicU64::new(0);
-
 pub(super) fn account_epoch() -> u64 {
-    ACCOUNT_EPOCH.load(Ordering::SeqCst)
+    let scope = crate::process::env_scope();
+    let Some((credential_id, scope_epoch)) = CLIENTS.lock().ok().and_then(|slot| {
+        let entry = slot.as_ref()?.scopes.get(&scope)?;
+        Some((entry.client.credential_id().to_string(), entry.epoch))
+    }) else {
+        return 0;
+    };
+    let dir_epoch = DIRECTORIES
+        .lock()
+        .ok()
+        .and_then(|slot| Some(slot.as_ref()?.epoch(Some(&credential_id))))
+        .unwrap_or(0);
+    (scope_epoch << 32) | (dir_epoch & 0xffff_ffff)
 }
 
-/// The cached directory if it belongs to the account of `client`. One of
-/// another account is forgotten at once, so it is never shown again. An
-/// unverified client never reuses a cached directory until `auth.test`
-/// confirms its account.
+/// The cached directory if it belongs to the account of `client`. When Slack
+/// cannot be reached (offline, not rejected), only the directory keyed to
+/// `client`'s exact credential fingerprint is reused.
 pub(super) fn verified_directory(client: &Client) -> Result<Option<Arc<Directory>>, String> {
-    let account = client.identity()?;
-    let Some(directory) = stored_directory() else {
+    let credential_id = client.credential_id();
+    let account = match client.identity() {
+        Ok(account) => account,
+        Err(error) if client.rejection().is_some() => return Err(error),
+        Err(error) => {
+            crate::debug_log!("slack: cannot tell whose the token is: {error}");
+            return match directory_for_credential(credential_id) {
+                Some(directory) => Ok(Some(directory)),
+                None => Err(error),
+            };
+        }
+    };
+    let Some(directory) = directory_for_credential(credential_id) else {
         return Ok(None);
     };
     if directory.workspace.same_account(&account) {
         return Ok(Some(directory));
     }
     crate::debug_log!("slack: the token belongs to another account, forgetting the cache");
-    forget_directory();
+    forget_directory(credential_id);
     Ok(None)
 }
 
-fn forget_directory() {
-    if let Ok(mut slot) = DIRECTORY.lock() {
-        *slot = None;
+fn forget_directory(credential_id: &str) {
+    if let Ok(mut slot) = DIRECTORIES.lock() {
+        slot.get_or_insert_with(Directories::default)
+            .forget(credential_id);
     }
-    if let Some(path) = directory_path() {
+    if let Some(path) = directory_path_for(credential_id) {
         let _ = std::fs::remove_file(path);
     }
-    ACCOUNT_EPOCH.fetch_add(1, Ordering::SeqCst);
 }
 
 /// The directory of the account of `client`, from the cache unless
@@ -1417,31 +1760,36 @@ pub(super) fn directory(client: &Client, refresh: bool) -> Result<Arc<Directory>
         directory.users.len(),
         started.elapsed()
     );
-    store_directory(&directory);
+    store_directory(client.credential_id(), &directory);
     Ok(directory)
 }
 
-fn store_directory(directory: &Arc<Directory>) {
-    if let Some(path) = directory_path() {
+fn store_directory(credential_id: &str, directory: &Arc<Directory>) {
+    if let Some(path) = directory_path_for(credential_id) {
         write_directory_to(&path, directory);
+        if let Some(dir) = directories_dir() {
+            prune_directory_files(&dir, MAX_CLIENTS);
+        }
     }
     // Like the disk cache, kept out of unit tests so one test's directory
     // does not turn into another's cached rows.
-    if cfg!(test) {
-        return;
-    }
-    if let Ok(mut slot) = DIRECTORY.lock() {
-        *slot = Some(directory.clone());
-    }
+    remember_directory(credential_id, directory);
 }
 
 /// Remove everything cached but the usage counts.
 pub fn clear_cache() {
     if let Ok(dir) = crate::ui::get_slack_cache_dir() {
-        for file in [DIRECTORY_FILE, LIVE_FILE, UNREAD_FILE, MUTED_FILE] {
+        for file in [
+            DIRECTORY_FILE,
+            LIVE_FILE,
+            UNREAD_FILE,
+            MUTED_FILE,
+            THREADS_FILE,
+            ACTIVITY_FILE,
+        ] {
             let _ = std::fs::remove_file(dir.join(file));
         }
-        for subdir in ["avatars", PREVIEW_DIR] {
+        for subdir in ["avatars", PREVIEW_DIR, DIRECTORIES_DIR, ACCOUNTS_DIR] {
             let _ = std::fs::remove_dir_all(dir.join(subdir));
         }
     }
@@ -1595,32 +1943,44 @@ pub(super) mod tests {
 
     #[test]
     fn test_client_is_rebuilt_for_other_credential_commands() {
-        let first = client(Some("printf xoxp-1"), None).unwrap();
-        let again = client(Some("printf xoxp-1"), None).unwrap();
-        assert!(Arc::ptr_eq(&first, &again));
-        let other = client(Some("printf xoxp-2"), None).unwrap();
-        assert!(!Arc::ptr_eq(&first, &other));
-        assert!(Arc::ptr_eq(&current_client().unwrap(), &other));
-        // A window served for a caller has clients of its own, and the
-        // server's work loading Slack meanwhile does not change them.
         let base_env = || {
             HashMap::from([(
                 "PATH".to_string(),
                 std::env::var("PATH").unwrap_or_default(),
             )])
         };
-        let window_a = crate::process::ClientEnv::new(base_env());
-        let served = crate::process::with_env(window_a.clone(), || {
-            client(Some("printf xoxp-1"), None).unwrap()
+        let server_scope = crate::process::ClientEnv::new(base_env());
+        let first = crate::process::with_env(server_scope.clone(), || {
+            let first = client(Some("printf xoxp-1"), None, false).unwrap();
+            let again = client(Some("printf xoxp-1"), None, false).unwrap();
+            assert!(Arc::ptr_eq(&first, &again));
+            let other = client(Some("printf xoxp-2"), None, false).unwrap();
+            assert!(!Arc::ptr_eq(&first, &other));
+            assert!(Arc::ptr_eq(&current_client().unwrap(), &other));
+            first
         });
-        assert!(!Arc::ptr_eq(&served, &first));
-        client(Some("printf xoxp-1"), None).unwrap();
+        // A served window starts unconnected, then reuses the matching
+        // credential client once its own token command runs, while staying
+        // scoped separately from the server and other windows.
+        let window_a = crate::process::ClientEnv::new(base_env());
+        crate::process::with_env(window_a.clone(), || {
+            assert!(current_client().is_err());
+            assert!(current_client_id().is_none());
+        });
+        let served = crate::process::with_env(window_a.clone(), || {
+            client(Some("printf xoxp-1"), None, false).unwrap()
+        });
+        assert!(Arc::ptr_eq(&served, &first));
+        // Changing another scope's client does not affect window A.
+        crate::process::with_env(server_scope, || {
+            client(Some("printf xoxp-2"), None, false).unwrap();
+        });
         crate::process::with_env(window_a.clone(), || {
             assert!(Arc::ptr_eq(&current_client().unwrap(), &served));
+            assert_eq!(current_client_id(), Some(served.id()));
         });
-        // A new window with a different per-launch activation token reuses
-        // the same client when selected, while staying scoped separately
-        // from window A.
+        // A new window with a different per-launch activation token starts
+        // unconnected and reuses the same client once its token matches.
         let mut env_b = base_env();
         env_b.insert("XDG_ACTIVATION_TOKEN".to_string(), "tok-2".to_string());
         let window_b = crate::process::ClientEnv::new(env_b);
@@ -1634,38 +1994,66 @@ pub(super) mod tests {
             user_id: "U2".into(),
             ..Workspace::default()
         };
+        let own_dir = Directory::new(workspace.clone(), Vec::new(), Vec::new(), 1_000);
+        let foreign_dir = Directory::new(other_workspace.clone(), Vec::new(), Vec::new(), 1_000);
         crate::process::with_env(window_b.clone(), || {
-            select_window_client(Some("printf xoxp-2"), None);
             assert!(current_client().is_err());
-            assert!(current_client_id().is_none());
-            assert!(!may_show(&workspace));
-            select_window_client(Some("printf xoxp-1"), None);
-            assert!(Arc::ptr_eq(&current_client().unwrap(), &served));
-            assert_eq!(current_client_id(), Some(served.id()));
-            // Unverified identity: cached directory is rejected until verified.
-            assert!(!may_show(&workspace));
+            let b_client = client(Some("printf xoxp-1"), None, false).unwrap();
+            assert!(Arc::ptr_eq(&b_client, &served));
+            assert!(may_show_for_client(&b_client, &own_dir));
         });
         // Once verified, only the matching workspace may be shown.
         let _ = served.identity.set(workspace.clone());
-        crate::process::with_env(window_b.clone(), || {
-            assert!(may_show(&workspace));
-            assert!(!may_show(&other_workspace));
-        });
+        assert!(may_show_for_client(&served, &own_dir));
+        assert!(!may_show_for_client(&served, &foreign_dir));
         // Delayed work from window A keeps window A's client even after
-        // window B selects another command.
-        crate::process::with_env(window_b.clone(), || {
-            select_window_client(Some("printf xoxp-2"), None);
+        // window B switches to another token.
+        let b_other = crate::process::with_env(window_b.clone(), || {
+            client(Some("printf xoxp-2"), None, false).unwrap()
         });
-        crate::process::with_env(window_a.clone(), || {
+        assert!(!Arc::ptr_eq(&b_other, &served));
+        crate::process::with_env(window_a, || {
             assert!(Arc::ptr_eq(&current_client().unwrap(), &served));
         });
         crate::process::with_env(window_b, || {
-            assert!(current_client().is_err());
+            assert!(Arc::ptr_eq(&current_client().unwrap(), &b_other));
         });
     }
 
     #[test]
-    fn test_select_window_client_does_not_wait_for_credential_commands() {
+    fn test_changed_token_from_same_command_builds_new_client() {
+        let dir = std::env::temp_dir().join(format!("raffi-slack-token-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let token_file = dir.join("token");
+        let cmd = format!("cat {}", token_file.display());
+        let env = || {
+            crate::process::ClientEnv::new(HashMap::from([(
+                "PATH".to_string(),
+                std::env::var("PATH").unwrap_or_default(),
+            )]))
+        };
+        std::fs::write(&token_file, "xoxp-account-one\n").unwrap();
+        let win1 = env();
+        let c1 =
+            crate::process::with_env(win1.clone(), || client(Some(&cmd), None, false)).unwrap();
+        // Same window reuses without re-reading until refresh.
+        std::fs::write(&token_file, "xoxp-account-two\n").unwrap();
+        let same_win =
+            crate::process::with_env(win1.clone(), || client(Some(&cmd), None, false)).unwrap();
+        assert!(Arc::ptr_eq(&c1, &same_win));
+        // A new window re-runs token_command and switches to the new account.
+        let win2 = env();
+        let c2 = crate::process::with_env(win2, || client(Some(&cmd), None, false)).unwrap();
+        assert!(!Arc::ptr_eq(&c1, &c2));
+        assert_ne!(c1.credential_id(), c2.credential_id());
+        // Refreshing in window 1 also picks up the changed token.
+        let refreshed = crate::process::with_env(win1, || client(Some(&cmd), None, true)).unwrap();
+        assert!(Arc::ptr_eq(&refreshed, &c2));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_other_window_does_not_wait_for_credential_commands() {
         let env_slow = crate::process::ClientEnv::new(HashMap::from([
             (
                 "PATH".to_string(),
@@ -1682,18 +2070,18 @@ pub(super) mod tests {
         ]));
         let handle = std::thread::spawn(move || {
             crate::process::with_env(env_slow, || {
-                client(Some("sleep 0.25; printf xoxp-slow"), None)
+                client(Some("sleep 0.25; printf xoxp-slow"), None, false)
             })
         });
         // Give the background thread time to enter `read_secret_command`.
         std::thread::sleep(Duration::from_millis(50));
         let started = std::time::Instant::now();
         crate::process::with_env(env_other, || {
-            select_window_client(Some("printf xoxp-other"), None);
+            assert!(current_client().is_err());
         });
         assert!(
             started.elapsed() < Duration::from_millis(100),
-            "select_window_client blocked for {:?}",
+            "current_client blocked for {:?}",
             started.elapsed()
         );
         assert!(handle.join().unwrap().is_ok());
@@ -1711,20 +2099,122 @@ pub(super) mod tests {
     #[test]
     fn test_clients_cache_evicts_least_recently_used() {
         let mut clients = Clients::default();
+        let mut ids = Vec::new();
         for i in 0..(MAX_CLIENTS + 3) {
-            let key: ClientKey = (Some(format!("cmd-{i}")), None, Some(i as u64));
-            let client = Arc::new(Client::fake(Box::new(FakeHttp::default())));
-            clients.insert(Some(i as u64), key, client);
+            let credentials = Credentials::new(Secret::new(format!("xoxp-lru-{i}")), None).unwrap();
+            let id = credentials.fingerprint();
+            ids.push(id);
+            clients.resolve_or_insert(
+                Some(i as u64),
+                (Some(format!("cmd-{i}")), None),
+                credentials,
+            );
         }
-        assert_eq!(clients.built.len(), MAX_CLIENTS);
-        assert!(!clients
-            .built
-            .contains_key(&(Some("cmd-0".into()), None, Some(0))));
-        assert!(clients.built.contains_key(&(
-            Some(format!("cmd-{}", MAX_CLIENTS + 2)),
-            None,
-            Some((MAX_CLIENTS + 2) as u64)
-        )));
+        assert_eq!(clients.by_credential.len(), MAX_CLIENTS);
+        assert!(!clients.by_credential.contains_key(&ids[0]));
+        assert!(clients.by_credential.contains_key(&ids[MAX_CLIENTS + 2]));
+    }
+
+    #[test]
+    fn test_clients_scope_epoch_changes_on_account_switch() {
+        let mut clients = Clients::default();
+        let commands = (Some("token".into()), None);
+        let cred = |token: &str| Credentials::new(Secret::new(token.into()), None).unwrap();
+
+        let _ = clients.resolve_or_insert(Some(1), commands.clone(), cred("xoxp-switch-a"));
+        let epoch_a = clients.scopes[&Some(1)].epoch;
+        // Refreshing with the same credentials keeps the same scope epoch.
+        let _ = clients.resolve_or_insert(Some(1), commands.clone(), cred("xoxp-switch-a"));
+        assert_eq!(clients.scopes[&Some(1)].epoch, epoch_a);
+
+        // Switching scope 1 to another account bumps only scope 1's epoch.
+        let _ = clients.resolve_or_insert(Some(2), commands.clone(), cred("xoxp-switch-b"));
+        let epoch_other = clients.scopes[&Some(2)].epoch;
+        let _ = clients.resolve_or_insert(Some(1), commands, cred("xoxp-switch-b"));
+        assert_ne!(clients.scopes[&Some(1)].epoch, epoch_a);
+        assert_eq!(clients.scopes[&Some(2)].epoch, epoch_other);
+    }
+
+    #[test]
+    fn test_sha256_and_credential_fingerprint() {
+        let mut hasher = Sha256::new();
+        hasher.update(b"abc");
+        assert_eq!(
+            hasher.finalize_hex(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        let a = Credentials::new(Secret::new("xoxp-account-a".into()), None).unwrap();
+        let b = Credentials::new(Secret::new("xoxp-account-b".into()), None).unwrap();
+        let fp_a = a.fingerprint();
+        let fp_b = b.fingerprint();
+        assert_eq!(fp_a.len(), 64);
+        assert_ne!(fp_a, fp_b);
+        assert!(!fp_a.contains("xoxp-"));
+    }
+
+    #[test]
+    fn test_directories_and_epochs_stay_isolated_per_account() {
+        let cred_a = Credentials::new(Secret::new("xoxp-a".into()), None)
+            .unwrap()
+            .fingerprint();
+        let cred_b = Credentials::new(Secret::new("xoxp-b".into()), None)
+            .unwrap()
+            .fingerprint();
+        let dir_a = Arc::new(Directory::new(
+            Workspace {
+                team_id: "T1".into(),
+                user_id: "U1".into(),
+                ..Workspace::default()
+            },
+            Vec::new(),
+            Vec::new(),
+            1_000,
+        ));
+        let dir_b = Arc::new(Directory::new(
+            Workspace {
+                team_id: "T2".into(),
+                user_id: "U2".into(),
+                ..Workspace::default()
+            },
+            Vec::new(),
+            Vec::new(),
+            1_000,
+        ));
+        let mut store = Directories::default();
+        store.insert(cred_a.clone(), dir_a.clone());
+        store.insert(cred_b.clone(), dir_b.clone());
+        assert_eq!(store.get(&cred_a).unwrap().workspace.team_id, "T1");
+        assert_eq!(store.get(&cred_b).unwrap().workspace.team_id, "T2");
+        assert_eq!(store.epoch(Some(&cred_a)), 0);
+        assert_eq!(store.epoch(Some(&cred_b)), 0);
+        // Forgetting account A bumps only A's epoch and leaves B intact.
+        assert_eq!(store.forget(&cred_a), 1);
+        assert!(store.get(&cred_a).is_none());
+        assert_eq!(store.get(&cred_b).unwrap().workspace.team_id, "T2");
+        assert_eq!(store.epoch(Some(&cred_a)), 1);
+        assert_eq!(store.epoch(Some(&cred_b)), 0);
+        // Per-credential disk files keep both accounts without overwriting.
+        let dir = std::env::temp_dir().join(format!("raffi-slack-dirs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path_a = dir.join(format!("{cred_a}.json"));
+        let path_b = dir.join(format!("{cred_b}.json"));
+        write_directory_to(&path_a, &dir_a);
+        write_directory_to(&path_b, &dir_b);
+        assert_eq!(
+            read_directory_from(&path_a, 1_060)
+                .unwrap()
+                .workspace
+                .team_id,
+            "T1"
+        );
+        assert_eq!(
+            read_directory_from(&path_b, 1_060)
+                .unwrap()
+                .workspace
+                .team_id,
+            "T2"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1934,6 +2424,40 @@ pub(super) mod tests {
         // Written before the workspace was recorded.
         std::fs::write(&path, r#"{"user":"U1","fetched_at":1000,"value":["C1"]}"#).unwrap();
         assert!(read_cache_from::<Vec<String>>(&path, &owner, 1_060).is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_per_account_cache_paths_keep_offline_fallbacks_isolated() {
+        let dir = std::env::temp_dir().join(format!("raffi-slack-accounts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let account_a = Workspace {
+            team_id: "T1".into(),
+            user_id: "U1".into(),
+            ..Default::default()
+        };
+        let account_b = Workspace {
+            team_id: "T2".into(),
+            user_id: "U2".into(),
+            ..Default::default()
+        };
+        assert!(account_cache_path_in(&dir, UNREAD_FILE, &Workspace::default()).is_none());
+
+        for name in [UNREAD_FILE, THREADS_FILE, ACTIVITY_FILE] {
+            let path_a = account_cache_path_in(&dir, name, &account_a).unwrap();
+            let path_b = account_cache_path_in(&dir, name, &account_b).unwrap();
+            assert_ne!(path_a, path_b);
+            write_cache_to(&path_a, &account_a, &vec!["A".to_string()], 1_000);
+            write_cache_to(&path_b, &account_b, &vec!["B".to_string()], 1_000);
+            assert_eq!(
+                read_cache_from::<Vec<String>>(&path_a, &account_a, 1_060).map(|(v, _)| v),
+                Some(vec!["A".to_string()])
+            );
+            assert_eq!(
+                read_cache_from::<Vec<String>>(&path_b, &account_b, 1_060).map(|(v, _)| v),
+                Some(vec!["B".to_string()])
+            );
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 
