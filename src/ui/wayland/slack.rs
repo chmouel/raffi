@@ -574,29 +574,53 @@ pub(super) enum SlackAction {
     },
 }
 
-/// Run `action` against Slack only if the active account epoch still
-/// matches `epoch`, so an action started before an account switch cannot
-/// run against the new client. Blocking: run it off the UI thread.
+/// Run `action` against Slack only if the active account epoch still matches
+/// `epoch`, resolving the client atomically with the epoch check so a
+/// concurrent refresh cannot swap accounts in between. Blocking: run it off
+/// the UI thread.
 pub(super) fn run_action_for_epoch(action: &SlackAction, epoch: u64) -> Result<(), String> {
-    if slack_api::account_epoch() != epoch {
+    let client = if epoch != 0 {
+        Some(slack_api::client_for_epoch(epoch)?)
+    } else if slack_api::account_epoch() != 0 {
         return Err("Slack account changed; refresh and try again".to_string());
-    }
-    run_action(action)
+    } else {
+        slack_api::current_client().ok()
+    };
+    run_action_with(action, client)
 }
 
 /// Run `action` against Slack. Blocking: run it off the UI thread.
 pub(super) fn run_action(action: &SlackAction) -> Result<(), String> {
+    run_action_with(action, slack_api::current_client().ok())
+}
+
+fn run_action_with(
+    action: &SlackAction,
+    client: Option<std::sync::Arc<Client>>,
+) -> Result<(), String> {
     match action {
         SlackAction::Open(url) => return open_url(url),
         SlackAction::OpenUnread { url, channel, ts } => {
-            forget_cached_unread(channel);
+            if let Some(account) = client.as_ref().and_then(|c| c.known_identity()) {
+                slack_api::update_cache(
+                    slack_api::UNREAD_FILE,
+                    account,
+                    |unread: &mut Vec<Unread>| {
+                        unread.retain(|entry| entry.channel != *channel);
+                    },
+                );
+            }
             let opened = open_url(url);
             if !ts.is_empty() {
-                if let Err(error) = slack_api::current_client().and_then(|client| {
-                    client
-                        .call("conversations.mark", &[("channel", channel), ("ts", ts)])
-                        .map(drop)
-                }) {
+                if let Err(error) = client
+                    .as_deref()
+                    .ok_or_else(|| "Slack is not connected".to_string())
+                    .and_then(|client| {
+                        client
+                            .call("conversations.mark", &[("channel", channel), ("ts", ts)])
+                            .map(drop)
+                    })
+                {
                     crate::debug_log!("slack: cannot mark {channel} as read: {error}");
                 }
             }
@@ -608,10 +632,22 @@ pub(super) fn run_action(action: &SlackAction) -> Result<(), String> {
             thread_ts,
             ts,
         } => {
-            forget_cached_thread(channel, thread_ts);
+            if let Some(account) = client.as_ref().and_then(|c| c.known_identity()) {
+                slack_api::update_cache(
+                    slack_api::THREADS_FILE,
+                    account,
+                    |threads: &mut Vec<UnreadThread>| {
+                        threads.retain(|entry| {
+                            !(entry.channel == *channel && entry.thread_ts == *thread_ts)
+                        });
+                    },
+                );
+            }
             let opened = open_url(url);
-            if let Err(error) = slack_api::current_client()
-                .and_then(|client| mark_thread(&client, channel, thread_ts, ts))
+            if let Err(error) = client
+                .as_deref()
+                .ok_or_else(|| "Slack is not connected".to_string())
+                .and_then(|client| mark_thread(client, channel, thread_ts, ts))
             {
                 crate::debug_log!("slack: cannot mark thread {thread_ts} as read: {error}");
             }
@@ -619,7 +655,7 @@ pub(super) fn run_action(action: &SlackAction) -> Result<(), String> {
         }
         _ => {}
     }
-    let client = slack_api::current_client()?;
+    let client = client.ok_or_else(|| "Slack is not connected".to_string())?;
     let now = Local::now();
     call_action(&client, action, now)?;
     if let Some(account) = client.known_identity() {
@@ -629,9 +665,9 @@ pub(super) fn run_action(action: &SlackAction) -> Result<(), String> {
 }
 
 /// Drop `channel` from the unread cache at once, even before `auth.test`
-/// has answered in this run.
-pub(super) fn forget_cached_unread(channel: &str) {
-    if let Some(account) = slack_api::cached_account() {
+/// has answered in this run, only if the active account epoch still matches.
+pub(super) fn forget_cached_unread(channel: &str, epoch: u64) {
+    if let Some(account) = slack_api::cached_account_for_epoch(epoch) {
         slack_api::update_cache(
             slack_api::UNREAD_FILE,
             &account,
@@ -644,8 +680,8 @@ pub(super) fn forget_cached_unread(channel: &str) {
 
 /// Drop the thread from the threads cache at once, as
 /// [`forget_cached_unread`] does for conversations.
-pub(super) fn forget_cached_thread(channel: &str, thread_ts: &str) {
-    if let Some(account) = slack_api::cached_account() {
+pub(super) fn forget_cached_thread(channel: &str, thread_ts: &str, epoch: u64) {
+    if let Some(account) = slack_api::cached_account_for_epoch(epoch) {
         slack_api::update_cache(
             slack_api::THREADS_FILE,
             &account,

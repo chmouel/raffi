@@ -688,6 +688,9 @@ pub(super) fn run_kept_open(action: &DeferredAction) -> Result<(), String> {
         DeferredAction::Bluetooth(args) => super::bluetooth::run_action(args),
         DeferredAction::BrowserTab(action) => super::browser_tabs::run(action),
         DeferredAction::Slack(action) => super::slack::run_action(action),
+        DeferredAction::SlackForEpoch(action, epoch) => {
+            super::slack::run_action_for_epoch(action, *epoch)
+        }
         DeferredAction::Copy(text) => super::actions::copy_text_checked(text),
         DeferredAction::BrowserHostSetup { force } => {
             crate::browser_host::install_current(*force).map(|_| ())

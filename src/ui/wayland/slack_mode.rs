@@ -274,13 +274,13 @@ impl LauncherApp {
         if let Some(rest) = identity.strip_prefix("slack:unread:") {
             let channel = rest.split(':').next().unwrap_or_default();
             if !channel.is_empty() {
-                slack::forget_cached_unread(channel);
+                slack::forget_cached_unread(channel, self.slack.epoch);
             }
             return;
         }
         if let Some(rest) = identity.strip_prefix("slack:thread:") {
             if let [channel, _, thread_ts] = rest.split(':').collect::<Vec<_>>()[..] {
-                slack::forget_cached_thread(channel, thread_ts);
+                slack::forget_cached_thread(channel, thread_ts, self.slack.epoch);
             }
             return;
         }

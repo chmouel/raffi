@@ -832,6 +832,31 @@ pub(super) fn current_client() -> Result<Arc<Client>, String> {
         .ok_or_else(|| "Slack is not connected".to_string())
 }
 
+/// The active client for this window only if its account epoch still matches
+/// `expected_epoch`, checked atomically with the client lookup so a
+/// concurrent refresh cannot swap accounts in between.
+pub(super) fn client_for_epoch(expected_epoch: u64) -> Result<Arc<Client>, String> {
+    let scope = crate::process::env_scope();
+    let (client, scope_epoch) = CLIENTS
+        .lock()
+        .ok()
+        .and_then(|slot| {
+            let entry = slot.as_ref()?.scopes.get(&scope)?;
+            Some((entry.client.clone(), entry.epoch))
+        })
+        .ok_or_else(|| "Slack is not connected".to_string())?;
+    let dir_epoch = DIRECTORIES
+        .lock()
+        .ok()
+        .and_then(|slot| Some(slot.as_ref()?.epoch(Some(client.credential_id()))))
+        .unwrap_or(0);
+    let current_epoch = (scope_epoch << 32) | (dir_epoch & 0xffff_ffff);
+    if current_epoch != expected_epoch {
+        return Err("Slack account changed; refresh and try again".to_string());
+    }
+    Ok(client)
+}
+
 /// Identifies the active client for this window, if one is connected.
 pub(super) fn current_client_id() -> Option<u64> {
     current_client().ok().map(|client| client.id())
@@ -1515,12 +1540,17 @@ pub(super) fn update_cache_at<T: Serialize + DeserializeOwned>(
 }
 
 /// The account known from [`Client::known_identity`], or from the cached
-/// directory before `auth.test` has answered.
-pub(super) fn cached_account() -> Option<Workspace> {
-    current_client()
-        .ok()
-        .and_then(|client| client.known_identity().cloned())
-        .or_else(|| cached_directory().map(|directory| directory.workspace.clone()))
+/// directory before `auth.test` has answered, only if the active client's
+/// epoch still matches `expected_epoch`.
+pub(super) fn cached_account_for_epoch(expected_epoch: u64) -> Option<Workspace> {
+    let client = client_for_epoch(expected_epoch).ok()?;
+    client
+        .known_identity()
+        .cloned()
+        .or_else(|| {
+            let directory = directory_for_credential(client.credential_id())?;
+            may_show_for_client(&client, &directory).then(|| directory.workspace.clone())
+        })
         .filter(|workspace| !workspace.team_id.is_empty() && !workspace.user_id.is_empty())
 }
 
@@ -2133,6 +2163,40 @@ pub(super) mod tests {
         let _ = clients.resolve_or_insert(Some(1), commands, cred("xoxp-switch-b"));
         assert_ne!(clients.scopes[&Some(1)].epoch, epoch_a);
         assert_eq!(clients.scopes[&Some(2)].epoch, epoch_other);
+    }
+
+    #[test]
+    fn test_client_for_epoch_atomically_matches_and_rejects_switched_account() {
+        let env = crate::process::ClientEnv::new(HashMap::from([
+            (
+                "PATH".to_string(),
+                std::env::var("PATH").unwrap_or_default(),
+            ),
+            ("RAFFI_TEST_CLIENT_FOR_EPOCH".to_string(), "1".to_string()),
+        ]));
+        crate::process::with_env(env, || {
+            let client_a = client(Some("printf xoxp-atomic-a"), None, false).unwrap();
+            let epoch_a = account_epoch();
+            let resolved = client_for_epoch(epoch_a).unwrap();
+            assert!(Arc::ptr_eq(&resolved, &client_a));
+
+            let client_b = client(Some("printf xoxp-atomic-b"), None, true).unwrap();
+            let epoch_b = account_epoch();
+            assert_ne!(epoch_a, epoch_b);
+            assert!(client_for_epoch(epoch_a).is_err());
+            assert!(Arc::ptr_eq(&client_for_epoch(epoch_b).unwrap(), &client_b));
+
+            let _ = client_b.identity.set(Workspace {
+                team_id: "T2".into(),
+                user_id: "U2".into(),
+                ..Workspace::default()
+            });
+            assert!(cached_account_for_epoch(epoch_a).is_none());
+            assert_eq!(
+                cached_account_for_epoch(epoch_b).map(|w| w.team_id),
+                Some("T2".to_string())
+            );
+        });
     }
 
     #[test]

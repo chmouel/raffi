@@ -325,6 +325,8 @@ pub(super) enum DeferredAction {
     },
     /// Call the Slack Web API.
     Slack(super::slack::SlackAction),
+    /// Call the Slack Web API only if the active account epoch still matches.
+    SlackForEpoch(super::slack::SlackAction, u64),
     /// Copy this text to the clipboard.
     Copy(String),
     /// Run `argv`, then focus the most recent window of one of `apps`, as
@@ -358,6 +360,9 @@ impl DeferredAction {
                 raise,
             } => open_in_terminal_tab(*kind, tab, window, raise.as_ref(), DEFERRED_TIMEOUT),
             Self::Slack(action) => super::slack::run_action(action),
+            Self::SlackForEpoch(action, epoch) => {
+                super::slack::run_action_for_epoch(action, *epoch)
+            }
             Self::Copy(text) => copy_text_checked(text),
             Self::OpenInApp { argv, apps } => {
                 run_detached(argv, DEFERRED_TIMEOUT)?;
@@ -382,7 +387,7 @@ impl DeferredAction {
             Self::Secret(_) => "secret",
             Self::BrowserTab(_) | Self::BrowserHostSetup { .. } => "browser tabs",
             Self::TerminalTab { .. } => "terminal",
-            Self::Slack(_) => "slack",
+            Self::Slack(_) | Self::SlackForEpoch(_, _) => "slack",
             Self::Copy(_) => "copy",
             Self::OpenInApp { .. } => "open",
         }

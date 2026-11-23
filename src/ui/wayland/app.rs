@@ -5938,6 +5938,12 @@ impl LauncherApp {
         if addon == CommandListAddon::Slack {
             self.record_slack_pick(&identity);
         }
+        let action = match action {
+            DeferredAction::Slack(slack_action) => {
+                DeferredAction::SlackForEpoch(slack_action, self.slack.epoch)
+            }
+            other => other,
+        };
         if keep_open {
             crate::debug_log!("{}: running {identity}", addon.name());
             self.save_query_to_history();
@@ -5987,7 +5993,6 @@ impl LauncherApp {
         action: DeferredAction,
     ) -> Task<Message> {
         let session = self.command_list.session;
-        let slack_epoch = self.slack.epoch;
         Task::perform(
             async move {
                 let (sender, receiver) = iced::futures::channel::oneshot::channel();
@@ -6000,8 +6005,6 @@ impl LauncherApp {
                             | CommandListAddon::BrowserHistory
                     ) {
                         action.run()
-                    } else if let DeferredAction::Slack(slack_action) = &action {
-                        super::slack::run_action_for_epoch(slack_action, slack_epoch)
                     } else {
                         super::command_list::run_kept_open(&action)
                     };

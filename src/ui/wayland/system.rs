@@ -85,6 +85,7 @@ impl SystemEntry {
             | DeferredAction::BrowserHostSetup { .. }
             | DeferredAction::TerminalTab { .. }
             | DeferredAction::Slack(_)
+            | DeferredAction::SlackForEpoch(_, _)
             | DeferredAction::Copy(_)
             | DeferredAction::OpenInApp { .. } => String::new(),
         }
@@ -172,6 +173,7 @@ fn program(action: &DeferredAction) -> Option<&str> {
         | DeferredAction::BrowserHostSetup { .. }
         | DeferredAction::TerminalTab { .. }
         | DeferredAction::Slack(_)
+        | DeferredAction::SlackForEpoch(_, _)
         | DeferredAction::Copy(_)
         | DeferredAction::OpenInApp { .. } => None,
         DeferredAction::Bluetooth(_) => Some("bluetoothctl"),

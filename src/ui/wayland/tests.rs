@@ -12698,6 +12698,57 @@ fn test_slack_enter_in_account_switch_gap_does_not_run_old_row() {
 }
 
 #[test]
+fn test_slack_deferred_action_refuses_to_run_after_account_switch() {
+    let env = crate::process::ClientEnv::new(std::collections::HashMap::from([
+        (
+            "PATH".to_string(),
+            std::env::var("PATH").unwrap_or_default(),
+        ),
+        ("RAFFI_TEST_SLACK_DEFERRED".to_string(), "1".to_string()),
+    ]));
+    crate::process::with_env(env, || {
+        let mut addons = AddonsConfig::default();
+        addons.slack.enabled = true;
+        addons.slack.close_on_action = Some(true);
+        let mut app = test_app(addons);
+        app.history.max_items = 0;
+
+        super::slack_api::client(Some("printf xoxp-defer-a"), None, false).unwrap();
+        let _ = app.update(Message::SearchChanged("slack unread ".into()));
+        let unread = [super::slack::Unread {
+            channel: "C1".into(),
+            last_read: "1.0".into(),
+            latest: "5.0".into(),
+            mentions: 1,
+            count: Some(1),
+            muted: false,
+        }];
+        let mut dir = super::slack_api::Directory::default();
+        dir.workspace.team_id = "T1".into();
+        let rows = super::slack::unread_rows(
+            &unread,
+            &dir,
+            crate::SlackOpenIn::Desktop,
+            chrono::Local::now(),
+        );
+        let generation = app.command_list.generation;
+        let _ = app.update(Message::CommandListLoaded(generation, Ok(rows)));
+
+        // Enter queues a deferred close-then-run action bound to account A's epoch.
+        app.selected_index = app.command_list_offset();
+        let _ = app.update(Message::Submit);
+        let deferred = deferred_action(&app).expect("expected deferred Slack action");
+
+        // Before the deferred action executes after window close, a refresh
+        // worker switches the active client to account B.
+        super::slack_api::client(Some("printf xoxp-defer-b"), None, true).unwrap();
+
+        let err = deferred.run().unwrap_err();
+        assert!(err.contains("account changed"));
+    });
+}
+
+#[test]
 fn test_slack_unread_enter_produces_open_unread_action() {
     let mut addons = AddonsConfig::default();
     addons.slack.enabled = true;
@@ -12727,7 +12778,11 @@ fn test_slack_unread_enter_produces_open_unread_action() {
 
     app.selected_index = app.command_list_offset();
     let _ = app.update(Message::Submit);
-    let Some(super::actions::DeferredAction::Slack(action)) = deferred_action(&app) else {
+    let Some(
+        super::actions::DeferredAction::Slack(action)
+        | super::actions::DeferredAction::SlackForEpoch(action, _),
+    ) = deferred_action(&app)
+    else {
         panic!("expected a Slack action");
     };
     assert_eq!(
@@ -13429,7 +13484,11 @@ fn test_slack_mrkdwn_parsing_and_chat_preview_header() {
         browser_url: Some("https://acme.slack.com/archives/C1/p10?thread_ts=1.0&cid=C1".into()),
     });
     assert!(task.units() > 0);
-    let Some(super::actions::DeferredAction::Slack(action)) = deferred_action(&app) else {
+    let Some(
+        super::actions::DeferredAction::Slack(action)
+        | super::actions::DeferredAction::SlackForEpoch(action, _),
+    ) = deferred_action(&app)
+    else {
         panic!("expected a Slack action");
     };
     assert_eq!(
@@ -13447,7 +13506,11 @@ fn test_slack_mrkdwn_parsing_and_chat_preview_header() {
         browser_url: Some("https://acme.slack.com/archives/C1/p10?thread_ts=1.0&cid=C1".into()),
     });
     assert!(task.units() > 0);
-    let Some(super::actions::DeferredAction::Slack(action)) = deferred_action(&app) else {
+    let Some(
+        super::actions::DeferredAction::Slack(action)
+        | super::actions::DeferredAction::SlackForEpoch(action, _),
+    ) = deferred_action(&app)
+    else {
         panic!("expected a Slack action");
     };
     assert_eq!(
