@@ -1,6 +1,6 @@
 <img src="assets/logo.png" alt="Raffi logo" width="120" align="right"/>
 
-# Raffi
+# Raffi - A fast rust launcher on Wayland
 
 [![Release](https://img.shields.io/github/v/release/chmouel/raffi?style=flat-square)](https://github.com/chmouel/raffi/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/chmouel/raffi/rust.yaml?branch=main&style=flat-square&label=CI)](https://github.com/chmouel/raffi/actions/workflows/rust.yaml)
