@@ -9,7 +9,10 @@ import mainScreenshot from '../../assets/screenshots/main.png';
 Raffi is a keyboard-driven search box for your Wayland desktop. From one
 place you can open apps, browse files, switch windows, paste from your
 clipboard history, fill in passwords, do sums and convert currencies. It is
-written in Rust, opens fast, and runs without a server or database.
+written in Rust and works without a background server; running the optional
+[`raffi --server`](reference/cli-options/#cache-management) opens the window about
+a third faster, warms caches in the background, and records your built-in
+clipboard history.
 
 <Image src={mainScreenshot} alt="Raffi with the preview pane open" width={800} />
 

@@ -339,13 +339,14 @@ the rename keep working.
   raffi: refreshed slack:unread in 0.7s
   ```
 
-  When the server has a display (`WAYLAND_DISPLAY` or `DISPLAY` set), it
-  also shows the launcher window. Running `raffi` from a keybinding then
-  asks the server to open it instead of starting a new window, which skips
-  process start-up, the font scan and library loading, so the window
-  appears noticeably sooner. Each open still reads the configuration and
-  your command-line options as a new process would. Running `raffi` again
-  while the window is shown closes it.
+  Raffi works on its own without the server. When the server is running
+  with a display (`WAYLAND_DISPLAY` or `DISPLAY` set), it also shows the
+  launcher window: running `raffi` from a keybinding asks the server to
+  open it instead of starting a new process, skipping process start-up,
+  library loading and the font scan so the window opens about a third
+  faster. Each open still reads the configuration and your command-line
+  options as a new process would. Running `raffi` again while the window
+  is shown closes it.
 
   The server opens the window only when it would behave exactly as a new
   process: `raffi` was started without a terminal (its input and output on
