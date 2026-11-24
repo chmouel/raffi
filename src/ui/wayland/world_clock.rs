@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 
 use jiff::civil::Time;
 use jiff::tz::{AmbiguousOffset, TimeZone};
-use jiff::{Timestamp, Zoned};
+use jiff::{Timestamp, ZonedDateTime};
 
 use super::preview::{PreviewBody, PreviewData};
 use super::types::{InlineProvider, InlineResult, InlineRow};
@@ -278,7 +278,7 @@ fn day_label(days: i32) -> String {
 /// One row for `zoned`, dated when it falls on another day than
 /// `reference`; `source` describes the converted time, if any.
 fn zone_row(
-    zoned: &Zoned,
+    zoned: &ZonedDateTime,
     name: &str,
     reference: jiff::civil::Date,
     source: Option<&str>,
@@ -340,13 +340,13 @@ pub(super) fn time_inline_result(
     let rows = match query {
         TimeQuery::MissingData => None,
         TimeQuery::Now(zones) => {
-            let today = now.to_zoned(local.clone()).date();
+            let today = now.to_zoned_datetime(local.clone()).date();
             zones
                 .iter()
                 .take(MAX_ROWS)
                 .map(|name| {
                     let tz = (index.load)(name)?;
-                    Some(zone_row(&now.to_zoned(tz), name, today, None))
+                    Some(zone_row(&now.to_zoned_datetime(tz), name, today, None))
                 })
                 .collect::<Option<Vec<_>>>()
         }
@@ -357,8 +357,8 @@ pub(super) fn time_inline_result(
             .map(|(source, target)| {
                 let source_tz = (index.load)(source)?;
                 let target_tz = (index.load)(target)?;
-                let date = now.to_zoned(source_tz.clone()).date();
-                let ambiguous = source_tz.to_ambiguous_zoned(date.to_datetime(*time));
+                let date = now.to_zoned_datetime(source_tz.clone()).date();
+                let ambiguous = source_tz.to_ambiguous_zoned_datetime(date.to_datetime(*time));
                 let gap = matches!(ambiguous.offset(), AmbiguousOffset::Gap { .. });
                 let start = ambiguous.compatible().ok()?;
                 let mut from = format!("{} {source}", start.strftime("%H:%M"));

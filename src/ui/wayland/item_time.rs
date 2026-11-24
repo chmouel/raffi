@@ -54,7 +54,7 @@ impl ScriptFilterTime {
         let moment = jiff::Timestamp::from_second(self.at).ok()?;
         Some(
             moment
-                .to_zoned(zone.clone())
+                .to_zoned_datetime(zone.clone())
                 .strftime("%Y-%m-%d %H:%M")
                 .to_string(),
         )
