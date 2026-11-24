@@ -384,7 +384,12 @@ impl LauncherApp {
             }) if self.script_filter_target_is_shown(index, &query, generation) => {
                 self.script_filter.refresh_failed = false;
                 let mut tasks = Vec::new();
-                self.handle_script_filter_query(index, query, false, &mut tasks);
+                self.handle_script_filter_query(
+                    index,
+                    query,
+                    super::script_filters::FilterRun::Normal,
+                    &mut tasks,
+                );
                 Task::batch(tasks)
             }
             _ => Task::none(),

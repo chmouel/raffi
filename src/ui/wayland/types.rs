@@ -323,6 +323,11 @@ pub(crate) struct ScriptFilterItemAction {
     /// Same values as the filter's `action`; that action when missing.
     #[serde(default)]
     pub action: Option<String>,
+    /// Run the action, then re-run the filter for the same query instead of
+    /// closing Raffi: the entry changes what the list shows. Raffi extension,
+    /// ignored by Alfred.
+    #[serde(default)]
+    pub refresh: bool,
 }
 
 /// Alfred Script Filter JSON item.

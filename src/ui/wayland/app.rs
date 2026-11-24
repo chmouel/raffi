@@ -2086,7 +2086,12 @@ impl LauncherApp {
             }
             let query = self.script_filter.query.clone();
             let mut tasks = Vec::new();
-            self.handle_script_filter_query(index, query, true, &mut tasks);
+            self.handle_script_filter_query(
+                index,
+                query,
+                super::script_filters::FilterRun::Refresh,
+                &mut tasks,
+            );
             return Task::batch(tasks);
         }
         if self.main_view.active && !self.main_view.sources.is_empty() {
@@ -2268,7 +2273,12 @@ impl LauncherApp {
                 query,
             } => {
                 self.file_browser.clear();
-                self.handle_script_filter_query(config_index, query, false, &mut tasks);
+                self.handle_script_filter_query(
+                    config_index,
+                    query,
+                    super::script_filters::FilterRun::Normal,
+                    &mut tasks,
+                );
                 self.text_snippets.clear();
                 self.emoji.clear();
                 self.web_search.clear();
@@ -2631,9 +2641,10 @@ impl LauncherApp {
         &mut self,
         config_index: usize,
         query: String,
-        force_refresh: bool,
+        run: super::script_filters::FilterRun,
         tasks: &mut Vec<Task<Message>>,
     ) {
+        let force_refresh = run.skips_snapshot();
         let mut query = query;
         // Only a refresh of the rows on screen keeps their selected row; a new
         // query, or a view Ctrl+Tab switched to, starts at the top. Read it
@@ -2719,12 +2730,12 @@ impl LauncherApp {
         let mut cached = None;
         let mut cached_at = None;
         let mut stale = false;
-        if let Some(ttl) = cache_ttl {
+        if let Some(ttl) = cache_ttl.filter(|_| !force_refresh) {
             let key = cache::script_filter_list_key(config, &query);
             let ceiling = config.cache_ceiling().unwrap_or(ttl);
             if let Some(snapshot) = cache::read_list(&key) {
                 if let Some(result) = cache::parse_list(&snapshot, config.icon.clone()) {
-                    stale = force_refresh || !snapshot.fresh_within(ttl, ceiling);
+                    stale = !snapshot.fresh_within(ttl, ceiling);
                     cached_at = Some(snapshot.fetched_at);
                     cached = Some(result);
                 }
@@ -2753,7 +2764,7 @@ impl LauncherApp {
         let config = view_config(&self.addons.script_filters[config_index], view.as_ref());
         let config = config.as_ref();
         let mut env = config.env.clone();
-        if force_refresh {
+        if run.tells_the_script() {
             env.insert("RAFFI_REFRESH".into(), "1".into());
         }
         let cache_target = cache_ttl.and_then(|ttl| cache::list_target(config, &query, ttl, None));
@@ -5072,6 +5083,9 @@ impl LauncherApp {
         let mut addon_close = None;
         let mut force_close = false;
         let mut used = None;
+        // An entry that says it changes the list leaves Raffi open and runs
+        // the filter again, so the row it acted on is gone or back at once.
+        let refresh = menu_action.as_ref().is_some_and(|chosen| chosen.refresh);
         if let Some(result) = &self.script_filter.results {
             if let Some(item) = result.items.get(index) {
                 if !item.valid {
@@ -5114,6 +5128,10 @@ impl LauncherApp {
                 }
             }
         }
+        if refresh {
+            // The row is about to change or vanish, so it is no pick.
+            return self.refresh_after_script_filter_action();
+        }
         if let Some(item) = &used {
             self.record_script_filter_use(item);
         }
@@ -5126,6 +5144,30 @@ impl LauncherApp {
         } else {
             self.finish_or_keep_open(addon_close)
         }
+    }
+
+    /// Run the list again after an action changed it, keeping the window open.
+    ///
+    /// The action wrote something the script reads back, so the run skips
+    /// Raffi's cache: the row would otherwise come back from it for up to
+    /// `cache_seconds`. The script still honours its own caches, which keeps
+    /// this cheap for a filter reading a local file.
+    fn refresh_after_script_filter_action(&mut self) -> Task<Message> {
+        if self.main_view.active && !self.main_view.sources.is_empty() {
+            return self.reload_main_view();
+        }
+        let Some(config_index) = self.script_filter.config_index else {
+            return Task::none();
+        };
+        let query = self.script_filter.query.clone();
+        let mut tasks = Vec::new();
+        self.handle_script_filter_query(
+            config_index,
+            query,
+            super::script_filters::FilterRun::Changed,
+            &mut tasks,
+        );
+        Task::batch(tasks)
     }
 
     fn handle_text_snippet_command_result(

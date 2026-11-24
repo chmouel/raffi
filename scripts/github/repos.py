@@ -11,16 +11,21 @@ alias in front of the query lists that account instead, any GitHub account with
 The pull requests and issues pages of a repository are live menus when --pages
 or --actions name them: their children are fetched on demand when expanded
 (RAFFI_CHILDREN=1).
+
+A repository's action menu hides it for good, and --show-hidden lists what is
+hidden so it can come back.
 """
 
 import argparse
 import json
 import os
 import re
+import shlex
 import sys
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -106,6 +111,19 @@ def missing_file() -> Path:
 
 def login_file() -> Path:
     return CACHE_DIR / "login.json"
+
+
+def state_dir() -> Path:
+    """Where hidden repositories live, out of reach of a cache wipe."""
+    root = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state")
+    return root / "raffi"
+
+
+STATE_DIR = state_dir()
+
+
+def hidden_file() -> Path:
+    return STATE_DIR / "github-hidden.json"
 
 
 # Short names accepted in front of the query, and as --owners entries. "me"
@@ -228,6 +246,8 @@ class Options(NamedTuple):
     live: bool = True
     # How many pull requests or issues a live menu lists.
     live_items: int = LIVE_ITEMS
+    # Whether each row's action menu offers to hide it for good.
+    hide: bool = True
 
 
 DEFAULTS = Options()
@@ -308,6 +328,49 @@ def write_cache(file: Path, data: object, strict: bool = False) -> None:
 def fresh(at: object, duration: str) -> bool:
     """Whether a cached timestamp is younger than duration."""
     return isinstance(at, float) and time.time() - at < seconds(duration)
+
+
+def hidden() -> dict[str, str]:
+    """The repositories hidden on this host, and when each was hidden."""
+    entries = read_cache(hidden_file()).get(API_HOST)
+    if not isinstance(entries, dict):
+        return {}
+    return {name: at for name, at in entries.items() if isinstance(at, str)}
+
+
+def hidden_names() -> set[str]:
+    """The hidden repository names, casefolded: GitHub logins ignore case."""
+    return {name.casefold() for name in hidden()}
+
+
+def remember_hidden(entries: dict[str, str]) -> None:
+    """Keep entries as this host's hidden repositories, or drop the key."""
+    data = read_cache(hidden_file())
+    if entries:
+        data[API_HOST] = entries
+    else:
+        data.pop(API_HOST, None)
+    # The caller reports a failed write rather than hiding nothing quietly.
+    write_cache(hidden_file(), data, strict=True)
+
+
+def hide(name: str) -> None:
+    """Leave name out of every listing from now on."""
+    entries = hidden_except(name)
+    entries[name] = datetime.now(UTC).isoformat(timespec="seconds")
+    remember_hidden(entries)
+
+
+def unhide(name: str) -> None:
+    """List name again."""
+    remember_hidden(hidden_except(name))
+
+
+def hidden_except(name: str) -> dict[str, str]:
+    """The hidden repositories other than name."""
+    return {
+        key: at for key, at in hidden().items() if key.casefold() != name.casefold()
+    }
 
 
 def recent_miss(name: str) -> bool:
@@ -526,12 +589,43 @@ def copy_actions(url: str, label: str, clone: bool = False) -> list[dict]:
     return entries
 
 
+# What this script was started as, so an action entry can run it again.
+SCRIPT = Path(__file__).resolve()
+
+
+def script_action(*args: str) -> str:
+    """A shell command running this script with args, for an action entry.
+
+    The filter's `env` does not reach actions, so a host other than
+    github.com is spelled out on the command itself.
+    """
+    command = " ".join(
+        shlex.quote(part) for part in (sys.executable, str(SCRIPT), *args)
+    )
+    if API_HOST != "github.com":
+        command = f"API_HOST={shlex.quote(API_HOST)} {command}"
+    return command
+
+
 def row_actions(name: str, options: Options) -> list[dict]:
-    """The action menu of a repository: --actions pages, then copy entries."""
+    """The action menu of a repository: --actions pages, copy entries, hiding."""
     pages = [
         {"title": label, "arg": page_url(name, path)} for path, label in options.actions
     ]
-    return pages + copy_actions(page_url(name, ""), name, clone=True)
+    entries = pages + copy_actions(page_url(name, ""), name, clone=True)
+    if options.hide:
+        # Last, and reversible with --show-hidden, so a stray Enter in the
+        # menu opens or copies before it forgets. Typing "hide" filters the
+        # menu down to it.
+        entries.append(
+            {
+                "title": "Hide forever",
+                "action": script_action("--hide", name),
+                # The row is meant to leave the list: run it again, in place.
+                "refresh": True,
+            }
+        )
+    return entries
 
 
 def link_leaf(
@@ -850,6 +944,67 @@ def repo_item(name: str, options: Options = DEFAULTS) -> dict:
     return item
 
 
+def hidden_item(name: str, at: str, options: Options = DEFAULTS) -> dict:
+    """A hidden repository, listed by --show-hidden so it can come back."""
+    url = page_url(name, options.path)
+    root = f"https://{API_HOST}/{name}"
+    when = f"hidden {ago(at)}"
+    return {
+        "title": colored(name, GREY),
+        "subtitle": f"{when} \u00b7 Right \u2192 Unhide lists it again",
+        "arg": url,
+        "variables": repo_variables({"nameWithOwner": name, "url": root}),
+        "actions": [
+            {
+                "title": "Unhide",
+                "action": script_action("--unhide", name),
+                # Back in the list this row came from: run it again.
+                "refresh": True,
+            },
+            *copy_actions(url, name, clone=True),
+        ],
+        "preview": {
+            "title": name,
+            "subtitle": when,
+            "icon": ICON,
+            "text": f"{when}.\nEnter opens {url}.\nRight \u2192 Unhide lists it again.",
+            "dynamic": False,
+        },
+    }
+
+
+def hidden_items(words: list[str], options: Options = DEFAULTS) -> list[dict]:
+    """The hidden repositories, most recently hidden first."""
+    entries = sorted(hidden().items(), key=lambda entry: entry[1], reverse=True)
+    items = [
+        hidden_item(name, at, options)
+        for name, at in entries
+        if all(word in name.casefold() for word in words)
+    ]
+    if items:
+        return items
+    hidden_any = bool(entries)
+    message = (
+        f"nothing is hidden on {API_HOST}"
+        if not hidden_any
+        else "the filter matches none of the hidden repositories"
+    )
+    return [
+        {
+            "title": "No hidden repository"
+            if not hidden_any
+            else "No hidden repository matches",
+            "subtitle": message,
+            "valid": False,
+            "preview": {
+                "title": "Hidden repositories",
+                "text": message,
+                "dynamic": False,
+            },
+        }
+    ]
+
+
 def initials(name: str) -> str:
     """The first letter of each hyphen, dot or underscore separated part."""
     return "".join(part[0] for part in re.split(r"[-_.]", name) if part).casefold()
@@ -976,10 +1131,14 @@ def ranked(
     """The repositories matching words, forks last.
 
     Name matches come first, then initials, then anything shown or described;
-    each group keeps the most recently pushed order of repos.
+    each group keeps the most recently pushed order of repos. Repositories
+    hidden for good are left out; --show-hidden lists them.
     """
     found: dict[tuple[bool, int], list[dict]] = {}
+    known = hidden_names()
     for repo in repos:
+        if repo["nameWithOwner"].casefold() in known:
+            continue
         item = build_item(repo, options, owner, menus=False)
         if (place := rank(repo, item, words)) is not None:
             found.setdefault((bool(repo["isFork"]), place), []).append(item)
@@ -1025,6 +1184,29 @@ def items_for(
             items.append(no_match_item(account, " ".join(words)))
         return items
     return matches + [account_item(account)]
+
+
+def forget(hiding: list[str], showing: list[str]) -> int:
+    """Hide and unhide the named repositories, as an action entry asks."""
+    for name in [*hiding, *showing]:
+        if not REPO.fullmatch(name):
+            return report("Not a repository", f"{name!r} is not an owner/repo name")
+    try:
+        for name in hiding:
+            hide(name)
+        for name in showing:
+            unhide(name)
+    except OSError as error:
+        # A failed write would hide nothing while the row still disappeared.
+        return report("Could not write the hidden list", str(error))
+    return 0
+
+
+def report(title: str, message: str) -> int:
+    """Print a failed action as an error row, and fail the run."""
+    items = error_rows(title, message)
+    print(json.dumps(with_cache({}, items, CACHE_REPOS), ensure_ascii=False))
+    return 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1083,6 +1265,31 @@ def main(argv: list[str] | None = None) -> int:
         help="link the pull requests and issues pages instead of listing "
         "the open ones",
     )
+    parser.add_argument(
+        "--no-hide",
+        action="store_true",
+        default=os.environ.get("HIDE") == "0",
+        help="leave 'Hide forever' out of the action menus",
+    )
+    parser.add_argument(
+        "--hide",
+        action="append",
+        metavar="OWNER/REPO",
+        help="hide a repository from every list for good, as the row's "
+        "action menu does; takes an owner/repo name",
+    )
+    parser.add_argument(
+        "--unhide",
+        action="append",
+        metavar="OWNER/REPO",
+        help="list a hidden repository again",
+    )
+    parser.add_argument(
+        "--show-hidden",
+        action="store_true",
+        default=os.environ.get("SHOW_HIDDEN") == "1",
+        help="list the hidden repositories instead, with an Unhide action",
+    )
     parser.add_argument("query", nargs="*", help="text typed after the Raffi keyword")
     args = parser.parse_args(argv)
     NAMED.clear()
@@ -1095,7 +1302,17 @@ def main(argv: list[str] | None = None) -> int:
         any_owner=args.any_owner,
         live=not args.no_live,
         live_items=args.live_items,
+        hide=not args.no_hide,
     )
+
+    if args.hide or args.unhide:
+        return forget(args.hide or [], args.unhide or [])
+
+    if args.show_hidden:
+        items = hidden_items(query.casefold().split(), options)
+        attach_children(items, options)
+        print(json.dumps(with_cache({}, items, CACHE_REPOS), ensure_ascii=False))
+        return 0
 
     if os.environ.get("RAFFI_CHILDREN") == "1":
         print(json.dumps(live_children(options), ensure_ascii=False))

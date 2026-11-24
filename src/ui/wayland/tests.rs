@@ -399,7 +399,12 @@ fn test_a_query_too_short_for_the_filter_forgets_the_cached_hint() {
     let _ = app.update(Message::ScriptFilterResult(7, Err("offline".into())));
     assert!(app.cache_hint().is_some());
     let mut tasks = Vec::new();
-    app.handle_script_filter_query(0, "a".into(), false, &mut tasks);
+    app.handle_script_filter_query(
+        0,
+        "a".into(),
+        super::script_filters::FilterRun::Normal,
+        &mut tasks,
+    );
     assert_eq!(cache_hint_text(&app), None);
     assert!(!app.script_filter.results_are_cached);
     assert_eq!(app.script_filter.cached_at, None);
@@ -3655,7 +3660,12 @@ fn test_script_filter_navigation_refreshes_root() {
     let _ = app.handle_script_filter_selected(1);
     let _ = app.update(Message::SearchChanged("ag Alpha".into()));
     let mut tasks = Vec::new();
-    app.handle_script_filter_query(0, "Alpha".into(), true, &mut tasks);
+    app.handle_script_filter_query(
+        0,
+        "Alpha".into(),
+        super::script_filters::FilterRun::Refresh,
+        &mut tasks,
+    );
     assert!(app.script_filter.navigation.is_empty());
     assert!(app.script_filter.navigation_items.is_empty());
     assert_eq!(app.search_query, "ag Alice");
@@ -15809,6 +15819,7 @@ fn declared_action(title: &str, arg: Option<&str>, action: Option<&str>) -> Scri
         arg: arg.map(str::to_string),
         variables: Default::default(),
         action: action.map(str::to_string),
+        refresh: false,
     }
 }
 
@@ -15995,6 +16006,39 @@ fn test_script_filter_menu_action_ignores_a_row_replaced_by_a_refresh() {
     std::thread::sleep(std::time::Duration::from_millis(300));
     assert!(std::fs::read_to_string(&out).is_err(), "nothing ran");
     assert!(app.menu_script_action.is_none());
+}
+
+#[test]
+fn test_filter_run_tells_the_script_only_on_ctrl_r() {
+    use super::script_filters::FilterRun;
+    assert!(!FilterRun::Normal.skips_snapshot());
+    assert!(!FilterRun::Normal.tells_the_script());
+    assert!(FilterRun::Refresh.skips_snapshot());
+    assert!(FilterRun::Refresh.tells_the_script());
+    // The action wrote what the script reads: skip Raffi's snapshot only.
+    assert!(FilterRun::Changed.skips_snapshot());
+    assert!(!FilterRun::Changed.tells_the_script());
+}
+
+#[test]
+fn test_script_filter_action_that_refreshes_runs_the_list_again() {
+    let mut item = plain_item("raffi");
+    let mut entry = declared_action("Hide forever", None, Some("true"));
+    entry.refresh = true;
+    item.actions = vec![entry];
+    let mut app = actions_app(vec![item]);
+    // The window stays whatever the config says about closing on an action.
+    app.addons.script_filters[0].close_on_action = Some(true);
+    app.history.items.clear();
+    app.main_view.recent.clear();
+    let query = app.script_filter.query.clone();
+    run_menu_entry(&mut app, "Hide forever");
+    assert_eq!(app.script_filter.config_index, Some(0));
+    assert_eq!(app.script_filter.query, query);
+    assert!(app.script_filter.loading, "the filter runs again");
+    assert!(app.script_filter.results.is_none());
+    // A row that hides itself is not a pick.
+    assert!(app.main_view.recent.is_empty());
 }
 
 #[test]

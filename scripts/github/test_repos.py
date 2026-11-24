@@ -1,6 +1,8 @@
 import io
 import json
 import os
+import shlex
+import sys
 import tempfile
 import time
 import unittest
@@ -188,6 +190,8 @@ def environment(**values):
         "REPO_NAME": "",
         "LIVE_PATH": "",
         "LIVE_LABEL": "",
+        "HIDE": "",
+        "SHOW_HIDDEN": "",
     }
     with patch.dict(os.environ, pinned), patch.dict(os.environ, values):
         yield
@@ -219,6 +223,9 @@ class ReposTestCase(unittest.TestCase):
         self.patches = [
             patch.object(repos, "graphql", graphql),
             patch.object(repos, "CACHE_DIR", cache_dir),
+            # Hidden repositories live outside the cache, so keep them in the
+            # sandbox too: a developer's own hidden list must not list here.
+            patch.object(repos, "STATE_DIR", cache_dir / "state"),
         ]
         for patcher in self.patches:
             patcher.start()
@@ -748,6 +755,7 @@ class ActionTests(ReposTestCase):
                 "Copy SSH clone URL",
                 "Copy HTTPS clone URL",
                 "Copy name",
+                "Hide forever",
             ],
         )
         self.assertEqual(
@@ -776,7 +784,13 @@ class ActionTests(ReposTestCase):
             "https://github.com/owner/raffi.git",
         )
         self.assertEqual(by_title["Copy name"]["arg"], "owner/raffi")
-        self.assertTrue(all(entry["action"] == "copy" for entry in item["actions"]))
+        self.assertTrue(
+            all(
+                entry["action"] == "copy"
+                for entry in item["actions"]
+                if entry["title"] != "Hide forever"
+            )
+        )
 
     def test_pages_make_enter_list_them(self):
         item = repos.build_item(
@@ -1204,6 +1218,176 @@ class MissingAccountTests(ReposTestCase):
             repos.as_account("ghost")
             repos.as_account("ghost")
         self.assertEqual(calls, ["ghost"])
+
+
+class HiddenTests(ReposTestCase):
+    """A repository's action menu hides it for good; --show-hidden brings it back."""
+
+    def run_main(self, *argv, env=None, code=0):
+        with environment(**(env or {})), patch("sys.argv", ["repos.py", *argv]), patch(
+            "builtins.print"
+        ) as printed:
+            self.assertEqual(repos.main(), code)
+        # Hiding prints nothing: the action's output is thrown away.
+        return json.loads(printed.call_args[0][0]) if printed.called else None
+
+    def items(self, *argv, **kwargs):
+        return self.run_main(*argv, **kwargs)["items"]
+
+    def listed(self, query="", view="", owners=("me",), options=None):
+        with environment():
+            return repos.list_items(
+                query, view, list(owners), options or self.options()
+            )[1]
+
+    def by_title(self, item):
+        return {repos.ANSI.sub("", entry["title"]): entry for entry in item["actions"]}
+
+    def test_the_action_menu_hides_a_repository_for_good(self):
+        entry = self.by_title(repos.build_item(repo("raffi")))["Hide forever"]
+        self.assertTrue(
+            entry["action"].endswith("--hide owner/raffi"), entry["action"]
+        )
+        # Raffi runs the list again in place, so the row leaves on the spot.
+        self.assertTrue(entry["refresh"])
+
+    def test_no_hide_flag_leaves_the_menu_alone(self):
+        item = repos.build_item(repo("raffi"), self.options(hide=False))
+        self.assertNotIn("Hide forever", self.by_title(item))
+
+    def test_hide_zero_in_the_environment_leaves_the_menu_alone(self):
+        items = self.items("me", "raffi", env={"HIDE": "0"})
+        self.assertNotIn("Hide forever", self.by_title(items[0]))
+
+    def test_hiding_leaves_the_repository_out_of_the_list(self):
+        repos.hide("owner/raffi")
+        self.assertEqual(self.titles(self.listed()), ["pipelines", "notes", "me"])
+
+    def test_hiding_ignores_the_case_of_the_name(self):
+        repos.hide("Owner/RAFFI")
+        self.assertEqual(self.titles(self.listed()), ["pipelines", "notes", "me"])
+
+    def test_a_hidden_repository_leaves_the_all_view_too(self):
+        repos.hide("owner/pipeline")
+        items = self.listed(owners=("me", "tektoncd"))
+        self.assertNotIn("pipeline", self.titles(items))
+        self.assertIn("pipelines-as-code", self.titles(items))
+
+    def test_a_hidden_repository_does_not_come_back_through_a_filter(self):
+        repos.hide("owner/pipelines")
+        items = self.listed("pipeline")
+        self.assertEqual(len(items), 2)
+        self.assertFalse(items[1]["valid"])
+        self.assertNotIn("owner/pipelines", [item.get("arg") for item in items])
+
+    def test_unhiding_lists_it_again(self):
+        repos.hide("owner/raffi")
+        repos.unhide("owner/raffi")
+        self.assertEqual(
+            self.titles(self.listed()), ["raffi", "pipelines", "notes", "me"]
+        )
+        self.assertEqual(repos.hidden(), {})
+
+    def test_unhiding_a_name_that_is_not_hidden_changes_nothing(self):
+        repos.hide("owner/raffi")
+        repos.unhide("owner/zzz")
+        self.assertEqual(list(repos.hidden()), ["owner/raffi"])
+
+    def test_a_typed_repository_still_opens_a_hidden_one(self):
+        repos.hide("owner/raffi")
+        items = self.items("owner/raffi")
+        self.assertEqual(items[0]["arg"], "https://github.com/owner/raffi")
+
+    def test_the_hide_flag_writes_the_list_the_menu_reads(self):
+        self.run_main("--hide", "owner/raffi")
+        self.assertEqual(list(repos.hidden()), ["owner/raffi"])
+        self.assertNotIn("raffi", self.titles(self.items("me")))
+
+    def test_the_unhide_flag_lists_it_again(self):
+        self.run_main("--hide", "owner/raffi")
+        self.run_main("--unhide", "owner/raffi")
+        self.assertIn("raffi", self.titles(self.items("me")))
+
+    def test_a_name_that_is_not_a_repository_hides_nothing(self):
+        output = self.run_main("--hide", "raffi", code=1)
+        self.assertEqual(output["items"][0]["title"], "Not a repository")
+        self.assertEqual(repos.hidden(), {})
+
+    def test_a_failed_write_is_reported(self):
+        coding = patch.object(repos, "write_cache", side_effect=OSError("read-only"))
+        with coding:
+            output = self.run_main("--hide", "owner/raffi", code=1)
+        self.assertEqual(output["items"][0]["title"], "Could not write the hidden list")
+        self.assertEqual(output["cache"], {"seconds": 0})
+
+    def test_show_hidden_lists_them_newest_first_with_an_unhide_action(self):
+        repos.remember_hidden(
+            {
+                "owner/raffi": "2025-01-01T10:00:00+00:00",
+                "owner/notes": "2025-02-01T10:00:00+00:00",
+            }
+        )
+        items = self.items("--show-hidden")
+        self.assertEqual(self.titles(items), ["owner/notes", "owner/raffi"])
+        self.assertEqual(items[0]["actions"][0]["title"], "Unhide")
+        self.assertTrue(
+            items[0]["actions"][0]["action"].endswith("--unhide owner/notes")
+        )
+        self.assertTrue(items[0]["actions"][0]["refresh"])
+        self.assertEqual(items[0]["arg"], "https://github.com/owner/notes")
+        self.assertEqual(items[0]["variables"]["REPO_NAME"], "owner/notes")
+
+    def test_show_hidden_says_when_nothing_is_hidden(self):
+        items = self.items("--show-hidden")
+        self.assertEqual(len(items), 1)
+        self.assertFalse(items[0]["valid"])
+        self.assertEqual(items[0]["title"], "No hidden repository")
+
+    def test_show_hidden_filters_by_the_query(self):
+        repos.remember_hidden(
+            {
+                "owner/raffi": "2025-01-01T10:00:00+00:00",
+                "owner/notes": "2025-02-01T10:00:00+00:00",
+            }
+        )
+        items = self.items("--show-hidden", "notes")
+        self.assertEqual(self.titles(items), ["owner/notes"])
+
+    def test_show_hidden_one_in_the_environment_lists_them(self):
+        repos.hide("owner/raffi")
+        items = self.items(env={"SHOW_HIDDEN": "1"})
+        self.assertEqual(self.titles(items), ["owner/raffi"])
+
+    def test_the_hidden_list_stays_out_of_the_cache(self):
+        self.assertEqual(repos.hidden_file().parent, repos.STATE_DIR)
+        self.assertNotEqual(repos.STATE_DIR, repos.CACHE_DIR)
+        self.assertEqual(repos.hidden_file().name, "github-hidden.json")
+
+    def test_the_state_directory_follows_xdg_state_home(self):
+        with patch.dict(os.environ, {"XDG_STATE_HOME": "/tmp/state"}):
+            self.assertEqual(repos.state_dir(), Path("/tmp/state/raffi"))
+
+    def test_the_hidden_list_is_kept_per_host(self):
+        repos.hide("owner/raffi")
+        with patch.object(repos, "API_HOST", "github.example.com"):
+            self.assertEqual(repos.hidden(), {})
+        self.assertEqual(list(repos.hidden()), ["owner/raffi"])
+
+    def test_actions_name_an_enterprise_host(self):
+        with patch.object(repos, "API_HOST", "github.example.com"):
+            item = repos.build_item(repo("raffi"))
+            entry = self.by_title(item)["Hide forever"]
+            self.assertTrue(
+                entry["action"].startswith("API_HOST=github.example.com "),
+                entry["action"],
+            )
+
+    def test_the_name_is_quoted_in_the_action(self):
+        command = repos.script_action("--hide", "owner/it's repo")
+        self.assertEqual(
+            shlex.split(command),
+            [sys.executable, str(repos.SCRIPT), "--hide", "owner/it's repo"],
+        )
 
 
 if __name__ == "__main__":

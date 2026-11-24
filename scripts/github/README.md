@@ -258,6 +258,42 @@ for words that are not accounts. The entry's `dynamic_preview` can stay `false`:
 each row carries its own preview, with the description, stars, forks,
 visibility and topics.
 
+### Hiding repositories
+
+Right on a repository row opens its action menu, whose last entry, `Hide
+forever`, takes that repository out of every list of every account view, for
+good. The entry carries `"refresh": true`, so Raffi runs the filter again for
+the query on screen instead of closing: the row goes away where it stands, with
+the window still open. That run skips Raffi's cached list but not the script's
+own caches, since the script reads the hidden list itself. A full `owner/repo`
+query still opens a hidden repository: a name you spell out is not a listing.
+
+What is hidden lives per GitHub host in
+`~/.local/state/raffi/github-hidden.json`, or under `$XDG_STATE_HOME` when it
+is set. It sits outside the caches because it is not one: clearing
+`~/.cache/raffi` keeps the hidden repositories hidden. Delete that file to get
+them all back.
+
+`--show-hidden` lists them instead, most recently hidden first, and typed words
+filter that list. Each row keeps the usual `REPO_*` variables, opens the
+repository on Enter and leads its action menu with `Unhide`, which calls the
+script with `--unhide` and refreshes the list the same way. Giving the option
+its own keyword keeps the list one word away:
+
+```yaml
+    - name: "Hidden repositories"
+      keyword: "rhidden"
+      command: "~/.config/raffi/scripts/github/repos.py"
+      args: ["--show-hidden"]
+      icon: "github"
+      action: "xdg-open {value}"
+      secondary_action: "copy"
+```
+
+`--hide OWNER/REPO` and `--unhide OWNER/REPO` do the same from a terminal. Pass
+`--no-hide`, or set `HIDE=0` in the entry's `env`, to leave `Hide forever` out
+of the menus; `SHOW_HIDDEN=1` does what `--show-hidden` does.
+
 ### Pages and action menus
 
 A row opens its repository. Two options point rows at something else.
@@ -362,6 +398,8 @@ also read `REPO_PATH`, `REPO_PAGES` and `REPO_ACTIONS` from `env`.
 | `CACHE_LOGIN` | `1h` | How long `gh` caches the logged in account |
 | `ANY_OWNER` | | `1` is the same as `--any-owner` |
 | `USAGE_SORT` | | `0` is the same as `--no-usage-sort` |
+| `HIDE` | | `0` leaves `Hide forever` out of the action menus; `--no-hide` sets this |
+| `SHOW_HIDDEN` | | `1` is the same as `--show-hidden` |
 | `CACHE_MISSING` | `24h` | How long a word is remembered as not being an account, with `--any-owner` |
 | `GITHUB_USER` | | Skip the lookup of the logged in account |
 
@@ -432,7 +470,7 @@ waiting for one.
 |------|-------|
 | `ghcommon.py` | Running `gh`, GraphQL through its cache (`RAFFI_REFRESH` bypasses it), error rows, relative dates and terminal colours |
 | `pr.py` | Pull request queries, rows, markdown rendering and the live preview |
-| `repos.py` | Repository listing, account and alias resolution, filtering, pages, action menus and the live pull request and issue menus |
+| `repos.py` | Repository listing, account and alias resolution, filtering, pages, action menus, the live pull request and issue menus, and the hidden list |
 
 New GitHub scripts should import from `ghcommon.py` rather than copy it.
 `test_ghcommon.py` covers the shared parts, so the other two test files only

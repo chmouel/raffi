@@ -24,6 +24,32 @@ const MAX_LIST_OUTPUT: usize = 64 * 1024 * 1024;
 /// Largest preview output accepted, enough for a base64 screenshot.
 const MAX_PREVIEW_OUTPUT: usize = 8 * 1024 * 1024;
 
+/// How a script filter run treats what it already knows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum FilterRun {
+    /// The usual keystroke: show the snapshot when there is a fresh one.
+    Normal,
+    /// Ctrl+R: skip the snapshot and ask the script for live state, which
+    /// makes it skip its own caches too.
+    Refresh,
+    /// An action just changed what the list holds: skip the snapshot, but
+    /// leave the script's own caches alone, since it reads the change
+    /// itself.
+    Changed,
+}
+
+impl FilterRun {
+    /// Whether the snapshot on disk is out of date.
+    pub fn skips_snapshot(self) -> bool {
+        self != Self::Normal
+    }
+
+    /// Whether the script is told to read live state (`RAFFI_REFRESH=1`).
+    pub fn tells_the_script(self) -> bool {
+        self == Self::Refresh
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct ScriptFilterResponse {
     items: Vec<ScriptFilterItem>,

@@ -23,6 +23,8 @@ pub(super) struct ScriptMenuAction {
     pub action: String,
     pub value: String,
     pub env: HashMap<String, String>,
+    /// Leave Raffi open and re-run the filter once the action ran.
+    pub refresh: bool,
     item_title: String,
     item_arg: Option<String>,
     item_variables: HashMap<String, String>,
@@ -344,15 +346,16 @@ impl LauncherApp {
                 entry.arg.as_deref(),
                 Some(&entry.variables),
                 entry.action.as_deref(),
+                entry.refresh,
             )
         });
         let configured = config
             .actions
             .iter()
-            .map(|entry| (&entry.title, None, None, Some(entry.action.as_str())));
+            .map(|entry| (&entry.title, None, None, Some(entry.action.as_str()), false));
         declared
             .chain(configured)
-            .map(|(title, arg, variables, action)| {
+            .map(|(title, arg, variables, action, refresh)| {
                 let mut env = item.variables.clone();
                 for (name, value) in variables.into_iter().flatten() {
                     env.insert(name.clone(), value.clone());
@@ -361,6 +364,7 @@ impl LauncherApp {
                     action: action.unwrap_or(default_action).to_string(),
                     value: arg.unwrap_or(row_value).to_string(),
                     env,
+                    refresh,
                     item_title: item.title.clone(),
                     item_arg: item.arg.clone(),
                     item_variables: item.variables.clone(),

@@ -237,11 +237,17 @@ Each entry accepts four fields:
 - `variables` merges on top of the row's `variables`.
 - `action` accepts `copy`, `insert`, or a shell command; defaults to the
   filter's `action`.
+- `refresh: true` keeps Raffi open and runs the filter again for the same
+  query once the action finished, skipping the cached list but not the
+  script's own caches. Use it for an entry that changes the rows, such as
+  hiding one: the list updates on the spot instead of closing Raffi.
 
-Running a menu action respects `close_on_action`, never opens the row's
-children, and skips recording a recent pick if the row has children. Rows with
-`valid: false` have no action menu. If a background refresh replaces the row
-while the menu is open, choosing an entry does nothing.
+Running a menu action respects `close_on_action`, unless the entry sets
+`refresh`, which keeps the window open. Menu actions never open the row's
+children, and skip recording a recent pick if the row has children or sets
+`refresh`, since the row it acted on is gone or back. Rows with `valid: false`
+have no action menu. If a background refresh replaces the row while the menu is
+open, choosing an entry does nothing.
 
 <Aside type="caution">
 Item-defined `action` commands always run through `sh -c`, regardless of the
@@ -891,6 +897,36 @@ request rows export `PR_URL`, `PR_REPO`, `PR_NUMBER`, and `PR_BRANCH`; issue
 rows export `ISSUE_URL`, `ISSUE_REPO`, and `ISSUE_NUMBER`. Raffi caches the
 expanded list for `CACHE_LIVE` (default `10m`), Ctrl+R inside the list fetches
 live data, and `--live-items` (default 20) sets how many rows to request.
+
+#### Hiding repositories
+
+Right on a repository row opens its action menu, where the last entry, `Hide
+forever`, takes the repository out of every list of every account view. The row
+disappears on the spot and Raffi stays open: the entry marks itself `refresh`,
+so the filter runs again for the query on screen. Typing `owner/repo` still
+opens a hidden repository: a full name is not a listing.
+
+Hidden names are kept per GitHub host in
+`~/.local/state/raffi/github-hidden.json`, or under `$XDG_STATE_HOME` when it
+is set, outside the caches: `rm -rf ~/.cache/raffi` does not bring them back.
+
+`repo --show-hidden` lists what is hidden instead, most recently hidden first,
+typed text filtering that list. Each row opens the repository on Enter, and its
+action menu leads with `Unhide`. Give it a keyword of its own to keep the list
+one word away:
+
+```yaml
+    - name: "Hidden repositories"
+      keyword: "rhidden"
+      command: "~/.config/raffi/scripts/github/repos.py"
+      args: ["--show-hidden"]
+      icon: "github"
+      action: "xdg-open {value}"
+      secondary_action: "copy"
+```
+
+Pass `--no-hide`, or set `HIDE=0` in the entry's `env`, to leave `Hide forever`
+out of the menus, and `SHOW_HIDDEN=1` for the hidden list.
 
 Because `gh` caches repository pages locally, warm queries answer in roughly
 100 to 130 ms and typed filters make no network requests. See the
