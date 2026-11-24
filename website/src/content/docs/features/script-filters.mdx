@@ -872,9 +872,11 @@ The first word selects an account from `--owners` or an alias (`me` resolves to
 the logged-in `gh` user; `ALIAS_<name>` defines custom aliases). Pass
 `--any-owner` to allow querying any GitHub account. Configured `--owners`
 accounts become Ctrl+Tab views; with more than one, the default `All` view
-merges them by last push, labels each row with its owner, and places forks
-after source repositories. Remaining words match repository name, initials
-(`a gs` finds `go-server`), description, topics, language, and flags.
+merges them by last push and labels each row with its owner. Forks and
+archived repositories are left out of every view: `--show-forks` and
+`--show-archived` (or `FORKS=1` and `ARCHIVED=1` in the entry's `env`) list
+them too, forks after the others. Remaining words match repository name,
+initials (`a gs` finds `go-server`), description, topics, language, and flags.
 
 Rows export `REPO_URL`, `REPO_OWNER`, `REPO_NAME`, `REPO_SSH`, and `REPO_CLONE`,
 and the script prints `"sort": "usage"` (disable with `--no-usage-sort` or

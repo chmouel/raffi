@@ -248,6 +248,10 @@ class Options(NamedTuple):
     live_items: int = LIVE_ITEMS
     # Whether each row's action menu offers to hide it for good.
     hide: bool = True
+    # Whether forked repositories are listed at all.
+    forks: bool = False
+    # Whether archived repositories are listed at all.
+    archived: bool = False
 
 
 DEFAULTS = Options()
@@ -1110,11 +1114,12 @@ def repo_named(owner: str, name: str) -> bool:
     return NAMED[key]
 
 
-def no_match_item(account: dict, needle: str) -> dict:
+def no_match_item(account: dict, needle: str, more: str = "") -> dict:
+    """The row that says nothing matched, naming the flags that list more."""
     total = count(account["total"])
     return {
         "title": f"No repository matches {needle!r}",
-        "subtitle": f"{account['login']} has {total} repositories",
+        "subtitle": f"{account['login']} has {total} repositories{more}",
         "valid": False,
         "preview": {
             "title": "No match",
@@ -1125,6 +1130,27 @@ def no_match_item(account: dict, needle: str) -> dict:
     }
 
 
+def skipped_by_default(repo: dict, options: Options) -> bool:
+    """Whether a repository is out of the list: forks and archived ones are,
+    unless --show-forks or --show-archived asks for them."""
+    return (repo["isFork"] and not options.forks) or (
+        repo["isArchived"] and not options.archived
+    )
+
+
+def skipped_hint(repos: list[dict], options: Options) -> str:
+    """The flags that would list more of repos, for the no-match row."""
+    flags = []
+    if not options.forks and any(repo["isFork"] for repo in repos):
+        flags.append("--show-forks")
+    if not options.archived and any(repo["isArchived"] for repo in repos):
+        flags.append("--show-archived")
+    if not flags:
+        return ""
+    verb = "lists" if len(flags) == 1 else "list"
+    return f" \u00b7 {' and '.join(flags)} {verb} more"
+
+
 def ranked(
     repos: list[dict], words: list[str], options: Options, owner: bool = False
 ) -> list[dict]:
@@ -1132,12 +1158,16 @@ def ranked(
 
     Name matches come first, then initials, then anything shown or described;
     each group keeps the most recently pushed order of repos. Repositories
-    hidden for good are left out; --show-hidden lists them.
+    hidden for good are left out; --show-hidden lists them. Forks and archived
+    repositories are left out too, unless --show-forks or --show-archived asks
+    for them.
     """
     found: dict[tuple[bool, int], list[dict]] = {}
     known = hidden_names()
     for repo in repos:
         if repo["nameWithOwner"].casefold() in known:
+            continue
+        if skipped_by_default(repo, options):
             continue
         item = build_item(repo, options, owner, menus=False)
         if (place := rank(repo, item, words)) is not None:
@@ -1166,7 +1196,11 @@ def mixed_items(owners: list[str], words: list[str], options: Options) -> list[d
         "login": ", ".join(account["login"] for account in accounts),
         "total": sum(account["total"] for account in accounts),
     }
-    return [no_match_item(combined, " ".join(words))] if words else []
+    return (
+        [no_match_item(combined, " ".join(words), skipped_hint(repos, options))]
+        if words
+        else []
+    )
 
 
 def items_for(
@@ -1181,7 +1215,13 @@ def items_for(
     if not matches:
         items = [account_item(account)]
         if words:
-            items.append(no_match_item(account, " ".join(words)))
+            items.append(
+                no_match_item(
+                    account,
+                    " ".join(words),
+                    skipped_hint(account["repos"], options),
+                )
+            )
         return items
     return matches + [account_item(account)]
 
@@ -1290,6 +1330,18 @@ def main(argv: list[str] | None = None) -> int:
         default=os.environ.get("SHOW_HIDDEN") == "1",
         help="list the hidden repositories instead, with an Unhide action",
     )
+    parser.add_argument(
+        "--show-forks",
+        action="store_true",
+        default=os.environ.get("FORKS") == "1",
+        help="list forked repositories too, after the others",
+    )
+    parser.add_argument(
+        "--show-archived",
+        action="store_true",
+        default=os.environ.get("ARCHIVED") == "1",
+        help="list archived repositories too",
+    )
     parser.add_argument("query", nargs="*", help="text typed after the Raffi keyword")
     args = parser.parse_args(argv)
     NAMED.clear()
@@ -1303,6 +1355,8 @@ def main(argv: list[str] | None = None) -> int:
         live=not args.no_live,
         live_items=args.live_items,
         hide=not args.no_hide,
+        forks=args.show_forks,
+        archived=args.show_archived,
     )
 
     if args.hide or args.unhide:

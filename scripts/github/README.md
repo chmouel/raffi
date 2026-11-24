@@ -231,7 +231,10 @@ filters your repositories whatever the word is. The remaining words must all
 appear in a repository's description, topics, name, language or flags, which
 are shown with its stars and last push. Names answer to their initials too, so
 `a gs` finds `go-server`, and name matches are listed before the rest.
-Forks come after every other repository, in all views.
+Forks and archived repositories are left out of every list, in every view,
+unless you pass `--show-forks` or `--show-archived`, or set `FORKS=1` or
+`ARCHIVED=1` in the filter's `env`. Forks then come after every other
+repository.
 A filter that matches nothing says so instead of showing an empty list.
 
 Enter opens the selected repository and Ctrl+Enter copies its URL. The last
@@ -397,6 +400,8 @@ also read `REPO_PATH`, `REPO_PAGES` and `REPO_ACTIONS` from `env`.
 | `REPO_ACTIONS` | | Default for `--actions` |
 | `CACHE_LOGIN` | `1h` | How long `gh` caches the logged in account |
 | `ANY_OWNER` | | `1` is the same as `--any-owner` |
+| `FORKS` | | `1` is the same as `--show-forks`: list forked repositories too |
+| `ARCHIVED` | | `1` is the same as `--show-archived`: list archived repositories too |
 | `USAGE_SORT` | | `0` is the same as `--no-usage-sort` |
 | `HIDE` | | `0` leaves `Hide forever` out of the action menus; `--no-hide` sets this |
 | `SHOW_HIDDEN` | | `1` is the same as `--show-hidden` |

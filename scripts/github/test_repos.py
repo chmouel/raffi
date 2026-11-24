@@ -192,6 +192,8 @@ def environment(**values):
         "LIVE_LABEL": "",
         "HIDE": "",
         "SHOW_HIDDEN": "",
+        "FORKS": "",
+        "ARCHIVED": "",
     }
     with patch.dict(os.environ, pinned), patch.dict(os.environ, values):
         yield
@@ -489,9 +491,9 @@ def pushed(name, year, **fields):
 class AllViewTests(ReposTestCase):
     """More than one --owners account mixes them in the default view."""
 
-    def list(self, query, view="", owners=("me", "tektoncd"), **env):
+    def list(self, query, view="", owners=("me", "tektoncd"), options=None, **env):
         with environment(**env):
-            return repos.list_items(query, view, list(owners))
+            return repos.list_items(query, view, list(owners), options or self.options())
 
     def mixed(self, accounts):
         return patch.dict(ACCOUNTS, accounts)
@@ -515,14 +517,29 @@ class AllViewTests(ReposTestCase):
             ),
         }
         with self.mixed(accounts):
-            _, items = self.list("")
+            _, items = self.list("", options=self.options(forks=True))
         self.assertEqual(self.titles(items), ["mine", "theirs", "fork-a", "fork-b"])
+
+    def test_forks_are_left_out_unless_asked_for(self):
+        accounts = {
+            "me": account("me", [pushed("fork-a", 2024, isFork=True), pushed("mine", 2020)]),
+            "tektoncd": account("tektoncd", [pushed("theirs", 2019)]),
+        }
+        with self.mixed(accounts):
+            _, items = self.list("")
+        self.assertEqual(self.titles(items), ["mine", "theirs"])
 
     def test_forks_come_last_in_an_account_view_too(self):
         accounts = {"me": account("me", [repo("fork", isFork=True), repo("mine")])}
         with self.mixed(accounts):
-            _, items = self.list("", owners=("me",))
+            _, items = self.list("", owners=("me",), options=self.options(forks=True))
         self.assertEqual(self.titles(items), ["mine", "fork", "me"])
+
+    def test_an_account_view_leaves_its_forks_out(self):
+        accounts = {"me": account("me", [repo("fork", isFork=True), repo("mine")])}
+        with self.mixed(accounts):
+            _, items = self.list("", owners=("me",))
+        self.assertEqual(self.titles(items), ["mine", "me"])
 
     def test_rows_name_their_owner(self):
         accounts = {
@@ -703,6 +720,69 @@ class MainTests(ReposTestCase):
         with patch.object(repos, "CACHE_REPOS", "24h"):
             output = self.run_main("--pages", "pulls", "owner/raffi")
         self.assertEqual(output["cache"], {"seconds": 86400})
+
+
+class ForksTests(ReposTestCase):
+    """Forks are left out of every list unless --show-forks asks for them."""
+
+    def run_main(self, *argv, env=None):
+        with environment(**(env or {})), patch("sys.argv", ["repos.py", *argv]), patch(
+            "builtins.print"
+        ) as printed:
+            self.assertEqual(repos.main(), 0)
+        return json.loads(printed.call_args[0][0])
+
+    def titles(self, output):
+        return [repos.ANSI.sub("", item["title"]) for item in output["items"]]
+
+    def account(self, *items):
+        return patch.dict(ACCOUNTS, {"me": account("me", list(items))})
+
+    def test_forks_are_not_listed_by_default(self):
+        with self.account(repo("fork", isFork=True), repo("mine")):
+            output = self.run_main("--owners", "me")
+        self.assertEqual(self.titles(output), ["mine", "me"])
+
+    def test_show_forks_lists_them_after_the_others(self):
+        with self.account(repo("fork", isFork=True), repo("mine")):
+            output = self.run_main("--owners", "me", "--show-forks")
+        self.assertEqual(self.titles(output), ["mine", "fork", "me"])
+
+    def test_forks_one_in_the_environment_lists_them(self):
+        with self.account(repo("fork", isFork=True), repo("mine")):
+            output = self.run_main("--owners", "me", env={"FORKS": "1"})
+        self.assertEqual(self.titles(output), ["mine", "fork", "me"])
+
+    def test_a_typed_filter_does_not_bring_a_fork_back(self):
+        with self.account(repo("fork", isFork=True), repo("mine")):
+            output = self.run_main("--owners", "me", "fork")
+        self.assertEqual(
+            [repos.ANSI.sub("", item["title"]) for item in output["items"]],
+            ["me", "No repository matches 'fork'"],
+        )
+        # The row says how to see it rather than leaving a dead end.
+        self.assertIn("--show-forks", output["items"][-1]["subtitle"])
+
+    def test_archived_repositories_are_not_listed_by_default(self):
+        with self.account(repo("old", isArchived=True), repo("mine")):
+            output = self.run_main("--owners", "me")
+        self.assertEqual(self.titles(output), ["mine", "me"])
+
+    def test_show_archived_lists_them(self):
+        with self.account(repo("old", isArchived=True), repo("mine")):
+            output = self.run_main("--owners", "me", "--show-archived")
+        self.assertEqual(sorted(self.titles(output)), ["me", "mine", "old"])
+
+    def test_archived_one_in_the_environment_lists_them(self):
+        with self.account(repo("old", isArchived=True), repo("mine")):
+            output = self.run_main("--owners", "me", env={"ARCHIVED": "1"})
+        self.assertIn("old", self.titles(output))
+
+    def test_the_no_match_row_names_every_flag_that_lists_more(self):
+        with self.account(repo("old", isArchived=True), repo("fork", isFork=True)):
+            output = self.run_main("--owners", "me", "zzz")
+        subtitle = output["items"][-1]["subtitle"]
+        self.assertIn("--show-forks and --show-archived list more", subtitle)
 
 
 class ActionTests(ReposTestCase):
