@@ -82,7 +82,7 @@ jiff = { version = "1.0.1", default-features = false, features = [
   "tz-system",
   "tzdb-zoneinfo",
 ], optional = true }
-evalexpr = { version = "13.1.0", optional = true }
+evalexpr = { version = "14.0.0", optional = true }
 libc = "0.2"
 rusqlite = { version = "0.43.0", features = [
   "blob",
